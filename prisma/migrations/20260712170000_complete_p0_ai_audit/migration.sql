@@ -1,0 +1,3 @@
+ALTER TABLE "articles" ADD COLUMN "aiProvider" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "articles" ADD COLUMN "promptHash" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "articles" ADD COLUMN "scorePolicySnapshot" TEXT NOT NULL DEFAULT '';

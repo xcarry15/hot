@@ -1,0 +1,134 @@
+# Hot2 Next.js 生产反向代理模板
+# 应用：127.0.0.1:3011
+# 动态页面绕过全局 proxy_cache；SSE 必须关闭 buffering。
+server
+{
+    listen 80;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    listen [::]:80;
+    server_name hot.kfxz.cn;
+    index index.php index.html index.htm default.php default.htm default.html;
+    root /www/wwwroot/hot.kfxz.cn;
+    #CERT-APPLY-CHECK--START
+    include /www/server/panel/vhost/nginx/well-known/hot.kfxz.cn.conf;
+    #CERT-APPLY-CHECK--END
+    include /www/server/panel/vhost/nginx/extension/hot.kfxz.cn/*.conf;
+
+    #HTTP_TO_HTTPS_START
+    set $isRedcert 1;
+    if ($server_port != 443) {
+        set $isRedcert 2;
+    }
+    if ( $uri ~ /\.well-known/ ) {
+        set $isRedcert 1;
+    }
+    if ($isRedcert != 1) {
+        rewrite ^(/.*)$ https://$host$1 permanent;
+    }
+    #HTTP_TO_HTTPS_END
+    ssl_certificate    /www/server/panel/vhost/cert/hot.kfxz.cn/fullchain.pem;
+    ssl_certificate_key    /www/server/panel/vhost/cert/hot.kfxz.cn/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers EECDH+CHACHA20:EECDH+CHACHA20-draft:EECDH+AES128:RSA+AES128:EECDH+AES256:RSA+AES256:EECDH+3DES:RSA+3DES:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_tickets on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    add_header Strict-Transport-Security "max-age=31536000";
+    error_page 497  https://$host$request_uri;
+
+    #SSL-END
+
+    # SSE：/api/progress 只发送 snapshot:changed 失效通知。
+    # 关闭缓存和响应缓冲，避免浏览器长时间收不到状态变化。
+    location = /api/progress {
+        proxy_pass http://127.0.0.1:3011;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_cache off;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        add_header X-Accel-Buffering no;
+    }
+
+    # Next.js 静态文件直接由 Nginx 提供服务（绕过 Node.js）
+    location ^~ /_next/static/ {
+        alias /www/wwwroot/hot.kfxz.cn/.next/static/;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        access_log off;
+    }
+
+    # Next.js 客户端静态资源（hashed filename）
+    location ^~ /_next/ {
+        proxy_pass http://127.0.0.1:3011;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 反向代理 - 动态请求指向 Next.js 3011 端口
+    location / {
+        proxy_pass http://127.0.0.1:3011;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # 关键：本服务器全局启用了 nginx proxy_cache（见 /www/server/nginx/conf/proxy.conf:
+        # proxy_cache_path ... + proxy_cache cache_one），会对反代响应做缓存。
+        # Next.js 首页 HTML 引用的 chunk hash 每次 build 都会变，若被 proxy_cache 缓存住旧 HTML，
+        # 重新部署后浏览器会按旧 HTML 请求已被 rm -rf 删除的旧 chunk → 404、样式丢失。
+        # 因此对动态页面一律绕过 proxy_cache（与 poian.kfxz.cn 站点处理方式一致）。
+        proxy_no_cache 1;
+        proxy_cache_bypass 1;
+
+        # 性能优化
+        proxy_buffering on;
+        proxy_buffer_size 4k;
+        proxy_buffers 8 4k;
+        proxy_busy_buffers_size 8k;
+        proxy_max_temp_file_size 1024m;
+
+        # 超时
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 300s;
+
+        client_max_body_size 10M;
+    }
+
+    # 禁止访问的敏感文件
+    location ~* (\.user.ini|\.htaccess|\.htpasswd|\.env.*|\.project|\.bashrc|\.bash_profile|\.bash_logout|\.DS_Store|\.gitignore|\.gitattributes|LICENSE|README\.md|CLAUDE\.md|CHANGELOG\.md|CONTRIBUTING\.md|TODO\.md|FAQ\.md|composer\.json|composer\.lock|package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|\.\w+~|\.swp|\.swo|\.bak(up)?|\.old|\.tmp|\.temp|\.log|\.sql(\.gz)?|docker-compose\.yml|docker\.env|Dockerfile|\.csproj|\.sln|Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|phpunit\.xml|pom\.xml|build\.gradl|pyproject\.toml|requirements\.txt|application(-\w+)?\.(ya?ml|properties))$
+    {
+        return 404;
+    }
+
+    # 禁止访问的敏感目录
+    location ~* /(\.git|\.svn|\.bzr|\.vscode|\.claude|\.idea|\.ssh|\.github|\.npm|\.yarn|\.pnpm|\.cache|\.husky|\.turbo|\.next|\.nuxt|node_modules|runtime)/ {
+        return 404;
+    }
+
+    location ~ \.well-known{
+        allow all;
+    }
+
+    if ( $uri ~ "^/\.well-known/.*\.(php|jsp|py|js|css|lua|ts|go|zip|tar\.gz|rar|7z|sql|bak)$" ) {
+        return 403;
+    }
+
+    
+    
+	access_log  /www/wwwlogs/hot.kfxz.cn.log;
+    error_log  /www/wwwlogs/hot.kfxz.cn.error.log;
+}

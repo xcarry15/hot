@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum FetchStatus {
+  pending
+  fetched
+  failed
+}
+
+model Source {
+  id                 String    @id @default(cuid())
+  name               String
+  type               String    @default("html") // html, rss, websearch, canyin88
+  url                String
+  parserConfig       String    @default("{}") // JSON: CSS selectors / feed URL / JSONPath + headers
+  enabled            Boolean   @default(true)
+  status             String    @default("never_fetched") // never_fetched, normal, warning, breaker, disabled
+  consecutiveFailures Int      @default(0)
+  circuitBreakerUntil DateTime?
+  lastFetchedAt      DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  articles        Article[]
+  fetchLogs       FetchLog[]
+  discardedItems  DiscardedItem[]
+
+  // Dashboard and maintenance frequently scope sources by lifecycle status.
+  @@index([deletedAt, status])
+  @@map("sources")
+}
+
+model Article {
+  id            String    @id @default(cuid())
+  sourceId      String
+  url           String
+  title         String
+  originalSource String?  // 文章原始来源（如联商网转载的时代周报）
+  rawContent    String    @default("")
+  cleanContent  String    @default("")
+  contentHash   String    @default("")
+  fetchStatus   FetchStatus @default(pending) // pending=待抓取, fetched=已抓取有内容, failed=已确认抓取失败
+  articleBody   String    @default("") // 已从 rawContent 提取的正文（缓存，避免每次 AI 重新 extractArticleBody）
+  // AI fields
+  relevance     Int       @default(0) // 0-100，与连锁消费行业的相关度
+  summary       String    @default("")
+  brand         String    @default("")
+  category      String    @default("") // 餐饮/零售/品牌/加盟/其他
+  tags          String    @default("[]") // JSON array
+  keyPoints     String    @default("[]") // JSON array
+  score         Int       @default(0) // 0-100
+  eventScore    Int?      // AI 原始事件影响力分；策略调整时用于零成本重算
+  contentScore  Int?      // AI 原始内容质量分；策略调整时用于零成本重算
+  rawScore      Int?      // 应用广告规则前的确定性加权分
+  adProbability Int?      // 0-100，AI 对广告/软文的概率判断
+  aiConfidence  Int?      // 0-100，AI 对本次结构化判断的置信度
+  scorePolicyVersion String @default("") // 本次最终分使用的策略快照标识
+  aiModel       String    @default("") // 生成原始特征的模型
+  aiProvider    String    @default("") // 生成原始特征的 Provider
+  promptHash    String    @default("") // 完整 Prompt 的 SHA-256
+  scorePolicySnapshot String @default("") // JSON：本次权重及广告规则快照
+  promptVersion String    @default("v1")
+  aiStatus      String    @default("pending") // pending, done, skipped, failed
+  skipReason    String?   // 跳过原因（dedup 命中 / 内容不足等）。与 summary 解耦：summary 保留 AI 洞察不被覆盖
+  dedupDetail   String?   // JSON: canonical DedupEvidence（去重方式/重复文章/URL/详情/内容对比片段）。仅 dedup 命中并标 skipped 时写入；列表用 skipReason，详情用本字段
+  aiRetryCount  Int       @default(0) // AI 失败累计重试次数；≥5 次标 skipped 放弃（防 provider 故障持续烧 token）
+  nextAiRetryAt DateTime? // AI 失败后的下次允许重试时间（指数退避：2^n 分钟，上限 6h）
+  isAd          Boolean   @default(false) // AI 判定为软文/广告时为 true（分数会被 clamp 到 0-34，标题加 [软文] 标记）
+  // Push
+  pushedAt      DateTime?
+  nextRetryAt   DateTime? // 推送失败后的下次允许重试时间（用于失败重试队列）
+  publishedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  source    Source     @relation(fields: [sourceId], references: [id])
+  pushLogs  PushLog[]
+
+  @@unique([url])
+  @@index([contentHash])
+  @@index([fetchStatus])
+  @@index([aiStatus, createdAt])
+  // AI worker filters by status + retry window, then processes oldest rows first.
+  @@index([aiStatus, nextAiRetryAt, createdAt])
+  @@index([pushedAt, score, relevance, aiStatus])
+  @@index([brand, createdAt])
+  @@map("articles")
+}
+
+model Keyword {
+  id        String   @id @default(cuid())
+  category  String   @default("正面") // 分组标签：如「品牌」用于品牌字典（ai.ts 读取）；其他仅用于管理分组，filter.ts 全部参与白名单命中
+  word      String
+  createdAt DateTime @default(now())
+
+  @@unique([category, word])
+  @@map("keywords")
+}
+
+model FetchLog {
+  id          String   @id @default(cuid())
+  sourceId    String
+  status      String   // success, failure, warning
+  errorMessage String  @default("")
+  itemsFound  Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  source Source @relation(fields: [sourceId], references: [id])
+
+  @@index([sourceId, status, createdAt])
+  @@index([createdAt])
+  @@map("fetch_logs")
+}
+
+model PushLog {
+  id            String   @id @default(cuid())
+  articleId     String
+  status        String   // success, failure
+  errorMessage  String   @default("")
+  retryCount    Int      @default(0)
+  webhookUrl    String   @default("")
+  webhookRemark String   @default("")
+  createdAt     DateTime @default(now())
+
+  article Article @relation(fields: [articleId], references: [id])
+
+  @@index([articleId, status, webhookUrl])
+  @@index([status, webhookRemark, createdAt])
+  @@index([createdAt])
+  @@map("push_logs")
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+model DiscardedItem {
+  id              String    @id @default(cuid())
+  sourceId        String
+  title           String
+  url             String
+  reason          String    // "dedup:url" | "dedup:content" | "dedup:near" | "dedup:entity" | "filter:keyword" | "filter:short"
+  detail          String    @default("") // JSON: matched title/url, similarity, etc.
+  winnerArticleId String?   // 命中去重时指向「赢家」Article.id（filter:* 拒绝则为空）
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  source Source @relation(fields: [sourceId], references: [id])
+
+  // 同一 url + 同一 reason 只记一条：每次"采集全部"会重新命中关键词失败的同一篇文章，
+  // 不加唯一约束会让 discarded 表被同一行堆出几百条。
+  @@unique([url, reason])
+  @@index([sourceId, createdAt])
+  // Dedup statistics and retention filter discarded rows by reason and time window.
+  @@index([reason, createdAt])
+  @@index([winnerArticleId])
+  @@map("discarded_items")
+}
+
+/// 未入库条目被管理员强制重试后的不可变审计快照。
+/// 原 DiscardedItem 仍会按现有流程删除，但操作事实不会丢失。
+model DiscardedRetryAudit {
+  id              String    @id @default(cuid())
+  discardedId     String
+  sourceId        String
+  title           String
+  url             String
+  reason          String
+  detail          String    @default("")
+  winnerArticleId String?
+  publishedAt     DateTime?
+  action          String    // existing | created
+  articleId       String?
+  createdAt       DateTime  @default(now())
+
+  @@index([discardedId, createdAt])
+  @@index([sourceId, createdAt])
+  @@map("discarded_retry_audits")
+}
+
+enum JobType {
+  full     // collect -> process -> ai -> push
+  collect  // only collect all sources
+  process  // only fetch pending details
+  ai       // only run AI on pending articles
+  push     // only push unpushed articles
+  fastProcess  // @deprecated 已移除，仅保留以兼容历史 Job 记录
+}
+
+enum JobStatus {
+  pending
+  running
+  completed
+  failed
+}
+
+enum JobStage {
+  collect
+  process
+  ai
+  push
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  type        JobType
+  status      JobStatus @default(pending)
+  payload     String    @default("{}") // JSON string
+  result      String    @default("{}") // JSON string
+  error       String    @default("")
+  // 进度快照字段（重构 #4）：Job 是任务级状态的唯一事实源。
+  // 旧 Job 这些字段为空/0，前端 snapshot API 在 stage 为 null 时仍能正常返回。
+  currentStage     JobStage?
+  progressTotal    Int       @default(0)
+  progressDone     Int       @default(0)
+  progressErrors   Int       @default(0)
+  currentItemLabel String    @default("")
+  heartbeatAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  @@index([status, createdAt])
+  @@map("jobs")
+}

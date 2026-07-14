@@ -1,0 +1,112 @@
+import { z } from 'zod';
+import { db } from '@/lib/db';
+import { invalidateAISettingsCache } from '@/lib/ai-client';
+import {
+  EXPORTABLE_SETTING_KEYS, SETTING_DEFINITION_MAP, SENSITIVE_SETTING_KEYS, getSettingDefaults, getExportableSettingDefaults,
+} from '@/lib/settings';
+import { SETTING_KEYS } from '@/lib/settings-catalog';
+import { applyScorePolicy, buildScorePolicySnapshot } from '@/lib/score-policy';
+import { parseWebhookConfigs, serializeWebhookConfigsForServer } from '@/contracts/webhook';
+
+const settingsUpdateSchema = z.record(z.string(), z.string());
+
+export async function getSettings() {
+  const settings = await db.setting.findMany();
+  const map = getSettingDefaults({ redactSensitive: true });
+  for (const setting of settings) {
+    if (!SETTING_DEFINITION_MAP.has(setting.key)) continue;
+    map[setting.key] = SENSITIVE_SETTING_KEYS.has(setting.key) ? '' : setting.value;
+  }
+  return map;
+}
+
+export async function exportSettings() {
+  const rows = await db.setting.findMany({ where: { key: { in: Array.from(EXPORTABLE_SETTING_KEYS) } } });
+  const settings = getExportableSettingDefaults();
+  for (const row of rows) settings[row.key] = row.value;
+  return { type: 'hot2-settings', version: 1, exportedAt: new Date().toISOString(), settings };
+}
+
+export async function revealSensitiveSettings(requestedKeys?: string[]) {
+  const keys = requestedKeys?.length
+    ? requestedKeys.filter((key) => SENSITIVE_SETTING_KEYS.has(key))
+    : Array.from(SENSITIVE_SETTING_KEYS);
+  const rows = await db.setting.findMany({ where: { key: { in: keys } } });
+  return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+}
+
+export async function updateSettings(input: unknown): Promise<
+  | { ok: true }
+  | { ok: false; error: string; details: unknown[] }
+> {
+  const parsed = settingsUpdateSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: '无效的请求格式', details: parsed.error.issues };
+  const validationErrors: string[] = [];
+  for (const [key, value] of Object.entries(parsed.data)) {
+    if (!EXPORTABLE_SETTING_KEYS.includes(key)) { validationErrors.push(`${key}: 不可写(不在允许的配置键清单内)`); continue; }
+    const definition = SETTING_DEFINITION_MAP.get(key);
+    if (!definition || !definition.exportable) { validationErrors.push(`${key}: 不可写(未在配置目录中声明)`); continue; }
+    const result = definition.schema.safeParse(value);
+    if (!result.success) validationErrors.push(`${key}: ${result.error.issues[0].message}`);
+  }
+  if (validationErrors.length > 0) return { ok: false, error: '设置值校验失败', details: validationErrors };
+
+  let updates = Object.entries(parsed.data) as [string, string][];
+  updates = updates.map(([key, value]) => key === SETTING_KEYS.FEISHU_WEBHOOK_URL
+    ? [key, serializeWebhookConfigsForServer(parseWebhookConfigs(value))]
+    : [key, value]);
+  const keepKeys = updates.filter(([key, value]) => SENSITIVE_SETTING_KEYS.has(key) && value === '').map(([key]) => key);
+  if (keepKeys.length > 0) {
+    const existing = await db.setting.findMany({ where: { key: { in: keepKeys } } });
+    const existingMap = new Map(existing.map((setting) => [setting.key, setting.value]));
+    updates = updates.map(([key, value]) => SENSITIVE_SETTING_KEYS.has(key) && value === '' && existingMap.has(key)
+      ? [key, existingMap.get(key)!] : [key, value]);
+  }
+  const previousWeights = await db.setting.findMany({
+    where: { key: { in: [SETTING_KEYS.AI_WEIGHT_EVENT, SETTING_KEYS.AI_WEIGHT_CONTENT] } },
+  });
+  const previousWeightMap = Object.fromEntries(previousWeights.map(x => [x.key, x.value]));
+  const requestedEventWeight = parsed.data[SETTING_KEYS.AI_WEIGHT_EVENT];
+  const requestedContentWeight = parsed.data[SETTING_KEYS.AI_WEIGHT_CONTENT];
+  const effectiveEventWeight = Number(requestedEventWeight ?? previousWeightMap[SETTING_KEYS.AI_WEIGHT_EVENT] ?? 70);
+  const effectiveContentWeight = Number(requestedContentWeight ?? previousWeightMap[SETTING_KEYS.AI_WEIGHT_CONTENT] ?? 30);
+  if (effectiveEventWeight + effectiveContentWeight !== 100) {
+    return { ok: false, error: '设置值校验失败', details: ['评分权重合计必须为 100'] };
+  }
+  const weightChanged = updates.some(([key, value]) =>
+    (key === SETTING_KEYS.AI_WEIGHT_EVENT || key === SETTING_KEYS.AI_WEIGHT_CONTENT)
+    && Number(previousWeightMap[key] ?? (key === SETTING_KEYS.AI_WEIGHT_EVENT ? 70 : 30)) !== Number(value)
+  );
+  const updateMap = Object.fromEntries(updates);
+  const nextWeightEvent = Number(updateMap[SETTING_KEYS.AI_WEIGHT_EVENT] ?? effectiveEventWeight);
+  const nextWeightContent = Number(updateMap[SETTING_KEYS.AI_WEIGHT_CONTENT] ?? effectiveContentWeight);
+
+  // 设置与历史文章重算在同一事务提交，避免“权重已保存、文章只更新一部分”。
+  await db.$transaction(async tx => {
+    for (const [key, value] of updates) {
+      await tx.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
+    }
+    if (!weightChanged) return;
+    const articles = await tx.article.findMany({
+      where: { eventScore: { not: null }, contentScore: { not: null } },
+      select: { id: true, eventScore: true, contentScore: true, adProbability: true, isAd: true },
+    });
+    for (const article of articles) {
+      const result = applyScorePolicy(
+        article.eventScore!, article.contentScore!, article.adProbability ?? (article.isAd ? 100 : 0),
+        article.isAd, nextWeightEvent, nextWeightContent,
+      );
+      await tx.article.update({
+        where: { id: article.id },
+        data: {
+          score: result.finalScore,
+          rawScore: result.rawScore,
+          scorePolicyVersion: result.version,
+          scorePolicySnapshot: buildScorePolicySnapshot(nextWeightEvent, nextWeightContent),
+        },
+      });
+    }
+  }, { maxWait: 10_000, timeout: 60_000 });
+  invalidateAISettingsCache();
+  return { ok: true };
+}
