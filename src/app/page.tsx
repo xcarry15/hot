@@ -76,9 +76,9 @@ export default function Home() {
     <div className="h-[100dvh] flex flex-col bg-background">
       <div className="flex flex-1 overflow-hidden min-h-0">
         {/* Sidebar — desktop */}
-        <aside className="hidden sm:flex w-[216px] border-r border-border/70 bg-background flex-col shrink-0">
+        <aside className="hidden sm:flex w-[180px] border-r border-border/70 bg-background flex-col shrink-0">
           {/* Logo area */}
-          <div className="px-4 py-3.5 flex items-center gap-2.5 border-b border-border/70">
+          <div className="px-3 py-3.5 flex items-center gap-2 border-b border-border/70">
             <div className="w-8 h-8 rounded-[6px] bg-primary flex items-center justify-center shrink-0 overflow-hidden shadow-[0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
               <img src="/icon-192x192.png" alt="logo" className="w-full h-full object-cover" />
             </div>
@@ -89,7 +89,7 @@ export default function Home() {
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 px-3 py-4" aria-label="主导航">
+          <nav className="flex-1 px-2 py-4" aria-label="主导航">
             <div className="space-y-1">
               {navItems.map((item) => {
                 const isActive = activeTab === item.key
@@ -99,7 +99,7 @@ export default function Home() {
                     onClick={() => handleTabChange(item.key)}
                     aria-current={isActive ? 'page' : undefined}
                     className={`
-                      relative w-full flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors duration-150
+                      relative w-full flex h-10 items-center gap-2.5 rounded-md px-2.5 text-sm font-medium transition-colors duration-150
                       focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring
                       ${isActive
                         ? 'bg-muted text-foreground before:absolute before:left-0 before:top-2 before:h-6 before:w-0.5 before:rounded-full before:bg-foreground'
@@ -116,11 +116,11 @@ export default function Home() {
           </nav>
 
           {/* Sidebar footer */}
-          <div className="px-3 py-3 border-t border-border/70">
+          <div className="px-2 py-3 border-t border-border/70">
             {mounted ? (
               <button
                 onClick={toggleTheme}
-                className="w-full flex h-9 items-center gap-2 rounded-md px-3 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                className="w-full flex h-9 items-center gap-2 rounded-md px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 aria-label="切换主题"
               >
                 {resolvedTheme === 'dark' ? (
@@ -133,7 +133,7 @@ export default function Home() {
             ) : (
               <div className="w-full h-9" />
             )}
-            <p className="mt-2 px-3 font-mono text-[10px] tracking-[0.08em] text-muted-foreground/70">v1.0.0</p>
+            <p className="mt-2 px-2.5 font-mono text-[10px] tracking-[0.08em] text-muted-foreground/70">v1.0.0</p>
           </div>
         </aside>
 

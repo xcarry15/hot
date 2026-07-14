@@ -18,9 +18,20 @@ export interface RequestJsonError extends Error {
   body?: unknown;
 }
 
+export function isRequestJsonError(error: unknown, status?: number): error is RequestJsonError {
+  if (!(error instanceof Error) || error.name !== 'RequestJsonError') return false;
+  return status === undefined || (error as RequestJsonError).status === status;
+}
+
+export function isRequestAborted(error: unknown): boolean {
+  return (error instanceof DOMException && error.name === 'AbortError')
+    || (error instanceof Error && (error.name === 'AbortError' || isRequestJsonError(error, 499)));
+}
+
 export interface RequestJsonInit<B = unknown> {
   body?: B;
   signal?: AbortSignal;
+  keepalive?: boolean;
   headers?: Record<string, string>;
 }
 
@@ -41,7 +52,7 @@ export async function requestJson<T = unknown>(
   url: string,
   init: RequestJsonInit = {},
 ): Promise<T> {
-  const { body, signal, headers } = init;
+  const { body, signal, keepalive, headers } = init;
   const hasBody = body !== undefined && body !== null && method !== 'GET' && method !== 'DELETE';
   const finalHeaders = new Headers(headers);
   if (hasBody && !finalHeaders.has('Content-Type')) {
@@ -54,6 +65,7 @@ export async function requestJson<T = unknown>(
   const requestInit: RequestInit = {
     method,
     signal,
+    keepalive,
     headers: finalHeaders,
   };
   if (hasBody) {

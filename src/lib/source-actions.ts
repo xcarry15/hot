@@ -187,7 +187,7 @@ export async function retrySource(body: Record<string, unknown>) {
   // 健康状态重置属于该 Job 的第一步，避免“先重置、后因并发被拒绝”的半完成写入。
   // 重试数据源只重新采集该源；处理、AI、推送由管理员按阶段明确触发，
   // 避免一次“重试源”意外处理全局待处理文章。
-  const res = await runJob('collect', { sourceId, reason: 'retry', resetSourceHealth: true });
+  const res = await runJob('collect', { sourceId, reason: 'retry', trigger: 'manual', resetSourceHealth: true });
   if (!res.queued) {
     return { queued: false, error: '已有抓取任务在执行中' };
   }

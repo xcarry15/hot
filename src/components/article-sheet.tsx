@@ -29,6 +29,7 @@ import {
   fetchArticleDetail as fetchArticleDetailFromClient,
   fetchRelatedByBrand as fetchRelatedByBrandFromClient,
 } from '@/features/articles-api.client'
+import { isRequestAborted, isRequestJsonError } from '@/lib/request-json.client'
 
 interface Props {
   articleId: string | null
@@ -103,7 +104,7 @@ export default function ArticleSheet({ articleId, open, onOpenChange, onArticleU
         if (!controller.signal.aborted) setArticle(data)
       })
       .catch((err) => {
-        if (err?.name === 'AbortError' || err instanceof DOMException) return
+        if (isRequestAborted(err) || isRequestJsonError(err, 404)) return
         toast.error('获取文章详情失败')
       })
       .finally(() => {
@@ -118,8 +119,9 @@ export default function ArticleSheet({ articleId, open, onOpenChange, onArticleU
   useEffect(() => {
     const currentId = article?.id
     const currentBrand = article?.brand
-    if (!currentId || !currentBrand) {
+    if (!open || !currentId || !currentBrand) {
       setRelatedItems([])
+      setRelatedLoading(false)
       return
     }
     const controller = new AbortController()
@@ -132,7 +134,7 @@ export default function ArticleSheet({ articleId, open, onOpenChange, onArticleU
         }
       })
       .catch((err) => {
-        if (err?.name === 'AbortError' || err instanceof DOMException) return
+        if (isRequestAborted(err) || isRequestJsonError(err, 404)) return
         console.error('[related-by-brand] fetch failed:', err)
         setRelatedItems([])
       })
@@ -140,7 +142,7 @@ export default function ArticleSheet({ articleId, open, onOpenChange, onArticleU
         if (!controller.signal.aborted) setRelatedLoading(false)
       })
     return () => controller.abort()
-  }, [article?.id, article?.brand])
+  }, [article?.id, article?.brand, open])
 
   const tagItems = article ? parseTags(article.tags) : []
   const keyPoints = article ? parseJsonArray(article.keyPoints) : []

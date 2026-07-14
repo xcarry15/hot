@@ -22,6 +22,7 @@
 import { collectAllSources, crawlSource } from './pipeline/collect';
 import { processAllPending } from './pipeline/process';
 import { analyzeAllPending } from './pipeline/analyze';
+import { reprocessWithAI } from './ai';
 import { pushAllPendingArticles } from './pipeline/push-bridge';
 import { shouldPushAtPipelineEnd } from './push/policy';
 import { db } from './db';
@@ -173,8 +174,9 @@ async function executeFullJob(
   assertNotAborted(signal);
   // 调度策略（重构 #3）：
   //  - Scheduler 触发：在 maybeEnqueueCrawl 中检查 lastCrawlAt + crawl_interval_min，
-  //    到期才调用 runJob('full')（不传任何特殊 payload）。
-  //  - 手动触发（API / 前端按钮）：直接调用 runJob('full')，跳过 scheduler 间隔。
+  //    到期才调用 runJob('full', { trigger: 'auto' })。
+  //  - 手动触发（API / 前端按钮）：直接调用 runJob('full', { trigger: 'manual' })，
+  //    跳过 scheduler 间隔；trigger 只记录来源，不改变流水线语义。
   //  - collectAllSources 不再接收 force 参数，差异由调用方（scheduler vs API）
   //    在所有到达本函数的路径上完成。
   //
@@ -260,10 +262,15 @@ async function executeProcessJob(
 }
 
 async function executeAiJob(
-  _payload: Record<string, unknown>,
+  payload: Record<string, unknown>,
   signal?: AbortSignal,
   jobId?: string,
 ): Promise<Record<string, unknown>> {
+  const articleId = typeof payload.articleId === 'string' ? payload.articleId : undefined;
+  if (articleId) {
+    const result = await reprocessWithAI(articleId, signal, jobId);
+    return { articleId, result: result ?? { status: 'not_found' } };
+  }
   const result = await analyzeAllPending(signal, jobId);
   return { result };
 }

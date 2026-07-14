@@ -10,7 +10,7 @@
  */
 import { db } from '@/lib/db';
 import { assertNotAborted } from '@/lib/worker-stop';
-import { splitBrands } from '@/lib/shared/article-codecs';
+import { getRelatedArticles } from '@/lib/article-related-service';
 import { getWebhookConfigs, type WebhookConfig } from '@/lib/settings';
 import { PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/push/policy';
 import { getPushUrgency, buildFeishuCard } from '@/lib/push/feishu-card';
@@ -110,7 +110,8 @@ async function pushArticleToFeishuInternal(
   const urgency = getPushUrgency(article);
 
   // Build Feishu card message（只需构建一次，所有 webhook 共用）
-  const relatedArticles = await fetchRelatedByBrand(article);
+  // 与文章详情页采用同一套双向关联规则；推送场景额外只引用已成功推送的文章。
+  const relatedArticles = (await getRelatedArticles(article.id, 3, { onlyPushed: true })) ?? [];
   const card = buildFeishuCard(article, urgency, { relatedArticles });
 
   // A successful destination is durable in PushLog. On a partial retry, only
@@ -193,37 +194,4 @@ async function pushToSingleWebhook(
     },
   });
   return false;
-}
-
-/**
- * 查询同品牌近 30 天内已推送过的其它文章(最多 3 条),用于卡片末尾的"趋势联动"块。
- * - 只取第一个品牌（article.brand 形如 "海底捞|瑞幸"）,避免多品牌信息过载
- * - pushedAt not null 是推送契约的硬约束(只引用"已推送过"的文章,避免指向未推送低分文章)
- * - aiStatus='done' 与详情页 related-by-brand 对齐,口径一致
- * - 时间窗口优先 publishedAt,回退 createdAt(与 detail route / articles 列表排序约定一致)
- * - 按 score desc 排序,重要的排前面
- * - take: 3 控制卡片高度
- */
-async function fetchRelatedByBrand(article: {
-  id: string;
-  brand: string;
-}): Promise<Array<{ title: string; score: number; createdAt: Date }>> {
-  const firstBrand = splitBrands(article.brand)[0];
-  if (!firstBrand) return [];
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  return db.article.findMany({
-    where: {
-      brand: { contains: firstBrand },
-      pushedAt: { not: null },
-      id: { not: article.id },
-      aiStatus: 'done',
-      OR: [
-        { publishedAt: { gte: thirtyDaysAgo } },
-        { publishedAt: null, createdAt: { gte: thirtyDaysAgo } },
-      ],
-    },
-    select: { title: true, score: true, createdAt: true },
-    orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-    take: 3,
-  });
 }

@@ -49,7 +49,7 @@ db/                   本地 SQLite 数据（不进入部署包）
 | ai | `src/lib/pipeline/analyze.ts` | 写入摘要、标签、评分和审计字段 |
 | push | `src/lib/pipeline/push-bridge.ts` | 按统一条件投递未推送文章 |
 
-关键 API 约束：`POST /api/crawl` 是唯一批量任务入口；`POST /api/sources/retry` 只重试数据源采集；`POST /api/push` 只推送单篇文章；`GET /api/crawl-log/status` 是抓取记录页唯一任务快照来源；`POST /api/worker/stop` 停止当前任务。Route Handler 只做适配，事务和业务规则由 Service 负责。不得重新引入已移除的 `/api/jobs`、`/api/articles/refetch-batch` 或独立队列。
+关键 API 约束：`POST /api/crawl` 是唯一批量任务入口；`GET /api/dashboard/analytics` 提供按周期和数据源聚合的内容质量分析；`POST /api/sources/retry` 只重试数据源采集；`POST /api/push` 只推送单篇文章；`GET /api/crawl-log/status` 是抓取记录页唯一任务快照来源；`POST /api/worker/stop` 停止当前任务。Route Handler 只做适配，事务和业务规则由 Service 负责。不得重新引入已移除的 `/api/jobs`、`/api/articles/refetch-batch` 或独立队列。
 
 `Job`、`FetchLog`、`PushLog`、`DiscardedItem` 和 `DiscardedRetryAudit` 分别记录任务、采集、目标级推送、未入库条目和管理员重试事实。页面不得用 `sessionStorage` 或乐观步骤推断任务状态；抓取记录使用 Job snapshot。列表接口返回摘要投影，详情接口才返回正文、评分明细、去重证据和脱敏推送日志。
 

@@ -48,7 +48,7 @@ async function maybeEnqueueCrawl(settings: Record<string, string>): Promise<void
 
   if (Date.now() - lastCrawlAt < intervalMs) return;
 
-  const res = await runJob('full');
+  const res = await runJob('full', { trigger: 'auto' });
   if (res.queued) {
     await setSetting(LAST_CRAWL_AT_KEY, String(Date.now()));
     console.log('[scheduler] started full-pipeline job', res.jobId);
@@ -81,7 +81,7 @@ function syncPushSchedule(settings: Record<string, string>): void {
       const lastPushDate = await getSetting(LAST_PUSH_DATE_KEY);
       if (lastPushDate === today) return;
 
-      const res = await runJob('push');
+      const res = await runJob('push', { trigger: 'auto' });
       if (res.queued) {
         await setSetting(LAST_PUSH_DATE_KEY, today);
         console.log('[scheduler] started push job', res.jobId);

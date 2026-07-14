@@ -36,6 +36,7 @@ import {
   fetchRelatedByBrand as fetchRelatedByBrandFromClient,
 } from '@/features/articles-api.client'
 import { fetchDiscardedItem } from '@/features/discarded-api.client'
+import { isRequestAborted, isRequestJsonError } from '@/lib/request-json.client'
 
 interface DiscardedDetail {
   id: string
@@ -226,6 +227,9 @@ export default function ArticleDetailSheet({ articleId, open, onOpenChange, onAr
     abortControllerRef.current = controller
     try {
       return await fetchArticleDetailFromClient(articleId, controller.signal)
+    } catch (error) {
+      if (isRequestAborted(error) || isRequestJsonError(error, 404)) return null
+      throw error
     } finally {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null
@@ -250,7 +254,7 @@ export default function ArticleDetailSheet({ articleId, open, onOpenChange, onAr
           if (!controller.signal.aborted) setDiscarded(data)
         })
         .catch((err) => {
-          if (err?.name === 'AbortError' || err instanceof DOMException) return
+          if (isRequestAborted(err) || isRequestJsonError(err, 404)) return
           toast.error('获取文章详情失败')
         })
         .finally(() => {
@@ -262,7 +266,7 @@ export default function ArticleDetailSheet({ articleId, open, onOpenChange, onAr
           if (!controller.signal.aborted) setArticle(data)
         })
         .catch((err) => {
-          if (err?.name === 'AbortError' || err instanceof DOMException) return
+          if (isRequestAborted(err) || isRequestJsonError(err, 404)) return
           toast.error('获取文章详情失败')
         })
         .finally(() => {
@@ -286,8 +290,9 @@ export default function ArticleDetailSheet({ articleId, open, onOpenChange, onAr
   // 依赖 [article?.id, article?.brand]：reprocess / refetch / push 后 article 更新时也会重拉
   // discarded 模式无 brand，跳过
   useEffect(() => {
-    if (kind === 'discarded') {
+    if (!open || kind === 'discarded') {
       setRelatedItems([])
+      setRelatedLoading(false)
       return
     }
     const currentId = article?.id
@@ -306,7 +311,7 @@ export default function ArticleDetailSheet({ articleId, open, onOpenChange, onAr
         }
       })
       .catch((err) => {
-        if (err?.name === 'AbortError' || err instanceof DOMException) return
+        if (isRequestAborted(err) || isRequestJsonError(err, 404)) return
         console.error('[related-by-brand] fetch failed:', err)
         setRelatedItems([])
       })
@@ -314,7 +319,7 @@ export default function ArticleDetailSheet({ articleId, open, onOpenChange, onAr
         if (!controller.signal.aborted) setRelatedLoading(false)
       })
     return () => controller.abort()
-  }, [article?.id, article?.brand, kind])
+  }, [article?.id, article?.brand, kind, open])
 
   const handleReprocess = async () => {
     if (!articleId || !onStepAction) return

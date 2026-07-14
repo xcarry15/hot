@@ -16,6 +16,7 @@ import {
 } from './ai-helpers';
 import { dedupAfterAI } from './dedup';
 import { assertNotAborted } from './worker-stop';
+import { advanceJobProgress, startJobStage } from './job-progress';
 import { z } from 'zod';
 import { applyScorePolicy, buildScorePolicySnapshot } from './score-policy';
 import { createHash } from 'node:crypto';
@@ -278,7 +279,12 @@ export async function processWithAI(article: { id: string; title: string; aiStat
 /**
  * Re-process an article with AI (manual trigger)
  */
-export async function reprocessWithAI(articleId: string): Promise<void> {
+export async function reprocessWithAI(
+  articleId: string,
+  signal?: AbortSignal,
+  jobId?: string,
+): Promise<AIProcessResult | null> {
+  assertNotAborted(signal);
   // 重置 AI 状态为 pending。
   // fetchStatus 仅在之前为 'failed' 时才重置（用户可能已修了源站/网络），
   // 已成功抓取的文章保留 fetchStatus='fetched'，避免"处理"步骤回退变灰。
@@ -297,7 +303,11 @@ export async function reprocessWithAI(articleId: string): Promise<void> {
       summary: true,
     },
   });
-  if (!articleData) return;
+  if (!articleData) return null;
+  if (jobId) {
+    await startJobStage(jobId, { stage: 'ai', total: 1, currentItemLabel: articleData.title });
+  }
+  assertNotAborted(signal);
   await db.article.update({
     where: { id: articleId },
     data: {
@@ -307,5 +317,13 @@ export async function reprocessWithAI(articleId: string): Promise<void> {
       fetchStatus: articleData.fetchStatus === 'failed' ? 'pending' : undefined,
     },
   });
-  await processWithAI({ ...articleData, aiRetryCount: 0 } as Article);
+  const result = await processWithAI({ ...articleData, aiRetryCount: 0 } as Article, signal);
+  if (jobId) {
+    await advanceJobProgress(jobId, {
+      doneDelta: 1,
+      errorDelta: result.status === 'failed' ? 1 : 0,
+      currentItemLabel: articleData.title,
+    });
+  }
+  return result;
 }

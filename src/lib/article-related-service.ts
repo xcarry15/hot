@@ -27,9 +27,10 @@ function effectiveTime(article: Pick<RelatedArticle, 'publishedAt' | 'createdAt'
 function isRelatedPair(article: RelatedArticle, candidate: RelatedArticle): boolean {
   const articleBrands = splitBrands(article.brand);
   const candidateBrands = splitBrands(candidate.brand);
+  const candidateBrandSet = new Set(candidateBrands);
 
   const articleBrandInCandidate = articleBrands.some((brand) =>
-    candidate.brand.includes(brand) || candidate.title.includes(brand) || candidate.summary.includes(brand),
+    candidateBrandSet.has(brand) || candidate.title.includes(brand) || candidate.summary.includes(brand),
   );
   const candidateBrandInArticle = candidateBrands.some((brand) =>
     article.title.includes(brand) || article.summary.includes(brand),
@@ -44,7 +45,15 @@ function compareByEffectiveTime(a: RelatedArticle, b: RelatedArticle): number {
   return b.createdAt.getTime() - a.createdAt.getTime();
 }
 
-export async function getRelatedArticles(id: string, requestedTake: number) {
+export interface RelatedArticleOptions {
+  onlyPushed?: boolean;
+}
+
+export async function getRelatedArticles(
+  id: string,
+  requestedTake: number,
+  options: RelatedArticleOptions = {},
+) {
   const take = Number.isFinite(requestedTake) ? Math.min(Math.max(requestedTake, 1), MAX_TAKE) : DEFAULT_TAKE;
   const article = await db.article.findUnique({
     where: { id },
@@ -66,7 +75,8 @@ export async function getRelatedArticles(id: string, requestedTake: number) {
   const candidates = await db.article.findMany({
     where: {
       id: { not: id },
-      aiStatus: { in: ['done', 'failed'] },
+      aiStatus: options.onlyPushed ? 'done' : { in: ['done', 'failed'] },
+      ...(options.onlyPushed ? { pushedAt: { not: null } } : {}),
       AND: [
         {
           OR: [

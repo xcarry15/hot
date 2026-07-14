@@ -3,19 +3,153 @@
  */
 import { requestJson } from '@/lib/request-json.client';
 
-export interface DashboardData {
-  // 由 /api/dashboard 决定；保留 unknown 让 UI 自己 narrow
-  [key: string]: unknown;
+export type DashboardAnalyticsRange = 'today' | '3d' | '7d' | '30d';
+
+export type DashboardCrawlTrigger = 'auto' | 'manual' | 'unknown';
+export type DashboardCrawlStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type DashboardCrawlType = 'full' | 'collect';
+
+export interface DashboardCrawlQuery {
+  page?: number;
+  trigger?: DashboardCrawlTrigger;
+  status?: DashboardCrawlStatus;
+  type?: DashboardCrawlType;
+  sourceId?: string;
 }
 
-export interface DedupStats {
-  [key: string]: unknown;
+export interface DashboardAnalytics {
+  range: DashboardAnalyticsRange;
+  sourceId: string | null;
+  startAt: string;
+  endAt: string;
+  summary: {
+    sourceCount: number;
+    found: number;
+    ingested: number;
+    totalArticles: number;
+    processed: number;
+    processedRate: number;
+    newArticles: number;
+    analyzed: number;
+    avgScore: number;
+    highScore: number;
+    highScoreRate: number;
+    pushed: number;
+    pushRate: number;
+    qualifiedPushRate: number;
+    pushedAds: number;
+    unmatched: number;
+    unmatchedRate: number;
+    duplicates: number;
+    duplicateArticles: number;
+    discardedDuplicates: number;
+    duplicateRate: number;
+    ads: number;
+    adRate: number;
+    fetchRuns: number;
+    fetchSuccesses: number;
+    fetchWarnings: number;
+    fetchFailures: number;
+  };
+  sources: Array<{
+    id: string;
+    name: string;
+    status: string;
+    enabled: boolean;
+    lastFetchedAt: string | null;
+    found: number;
+    ingested: number;
+    totalArticles: number;
+    processed: number;
+    processedRate: number;
+    newArticles: number;
+    analyzed: number;
+    avgScore: number;
+    highScore: number;
+    highScoreRate: number;
+    pushed: number;
+    pushRate: number;
+    qualifiedPushRate: number;
+    pushedAds: number;
+    unmatched: number;
+    unmatchedRate: number;
+    duplicates: number;
+    duplicateArticles: number;
+    discardedDuplicates: number;
+    duplicateRate: number;
+    ads: number;
+    adRate: number;
+    fetchRuns: number;
+    fetchSuccesses: number;
+    fetchWarnings: number;
+    fetchFailures: number;
+  }>;
+  trend: Array<{
+    date: string;
+    label: string;
+    found: number;
+    ingested: number;
+    totalArticles: number;
+    processed: number;
+    processedRate: number;
+    newArticles: number;
+    analyzed: number;
+    avgScore: number;
+    highScore: number;
+    highScoreRate: number;
+    pushed: number;
+    pushRate: number;
+    qualifiedPushRate: number;
+    pushedAds: number;
+    unmatched: number;
+    unmatchedRate: number;
+    duplicates: number;
+    duplicateArticles: number;
+    discardedDuplicates: number;
+    duplicateRate: number;
+    ads: number;
+    adRate: number;
+    fetchRuns: number;
+    fetchSuccesses: number;
+    fetchWarnings: number;
+    fetchFailures: number;
+    stackNew: number;
+    stackAds: number;
+    stackPushed: number;
+    stackDuplicates: number;
+  }>;
+  crawlRecords: Array<{
+    id: string;
+    type: 'full' | 'collect';
+    trigger: 'auto' | 'manual' | 'unknown';
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    sourceLabel: string;
+    startedAt: string;
+    completedAt: string | null;
+    durationMs: number;
+    itemsFound: number | null;
+    error: string | null;
+  }>;
+  crawlPagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
-export async function fetchDashboard(signal?: AbortSignal): Promise<DashboardData> {
-  return requestJson<DashboardData>('GET', '/api/dashboard', { signal });
-}
-
-export async function fetchDedupStats(signal?: AbortSignal): Promise<DedupStats> {
-  return requestJson<DedupStats>('GET', '/api/dedup-stats', { signal });
+export async function fetchDashboardAnalytics(
+  range: DashboardAnalyticsRange,
+  sourceId?: string,
+  signal?: AbortSignal,
+  crawl?: DashboardCrawlQuery,
+): Promise<DashboardAnalytics> {
+  const params = new URLSearchParams({ range });
+  if (sourceId) params.set('sourceId', sourceId);
+  if (crawl?.page) params.set('crawlPage', String(crawl.page));
+  if (crawl?.trigger) params.set('crawlTrigger', crawl.trigger);
+  if (crawl?.status) params.set('crawlStatus', crawl.status);
+  if (crawl?.type) params.set('crawlType', crawl.type);
+  if (crawl?.sourceId) params.set('crawlSourceId', crawl.sourceId);
+  return requestJson<DashboardAnalytics>('GET', `/api/dashboard/analytics?${params.toString()}`, { signal });
 }

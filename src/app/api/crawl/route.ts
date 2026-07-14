@@ -41,7 +41,7 @@ export async function POST(request: Request) {
 
     // 手动触发（API / 前端按钮）：直接调用 runJob，不经 scheduler 的
     // crawl_interval_min 间隔检查（重构 #3 全局唯一调度策略）。
-    const res = await runJob(jobType, sourceId ? { sourceId } : {});
+    const res = await runJob(jobType, sourceId ? { sourceId, trigger: 'manual' } : { trigger: 'manual' });
     if (!res.queued) {
       return NextResponse.json({ queued: false, reason: res.reason });
     }

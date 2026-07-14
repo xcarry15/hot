@@ -390,13 +390,32 @@ export default function CrawlLogTab() {
       && !window.confirm('该操作将绕过推送阈值或重复推送保护，确认继续吗？')) return false
 
     setStepActionLoading(prev => ({ ...prev, [key]: true }))
+
+    // AI 重处理现在由服务端 Job 后台执行。没有正在运行的任务或排队操作时，
+    // 直接在点击事件中提交请求，避免先放入组件内存队列后因切页而丢失。
+    const canSubmitAiImmediately = step === 'ai'
+      && !isAnyRunning
+      && !stepQueueRunningRef.current
+      && stepQueueRef.current.length === 0
+    if (canSubmitAiImmediately) {
+      try {
+        return await executeStepAction({ articleId, step, force })
+      } finally {
+        setStepActionLoading(prev => {
+          const next = { ...prev }
+          delete next[key]
+          return next
+        })
+      }
+    }
+
     const queuedAhead = stepQueueRef.current.length + (stepQueueRunningRef.current || isAnyRunning ? 1 : 0)
     if (queuedAhead > 0) toast.info(`已加入操作队列，前方 ${queuedAhead} 项`, { duration: 1500 })
     return new Promise<boolean>(resolve => {
       stepQueueRef.current.push({ articleId, step, force, resolve })
       setStepQueueVersion(value => value + 1)
     })
-  }, [isAnyRunning, sources, stepActionLoading])
+  }, [executeStepAction, isAnyRunning, sources, stepActionLoading])
 
   const handleOpenArticle = useCallback((articleId: string) => {
     setDetailKind('article')

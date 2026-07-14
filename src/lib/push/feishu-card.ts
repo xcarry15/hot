@@ -8,7 +8,7 @@
  *   - 单个 lark_md 块承载元信息 + 要点 + 洞察，避免多 div/hr 撑高卡片
  *   - header template 复用 getScoreStyle 的六色段位 + urgent 时升 red
  *   - 时间紧凑格式 MM-DD HH:mm（中文环境）
- *   - 同品牌近 30 天动态块（relatedArticles）后置，title 截 50 字 + … 控制高度
+ *   - 近期关联动态块（实际时间窗口 30 天）后置，title 截 50 字 + … 控制高度
  *   - 标题后缀 [软文] 仅 isAd=true 时附加（与 aiStatus='done' 契约一致）
  */
 import { parseJsonArray, parseTags, splitBrands } from '@/lib/shared/article-codecs';
@@ -37,7 +37,8 @@ export interface FeishuCardArticleInput {
 export interface FeishuCardRelated {
   title: string;
   score: number;
-  createdAt: Date;
+  createdAt: Date | string;
+  publishedAt?: Date | string | null;
 }
 
 export interface FeishuCardOptions {
@@ -70,6 +71,7 @@ export function buildFeishuCard(
   // tags 与 keyPoints 同样存为 JSON 字符串,这里做容错解析
   // 兼容旧格式(string[])和新格式(TagItem[{n,t}])
   const tags = parseTags(article.tags).map((t) => t.name);
+  const brandLabel = splitBrands(article.brand).join(' | ');
   const relatedArticles = options.relatedArticles ?? [];
 
   // Header color —— 复用 getScoreStyle 的六色段位体系
@@ -100,7 +102,7 @@ export function buildFeishuCard(
   // 元信息行:时间 · 品牌 · 分类 · 中文来源名
   const metaParts = [
     timeStr,
-    article.brand,
+    brandLabel ? `**${brandLabel}**` : '',
     article.category,
     article.originalSource || article.source?.name || '',
   ].filter(Boolean);
@@ -128,13 +130,14 @@ export function buildFeishuCard(
     lines.push(article.summary);
   }
 
-  // 同品牌近 30 天动态：把单点信息升级为趋势感知，title 截 50 字 + 省略号控制卡片高度
+  // 近期关联动态：把单点信息升级为趋势感知，title 截 50 字 + 省略号控制卡片高度
   if (relatedArticles.length > 0) {
-    const brandName = splitBrands(article.brand)[0] || '同品牌';
+    const brandName = splitBrands(article.brand).join(' | ') || '相关品牌';
     lines.push('');
-    lines.push(`<font color='blue'>**🔗 ${brandName}近30天另有${relatedArticles.length}篇**</font>`);
+    lines.push(`<font color='blue'>**🔗 ${brandName}近期另有${relatedArticles.length}篇**</font>`);
     for (const r of relatedArticles) {
-      const rTime = formatRelativeTime(r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt);
+      const relatedDate = r.publishedAt ?? r.createdAt;
+      const rTime = formatRelativeTime(relatedDate instanceof Date ? relatedDate.toISOString() : relatedDate);
       const rTitle = r.title.length > 50 ? r.title.slice(0, 50) + '…' : r.title;
       lines.push(`▪ <font color='grey'>${rTime}</font> ${rTitle}`);
     }

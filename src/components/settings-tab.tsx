@@ -27,7 +27,6 @@ import DataTab from '@/components/settings/data'
 import AccountTab from '@/components/settings/account'
 import KeywordsTab from '@/components/keywords-tab'
 import DashboardTab from '@/components/dashboard-tab'
-import PushLogTab from '@/components/push-log-tab'
 import { SourcesManagement } from '@/components/sources-tab'
 
 export default function SettingsTab() {
@@ -236,7 +235,6 @@ export default function SettingsTab() {
             <TabsTrigger value="ai-model" className="text-xs px-3 h-7 whitespace-nowrap">AI 模型</TabsTrigger>
             <TabsTrigger value="prompts" className="text-xs px-3 h-7 whitespace-nowrap">提示词</TabsTrigger>
             <TabsTrigger value="push" className="text-xs px-3 h-7 whitespace-nowrap">推送</TabsTrigger>
-            <TabsTrigger value="push-log" className="text-xs px-3 h-7 whitespace-nowrap">推送记录</TabsTrigger>
             <TabsTrigger value="account" className="text-xs px-3 h-7 whitespace-nowrap">账户</TabsTrigger>
             <TabsTrigger value="data" className="text-xs px-3 h-7 whitespace-nowrap">数据清理</TabsTrigger>
           </TabsList>
@@ -269,10 +267,6 @@ export default function SettingsTab() {
 
         <TabsContent value="push" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
           <PushTab settings={settings} setSettings={setSettings} />
-        </TabsContent>
-
-        <TabsContent value="push-log" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
-          <PushLogTab />
         </TabsContent>
 
         <TabsContent value="account" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">

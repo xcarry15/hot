@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { reprocessWithAI } from '@/lib/ai';
 import { apiError } from '@/lib/api-helpers';
-import { runExclusiveMutation } from '@/lib/mutation-guard';
+import { runJob } from '@/lib/execution';
 
 // POST /api/articles/reprocess - Re-run AI on an article
 export async function POST(request: Request) {
@@ -13,9 +12,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Article ID is required' }, { status: 400 });
     }
 
-    await runExclusiveMutation('单篇 AI 处理', () => reprocessWithAI(articleId));
+    const result = await runJob('ai', {
+      articleId,
+      trigger: 'manual',
+      scope: 'single',
+    });
 
-    return NextResponse.json({ success: true });
+    if (!result.queued) {
+      return NextResponse.json(
+        { success: false, queued: false, reason: result.reason },
+        { status: 409 },
+      );
+    }
+
+    return NextResponse.json({ success: true, queued: true, jobId: result.jobId });
   } catch (error: unknown) {
     return apiError(error, 'Reprocess failed');
   }

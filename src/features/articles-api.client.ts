@@ -9,7 +9,7 @@
  * 注意：本文件只能被客户端代码 import；`@/contracts/articles` 是纯 DTO，
  * 所以本模块本身也不依赖 Prisma / db，符合 client/server 边界。
  */
-import { requestJson } from '@/lib/request-json.client';
+import { isRequestJsonError, requestJson } from '@/lib/request-json.client';
 import type {
   ArticleDetailDto,
   ArticleListResponseDto,
@@ -53,14 +53,25 @@ export async function fetchRelatedByBrand(
   take = 5,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  return requestJson('GET', `/api/articles/${articleId}/related-by-brand?take=${take}`, { signal });
+  try {
+    return await requestJson('GET', `/api/articles/${encodeURIComponent(articleId)}/related-by-brand?take=${take}`, { signal });
+  } catch (error) {
+    // 文章已被删除或详情页持有旧 ID 时，关联面板应视为暂无数据，不产生未处理 404。
+    if (isRequestJsonError(error, 404)) return { items: [] };
+    throw error;
+  }
 }
 
 export async function triggerArticleReprocess(
   articleId: string,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  return requestJson('POST', '/api/articles/reprocess', { body: { articleId }, signal });
+  return requestJson('POST', '/api/articles/reprocess', {
+    body: { articleId },
+    signal,
+    // AI 已由服务端 Job 接管；切换页面时仍确保这个短请求能够提交出去。
+    keepalive: true,
+  });
 }
 
 export async function triggerArticleRefetch(
