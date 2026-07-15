@@ -48,7 +48,7 @@ function ScoreTooltip({ score, details }: { score: number; details: ScoreDetails
 interface ScoreBadgeProps {
   score: number
   /** 展示风格：pill=带背景圆角徽章(列表) badge=shadcn Badge(详情) text=纯文本色(推送日志) compact=紧凑圆角(文章行) */
-  variant?: 'pill' | 'badge' | 'text' | 'compact'
+  variant?: 'pill' | 'badge' | 'text' | 'compact' | 'compact-square'
   /** 评分明细（hover 展开 tooltip） */
   details?: ScoreDetails
 }
@@ -80,6 +80,10 @@ export function ScoreBadge({ score, variant = 'pill', details }: ScoreBadgeProps
     <Badge className={`${s.bg} ${s.text} text-xs rounded-full ${hasDetails ? 'cursor-help' : ''}`}>
       {score}
     </Badge>
+  ) : variant === 'compact-square' ? (
+    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-none tabular-nums shrink-0 ${s.bg} ${s.text} ${hasDetails ? 'cursor-help' : ''}`}>
+      {score}
+    </span>
   ) : variant === 'compact' ? (
     <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full tabular-nums shrink-0 ${s.bg} ${s.text} ${hasDetails ? 'cursor-help' : ''}`}>
       {score}

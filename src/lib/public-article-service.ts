@@ -2,7 +2,9 @@ import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { SETTING_KEYS } from '@/lib/settings-catalog';
 import { parseJsonArray, splitBrands, stripHtml } from '@/lib/shared/article-codecs';
+import { getPublicDateKey } from '@/lib/shared/public-date';
 import type {
+  PublicArticleDateGroupDto,
   PublicArticleDetailDto,
   PublicArticleListItemDto,
   PublicArticleListResponseDto,
@@ -30,6 +32,18 @@ type CacheEntry = {
 };
 
 type PublicConfig = { minScore: number; hideAds: boolean };
+
+type PublicArticleSortRow = {
+  id: string;
+  publishedAt: Date | null;
+  createdAt: Date;
+  pinUntil: Date | null;
+};
+
+type PublicDateGroup = {
+  date: string;
+  ids: string[];
+};
 
 const listCache = new Map<string, CacheEntry>();
 
@@ -168,6 +182,56 @@ function serializeListItem(article: {
   };
 }
 
+function effectiveDate(article: PublicArticleSortRow): Date {
+  return article.publishedAt ?? article.createdAt;
+}
+
+function comparePublicArticles(a: PublicArticleSortRow, b: PublicArticleSortRow, now: number): number {
+  const dateCompare = getPublicDateKey(effectiveDate(b)).localeCompare(getPublicDateKey(effectiveDate(a)));
+  if (dateCompare !== 0) return dateCompare;
+
+  const aPinned = a.pinUntil instanceof Date && a.pinUntil.getTime() > now;
+  const bPinned = b.pinUntil instanceof Date && b.pinUntil.getTime() > now;
+  if (aPinned !== bPinned) return Number(bPinned) - Number(aPinned);
+
+  const effectiveCompare = effectiveDate(b).getTime() - effectiveDate(a).getTime();
+  if (effectiveCompare !== 0) return effectiveCompare;
+
+  const createdCompare = b.createdAt.getTime() - a.createdAt.getTime();
+  return createdCompare !== 0 ? createdCompare : a.id.localeCompare(b.id);
+}
+
+function buildPublicDateGroups(rows: PublicArticleSortRow[], now: number): PublicDateGroup[] {
+  const sorted = [...rows].sort((a, b) => comparePublicArticles(a, b, now));
+  const groups = new Map<string, PublicDateGroup>();
+  for (const row of sorted) {
+    const date = getPublicDateKey(effectiveDate(row));
+    const group = groups.get(date) ?? { date, ids: [] };
+    group.ids.push(row.id);
+    groups.set(date, group);
+  }
+  return [...groups.values()];
+}
+
+function paginatePublicDateGroups(groups: PublicDateGroup[], targetSize: number): PublicDateGroup[][] {
+  const pages: PublicDateGroup[][] = [];
+  let currentPage: PublicDateGroup[] = [];
+  let currentSize = 0;
+
+  for (const group of groups) {
+    if (currentPage.length > 0 && currentSize + group.ids.length > targetSize) {
+      pages.push(currentPage);
+      currentPage = [];
+      currentSize = 0;
+    }
+    currentPage.push(group);
+    currentSize += group.ids.length;
+  }
+
+  if (currentPage.length > 0) pages.push(currentPage);
+  return pages;
+}
+
 async function loadPublicArticleList(
   params: PublicArticleListParams,
 ): Promise<PublicArticleListResponseDto> {
@@ -179,9 +243,27 @@ async function loadPublicArticleList(
   const where = buildPublicWhere(minScore, params, config);
   const facetWhere = buildPublicWhere(minScore, {}, config);
 
-  const [items, total, sourceRows] = await Promise.all([
+  const [candidateRows, sourceRows] = await Promise.all([
     db.article.findMany({
       where,
+      select: { id: true, publishedAt: true, createdAt: true, pinUntil: true },
+    }),
+    db.article.groupBy({
+      by: ['sourceId'],
+      where: facetWhere,
+      _count: { _all: true },
+    }),
+  ]);
+
+  const now = Date.now();
+  const dateGroups = buildPublicDateGroups(candidateRows, now);
+  const pages = paginatePublicDateGroups(dateGroups, pageSize);
+  const resolvedPage = pages.length === 0 ? 1 : Math.min(page, pages.length);
+  const selectedGroups = pages[resolvedPage - 1] ?? [];
+  const pageIds = selectedGroups.flatMap((group) => group.ids);
+
+  const items = pageIds.length === 0 ? [] : await db.article.findMany({
+      where: { ...where, id: { in: pageIds } },
       select: {
         id: true,
         url: true,
@@ -197,17 +279,18 @@ async function loadPublicArticleList(
         createdAt: true,
         source: { select: { id: true, name: true, type: true } },
       },
-      orderBy: [{ pinUntil: 'desc' }, { publishedAt: 'desc' }, { createdAt: 'desc' }],
-      skip: (page - 1) * pageSize,
-      take: pageSize,
+    });
+
+  const itemMap = new Map(items.map((item) => [item.id, serializeListItem(item)]));
+  const groups: PublicArticleDateGroupDto[] = selectedGroups.map((group) => ({
+    date: group.date,
+    count: group.ids.length,
+    items: group.ids.flatMap((id) => {
+      const item = itemMap.get(id);
+      return item ? [item] : [];
     }),
-    db.article.count({ where }),
-    db.article.groupBy({
-      by: ['sourceId'],
-      where: facetWhere,
-      _count: { _all: true },
-    }),
-  ]);
+  }));
+  const serializedItems = groups.flatMap((group) => group.items);
 
   const sources = await db.source.findMany({
     where: { id: { in: sourceRows.map((row) => row.sourceId) }, deletedAt: null },
@@ -216,11 +299,14 @@ async function loadPublicArticleList(
   const sourceNames = new Map(sources.map((source) => [source.id, source.name]));
 
   return {
-    items: items.map(serializeListItem),
-    total,
-    page,
+    items: serializedItems,
+    groups,
+    pageStartDate: groups[0]?.date ?? null,
+    pageEndDate: groups.at(-1)?.date ?? null,
+    total: candidateRows.length,
+    page: resolvedPage,
     pageSize,
-    totalPages: total === 0 ? 0 : Math.ceil(total / pageSize),
+    totalPages: pages.length,
     sources: sourceRows
       .map((row) => ({
         id: row.sourceId,

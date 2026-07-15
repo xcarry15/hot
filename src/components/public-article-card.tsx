@@ -1,63 +1,78 @@
 import Link from 'next/link'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
 import { parseTags, splitBrands } from '@/lib/shared/article-codecs'
 import { getTagToneClass } from '@/features/article-tag-style'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import type { PublicArticleListItemDto } from '@/contracts/public-articles'
+import { formatPublicTime } from '@/lib/shared/public-date'
 
-function formatDateTime(value: string | null, fallback: string): string {
-  const date = new Date(value || fallback)
-  if (Number.isNaN(date.getTime())) return ''
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-    timeZone: 'Asia/Shanghai',
-  }).format(date)
+type PublicArticleMetaItem = {
+  label: string
+  kind: 'brand' | 'tag' | 'meta'
+  className: string
 }
 
 export default function PublicArticleCard({ article }: { article: PublicArticleListItemDto }) {
   const tags = parseTags(article.tags)
   const brands = splitBrands(article.brand)
+  const effectiveDate = article.publishedAt || article.createdAt
+  const brandItems: PublicArticleMetaItem[] = brands
+    .map((brand) => ({ label: brand.trim(), kind: 'brand' as const, className: '' }))
+    .filter((item) => item.label)
+  const tagItems: PublicArticleMetaItem[] = tags.map((tag) => ({
+    label: tag.name,
+    kind: 'tag' as const,
+    className: getTagToneClass(tag.tone),
+  }))
+  const categoryItems: PublicArticleMetaItem[] = article.category
+    ? [{ label: article.category, kind: 'meta', className: '' }]
+    : []
+  const originalSourceItems: PublicArticleMetaItem[] = article.originalSource && article.originalSource !== article.source.name
+    ? [{ label: `原始：${article.originalSource}`, kind: 'meta', className: '' }]
+    : []
+  const sourceItems: PublicArticleMetaItem[] = [{ label: `数据源：${article.source.name}`, kind: 'meta', className: '' }]
+  const metaGroups = [brandItems, tagItems, categoryItems, originalSourceItems, sourceItems].filter((group) => group.length > 0)
 
   return (
-    <Link href={`/news/${article.id}`} className="group block h-full">
-      <Card className="h-full bg-background py-0 rounded-md transition-shadow hover:shadow-md">
-        <CardContent className="p-4 flex h-full flex-col gap-2">
-          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-            <div className="flex min-w-0 items-center gap-2 truncate">
-              <span className="font-mono shrink-0">{formatDateTime(article.publishedAt, article.createdAt)}</span>
-              <span className="text-border">|</span>
-              <span className="truncate">数据源：{article.source.name}</span>
-              {article.originalSource && article.originalSource !== article.source.name && (
-                <><span className="text-border">|</span><span className="truncate">原始：{article.originalSource}</span></>
-              )}
-              {article.category && <><span className="text-border">|</span><span className="shrink-0">{article.category}</span></>}
+    <li>
+      <Link href={`/news/${article.id}`} className="group/article grid grid-cols-[4rem_minmax(0,1fr)] gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)] sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-5">
+        <time dateTime={effectiveDate} className="pt-5 text-right font-mono text-xs tabular-nums text-[var(--public-muted)]">
+          {formatPublicTime(effectiveDate)}
+        </time>
+
+        <div className="relative border-l border-[var(--public-hairline)] pb-4 pl-4 pt-1 sm:pl-6 sm:pb-5">
+          <span aria-hidden="true" className="absolute left-[-5px] top-5 h-2.5 w-2.5 rounded-full border-2 border-[var(--public-canvas)] bg-[var(--public-primary)] shadow-[0_0_0_1px_var(--public-hairline)]" />
+          <div className="rounded-none border border-transparent bg-transparent px-4 py-4 transition-[background-color,border-color,transform] duration-200 group-hover/article:-translate-y-px group-hover/article:border-[var(--public-hairline-strong)] group-hover/article:bg-[var(--public-surface-soft)] motion-reduce:transition-none motion-reduce:group-hover/article:transform-none sm:px-5 sm:py-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-y-1 text-xs text-[var(--public-muted)]">
+                {metaGroups.map((group, groupIndex) => (
+                  <span key={`meta-group-${groupIndex}`} className="inline-flex items-center gap-1">
+                    {groupIndex > 0 && <span aria-hidden="true" className="mx-1 inline-flex h-5 items-center text-[var(--public-hairline-strong)]">|</span>}
+                    {group.map((item, itemIndex) => (
+                      <span key={`${item.label}-${itemIndex}`} className={item.kind === 'brand' ? 'inline-flex items-center rounded-none bg-[var(--public-ink)] px-1.5 py-0.5 font-medium text-white' : `${item.className} inline-flex items-center`}>
+                        {item.label}
+                      </span>
+                    ))}
+                  </span>
+                ))}
+              </div>
+
+              <h2 className="public-display mt-2 text-xl leading-snug text-[var(--public-ink)] transition-colors group-hover:text-[var(--public-primary)] sm:text-2xl">
+                {article.title}
+              </h2>
+              <p className="mt-2 line-clamp-2 text-sm leading-7 text-[var(--public-body)]">
+                {article.excerpt || '暂无摘要'}
+              </p>
+
             </div>
-            <ScoreBadge score={article.score} />
-          </div>
 
-          <h2 className="text-base font-semibold leading-snug line-clamp-2 group-hover:text-primary transition-colors">
-            {article.title}
-          </h2>
-          <p className="text-sm leading-relaxed text-muted-foreground line-clamp-3">
-            {article.excerpt || '暂无摘要'}
-          </p>
-
-          <div className="mt-auto flex flex-wrap gap-1 pt-1">
-            {brands.slice(0, 3).map((brand, index) => (
-              <Badge key={`${brand}-${index}`} variant="outline" className="rounded-none border-black bg-black px-1.5 py-0 text-xs font-medium text-white">
-                {brand.trim()}
-              </Badge>
-            ))}
-            {tags.slice(0, 4).map((tag, index) => (
-              <Badge key={`${tag.name}-${index}`} variant="outline" className={`px-1.5 py-0 text-xs font-semibold ${getTagToneClass(tag.tone)}`}>
-                {tag.name}
-              </Badge>
-            ))}
+            <span aria-label={`评分 ${article.score} 分`} className="flex shrink-0 items-center text-xs text-[var(--public-muted)]">
+              <ScoreBadge score={article.score} variant="compact-square" />
+            </span>
           </div>
-        </CardContent>
-      </Card>
-    </Link>
+          </div>
+        </div>
+      </Link>
+    </li>
   )
 }

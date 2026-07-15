@@ -1,4 +1,8 @@
+'use client'
+
+import { Menu, X } from 'lucide-react'
 import Link from 'next/link'
+import { useState } from 'react'
 
 export type PublicNavKey = 'articles' | 'tools' | 'data'
 
@@ -17,45 +21,75 @@ interface Props {
 }
 
 export default function PublicHeader({ active = 'articles' }: Props) {
+  const [mobileOpen, setMobileOpen] = useState(false)
+
+  function closeMobileMenu() {
+    setMobileOpen(false)
+  }
+
+  function renderNavItems(mobile = false) {
+    return PUBLIC_NAV_ITEMS.map((item) => {
+      const isActive = item.key === active
+      if (!item.href) {
+        return (
+          <span
+            key={item.key}
+            aria-disabled="true"
+            title={`${item.label}页面即将上线`}
+            className={`${mobile ? 'block w-full px-3 py-3' : 'rounded-none px-3 py-2'} text-sm text-[var(--public-muted-soft)]`}
+          >
+            {item.label}
+          </span>
+        )
+      }
+      return (
+        <Link
+          key={item.key}
+          href={item.href}
+          aria-current={isActive ? 'page' : undefined}
+          onClick={mobile ? closeMobileMenu : undefined}
+          className={`${mobile ? 'block w-full px-3 py-3' : 'rounded-none px-3 py-2'} text-sm transition-colors ${isActive ? 'bg-[var(--public-surface-strong)] font-medium text-[var(--public-ink)]' : 'text-[var(--public-muted)] hover:bg-[var(--public-surface-soft)] hover:text-[var(--public-ink)]'}`}
+        >
+          {item.label}
+        </Link>
+      )
+    })
+  }
+
   return (
-    <header className="border-b bg-background">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-4 sm:px-6">
-        <Link href="/" className="flex min-w-0 items-center gap-3">
-          <img src="/icon-192x192.png" alt="新闻聚合" className="h-9 w-9 rounded-md" />
+    <header className="sticky top-0 z-40 border-b border-[var(--public-hairline)] bg-[var(--public-canvas)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--public-canvas)]/85">
+      <div className="mx-auto flex min-h-16 max-w-[1200px] items-center justify-between gap-4 px-4 sm:px-6">
+        <Link href="/" onClick={closeMobileMenu} className="flex min-w-0 items-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]">
+          <img src="/icon-192x192.png" alt="新闻聚合" className="h-9 w-9 rounded-none" />
           <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold tracking-tight">行业新闻聚合</h1>
-            <p className="text-xs text-muted-foreground">精选行业动态与品牌资讯</p>
+            <h1 className="truncate text-base font-semibold tracking-tight text-[var(--public-ink)]">行业新闻聚合</h1>
+            <p className="truncate text-xs text-[var(--public-muted)]">精选行业动态与品牌资讯</p>
           </div>
         </Link>
 
-        <nav className="flex items-center gap-1" aria-label="公开导航">
-          {PUBLIC_NAV_ITEMS.map((item) => {
-            const isActive = item.key === active
-            if (!item.href) {
-              return (
-                <span
-                  key={item.key}
-                  aria-disabled="true"
-                  title={`${item.label}页面即将上线`}
-                  className="rounded-md px-3 py-2 text-sm text-muted-foreground/45"
-                >
-                  {item.label}
-                </span>
-              )
-            }
-            return (
-              <Link
-                key={item.key}
-                href={item.href}
-                aria-current={isActive ? 'page' : undefined}
-                className={`rounded-md px-3 py-2 text-sm transition-colors ${isActive ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'}`}
-              >
-                {item.label}
-              </Link>
-            )
-          })}
+        <nav className="hidden items-center gap-1 md:flex" aria-label="公开导航">
+          {renderNavItems()}
         </nav>
+
+        <button
+          type="button"
+          aria-label={mobileOpen ? '关闭导航菜单' : '打开导航菜单'}
+          aria-expanded={mobileOpen}
+          aria-controls="public-mobile-navigation"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-md text-[var(--public-ink)] transition-colors hover:bg-[var(--public-surface-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] md:hidden"
+          onClick={() => setMobileOpen((open) => !open)}
+        >
+          {mobileOpen ? <X aria-hidden="true" className="h-5 w-5" /> : <Menu aria-hidden="true" className="h-5 w-5" />}
+        </button>
       </div>
+
+      {mobileOpen && (
+        <div id="public-mobile-navigation" className="border-t border-[var(--public-hairline)] px-4 py-3 md:hidden">
+          <nav className="mx-auto max-w-[1200px] space-y-1" aria-label="移动端公开导航">
+            {renderNavItems(true)}
+          </nav>
+        </div>
+      )}
     </header>
   )
 }

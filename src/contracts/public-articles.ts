@@ -49,6 +49,12 @@ export interface PublicArticleSourceFacetDto {
   count: number;
 }
 
+export interface PublicArticleDateGroupDto {
+  date: string;
+  count: number;
+  items: PublicArticleListItemDto[];
+}
+
 export interface PublicArticlePaginationDto {
   total: number;
   page: number;
@@ -58,6 +64,9 @@ export interface PublicArticlePaginationDto {
 
 export interface PublicArticleListResponseDto extends PublicArticlePaginationDto {
   items: PublicArticleListItemDto[];
+  groups: PublicArticleDateGroupDto[];
+  pageStartDate: string | null;
+  pageEndDate: string | null;
   sources: PublicArticleSourceFacetDto[];
   minScore: number;
 }

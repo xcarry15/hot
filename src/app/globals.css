@@ -4,8 +4,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-yahei);
+  --font-mono: var(--font-yahei);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -43,6 +43,7 @@
 }
 
 :root {
+  --font-yahei: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Segoe UI", sans-serif;
   --radius: 0.75rem;
   --background: #ffffff;
   --foreground: #111111;
@@ -112,6 +113,51 @@
   --sidebar-accent-foreground: #fafafa;
   --sidebar-border: #262626;
   --sidebar-ring: #fafafa;
+}
+
+/* Public article portal: fixed light editorial theme. The admin keeps the
+   global light/dark tokens above and is intentionally outside this scope. */
+.public-site {
+  --background: #faf9f5;
+  --foreground: #141413;
+  --card: #efe9de;
+  --card-foreground: #141413;
+  --popover: #fffdf9;
+  --popover-foreground: #141413;
+  --primary: #cc785c;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f0e8;
+  --secondary-foreground: #141413;
+  --muted: #f5f0e8;
+  --muted-foreground: #6c6a64;
+  --accent: #e8e0d2;
+  --accent-foreground: #141413;
+  --border: #e6dfd8;
+  --input: #e6dfd8;
+  --ring: #cc785c;
+  --public-canvas: #faf9f5;
+  --public-surface: #fffdf9;
+  --public-surface-soft: #f5f0e8;
+  --public-surface-strong: #e8e0d2;
+  --public-ink: #141413;
+  --public-body: #3d3d3a;
+  --public-muted: #6c6a64;
+  --public-muted-soft: #8e8b82;
+  --public-primary: #cc785c;
+  --public-primary-active: #a9583e;
+  --public-hairline: #e6dfd8;
+  --public-hairline-soft: #ebe6df;
+  --public-hairline-strong: #d6cfc4;
+  --public-font-sans: var(--font-yahei);
+  --public-font-serif: var(--font-yahei);
+  color-scheme: light;
+  font-family: var(--public-font-sans);
+}
+
+.public-site .public-display {
+  font-family: var(--public-font-serif);
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 @layer base {
