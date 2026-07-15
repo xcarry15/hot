@@ -13,6 +13,7 @@ vi.mock('@/lib/db', () => ({
   db: {
     article: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       findMany: vi.fn(),
       count: vi.fn(),
       create: vi.fn(),

@@ -23,6 +23,9 @@ export interface ArticleListFilter {
   brand?: string;
   minScore?: number;
   minRelevance?: number;
+  reviewStatus?: string;
+  fetchStatus?: string;
+  inbox?: boolean;
 }
 
 export async function fetchArticleList(
@@ -37,8 +40,19 @@ export async function fetchArticleList(
   if (filter.brand) params.set('brand', filter.brand);
   if (typeof filter.minScore === 'number') params.set('minScore', String(filter.minScore));
   if (typeof filter.minRelevance === 'number') params.set('minRelevance', String(filter.minRelevance));
+  if (filter.reviewStatus) params.set('reviewStatus', filter.reviewStatus);
+  if (filter.fetchStatus) params.set('fetchStatus', filter.fetchStatus);
+  if (filter.inbox) params.set('inbox', 'true');
 
   return requestJson<ArticleListResponseDto>('GET', `/api/articles?${params}`, { signal });
+}
+
+export async function reviewArticle(
+  articleId: string,
+  status: string,
+  reasonTags: string[] = [],
+): Promise<unknown> {
+  return requestJson('POST', '/api/articles/review', { body: { articleId, status, reasonTags } });
 }
 
 export async function fetchArticleDetail(

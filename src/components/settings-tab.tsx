@@ -28,6 +28,7 @@ import AccountTab from '@/components/settings/account'
 import KeywordsTab from '@/components/keywords-tab'
 import DashboardTab from '@/components/dashboard-tab'
 import { SourcesManagement } from '@/components/sources-tab'
+import PublicTab from '@/components/settings/public'
 
 export default function SettingsTab() {
   const [settings, setSettings] = useState<SettingsType>(() => (
@@ -230,6 +231,7 @@ export default function SettingsTab() {
         <div className="overflow-x-auto mx-3 mt-3 sm:mx-4 sm:mt-4 shrink-0 [&::-webkit-scrollbar]:hidden">
           <TabsList className="h-9 flex-nowrap">
             <TabsTrigger value="dashboard" className="text-xs px-3 h-7 whitespace-nowrap">概览</TabsTrigger>
+            <TabsTrigger value="public" className="text-xs px-3 h-7 whitespace-nowrap">公开</TabsTrigger>
             <TabsTrigger value="sources" className="text-xs px-3 h-7 whitespace-nowrap">源管理</TabsTrigger>
             <TabsTrigger value="keywords" className="text-xs px-3 h-7 whitespace-nowrap">关键词</TabsTrigger>
             <TabsTrigger value="ai-model" className="text-xs px-3 h-7 whitespace-nowrap">AI 模型</TabsTrigger>
@@ -242,6 +244,10 @@ export default function SettingsTab() {
 
         <TabsContent value="dashboard" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
           <DashboardTab />
+        </TabsContent>
+
+        <TabsContent value="public" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+          <PublicTab settings={settings} setSettings={setSettings} />
         </TabsContent>
 
         <TabsContent value="data" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">

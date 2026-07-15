@@ -340,7 +340,6 @@ export default function ArticlesTab() {
         articleId={selectedArticleId}
         open={detailOpen}
         onOpenChange={setDetailOpen}
-        onArticleUpdated={fetchArticles}
         onSelectArticle={setSelectedArticleId}
       />
     </div>

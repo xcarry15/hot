@@ -26,6 +26,9 @@ export async function GET(request: Request) {
       minRelevance: parseOptionalInt(searchParams.get('minRelevance')),
       sourceId: searchParams.get('sourceId') ?? undefined,
       search: searchParams.get('search') ?? undefined,
+      reviewStatus: searchParams.get('reviewStatus') ?? undefined,
+      fetchStatus: searchParams.get('fetchStatus') ?? undefined,
+      inbox: searchParams.get('inbox') === 'true',
     };
     const page = parsePositiveInt(searchParams.get('page'), 1);
     const pageSize = parsePositiveInt(searchParams.get('pageSize'), 20, 100);

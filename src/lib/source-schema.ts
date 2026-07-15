@@ -33,6 +33,7 @@ export const sourceCreateSchema = z.object({
   url: sourceUrl,
   parserConfig: parserConfigInput.optional().default('{}'),
   enabled: z.boolean().default(true),
+  publicEnabled: z.boolean().default(true),
 }).strict();
 
 export const sourceUpdateSchema = z.object({
@@ -41,6 +42,7 @@ export const sourceUpdateSchema = z.object({
   url: sourceUrl.optional(),
   parserConfig: parserConfigInput.optional(),
   enabled: z.boolean().optional(),
+  publicEnabled: z.boolean().optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, '至少提供一个要更新的字段');
 
 export const sourceTestSchema = z.object({

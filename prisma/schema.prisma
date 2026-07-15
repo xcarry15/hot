@@ -20,6 +20,7 @@ model Source {
   url                String
   parserConfig       String    @default("{}") // JSON: CSS selectors / feed URL / JSONPath + headers
   enabled            Boolean   @default(true)
+  publicEnabled      Boolean   @default(true)
   status             String    @default("never_fetched") // never_fetched, normal, warning, breaker, disabled
   consecutiveFailures Int      @default(0)
   circuitBreakerUntil DateTime?
@@ -73,6 +74,18 @@ model Article {
   aiRetryCount  Int       @default(0) // AI 失败累计重试次数；≥5 次标 skipped 放弃（防 provider 故障持续烧 token）
   nextAiRetryAt DateTime? // AI 失败后的下次允许重试时间（指数退避：2^n 分钟，上限 6h）
   isAd          Boolean   @default(false) // AI 判定为软文/广告时为 true（分数会被 clamp 到 0-34，标题加 [软文] 标记）
+  // 人工审核与公开控制
+  reviewStatus       String    @default("unreviewed") // unreviewed, important, general, irrelevant
+  reviewReasonTags   String    @default("[]") // JSON array；只允许预设标签
+  reviewedAt         DateTime?
+  publicOverride     String    @default("auto") // auto, public, hidden
+  pinUntil           DateTime?
+  // 不同 URL 的同文文章保留入库，避免信息丢失；重复文章默认跳过完整 AI。
+  duplicateOfId      String?
+  duplicateStatus    String    @default("none") // none, duplicate
+  dedupOverride      Boolean   @default(false) // 管理员明确恢复重复文章后，允许其完成 AI
+  viewCount          Int       @default(0)
+  originalClickCount Int       @default(0)
   // Push
   pushedAt      DateTime?
   nextRetryAt   DateTime? // 推送失败后的下次允许重试时间（用于失败重试队列）
@@ -91,7 +104,47 @@ model Article {
   @@index([aiStatus, nextAiRetryAt, createdAt])
   @@index([pushedAt, score, relevance, aiStatus])
   @@index([brand, createdAt])
+  @@index([reviewStatus, aiStatus, fetchStatus, createdAt])
+  @@index([publicOverride, pinUntil, publishedAt])
+  @@index([duplicateStatus, createdAt])
   @@map("articles")
+}
+
+model KeywordCandidate {
+  id           String   @id @default(cuid())
+  phrase       String   @unique
+  occurrences  Int      @default(1)
+  sampleTitles String   @default("[]")
+  status       String   @default("pending") // pending, approved, dismissed
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status, occurrences])
+  @@map("keyword_candidates")
+}
+
+model TuningSuggestion {
+  id        String    @id @default(cuid())
+  kind      String
+  title     String
+  detail    String
+  payload   String    @default("{}")
+  status    String    @default("pending") // pending, applied, dismissed
+  createdAt DateTime  @default(now())
+  appliedAt DateTime?
+
+  @@index([status, createdAt])
+  @@map("tuning_suggestions")
+}
+
+model InboxSnapshot {
+  id           String   @id @default(cuid())
+  capturedOn   DateTime @unique
+  pendingCount Int
+  createdAt    DateTime @default(now())
+
+  @@index([capturedOn])
+  @@map("inbox_snapshots")
 }
 
 model Keyword {

@@ -181,6 +181,7 @@ export async function dedupAfterAI(
         dedupWindowWhere(windowStart),
         { id: { not: articleId } },
         { aiStatus: 'done' },
+        { dedupOverride: false },
         { OR: brandQueryTerms.map(b => ({ brand: { contains: b } })) },
       ],
     },
@@ -244,7 +245,7 @@ export async function dedupAfterAiBatch(
 
   const cfg = await getDedupConfig();
   const articles = await db.article.findMany({
-    where: { id: { in: articleIds }, aiStatus: 'done' },
+    where: { id: { in: articleIds }, aiStatus: 'done', dedupOverride: false },
     select: { id: true, title: true, url: true, brand: true, keyPoints: true, publishedAt: true, createdAt: true },
   });
   if (articles.length < 2) return { checked: articleIds.length, skipped: 0 };
@@ -311,6 +312,8 @@ export async function dedupAfterAiBatch(
             score: 0,
             skipReason: reason,
             dedupDetail: JSON.stringify(evidence),
+            duplicateStatus: 'duplicate',
+            duplicateOfId: evidence.matchedId ?? null,
           },
         });
       } catch (err) {

@@ -3,6 +3,7 @@ import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import { getPublicSiteUrl } from "@/lib/public-site";
 
 // 数据看板每次刷新内容都不同，强制动态渲染：
 // 禁止 build 时预渲染并将 HTML 标记 s-maxage=31536000，
@@ -22,6 +23,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: getPublicSiteUrl(),
   title: "行业新闻聚合推送器",
   description: "自动抓取 · AI分析 · 飞书推送",
   icons: {

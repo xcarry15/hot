@@ -61,7 +61,9 @@ export { maybeEnqueueCrawl };
 
 function syncPushSchedule(settings: Record<string, string>): void {
   const pushMode = parsePushMode(settings[SETTING_KEYS.PUSH_MODE]);
-  const pushTime = settings[SETTING_KEYS.PUSH_TIME] || '08:30';
+  const configuredPushTime = settings[SETTING_KEYS.PUSH_TIME] || '08:30';
+  // 兼容历史版本遗留的 cron: 值；新版本只允许每日固定时间。
+  const pushTime = toCronExpression(configuredPushTime) ? configuredPushTime : '08:30';
   const pushCron = toCronExpression(pushTime);
   const nextKey = pushMode === 'batch' && pushCron ? `${pushMode}:${pushCron}` : 'off';
 

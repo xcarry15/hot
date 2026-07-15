@@ -67,6 +67,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
       summary: true,
       aiStatus: true,
       aiRetryCount: true,
+      dedupOverride: true,
     },
     orderBy: { createdAt: 'asc' },
     take: MAX_BATCH_SIZE,
@@ -125,7 +126,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
   // 的文章可能互相看不到对方（落库时序）→ 这里对 justDone 成对互查补漏。
   assertNotAborted(signal);
   const justDone = await db.article.findMany({
-    where: { id: { in: pending.map(p => p.id) }, aiStatus: 'done' },
+    where: { id: { in: pending.map(p => p.id) }, aiStatus: 'done', dedupOverride: false },
     select: { id: true },
   });
   if (justDone.length >= 2) {

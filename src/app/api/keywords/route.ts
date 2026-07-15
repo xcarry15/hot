@@ -5,6 +5,7 @@ import {
   keywordsToCsv, listKeywords,
 } from '@/lib/keyword-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
+import { listKeywordCandidates, updateKeywordCandidate } from '@/lib/keyword-candidate-service';
 
 // GET /api/keywords - List all keywords
 //   ?format=csv   → export as CSV
@@ -12,6 +13,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const format = searchParams.get('format');
+    if (searchParams.get('candidates') === 'true') return NextResponse.json(await listKeywordCandidates());
 
     const keywords = await listKeywords();
 
@@ -38,6 +40,10 @@ export async function POST(request: Request) {
   try {
     const result = await runExclusiveMutation('更新关键词', async () => {
       const body = await request.json();
+      if ((body.action === 'approve-candidate' || body.action === 'dismiss-candidate') && typeof body.id === 'string') {
+        const result = await updateKeywordCandidate(body.id, body.action === 'approve-candidate' ? 'approve' : 'dismiss');
+        return result ? { kind: 'ok' as const, data: result } : { kind: 'invalid' as const };
+      }
       if (body.action === 'import-csv' && body.csv) {
         return { kind: 'ok' as const, data: await importKeywordsCsv(String(body.csv)) };
       }

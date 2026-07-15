@@ -9,6 +9,7 @@ export interface SourceDto {
   url: string;
   parserConfig: string;
   enabled: boolean;
+  publicEnabled: boolean;
   status: SourceStatus;
   consecutiveFailures: number;
   circuitBreakerUntil: string | null;

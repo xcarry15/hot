@@ -17,6 +17,7 @@ export interface SourceInput {
   url: string;
   parserConfig: string;
   enabled: boolean;
+  publicEnabled?: boolean;
 }
 
 export async function createSource(

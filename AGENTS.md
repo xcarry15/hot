@@ -4,11 +4,13 @@
 
 Hot2 is a Next.js 16 App Router application with React 19, TypeScript, Prisma, and SQLite. Keep changes within these boundaries:
 
-- `src/app/`: pages and API route handlers.
-- `src/components/`: UI; `src/features/` and `src/contracts/`: client helpers and shared contracts.
-- `src/lib/`: server services and pipeline code. Collection, processing, analysis, and push stages live in `src/lib/pipeline/` and `src/lib/push/`.
+- `src/app/`: public pages, the token-protected `/admin` shell, and API route handlers. Public article pages are under `src/app/news/`; `robots.ts` and `sitemap.ts` define indexing boundaries.
+- `src/components/`: UI; `intelligence-inbox.tsx` is the default admin workbench, while `src/features/` and `src/contracts/` contain client helpers and shared contracts.
+- `src/lib/`: server services and pipeline code. Collection, processing, analysis, push, review, deduplication, and public visibility rules live here; keep business rules in services rather than components or Route Handlers.
 - `prisma/`: schema, seed data, and ordered migrations; `tests/`: Vitest tests.
 - `scripts/`: maintenance/migration utilities; `bat/`: Windows deployment and operations files; `public/`: static assets.
+
+The admin navigation is intentionally limited to `情报收件箱`, `抓取记录`, and `设置`. The public `工具` and `数据` links are placeholders until their routes are implemented.
 
 Use the architecture and database sections in `README.md` as the repository reference; keep them synchronized with the source code and migrations.
 
@@ -22,13 +24,14 @@ Install dependencies and copy `.env.example` to `.env` for local setup. Use:
 - `npm test` — run the default Vitest suite (excluding the database baseline test).
 - `npm run test:critical` or `npm run test:all` — run the critical suite or every test.
 - `npm run build` — create the production build; `npm run start` — serve it.
-- `npm run db:migrate` / `npm run db:generate` — apply local migrations and regenerate Prisma Client.
+- `npm run db:migrate` — create/apply a local development migration; `npm run db:generate` — regenerate Prisma Client.
+- `npm run db:migrate:status` — verify migration state before delivery.
 
 Use `npm run db:migrate:deploy` for production migrations. Do not use `db:push` or `db:reset` for routine production work.
 
 ## Coding Style & Naming Conventions
 
-Use strict TypeScript, two-space indentation, single quotes, semicolons, and the `@/*` import alias. Prefer small typed functions and existing service boundaries. Name components and types in PascalCase, functions and variables in camelCase, and tests as `*.test.ts`. Run ESLint before submitting.
+Use strict TypeScript, two-space indentation, single quotes, semicolons, and the `@/*` import alias. Prefer small typed functions and existing service boundaries. Name components and types in PascalCase, functions and variables in camelCase, and tests as `*.test.ts`. Keep public visibility rules in `src/lib/public-article-service.ts`, setting definitions in `src/lib/settings-catalog.ts`, and review workflows in `src/lib/review-service.ts`. Run ESLint before submitting.
 
 ## Testing Guidelines
 
@@ -40,4 +43,4 @@ Follow the existing Conventional Commit style, such as `feat: add source retry` 
 
 ## Security & Configuration
 
-Never commit `.env`, API keys, Webhook URLs, SQLite data, or deployment archives. Production requires `API_TOKEN`; back up the database before migrations, and never reset a user database to resolve drift.
+Never commit `.env`, API keys, Webhook URLs, SQLite data, or deployment archives. Production requires `API_TOKEN`; set `NEXT_PUBLIC_SITE_URL` for canonical URLs and sitemap generation. Back up the database before migrations, and never reset a user database to resolve drift.

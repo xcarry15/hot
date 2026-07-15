@@ -1,9 +1,9 @@
 # Hot2
 
-Hot2 是面向餐饮/零售行业的新闻聚合与飞书推送工具，主链路为：
+Hot2 是面向餐饮/零售行业的新闻聚合、情报审核与飞书推送工具，主链路为：
 
 ```text
-数据源采集 → 详情处理 → 去重/关键词过滤 → AI 分析 → 条件推送
+数据源采集 → 详情处理 → 去重/关键词过滤 → AI 分析 → 情报审核 → 条件推送/公开展示
 ```
 
 ## 快速开始
@@ -19,13 +19,17 @@ npm run db:seed
 npm run dev
 ```
 
-开发地址：`http://localhost:3011`。生产环境必须在 `.env` 设置 `API_TOKEN`；浏览器进入「设置 → 账户」填写同一个 token 后，才能访问或修改 API 数据。
+开发地址：`http://localhost:3011`。根路径 `/` 是公开新闻卡片页，文章详情使用 `/news/[id]`；后台位于 `/admin`，当前仅包含“情报收件箱”“抓取记录”“设置”三个页面。生产环境必须在 `.env` 设置 `API_TOKEN`，首次访问后台时输入该 token 建立临时 HttpOnly 会话；公开端保持匿名访问。生产部署还应将 `NEXT_PUBLIC_SITE_URL` 设置为正式访问地址，用于 canonical、Open Graph 和 sitemap。公开导航中的“工具”“数据”目前是占位入口，暂未提供实际页面。
 
 ## 项目结构
 
 ```text
-src/app/              页面和 API Route Handler
-src/components/       页面、设置、数据源、抓取记录和 UI 组件
+src/app/              公开页面、后台页面和 API Route Handler
+src/app/admin/        Token 保护的管理后台
+src/app/news/         可分享、可收录的公开文章详情页
+src/app/robots.ts     robots 规则；仅公开首页和文章详情参与收录
+src/app/sitemap.ts    公开首页和文章详情 sitemap
+src/components/       收件箱、设置、数据源、抓取记录和公开端 UI 组件
 src/features/         前端 API 客户端
 src/contracts/        API、AI、文章、推送等共享契约
 src/lib/              execution、pipeline、AI、推送、去重、设置等核心模块
@@ -36,6 +40,8 @@ bat/                  Windows 启动、打包、部署和 Nginx 文档
 db/                   本地 SQLite 数据（不进入部署包）
 ```
 
+公开端只展示 AI 分析完成且符合「设置 → 公开」规则的文章，支持数据源、时间范围和关键词筛选，每页 20 篇并使用分页。规则包含自动最低评分、数据源公开开关和软文处理；人工重要归类强制公开并置顶，一般/无关归类按映射执行。公开读取接口为 `/api/public/articles`，与需要 Token 的管理 API 分离；筛选页、后台和 API 均不参与搜索引擎收录，首页和文章详情页参与收录。文章详情累计浏览量和原文点击量，指标在后台概览与文章详情中展示。
+
 ## 当前架构与数据事实
 
 - Next.js 16 App Router + React 19 + TypeScript；Prisma 6 + SQLite；单进程模块化单体，生产只运行一个 PM2 实例。
@@ -45,13 +51,15 @@ db/                   本地 SQLite 数据（不进入部署包）
 | 阶段 | 入口代码 | 作用 |
 |---|---|---|
 | collect | `src/lib/pipeline/collect.ts` | 采集数据源并写入/更新文章 |
-| process | `src/lib/pipeline/process.ts` | 抓取详情、提取正文、过滤和去重 |
+| process | `src/lib/pipeline/process.ts` | 抓取详情、提取正文、关键词过滤；不同 URL 的重复文章保留并标记 |
 | ai | `src/lib/pipeline/analyze.ts` | 写入摘要、标签、评分和审计字段 |
 | push | `src/lib/pipeline/push-bridge.ts` | 按统一条件投递未推送文章 |
 
-关键 API 约束：`POST /api/crawl` 是唯一批量任务入口；`GET /api/dashboard/analytics` 提供按周期和数据源聚合的内容质量分析；`POST /api/sources/retry` 只重试数据源采集；`POST /api/push` 只推送单篇文章；`GET /api/crawl-log/status` 是抓取记录页唯一任务快照来源；`POST /api/worker/stop` 停止当前任务。Route Handler 只做适配，事务和业务规则由 Service 负责。不得重新引入已移除的 `/api/jobs`、`/api/articles/refetch-batch` 或独立队列。
+关键 API 约束：`POST /api/crawl` 是批量任务的主入口；`GET /api/dashboard/analytics` 提供按周期和数据源聚合的内容质量分析；`POST /api/sources/retry` 只重试数据源采集；`POST /api/push` 只推送单篇文章；`GET /api/crawl-log/status` 是抓取记录页唯一任务快照来源；`POST /api/worker/stop` 停止当前任务；`POST /api/articles/review` 处理收件箱归类；`GET/POST /api/feedback` 处理调优建议。Route Handler 只做适配，事务和业务规则由 Service 负责。不要新增并行的批量编排入口、独立队列或绕过 `src/lib/execution.ts` 的后台任务；历史兼容目录即使存在，也不应作为新功能入口。
 
-`Job`、`FetchLog`、`PushLog`、`DiscardedItem` 和 `DiscardedRetryAudit` 分别记录任务、采集、目标级推送、未入库条目和管理员重试事实。页面不得用 `sessionStorage` 或乐观步骤推断任务状态；抓取记录使用 Job snapshot。列表接口返回摘要投影，详情接口才返回正文、评分明细、去重证据和脱敏推送日志。
+`InboxSnapshot` 保存近 90 天的待归类积压快照，概览以此展示积压趋势；快照是派生指标，不改变文章流水线事实。
+
+`Job`、`FetchLog`、`PushLog`、`DiscardedItem` 和 `DiscardedRetryAudit` 分别记录任务、采集、目标级推送、未入库条目和管理员重试事实。`Article` 还记录收件箱归类、预设反馈标签、公开覆盖、置顶、重复证据和浏览/点击计数；`KeywordCandidate` 保存未命中标题生成的本地候选词，`TuningSuggestion` 保存待管理员确认的调优建议。页面不得用 `sessionStorage` 或乐观步骤推断任务状态；抓取记录使用 Job snapshot。列表接口返回摘要投影，详情接口才返回正文、评分明细、去重证据和脱敏推送日志。
 
 设置默认值、校验、敏感性和导出策略集中在 `src/lib/settings-catalog.ts`；AI Provider 定义在 `src/contracts/ai-provider.ts`；预设数据源定义在 `src/lib/preset-sources.ts`。Webhook 默认值为空数组，仓库不得保存真实 Webhook。当前去重规则唯一来源是 `src/contracts/dedup-settings.ts`：时间窗口 15 天、特定数字最少重叠数 2、正文 LCS 单段 40 字符、总长 160 字符、品牌门控开启、短文兜底 1000 字符。标题 Jaccard 仅作证据，不单独触发去重。
 

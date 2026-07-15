@@ -22,6 +22,15 @@ export const ARTICLE_LIST_SELECT = {
   aiStatus: true,
   skipReason: true,
   isAd: true,
+  reviewStatus: true,
+  reviewReasonTags: true,
+  reviewedAt: true,
+  publicOverride: true,
+  pinUntil: true,
+  duplicateOfId: true,
+  duplicateStatus: true,
+  viewCount: true,
+  originalClickCount: true,
   pushedAt: true,
   publishedAt: true,
   createdAt: true,
@@ -63,6 +72,15 @@ export interface ArticleListFieldsDto {
   aiStatus: string;
   skipReason: string | null;
   isAd: boolean;
+  reviewStatus: string;
+  reviewReasonTags: string;
+  reviewedAt: string | null;
+  publicOverride: string;
+  pinUntil: string | null;
+  duplicateOfId: string | null;
+  duplicateStatus: string;
+  viewCount: number;
+  originalClickCount: number;
   pushedAt: string | null;
   pushUrgency: string;
   publishedAt: string | null;
@@ -137,13 +155,15 @@ export interface ArticleListResponseDto extends ArticlePaginationDto {
 type ListDates = {
   pushedAt: NullableDateValue;
   publishedAt: NullableDateValue;
+  reviewedAt: NullableDateValue;
+  pinUntil: NullableDateValue;
   createdAt: DateValue;
   updatedAt: DateValue;
 };
 
 export type ArticleListRecord = Omit<
   ArticleListFieldsDto,
-  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'createdAt' | 'updatedAt'
+  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'pinUntil' | 'createdAt' | 'updatedAt'
 > & ListDates & {
   cleanContent: string;
   source: ArticleSourceSummaryDto;
@@ -151,7 +171,7 @@ export type ArticleListRecord = Omit<
 
 export type ArticleDetailRecord = Omit<
   ArticleFieldsDto,
-  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'createdAt' | 'updatedAt'
+  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'pinUntil' | 'createdAt' | 'updatedAt'
 > & ListDates & {
   source: ArticleSourceDetailDto;
   pushLogs: ArticlePushLogRecord[];
@@ -202,6 +222,15 @@ function serializeArticleListFields(
     aiStatus: article.aiStatus,
     skipReason: article.skipReason,
     isAd: article.isAd,
+    reviewStatus: article.reviewStatus,
+    reviewReasonTags: article.reviewReasonTags,
+    reviewedAt: toIso(article.reviewedAt),
+    publicOverride: article.publicOverride,
+    pinUntil: toIso(article.pinUntil),
+    duplicateOfId: article.duplicateOfId,
+    duplicateStatus: article.duplicateStatus,
+    viewCount: article.viewCount,
+    originalClickCount: article.originalClickCount,
     pushedAt: toIso(article.pushedAt),
     // 紧急度是评分的派生状态，不读取可能过期的数据库缓存。
     pushUrgency: article.score >= 95 ? 'urgent' : 'normal',

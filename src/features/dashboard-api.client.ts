@@ -3,6 +3,23 @@
  */
 import { requestJson } from '@/lib/request-json.client';
 
+export interface FeedbackSuggestion {
+  id: string;
+  kind: string;
+  title: string;
+  detail: string;
+  payload: string;
+  createdAt: string;
+}
+
+export async function fetchFeedbackSuggestions(signal?: AbortSignal): Promise<FeedbackSuggestion[]> {
+  return requestJson<FeedbackSuggestion[]>('GET', '/api/feedback', { signal });
+}
+
+export async function updateFeedbackSuggestion(id: string, action: 'apply' | 'dismiss'): Promise<unknown> {
+  return requestJson('POST', '/api/feedback', { body: { id, action } });
+}
+
 export type DashboardAnalyticsRange = 'today' | '3d' | '7d' | '30d';
 
 export type DashboardCrawlTrigger = 'auto' | 'manual' | 'unknown';
@@ -50,6 +67,9 @@ export interface DashboardAnalytics {
     fetchSuccesses: number;
     fetchWarnings: number;
     fetchFailures: number;
+    views: number;
+    originalClicks: number;
+    clickRate: number;
   };
   sources: Array<{
     id: string;
@@ -83,6 +103,9 @@ export interface DashboardAnalytics {
     fetchSuccesses: number;
     fetchWarnings: number;
     fetchFailures: number;
+    views: number;
+    originalClicks: number;
+    clickRate: number;
   }>;
   trend: Array<{
     date: string;
@@ -135,6 +158,10 @@ export interface DashboardAnalytics {
     pageSize: number;
     total: number;
     totalPages: number;
+  };
+  inbox: {
+    pending: number;
+    trend: Array<{ date: string; pending: number }>;
   };
 }
 

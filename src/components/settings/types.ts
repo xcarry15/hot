@@ -25,6 +25,12 @@ export interface Settings extends Record<PromptBlockKey, string> {
   push_time: string
   push_min_score: string
   push_min_relevance: string
+  public_min_score: string
+  public_hide_ads: string
+  public_important_rule: string
+  public_general_rule: string
+  public_irrelevant_rule: string
+  public_pin_hours: string
   crawl_interval_min: string
   ai_provider: string
   ai_temperature: string

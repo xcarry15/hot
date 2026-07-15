@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { captureInboxSnapshot, listInboxSnapshots } from '@/lib/inbox-snapshot-service';
 
 export type DashboardAnalyticsRange = 'today' | '3d' | '7d' | '30d';
 
@@ -27,6 +28,8 @@ interface MutableStats {
   fetchSuccesses: number;
   fetchWarnings: number;
   fetchFailures: number;
+  views: number;
+  originalClicks: number;
 }
 
 interface MutableTrendStats extends MutableStats {
@@ -85,6 +88,8 @@ function createStats(): MutableStats {
     fetchSuccesses: 0,
     fetchWarnings: 0,
     fetchFailures: 0,
+    views: 0,
+    originalClicks: 0,
   };
 }
 
@@ -170,7 +175,10 @@ function toQualityStats(stats: MutableStats) {
     fetchSuccesses: stats.fetchSuccesses,
     fetchWarnings: stats.fetchWarnings,
     fetchFailures: stats.fetchFailures,
-    // 互斥堆叠分层：有效新增按普通/软文/已推送拆分，避免同一篇文章重复累加。
+    views: stats.views,
+    originalClicks: stats.originalClicks,
+    clickRate: ratio(stats.originalClicks, stats.views),
+    // 互斥堆叠分层：AI完成按普通/软文/已推送拆分，避免同一篇文章重复累加。
     stackNew: Math.max(0, stats.newArticles - stats.ads - pushedNonAds),
     stackAds: Math.max(0, stats.ads - stats.pushedAds),
     stackPushed: stats.pushed,
@@ -187,7 +195,10 @@ export async function getDashboardAnalytics(
   const timeWhere = { gte: window.startAt, lte: window.endAt };
   const sourceFilter = sourceId ? { sourceId } : {};
 
-  const [sources, articles, discardedItems, fetchLogs] = await Promise.all([
+  // 积压趋势是派生快照，不阻塞主统计；采集/归类任务完成后也会更新同一快照。
+  void captureInboxSnapshot().catch(() => undefined);
+
+  const [sources, articles, discardedItems, fetchLogs, inboxPending, inboxSnapshots] = await Promise.all([
     db.source.findMany({
       where: { deletedAt: null, ...(sourceId ? { id: sourceId } : {}) },
       select: { id: true, name: true, status: true, enabled: true, lastFetchedAt: true },
@@ -204,6 +215,8 @@ export async function getDashboardAnalytics(
         isAd: true,
         pushedAt: true,
         dedupDetail: true,
+        viewCount: true,
+        originalClickCount: true,
       },
     }),
     db.discardedItem.findMany({
@@ -221,6 +234,8 @@ export async function getDashboardAnalytics(
       where: { createdAt: timeWhere, ...sourceFilter },
       select: { sourceId: true, createdAt: true, status: true, itemsFound: true },
     }),
+    db.article.count({ where: { fetchStatus: 'fetched', reviewStatus: 'unreviewed' } }),
+    listInboxSnapshots(7),
   ]);
 
   const recentJobs = await db.job.findMany({
@@ -261,6 +276,10 @@ export async function getDashboardAnalytics(
 
     source.ingested += 1;
     trend.ingested += 1;
+    source.views += row.viewCount;
+    source.originalClicks += row.originalClickCount;
+    trend.views += row.viewCount;
+    trend.originalClicks += row.originalClickCount;
 
     if (row.fetchStatus === 'fetched') {
       source.processed += 1;
@@ -407,6 +426,13 @@ export async function getDashboardAnalytics(
       pageSize: CRAWL_PAGE_SIZE,
       total: totalCrawlRecords,
       totalPages: totalCrawlPages,
+    },
+    inbox: {
+      pending: inboxPending,
+      trend: inboxSnapshots.map((snapshot) => ({
+        date: dateKey(snapshot.capturedOn),
+        pending: snapshot.pendingCount,
+      })),
     },
   };
 }

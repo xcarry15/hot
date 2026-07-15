@@ -41,6 +41,7 @@ function parseBool(raw: string | undefined, fallback: boolean): boolean {
 }
 
 export async function getDedupConfig(_sourceId?: string): Promise<DedupConfig> {
+  void _sourceId;
   const now = Date.now();
 
   if (!baseCache || now - baseCache.cachedAt > CONFIG_CACHE_TTL_MS) {

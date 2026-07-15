@@ -7,13 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   Loader2,
   Send,
   Plus,
@@ -242,35 +235,12 @@ export default function PushTab({ settings, setSettings }: Props) {
             {settings.push_mode === 'batch' ? (
               <div className="space-y-1.5">
                 <Label className="text-xs">推送时间</Label>
-                <div className="flex gap-1.5">
-                  <Select
-                    value={settings.push_time.startsWith('cron:') ? 'cron' : 'time'}
-                    onValueChange={(val) => val === 'cron' ? updateSetting('push_time', 'cron:0 9 * * 1-5') : updateSetting('push_time', '08:30')}
-                  >
-                    <SelectTrigger className="h-8 text-xs w-24">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="time">固定时间</SelectItem>
-                      <SelectItem value="cron">Cron</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {settings.push_time.startsWith('cron:') ? (
-                    <Input
-                      placeholder="0 9 * * 1-5"
-                      value={settings.push_time.slice(5)}
-                      onChange={(e) => updateSetting('push_time', 'cron:' + e.target.value)}
-                      className="h-8 text-xs flex-1"
-                    />
-                  ) : (
-                    <Input
-                      type="time"
-                      value={settings.push_time}
-                      onChange={(e) => updateSetting('push_time', e.target.value)}
-                      className="h-8 text-xs flex-1"
-                    />
-                  )}
-                </div>
+                <Input
+                  type="time"
+                  value={settings.push_time.startsWith('cron:') ? '08:30' : settings.push_time}
+                  onChange={(e) => updateSetting('push_time', e.target.value)}
+                  className="h-8 text-xs"
+                />
               </div>
             ) : (
               <div className="space-y-1.5">

@@ -1,174 +1,104 @@
-'use client'
+import type { Metadata } from 'next'
+import Link from 'next/link'
+import { redirect } from 'next/navigation'
+import PublicArticleCard from '@/components/public-article-card'
+import PublicHeader from '@/components/public-header'
+import { listPublicArticles } from '@/lib/public-article-service'
 
-import { useState, useEffect } from 'react'
-import { useTheme } from '@/components/theme-provider'
-import {
-  Activity,
-  Newspaper,
-  Settings,
-  Sun,
-  Moon,
-} from 'lucide-react'
-import ArticlesTab from '@/components/articles-tab'
-import CrawlLogTab from '@/components/crawl-log-tab'
-import SettingsTab from '@/components/settings-tab'
-import { URL_PARAM_DETAIL, URL_PARAM_TAB } from '@/components/crawl-log/constants'
+export const dynamic = 'force-dynamic'
 
-type TabKey = 'articles' | 'crawl-log' | 'settings'
+type SearchParams = Record<string, string | string[] | undefined>
 
-interface NavItem {
-  key: TabKey
-  label: string
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>
+function first(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? '' : value ?? ''
 }
 
-const navItems: NavItem[] = [
-  { key: 'articles', label: '文章流', icon: Newspaper },
-  { key: 'crawl-log', label: '抓取记录', icon: Activity },
-  { key: 'settings', label: '设置', icon: Settings },
-]
-
-function readInitialTab(): TabKey {
-  if (typeof window === 'undefined') return 'articles'
-  const params = new URLSearchParams(window.location.search)
-  const tab = params.get(URL_PARAM_TAB)
-  if (tab === 'crawl-log' || tab === 'settings' || tab === 'articles') return tab
-  return params.has(URL_PARAM_DETAIL) ? 'crawl-log' : 'articles'
+function buildPageHref(params: Record<string, string>, page: number): string {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value) query.set(key, value)
+  }
+  query.set('page', String(page))
+  return `/?${query.toString()}`
 }
 
-export default function Home() {
-  // 服务端与客户端首帧必须保持一致，避免直接读取 window.location 导致 Hydration mismatch。
-  const [activeTab, setActiveTab] = useState<TabKey>('articles')
-  const { resolvedTheme, setTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
+export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }): Promise<Metadata> {
+  const params = await searchParams
+  const hasFilter = Boolean(first(params.q) || first(params.source) || first(params.from) || first(params.to) || Number(first(params.page)) > 1)
+  return {
+    title: hasFilter ? '文章筛选 · 行业新闻聚合' : '行业新闻聚合',
+    description: '聚合行业动态，提供经过质量筛选的新闻文章。',
+    alternates: { canonical: '/' },
+    robots: hasFilter ? { index: false, follow: true } : { index: true, follow: true },
+  }
+}
 
-  // 等客户端挂载后再渲染主题相关 UI，避免 hydration mismatch
-  useEffect(() => {
-    setMounted(true)
-    setActiveTab(readInitialTab())
-  }, [])
-
-  const toggleTheme = () => {
-    setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')
+export default async function PublicHomePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const params = await searchParams
+  const legacyTab = first(params.tab)
+  if (legacyTab === 'settings' || legacyTab === 'crawl-log') {
+    const detail = first(params.detail)
+    redirect(`/admin?tab=${legacyTab}${detail ? `&detail=${encodeURIComponent(detail)}` : ''}`)
   }
 
-  const handleTabChange = (tab: TabKey) => {
-    setActiveTab(tab)
-    if (typeof window === 'undefined') return
-    const url = new URL(window.location.href)
-    if (tab === 'articles') url.searchParams.delete(URL_PARAM_TAB)
-    else url.searchParams.set(URL_PARAM_TAB, tab)
-    window.history.replaceState(null, '', url.toString())
-  }
-
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'articles':
-        return <ArticlesTab />
-      case 'crawl-log':
-        return <CrawlLogTab />
-      case 'settings':
-        return <SettingsTab />
-    }
-  }
+  const search = first(params.q)
+  const sourceId = first(params.source)
+  const from = first(params.from)
+  const to = first(params.to)
+  const requestedPage = Math.max(1, Number(first(params.page)) || 1)
+  const data = await listPublicArticles({ page: requestedPage, pageSize: 20, search, sourceId, from, to })
+  const filterParams = { q: search, source: sourceId, from, to }
+  const hasFilter = Boolean(search || sourceId || from || to)
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-background">
-      <div className="flex flex-1 overflow-hidden min-h-0">
-        {/* Sidebar — desktop */}
-        <aside className="hidden sm:flex w-[180px] border-r border-border/70 bg-background flex-col shrink-0">
-          {/* Logo area */}
-          <div className="px-3 py-3.5 flex items-center gap-2 border-b border-border/70">
-            <div className="w-8 h-8 rounded-[6px] bg-primary flex items-center justify-center shrink-0 overflow-hidden shadow-[0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
-              <img src="/icon-192x192.png" alt="logo" className="w-full h-full object-cover" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-[13px] font-semibold leading-5 tracking-tight truncate">新闻聚合</h1>
-              <p className="text-[11px] leading-4 text-muted-foreground">推送器</p>
-            </div>
-          </div>
+    <div className="min-h-[100dvh] bg-muted/20">
+      <PublicHeader active="articles" />
 
-          {/* Navigation */}
-          <nav className="flex-1 px-2 py-4" aria-label="主导航">
-            <div className="space-y-1">
-              {navItems.map((item) => {
-                const isActive = activeTab === item.key
-                return (
-                  <button
-                    key={item.key}
-                    onClick={() => handleTabChange(item.key)}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={`
-                      relative w-full flex h-10 items-center gap-2.5 rounded-md px-2.5 text-sm font-medium transition-colors duration-150
-                      focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring
-                      ${isActive
-                        ? 'bg-muted text-foreground before:absolute before:left-0 before:top-2 before:h-6 before:w-0.5 before:rounded-full before:bg-foreground'
-                        : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'
-                      }
-                    `}
-                  >
-                    <item.icon className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
-                    <span>{item.label}</span>
-                  </button>
-                )
-              })}
-            </div>
+      <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-7">
+        <div className="mb-4 flex flex-col gap-1">
+          <h2 className="text-xl font-semibold tracking-tight">新闻卡片</h2>
+          <p className="text-sm text-muted-foreground">按文章自身发布时间排序 · 自动公开门槛 {data.minScore} 分，人工公开可覆盖</p>
+        </div>
+
+        <form method="get" className="mb-5 flex flex-wrap items-center gap-2 rounded-md border bg-background p-3">
+          <input
+            name="q"
+            defaultValue={search}
+            placeholder="搜索标题、摘要或品牌"
+            className="h-9 min-w-[220px] flex-1 rounded-md border bg-background px-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+          />
+          <select name="source" defaultValue={sourceId} className="h-9 rounded-md border bg-background px-2 text-sm">
+            <option value="">全部数据源</option>
+            {data.sources.map((source) => <option key={source.id} value={source.id}>{source.name}（{source.count}）</option>)}
+          </select>
+          <input name="from" type="date" defaultValue={from} aria-label="开始日期" className="h-9 rounded-md border bg-background px-2 text-sm" />
+          <span className="text-xs text-muted-foreground">至</span>
+          <input name="to" type="date" defaultValue={to} aria-label="结束日期" className="h-9 rounded-md border bg-background px-2 text-sm" />
+          <button type="submit" className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90">筛选</button>
+          {hasFilter && <Link href="/" className="px-2 text-sm text-muted-foreground hover:text-foreground">清除</Link>}
+        </form>
+
+        <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
+          <span>共 {data.total} 篇</span>
+          {data.totalPages > 1 && <span>第 {data.page}/{data.totalPages} 页</span>}
+        </div>
+
+        {data.items.length > 0 ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {data.items.map((article) => <PublicArticleCard key={article.id} article={article} />)}
+          </div>
+        ) : (
+          <div className="rounded-md border bg-background px-6 py-16 text-center text-sm text-muted-foreground">暂无符合条件的文章</div>
+        )}
+
+        {data.totalPages > 1 && (
+          <nav className="mt-6 flex items-center justify-center gap-2" aria-label="文章分页">
+            {data.page > 1 ? <Link href={buildPageHref(filterParams, data.page - 1)} className="rounded-md border bg-background px-3 py-2 text-sm hover:bg-muted">上一页</Link> : <span className="rounded-md border px-3 py-2 text-sm text-muted-foreground/50">上一页</span>}
+            <span className="px-2 text-sm text-muted-foreground">{data.page} / {data.totalPages}</span>
+            {data.page < data.totalPages ? <Link href={buildPageHref(filterParams, data.page + 1)} className="rounded-md border bg-background px-3 py-2 text-sm hover:bg-muted">下一页</Link> : <span className="rounded-md border px-3 py-2 text-sm text-muted-foreground/50">下一页</span>}
           </nav>
-
-          {/* Sidebar footer */}
-          <div className="px-2 py-3 border-t border-border/70">
-            {mounted ? (
-              <button
-                onClick={toggleTheme}
-                className="w-full flex h-9 items-center gap-2 rounded-md px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                aria-label="切换主题"
-              >
-                {resolvedTheme === 'dark' ? (
-                  <Sun className="h-[15px] w-[15px] shrink-0" strokeWidth={1.8} />
-                ) : (
-                  <Moon className="h-[15px] w-[15px] shrink-0" strokeWidth={1.8} />
-                )}
-                <span>{resolvedTheme === 'dark' ? '亮色模式' : '暗色模式'}</span>
-              </button>
-            ) : (
-              <div className="w-full h-9" />
-            )}
-            <p className="mt-2 px-2.5 font-mono text-[10px] tracking-[0.08em] text-muted-foreground/70">v1.0.0</p>
-          </div>
-        </aside>
-
-        {/* Main Content */}
-        <main className="flex-1 flex flex-col overflow-hidden min-h-0 bg-background">
-          {/* Content area — with bottom padding on mobile for tab bar */}
-          <div className="flex-1 overflow-hidden min-h-0 pb-16 sm:pb-0">
-            {renderContent()}
-          </div>
-        </main>
-      </div>
-
-      {/* Bottom Tab Bar — mobile only */}
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur border-t flex items-center justify-around h-16 pb-[env(safe-area-inset-bottom)]">
-        {navItems.map((item) => {
-          const isActive = activeTab === item.key
-          return (
-            <button
-              key={item.key}
-              onClick={() => handleTabChange(item.key)}
-              aria-current={isActive ? 'page' : undefined}
-              className={`
-                flex flex-col items-center justify-center gap-1 flex-1 h-full transition-colors
-                ${isActive
-                  ? 'text-primary'
-                  : 'text-muted-foreground'
-                }
-              `}
-            >
-              <item.icon className="h-5 w-5" />
-              <span className="text-[11px] font-medium leading-none">{item.label}</span>
-            </button>
-          )
-        })}
-      </nav>
+        )}
+      </main>
     </div>
   )
 }

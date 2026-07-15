@@ -13,6 +13,9 @@ import {
 } from '@/components/ui/select'
 import {
   fetchDashboardAnalytics,
+  fetchFeedbackSuggestions,
+  updateFeedbackSuggestion,
+  type FeedbackSuggestion,
   type DashboardAnalytics,
   type DashboardAnalyticsRange,
 } from '@/features/dashboard-api.client'
@@ -49,7 +52,7 @@ const SOURCE_FIELD_HELP: Record<string, { formula: string; detail: string }> = {
   '平均分': { formula: 'AI 分析分数之和 ÷ AI 分析文章数', detail: '仅统计 AI 已完成分析的文章，满分100' },
   '入库': { formula: '去重后入库的文章数', detail: '经去重（重复、已推送）后进入处理流程的文章数' },
   '处理': { formula: '完成预处理的文章数', detail: '经过预处理流程的文章数（不含入库前去重）' },
-  'AI分析': { formula: 'AI 完成质量分析的文章数', detail: '经 AI 模型判断为有价值的文章数（不含软文）' },
+  'AI分析': { formula: 'AI 完成分析的文章数', detail: '所有 AI 已完成的文章，软文是其中的子集' },
   '推送': { formula: '推送数 ÷ 文章总数', detail: '成功推送到飞书的文章数及其在全部文章中的占比' },
   '未命中': { formula: '未命中数 ÷ 文章总数', detail: '关键词匹配未通过的文章数及其在全部文章中的占比' },
   '重复': { formula: '重复数 ÷ 文章总数', detail: '与历史文章重复的文章数及其在全部文章中的占比' },
@@ -154,7 +157,7 @@ function TrendBody({ points }: { points: DashboardAnalytics['trend'] }) {
           <div key={point.date} className="group relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
             <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden min-w-[118px] -translate-x-1/2 rounded-md border bg-popover px-2 py-1.5 text-[10px] text-popover-foreground shadow-md group-hover:block group-focus-within:block" role="tooltip">
               <div className="mb-1 font-medium">{point.label}</div>
-              <div className="flex justify-between gap-3"><span>有效新增</span><span className="tabular-nums">{point.newArticles}</span></div>
+              <div className="flex justify-between gap-3"><span>AI完成</span><span className="tabular-nums">{point.newArticles}</span></div>
               <div className="flex justify-between gap-3"><span>重复项</span><span className="tabular-nums">{point.duplicates}</span></div>
               <div className="flex justify-between gap-3"><span>软文</span><span className="tabular-nums">{point.ads}</span></div>
               <div className="flex justify-between gap-3"><span>已推送</span><span className="tabular-nums">{point.pushed}</span></div>
@@ -162,7 +165,7 @@ function TrendBody({ points }: { points: DashboardAnalytics['trend'] }) {
             <div
               className="flex h-28 w-full max-w-12 flex-col-reverse justify-start overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               tabIndex={0}
-              aria-label={`${point.label}：有效新增 ${point.newArticles}，重复项 ${point.duplicates}，软文 ${point.ads}，已推送 ${point.pushed}`}
+              aria-label={`${point.label}：AI完成 ${point.newArticles}，重复项 ${point.duplicates}，软文 ${point.ads}，已推送 ${point.pushed}`}
             >
               {series.map((item) => {
                 const value = point[item.key]
@@ -191,7 +194,7 @@ function TrendCard({
         <div className="mb-3 flex items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-medium">{title}</h3>
-            <p className="text-[10px] text-muted-foreground">互斥分层显示处理结果，悬停查看有效新增、重复、软文与推送数量</p>
+            <p className="text-[10px] text-muted-foreground">互斥分层显示处理结果，悬停查看 AI完成、重复、软文与推送数量</p>
           </div>
           {points.length > 1 && <span className="text-[10px] text-muted-foreground">{points.length} 个时间点</span>}
         </div>
@@ -431,7 +434,7 @@ function buildSourceAttention(analytics: DashboardAnalytics): SourceAttention[] 
         icon: Send,
         label: '有新增未推送',
         value: `${source.newArticles} 篇`,
-        detail: `有效新增但全部未推送，可能关键词配置过严或推送渠道异常`,
+        detail: `AI完成文章但全部未推送，可能关键词配置过严或推送渠道异常`,
         threshold: `推送率 > 0%`,
       })
     }
@@ -487,6 +490,7 @@ export default function DashboardTab() {
   const [crawlType, setCrawlType] = useState<CrawlTypeFilter>('all')
   const [crawlSourceId, setCrawlSourceId] = useState('all')
   const [tooltipInfo, setTooltipInfo] = useState<{ field: string; x: number; y: number } | null>(null)
+  const [suggestions, setSuggestions] = useState<FeedbackSuggestion[]>([])
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const fetchData = useCallback(async () => {
@@ -499,12 +503,23 @@ export default function DashboardTab() {
         sourceId: crawlSourceId === 'all' ? undefined : crawlSourceId,
       })
       setAnalytics(analyticsJson)
+      fetchFeedbackSuggestions().then(setSuggestions).catch(() => undefined)
     } catch {
       toast.error('获取概览数据失败')
     } finally {
       setLoading(false)
     }
   }, [crawlPage, crawlSourceId, crawlStatus, crawlTrigger, crawlType, range])
+
+  const handleSuggestion = async (id: string, action: 'apply' | 'dismiss') => {
+    try {
+      await updateFeedbackSuggestion(id, action)
+      setSuggestions((items) => items.filter((item) => item.id !== id))
+      toast.success(action === 'apply' ? '建议已应用' : '建议已忽略')
+    } catch {
+      toast.error('处理建议失败')
+    }
+  }
 
   const handleRefresh = () => {
     setRefreshToken((value) => value + 1)
@@ -607,6 +622,13 @@ export default function DashboardTab() {
       </div>
 
       <section className="space-y-2">
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Card className="py-0"><CardContent className="p-2.5"><div className="text-[10px] text-muted-foreground">公开浏览</div><div className="mt-1 text-lg font-semibold tabular-nums">{formatNumber(summary.views)}</div></CardContent></Card>
+          <Card className="py-0"><CardContent className="p-2.5"><div className="text-[10px] text-muted-foreground">查看原文</div><div className="mt-1 text-lg font-semibold tabular-nums">{formatNumber(summary.originalClicks)}</div></CardContent></Card>
+          <Card className="py-0"><CardContent className="p-2.5"><div className="text-[10px] text-muted-foreground">原文点击率</div><div className="mt-1 text-lg font-semibold tabular-nums">{formatPercent(summary.clickRate)}</div></CardContent></Card>
+          <Card className="py-0"><CardContent className="p-2.5"><div className="text-[10px] text-muted-foreground">待归类积压</div><div className="mt-1 flex items-end gap-2"><span className="text-lg font-semibold tabular-nums">{formatNumber(analytics.inbox.pending)}</span><span className="text-[10px] text-muted-foreground">{analytics.inbox.trend.length > 1 ? `近${analytics.inbox.trend.length}天` : '今日'}</span></div><div className="mt-1 flex h-3 items-end gap-0.5" aria-label="近7天待归类积压趋势">{analytics.inbox.trend.map((point) => { const max = Math.max(1, ...analytics.inbox.trend.map((item) => item.pending)); return <span key={point.date} className="min-w-0 flex-1 bg-primary/50" style={{ height: `${Math.max(15, point.pending / max * 100)}%` }} title={`${point.date}: ${point.pending} 篇`} /> })}</div></CardContent></Card>
+        </div>
 
           <Card className="py-0">
             <CardContent className="p-2.5 sm:p-3">
@@ -843,7 +865,9 @@ export default function DashboardTab() {
 
           <PushLogPanel refreshToken={refreshToken} />
 
-          <TrendCard title={`${RANGE_OPTIONS.find((option) => option.value === range)?.label ?? ''}有效新增与质量趋势`} points={analytics.trend} />
+          <TrendCard title={`${RANGE_OPTIONS.find((option) => option.value === range)?.label ?? ''}文章处理结果趋势`} points={analytics.trend} />
+
+          {suggestions.length > 0 && <Card><CardContent className="p-3"><div className="mb-2 flex items-center gap-2"><span className="text-sm font-medium">人工反馈建议</span><Badge variant="secondary" className="text-[10px]">需确认</Badge></div><div className="space-y-2">{suggestions.slice(0, 5).map((item) => <div key={item.id} className="rounded-md border p-2"><div className="flex items-center gap-2"><span className="text-xs font-medium">{item.title}</span><span className="ml-auto text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span></div><p className="mt-1 text-[11px] text-muted-foreground">{item.detail}</p><div className="mt-2 flex gap-1.5"><Button size="sm" className="h-7 px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'apply')}>确认应用</Button><Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'dismiss')}>忽略</Button></div></div>)}</div></CardContent></Card>}
 
           {attention.length > 0 && (
             <Card className="border-amber-200 dark:border-amber-900/50">

@@ -35,7 +35,6 @@ interface Props {
   articleId: string | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  onArticleUpdated?: () => void
   onSelectArticle?: (id: string) => void
 }
 
@@ -76,7 +75,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-export default function ArticleSheet({ articleId, open, onOpenChange, onArticleUpdated, onSelectArticle }: Props) {
+export default function ArticleSheet({ articleId, open, onOpenChange, onSelectArticle }: Props) {
   const [article, setArticle] = useState<ArticleDetailDto | null>(null)
   const [loading, setLoading] = useState(false)
   const [relatedItems, setRelatedItems] = useState<RelatedItem[]>([])
@@ -194,6 +193,7 @@ export default function ArticleSheet({ articleId, open, onOpenChange, onArticleU
               {/* 元信息卡片 */}
               <div className="bg-background rounded-xl border p-4 space-y-3 text-sm">
                 <StatusBadge status={article.aiStatus} />
+                <Badge variant="outline" className="text-xs">{({ unreviewed: '待归类', important: '重要', general: '一般', irrelevant: '无关' } as Record<string, string>)[article.reviewStatus] ?? article.reviewStatus}</Badge>
 
                 {article.isAd && (
                   <Badge className="bg-red-100 text-red-700 hover:bg-red-100 text-xs rounded-full gap-1"><AlertTriangle className="h-3 w-3" />软文</Badge>
@@ -285,6 +285,7 @@ export default function ArticleSheet({ articleId, open, onOpenChange, onArticleU
                   <span>来源: {article.originalSource ?? article.source?.name ?? '未知来源'}</span>
                   <span>相关度: {article.relevance}%</span>
                   <span>{formatRelativeTime(article.createdAt || '')}</span>
+                  <span>浏览 {article.viewCount} · 原文点击 {article.originalClickCount} · 点击率 {article.viewCount > 0 ? Math.round(article.originalClickCount / article.viewCount * 100) : 0}%</span>
                   {article.url && (
                     <a
                       href={article.url}

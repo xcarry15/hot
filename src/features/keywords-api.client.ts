@@ -19,6 +19,25 @@ export interface KeywordListParams {
   category?: string;
 }
 
+export interface KeywordCandidate {
+  id: string;
+  phrase: string;
+  occurrences: number;
+  sampleTitles: string[];
+}
+
+export async function fetchKeywordCandidates(signal?: AbortSignal): Promise<KeywordCandidate[]> {
+  return requestJson<KeywordCandidate[]>('GET', '/api/keywords?candidates=true', { signal });
+}
+
+export async function updateKeywordCandidate(
+  id: string,
+  action: 'approve-candidate' | 'dismiss-candidate',
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return requestJson('POST', '/api/keywords', { body: { id, action }, signal });
+}
+
 export async function fetchKeywords(
   params: KeywordListParams = {},
   signal?: AbortSignal,

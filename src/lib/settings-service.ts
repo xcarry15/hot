@@ -7,6 +7,7 @@ import {
 import { SETTING_KEYS } from '@/lib/settings-catalog';
 import { applyScorePolicy, buildScorePolicySnapshot } from '@/lib/score-policy';
 import { parseWebhookConfigs, serializeWebhookConfigsForServer } from '@/contracts/webhook';
+import { invalidatePublicArticleCache } from '@/lib/public-article-service';
 
 const settingsUpdateSchema = z.record(z.string(), z.string());
 
@@ -41,8 +42,11 @@ export async function updateSettings(input: unknown): Promise<
 > {
   const parsed = settingsUpdateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: '无效的请求格式', details: parsed.error.issues };
+  const normalizedData = Object.fromEntries(Object.entries(parsed.data).map(([key, value]) => (
+    key === SETTING_KEYS.PUSH_TIME && value.startsWith('cron:') ? [key, '08:30'] : [key, value]
+  )));
   const validationErrors: string[] = [];
-  for (const [key, value] of Object.entries(parsed.data)) {
+  for (const [key, value] of Object.entries(normalizedData)) {
     if (!EXPORTABLE_SETTING_KEYS.includes(key)) { validationErrors.push(`${key}: 不可写(不在允许的配置键清单内)`); continue; }
     const definition = SETTING_DEFINITION_MAP.get(key);
     if (!definition || !definition.exportable) { validationErrors.push(`${key}: 不可写(未在配置目录中声明)`); continue; }
@@ -51,7 +55,7 @@ export async function updateSettings(input: unknown): Promise<
   }
   if (validationErrors.length > 0) return { ok: false, error: '设置值校验失败', details: validationErrors };
 
-  let updates = Object.entries(parsed.data) as [string, string][];
+  let updates = Object.entries(normalizedData) as [string, string][];
   updates = updates.map(([key, value]) => key === SETTING_KEYS.FEISHU_WEBHOOK_URL
     ? [key, serializeWebhookConfigsForServer(parseWebhookConfigs(value))]
     : [key, value]);
@@ -108,5 +112,6 @@ export async function updateSettings(input: unknown): Promise<
     }
   }, { maxWait: 10_000, timeout: 60_000 });
   invalidateAISettingsCache();
+  invalidatePublicArticleCache();
   return { ok: true };
 }

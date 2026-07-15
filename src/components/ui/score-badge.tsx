@@ -11,7 +11,7 @@ export interface ScoreDetails {
   aiConfidence?: number | null
 }
 
-function scoreRow(label: string, value: number | null | undefined, fallback: string) {
+function scoreRow(label: string, value: number | null | undefined) {
   if (value == null) return null
   const s = getScoreStyle(value)
   return (
@@ -28,11 +28,11 @@ function ScoreTooltip({ score, details }: { score: number; details: ScoreDetails
     <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
       <div className="bg-white border border-slate-200 rounded-lg shadow-lg px-3 py-2 text-xs whitespace-nowrap">
         <div className="space-y-0.5">
-          {scoreRow('事件影响力', details.eventScore, 'N/A')}
-          {scoreRow('内容质量', details.contentScore, 'N/A')}
-          {scoreRow('加权原始分', details.rawScore, 'N/A')}
-          {scoreRow('广告概率', details.adProbability, 'N/A')}
-          {scoreRow('AI 置信度', details.aiConfidence, 'N/A')}
+          {scoreRow('事件影响力', details.eventScore)}
+          {scoreRow('内容质量', details.contentScore)}
+          {scoreRow('加权原始分', details.rawScore)}
+          {scoreRow('广告概率', details.adProbability)}
+          {scoreRow('AI 置信度', details.aiConfidence)}
           <div className="border-t border-slate-100 pt-0.5 mt-0.5">
             <div className="flex items-center justify-between gap-3">
               <span className="text-slate-500">最终得分</span>

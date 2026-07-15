@@ -37,6 +37,9 @@ export interface ArticleListFilter {
   minRelevance?: number;
   sourceId?: string;
   search?: string;
+  reviewStatus?: string;
+  fetchStatus?: string;
+  inbox?: boolean;
 }
 
 export function buildArticleListWhere(filter: ArticleListFilter): Record<string, unknown> {
@@ -47,6 +50,12 @@ export function buildArticleListWhere(filter: ArticleListFilter): Record<string,
   if (Number.isFinite(filter.minScore)) where.score = { gte: filter.minScore };
   if (Number.isFinite(filter.minRelevance)) where.relevance = { gte: filter.minRelevance };
   if (filter.sourceId) where.sourceId = filter.sourceId;
+  if (filter.reviewStatus) where.reviewStatus = filter.reviewStatus;
+  if (filter.fetchStatus) where.fetchStatus = filter.fetchStatus;
+  if (filter.inbox) {
+    where.fetchStatus = 'fetched';
+    where.reviewStatus = 'unreviewed';
+  }
   if (filter.search) {
     where.OR = [
       { title: { contains: filter.search } },
@@ -104,7 +113,9 @@ export async function listArticles(
         ...ARTICLE_LIST_SELECT,
         source: { select: { name: true, type: true } },
       },
-      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: params.filter?.inbox
+        ? [{ createdAt: 'asc' }]
+        : [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

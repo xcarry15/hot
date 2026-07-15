@@ -142,7 +142,7 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
  * 打分：原始特征经本地策略引擎加权，并按广告概率扣分/封顶。
  */
 export type AIProcessResult = { status: 'done' | 'skipped' | 'failed'; errorKind?: string; globalError?: boolean };
-export async function processWithAI(article: { id: string; title: string; aiStatus: string | null; cleanContent: string | null; summary: string | null; publishedAt: Date | null; createdAt?: Date | null; aiRetryCount?: number }, signal?: AbortSignal): Promise<AIProcessResult> {
+export async function processWithAI(article: { id: string; title: string; aiStatus: string | null; cleanContent: string | null; summary: string | null; publishedAt: Date | null; createdAt?: Date | null; aiRetryCount?: number; dedupOverride?: boolean }, signal?: AbortSignal): Promise<AIProcessResult> {
   const { id: articleId, title } = article;
   assertNotAborted(signal);
 
@@ -219,7 +219,7 @@ export async function processWithAI(article: { id: string; title: string; aiStat
     // --- AI 后去重：同品牌 + keyPoints 数值重叠 ---
     // 同品牌文章若共享 ≥2 个具体数值（营收43.31亿、跌96%…），
     // 几乎可以确定是同一事件的不同媒体报道。旧文章保留，新文章标记为重复。
-    if (step2.brand && step2.keyPoints?.length > 0) {
+    if (!article.dedupOverride && step2.brand && step2.keyPoints?.length > 0) {
       const dupCheck = await dedupAfterAI(
         articleId, step2.brand, step2.keyPoints, article.publishedAt, article.createdAt,
       );
@@ -232,6 +232,8 @@ export async function processWithAI(article: { id: string; title: string; aiStat
             score: 0,
             skipReason: dupCheck.skipReason,
             dedupDetail: dupCheck.evidence ? JSON.stringify(dupCheck.evidence) : undefined,
+            duplicateStatus: 'duplicate',
+            duplicateOfId: dupCheck.evidence?.matchedId ?? null,
           },
         });
         console.log(

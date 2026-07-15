@@ -426,6 +426,7 @@ export async function dedupBeforeAI(
         { aiStatus: 'pending' },
         { fetchStatus: 'fetched' },
         { cleanContent: { not: '' } },
+        { dedupOverride: false },
       ],
     },
     select: { id: true, title: true, url: true, cleanContent: true, publishedAt: true, createdAt: true },
@@ -440,7 +441,7 @@ export async function dedupBeforeAI(
 
   const windowStart = new Date(Date.now() - cfg.windowDays * DAY_MS);
   const doneCandidates = await db.article.findMany({
-    where: { AND: [dedupWindowWhere(windowStart), { aiStatus: 'done' }] },
+      where: { AND: [dedupWindowWhere(windowStart), { aiStatus: 'done' }, { dedupOverride: false }] },
     select: { id: true, title: true, url: true, cleanContent: true, publishedAt: true, createdAt: true },
     take: DEDUP_DONE_CAP,
     orderBy: { createdAt: 'desc' },
@@ -477,7 +478,7 @@ export async function dedupBeforeAI(
     try {
       await db.article.update({
         where: { id: newerId },
-        data: { aiStatus: 'skipped', score: 0, skipReason: reason, dedupDetail: JSON.stringify(evidence) },
+        data: { aiStatus: 'skipped', score: 0, skipReason: reason, dedupDetail: JSON.stringify(evidence), duplicateStatus: 'duplicate', duplicateOfId: evidence.matchedId ?? null },
       });
       skipIds.add(newerId);
       skipped++;

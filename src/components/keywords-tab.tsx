@@ -36,6 +36,9 @@ import {
   exportKeywordsCsvBlob,
   fetchKeywords,
   importKeywordsCsv,
+  fetchKeywordCandidates,
+  updateKeywordCandidate,
+  type KeywordCandidate,
 } from '@/features/keywords-api.client'
 
 // ========== Types ==========
@@ -53,6 +56,7 @@ type BulkAction = 'clear-all'
 
 export default function KeywordsTab() {
   const [keywords, setKeywords] = useState<Keyword[]>([])
+  const [candidates, setCandidates] = useState<KeywordCandidate[]>([])
   const [loading, setLoading] = useState(true)
   const [clearAllDialogOpen, setClearAllDialogOpen] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
@@ -62,14 +66,26 @@ export default function KeywordsTab() {
 
   const loadKeywords = useCallback(async () => {
     try {
-      const data = await fetchKeywords()
+      const [data, candidateData] = await Promise.all([fetchKeywords(), fetchKeywordCandidates()])
       setKeywords(data)
+      setCandidates(candidateData)
     } catch {
       toast.error('获取关键词失败')
     } finally {
       setLoading(false)
     }
   }, [])
+
+  const handleCandidate = async (candidate: KeywordCandidate, action: 'approve-candidate' | 'dismiss-candidate') => {
+    try {
+      await updateKeywordCandidate(candidate.id, action)
+      setCandidates((prev) => prev.filter((item) => item.id !== candidate.id))
+      if (action === 'approve-candidate') await loadKeywords()
+      toast.success(action === 'approve-candidate' ? `已将「${candidate.phrase}」加入关键词` : '候选词已忽略')
+    } catch {
+      toast.error('候选词操作失败')
+    }
+  }
 
   useEffect(() => {
     const handle = setTimeout(loadKeywords, 0)
@@ -252,6 +268,11 @@ export default function KeywordsTab() {
               添加
             </Button>
           </section>
+
+          {candidates.length > 0 && <section className="rounded-md border bg-amber-50/50 p-3 dark:bg-amber-950/10">
+            <div className="mb-2 flex items-center gap-2"><span className="text-sm font-medium">未命中候选词</span><Badge variant="secondary" className="text-xs">{candidates.length}</Badge><span className="text-xs text-muted-foreground">本地统计生成，需人工确认后加入词库</span></div>
+            <div className="space-y-1.5">{candidates.slice(0, 12).map((candidate) => <div key={candidate.id} className="flex items-center gap-2 rounded border bg-background px-2 py-1.5"><span className="min-w-0 flex-1 truncate text-sm font-medium">{candidate.phrase}</span><span className="shrink-0 text-xs text-muted-foreground">{candidate.occurrences} 次</span><Button size="sm" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'approve-candidate')}>采用</Button><Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'dismiss-candidate')}>忽略</Button></div>)}</div>
+          </section>}
 
           {/* Search */}
           <div className="flex items-center gap-2">

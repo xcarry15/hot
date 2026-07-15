@@ -25,6 +25,8 @@ import {
 } from '@/lib/job-progress';
 import { findDuplicateArticle } from '@/lib/dedup';
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
+import { recordKeywordCandidates } from '@/lib/keyword-candidate-service';
+import { captureInboxSnapshot } from '@/lib/inbox-snapshot-service';
 
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_BATCH_SIZE = 500;
@@ -99,36 +101,32 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
           try {
             const dup = await findDuplicateArticle(article.title, content, article.id, article.sourceId);
             if (dup.isDuplicate && dup.dedupType) {
-              const reason = dup.dedupType === 'content_fingerprint' ? 'dedup:content' : 'dedup:near';
               // detail 存 canonical DedupEvidence（含去重方式/重复文章/URL/详情/内容对比片段），
               // 与 article.dedupDetail 同构 → 详情区用同一面板渲染。
-              const recorded = await recordDiscardedItem({
-                sourceId: article.sourceId,
-                title: article.title,
-                url: article.url,
-                reason,
-                detail: dup.evidence ?? {
-                  methodKey: dup.dedupType,
-                  method: dup.dedupType === 'content_fingerprint' ? '内容指纹 (SHA-256)' : '正文相似',
-                  matchedTitle: dup.matchedTitle ?? '',
-                  matchedUrl: dup.matchedUrl ?? '',
-                  matchedId: dup.matchedId,
-                  similarity: dup.similarity,
-                  detail: `similarity=${dup.similarity.toFixed(2)}`,
+              await db.article.update({
+                where: { id: article.id },
+                data: {
+                  aiStatus: 'skipped',
+                  score: 0,
+                  skipReason: `[重复] 与 "${dup.matchedTitle ?? '已有文章'}" 内容重复`,
+                  dedupDetail: JSON.stringify(dup.evidence ?? {
+                    methodKey: dup.dedupType,
+                    method: dup.dedupType === 'content_fingerprint' ? '内容指纹 (SHA-256)' : '正文相似',
+                    matchedTitle: dup.matchedTitle ?? '',
+                    matchedUrl: dup.matchedUrl ?? '',
+                    matchedId: dup.matchedId,
+                    similarity: dup.similarity,
+                    detail: `similarity=${dup.similarity.toFixed(2)}`,
+                  }),
+                  duplicateStatus: 'duplicate',
+                  duplicateOfId: dup.matchedId ?? null,
                 },
-                winnerArticleId: dup.matchedId,
-                publishedAt: article.publishedAt?.toISOString(),
               });
-              if (!recorded) {
-                errors++;
-                console.error(`[processAllPending] skipped deleting article=${article.id}: discarded audit failed`);
-                return;
-              }
-              await db.article.delete({ where: { id: article.id } });
               console.log(
                 `[processAllPending] dedup hit (${dup.dedupType}) ` +
-                `sim=${dup.similarity.toFixed(2)}: "${article.title}" → "${dup.matchedTitle}", discarded`
+                `sim=${dup.similarity.toFixed(2)}: "${article.title}" → "${dup.matchedTitle}", retained as duplicate`
               );
+              processed++;
               return;
             }
           } catch (err) {
@@ -144,6 +142,11 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
             const text = `${article.title} ${content.slice(0, 1000)}`;
             const matched = await matchKeyword(text);
             if (!matched) {
+              try {
+                await recordKeywordCandidates(article.title);
+              } catch (candidateError) {
+                console.error('[processAllPending] keyword candidate recording failed:', candidateError);
+              }
               const recorded = await recordDiscardedItem({
                 sourceId: article.sourceId,
                 title: article.title,
@@ -190,6 +193,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
 
   // 修复已抓取文章的 publishedAt：从 rawContent 提取精确时间覆盖列表页的日期-only
   await repairPublishedDates(signal);
+  await captureInboxSnapshot().catch((error) => console.error('[processAllPending] inbox snapshot failed:', error));
 
   return { total: pending.length, processed, errors, capped: pending.length >= MAX_BATCH_SIZE };
 }

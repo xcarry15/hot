@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { InvalidParserConfigError, serializeParserConfig } from '@/lib/source-config';
 import { sourceUpdateSchema } from '@/lib/source-schema';
+import { invalidatePublicArticleCache } from '@/lib/public-article-service';
 
 export type SourceUpdateInput = z.infer<typeof sourceUpdateSchema>;
 
@@ -17,7 +18,7 @@ export async function getSourceDetail(id: string) {
 }
 
 export async function updateSource(id: string, input: SourceUpdateInput) {
-  return db.source.update({
+  const source = await db.source.update({
     where: { id },
     data: {
       ...(input.name !== undefined && { name: input.name }),
@@ -25,12 +26,17 @@ export async function updateSource(id: string, input: SourceUpdateInput) {
       ...(input.url !== undefined && { url: input.url }),
       ...(input.parserConfig !== undefined && { parserConfig: serializeParserConfig(input.parserConfig) }),
       ...(input.enabled !== undefined && { enabled: input.enabled }),
+      ...(input.publicEnabled !== undefined && { publicEnabled: input.publicEnabled }),
     },
   });
+  if (input.publicEnabled !== undefined) invalidatePublicArticleCache();
+  return source;
 }
 
 export async function softDeleteSource(id: string) {
-  return db.source.update({ where: { id }, data: { deletedAt: new Date(), enabled: false } });
+  const source = await db.source.update({ where: { id }, data: { deletedAt: new Date(), enabled: false } });
+  invalidatePublicArticleCache();
+  return source;
 }
 
 export { InvalidParserConfigError };
