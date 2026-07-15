@@ -4,7 +4,7 @@ import { Menu, X } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 
-export type PublicNavKey = 'articles' | 'tools' | 'data'
+export type PublicNavKey = 'articles' | 'tools'
 
 /**
  * Public navigation targets. Leave future page hrefs empty until their routes
@@ -12,8 +12,7 @@ export type PublicNavKey = 'articles' | 'tools' | 'data'
  */
 const PUBLIC_NAV_ITEMS: Array<{ key: PublicNavKey; label: string; href: string }> = [
   { key: 'articles', label: '文章', href: '/' },
-  { key: 'tools', label: '工具', href: '' },
-  { key: 'data', label: '数据', href: '' },
+  { key: 'tools', label: '工具', href: '/tools' },
 ]
 
 interface Props {

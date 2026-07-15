@@ -94,7 +94,12 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
               {tags.map((tag, index) => <Badge key={`${tag.name}-${index}`} variant="outline" className={`font-semibold ${getTagToneClass(tag.tone)}`}>{tag.name}</Badge>)}
             </div>
 
-            {article.summary && <p className="mt-7 line-clamp-4 border-l-2 border-[var(--public-primary)] pl-4 text-base leading-8 text-[var(--public-body)]">{article.summary}</p>}
+            {article.summary && (
+              <section className="mt-8 border-t border-[var(--public-hairline)] pt-6">
+                <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--public-primary)]">AI洞察</h2>
+                <p className="mt-4 border-l-2 border-[var(--public-primary)] pl-4 text-base leading-8 text-[var(--public-body)]">{article.summary}</p>
+              </section>
+            )}
 
             {article.keyPoints.length > 0 && (
               <section className="mt-8 border-t border-[var(--public-hairline)] pt-6">
