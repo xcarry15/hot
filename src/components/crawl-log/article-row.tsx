@@ -52,7 +52,7 @@ export const ArticleRow = memo(function ArticleRow({
   const pushLoading = onStepActionLoading?.(article.id, 'push') ?? false
 
   return (
-    <div className={`group flex min-h-7 items-center gap-1 border-l-2 border-l-transparent px-2 py-0 text-[12px] leading-7 overflow-hidden whitespace-nowrap transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)] ${
+    <div className={`group flex min-h-6 items-center gap-1 border-l-2 border-l-transparent px-2 py-0.5 text-[12px] leading-5 overflow-hidden whitespace-nowrap transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)] ${
       isSkipped ? 'opacity-50' : ''
     }`}>
       {pubDate && (

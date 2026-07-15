@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import { getZAI } from './zai';
 import { fetchHtml, BROWSER_HEADERS } from './http';
 import { resolveUrl } from './url-utils';
+import { extractMetaPublishedAt } from './date-utils';
 import type { CrawlResult } from '@/contracts/crawl';
 import { assertNotAborted } from './worker-stop';
 
@@ -13,9 +14,11 @@ interface HtmlConfig {
   date?: string;
   content?: string;
   headers?: Record<string, string>;
+  fetchDetailPublishedAt?: boolean;
 }
 
 const DIRECT_FETCH_TIMEOUT_MS = 20_000;
+const DETAIL_DATE_CONCURRENCY = 4;
 
 export async function parseHtml(url: string, parserConfigStr: string, signal?: AbortSignal): Promise<CrawlResult> {
   try {
@@ -53,6 +56,9 @@ export async function parseHtml(url: string, parserConfigStr: string, signal?: A
 
     console.log(`[parser-html] ${url} fetched via ${fetchMethod}, html_len=${html.length}`);
     const items = extractLinksFromHtml(html, url, config);
+    if (shouldFetchDetailPublishedAt(url, config) && items.length > 0) {
+      await enrichDetailPublishedAt(items, signal);
+    }
 
     return { success: true, items };
   } catch (error: unknown) {
@@ -60,6 +66,63 @@ export async function parseHtml(url: string, parserConfigStr: string, signal?: A
     const msg = error instanceof Error ? error.message : 'HTML parse failed';
     return { success: false, items: [], error: msg };
   }
+}
+
+function shouldFetchDetailPublishedAt(url: string, config: HtmlConfig): boolean {
+  if (config.fetchDetailPublishedAt === true) return true;
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === 'winshang.com' || hostname.endsWith('.winshang.com');
+  } catch {
+    return false;
+  }
+}
+
+async function fetchDetailHtml(url: string, signal?: AbortSignal): Promise<string | null> {
+  const headers = { ...BROWSER_HEADERS, Referer: new URL(url).origin };
+  const directHtml = await fetchHtml(url, {
+    signal,
+    headers,
+    timeoutMs: DIRECT_FETCH_TIMEOUT_MS,
+  });
+  if (directHtml) return directHtml;
+
+  try {
+    const zai = await getZAI();
+    const result = await zai.functions.invoke('page_reader', { url });
+    assertNotAborted(signal);
+    return result?.data?.html || null;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return null;
+  }
+}
+
+async function enrichDetailPublishedAt(
+  items: Array<{ title: string; url: string; summary?: string; publishedAt?: string }>,
+  signal?: AbortSignal,
+): Promise<void> {
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      assertNotAborted(signal);
+      const item = items[nextIndex];
+      nextIndex += 1;
+      try {
+        const detailHtml = await fetchDetailHtml(item.url, signal);
+        if (!detailHtml) continue;
+        const publishedAt = extractMetaPublishedAt(detailHtml);
+        if (publishedAt) item.publishedAt = publishedAt.toISOString();
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        console.warn(`[parser-html] detail publish date failed for ${item.url}`);
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(DETAIL_DATE_CONCURRENCY, items.length) }, () => worker()),
+  );
 }
 
 function extractLinksFromHtml(
