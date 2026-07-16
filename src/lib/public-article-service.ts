@@ -10,6 +10,7 @@ import type {
   PublicArticleFeedRevisionDto,
   PublicArticleListItemDto,
   PublicArticleListResponseDto,
+  PublicArticleNavigationItemDto,
   PublicArticleRelatedDto,
 } from '@/contracts/public-articles';
 
@@ -322,6 +323,51 @@ async function loadPublicArticleList(
   };
 }
 
+async function loadPublicArticleNavigation(articleId: string): Promise<{
+  previous: PublicArticleNavigationItemDto | null;
+  next: PublicArticleNavigationItemDto | null;
+}> {
+  const effectiveDateKey = Prisma.sql`strftime('%Y-%m-%d', datetime(COALESCE("publishedAt", "createdAt") / 1000, 'unixepoch', '+8 hours'))`;
+  const effectiveDate = Prisma.sql`COALESCE("publishedAt", "createdAt")`;
+  const pinOrder = Prisma.sql`CASE WHEN "pinUntil" IS NOT NULL AND "pinUntil" > ${Date.now()} THEN 0 ELSE 1 END`;
+  const rows = await db.$queryRaw<Array<{
+    previousId: string | null;
+    previousTitle: string | null;
+    nextId: string | null;
+    nextTitle: string | null;
+  }>>(Prisma.sql`
+    SELECT "previousId", "previousTitle", "nextId", "nextTitle"
+    FROM (
+      SELECT
+        "id",
+        LAG("id") OVER (
+          ORDER BY ${effectiveDateKey} DESC, ${pinOrder}, ${effectiveDate} DESC, "createdAt" DESC, "id" ASC
+        ) AS "previousId",
+        LAG("title") OVER (
+          ORDER BY ${effectiveDateKey} DESC, ${pinOrder}, ${effectiveDate} DESC, "createdAt" DESC, "id" ASC
+        ) AS "previousTitle",
+        LEAD("id") OVER (
+          ORDER BY ${effectiveDateKey} DESC, ${pinOrder}, ${effectiveDate} DESC, "createdAt" DESC, "id" ASC
+        ) AS "nextId",
+        LEAD("title") OVER (
+          ORDER BY ${effectiveDateKey} DESC, ${pinOrder}, ${effectiveDate} DESC, "createdAt" DESC, "id" ASC
+        ) AS "nextTitle"
+      FROM "articles"
+      WHERE "publicStatus" = 'published'
+    ) ordered
+    WHERE "id" = ${articleId}
+  `);
+  const row = rows[0];
+  return {
+    previous: row?.previousId && row.previousTitle
+      ? { id: row.previousId, title: row.previousTitle }
+      : null,
+    next: row?.nextId && row.nextTitle
+      ? { id: row.nextId, title: row.nextTitle }
+      : null,
+  };
+}
+
 export async function getPublicArticleFeedRevision(
   params: Pick<PublicArticleListParams, 'search' | 'sourceId' | 'from' | 'to'> = {},
 ): Promise<PublicArticleFeedRevisionDto> {
@@ -379,6 +425,7 @@ export async function getPublicArticleDetail(id: string, options: { recordView?:
   if (options.recordView) enqueuePublicArticleView(id);
 
   const base = serializeListItem(article);
+  const navigation = await loadPublicArticleNavigation(id);
   const brands = splitBrands(article.brand).filter(Boolean).slice(0, 8);
   const relatedLikeClauses = brands.flatMap((brand) => {
     const pattern = `%${escapeLikePattern(brand)}%`;
@@ -436,8 +483,8 @@ export async function getPublicArticleDetail(id: string, options: { recordView?:
   return {
     ...base,
     keyPoints: parseJsonArray(article.keyPoints),
-    contentPreview: stripHtml(article.cleanContent).replace(/\s+/g, ' ').trim().slice(0, 2000),
     related: relatedDto,
+    navigation,
   };
 }
 

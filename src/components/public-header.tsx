@@ -68,7 +68,7 @@ export default function PublicHeader({
             key={item.key}
             aria-disabled="true"
             title={`${item.label}页面即将上线`}
-            className={`${mobile ? 'block w-full px-3 py-3' : 'rounded-none px-3 py-2'} text-sm text-[var(--public-muted-soft)]`}
+            className={`${mobile ? 'block w-full px-3 py-3' : 'inline-flex h-10 w-14 shrink-0 items-center justify-center rounded-none px-3 py-2'} text-sm font-medium text-[var(--public-muted-soft)]`}
           >
             {item.label}
           </span>
@@ -80,7 +80,7 @@ export default function PublicHeader({
           href={item.href}
           aria-current={isActive ? 'page' : undefined}
           onClick={mobile ? closeMobileMenu : undefined}
-          className={`${mobile ? 'block w-full px-3 py-3' : 'rounded-none px-3 py-2'} text-sm transition-colors ${isActive ? 'bg-[var(--public-surface-strong)] font-medium text-[var(--public-ink)]' : 'text-[var(--public-muted)] hover:bg-[var(--public-surface-soft)] hover:text-[var(--public-ink)]'}`}
+          className={`${mobile ? 'block w-full px-3 py-3' : 'inline-flex h-10 w-14 shrink-0 items-center justify-center rounded-none px-3 py-2'} text-sm font-medium transition-colors ${isActive ? 'bg-[var(--public-surface-strong)] text-[var(--public-ink)]' : 'text-[var(--public-muted)] hover:bg-[var(--public-surface-soft)] hover:text-[var(--public-ink)]'}`}
         >
           {item.label}
         </Link>
@@ -99,12 +99,14 @@ export default function PublicHeader({
           </div>
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex md:justify-self-center" aria-label="公开导航">
+        <nav className="hidden w-[116px] grid-cols-2 items-center gap-1 md:grid md:justify-self-center" aria-label="公开导航">
           {renderNavItems()}
         </nav>
 
         <div className="ml-auto flex items-center gap-2 md:ml-0 md:justify-self-end">
-          {active === 'articles' && <div className="hidden md:block">{renderSearchForm()}</div>}
+          <div className={`hidden w-[330px] md:block ${active === 'articles' ? '' : 'invisible pointer-events-none'}`} aria-hidden={active !== 'articles'}>
+            {active === 'articles' && renderSearchForm()}
+          </div>
           <button
             type="button"
             aria-label={mobileOpen ? '关闭导航菜单' : '打开导航菜单'}

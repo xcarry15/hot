@@ -29,7 +29,7 @@ export default function PublicArticleCard({ article }: { article: PublicArticleL
   const originalSourceItems: PublicArticleMetaItem[] = article.originalSource && article.originalSource !== article.source.name
     ? [{ label: `原始：${article.originalSource}`, kind: 'meta', className: '' }]
     : []
-  const sourceItems: PublicArticleMetaItem[] = [{ label: `数据源：${article.source.name}`, kind: 'meta', className: '' }]
+  const sourceItems: PublicArticleMetaItem[] = [{ label: article.source.name, kind: 'meta', className: '' }]
   const metaGroups = [brandItems, tagItems, categoryItems, originalSourceItems, sourceItems].filter((group) => group.length > 0)
 
   return (

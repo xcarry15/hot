@@ -28,6 +28,26 @@ export function getPublicDateLabel(dateKey: string): string {
     month: 'long',
     day: 'numeric',
     weekday: 'long',
+  }).format(date).replace(/日(?=星期)/, '日 ')
+}
+
+export function getPublicDayLabel(dateKey: string): string {
+  const date = new Date(`${dateKey}T00:00:00+08:00`)
+  if (Number.isNaN(date.getTime())) return dateKey
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: PUBLIC_TIME_ZONE,
+    day: 'numeric',
+    weekday: 'long',
+  }).format(date).replace(/日(?=星期)/, '日 ')
+}
+
+export function getPublicMonthLabel(dateKey: string): string {
+  const date = new Date(`${dateKey.slice(0, 7)}-01T00:00:00+08:00`)
+  if (Number.isNaN(date.getTime())) return dateKey.slice(0, 7)
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: PUBLIC_TIME_ZONE,
+    year: 'numeric',
+    month: 'long',
   }).format(date)
 }
 

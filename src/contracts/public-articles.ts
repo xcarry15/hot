@@ -37,10 +37,18 @@ export interface PublicArticleRelatedDto {
   source: Pick<PublicArticleSourceDto, 'name' | 'type'>;
 }
 
+export interface PublicArticleNavigationItemDto {
+  id: string;
+  title: string;
+}
+
 export interface PublicArticleDetailDto extends PublicArticleListItemDto {
   keyPoints: string[];
-  contentPreview: string;
   related: PublicArticleRelatedDto[];
+  navigation: {
+    previous: PublicArticleNavigationItemDto | null;
+    next: PublicArticleNavigationItemDto | null;
+  };
 }
 
 export interface PublicArticleDateGroupDto {

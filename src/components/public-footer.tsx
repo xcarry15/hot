@@ -1,3 +1,4 @@
+import { Settings2 } from 'lucide-react'
 import Link from 'next/link'
 
 export default function PublicFooter() {
@@ -9,8 +10,13 @@ export default function PublicFooter() {
           <span className="mx-2 text-[var(--public-hairline-strong)]">·</span>
           <span>精选行业动态与品牌资讯</span>
         </div>
-        <Link href="/admin" className="w-fit font-medium text-[var(--public-muted)] underline-offset-4 transition-colors hover:text-[var(--public-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">
-          后台管理
+        <Link
+          href="/admin"
+          aria-label="后台管理"
+          title="后台管理"
+          className="inline-flex h-8 w-8 items-center justify-center text-[var(--public-muted)] transition-colors hover:text-[var(--public-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]"
+        >
+          <Settings2 aria-hidden="true" className="h-4 w-4" strokeWidth={1.6} />
         </Link>
       </div>
     </footer>

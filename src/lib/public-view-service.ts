@@ -1,36 +1,50 @@
 import { db } from '@/lib/db'
 
 const VIEW_FLUSH_DELAY_MS = 1_000
-const pendingViews = new Map<string, number>()
-let flushTimer: NodeJS.Timeout | null = null
-let beforeExitHookRegistered = false
+type PublicViewState = {
+  pendingViews: Map<string, number>
+  flushTimer: NodeJS.Timeout | null
+  beforeExitHookRegistered: boolean
+}
+
+const globalForPublicViews = globalThis as typeof globalThis & {
+  __hot2PublicViewState?: PublicViewState
+}
+
+const state = globalForPublicViews.__hot2PublicViewState ?? {
+  pendingViews: new Map<string, number>(),
+  flushTimer: null,
+  beforeExitHookRegistered: false,
+}
+
+globalForPublicViews.__hot2PublicViewState = state
 
 function registerBeforeExitFlush() {
-  if (beforeExitHookRegistered || typeof process === 'undefined') return
-  beforeExitHookRegistered = true
+  if (state.beforeExitHookRegistered || typeof process === 'undefined') return
+  state.beforeExitHookRegistered = true
   process.once('beforeExit', () => {
     void flushPublicArticleViews()
   })
 }
 
 function scheduleFlush() {
-  if (flushTimer) return
-  flushTimer = setTimeout(() => {
-    flushTimer = null
+  if (state.flushTimer) return
+  state.flushTimer = setTimeout(() => {
+    state.flushTimer = null
     void flushPublicArticleViews()
   }, VIEW_FLUSH_DELAY_MS)
 }
 
 export function enqueuePublicArticleView(articleId: string): void {
   registerBeforeExitFlush()
-  pendingViews.set(articleId, (pendingViews.get(articleId) ?? 0) + 1)
+  state.pendingViews.set(articleId, (state.pendingViews.get(articleId) ?? 0) + 1)
   scheduleFlush()
 }
 
 export async function flushPublicArticleViews(): Promise<void> {
-  if (pendingViews.size === 0) return
-  const batch = new Map(pendingViews)
-  pendingViews.clear()
+  if (state.pendingViews.size === 0) return
+  const batch = new Map(state.pendingViews)
+  state.pendingViews.clear()
 
   for (const [articleId, count] of batch) {
     try {
@@ -40,5 +54,5 @@ export async function flushPublicArticleViews(): Promise<void> {
     }
   }
 
-  if (pendingViews.size > 0) scheduleFlush()
+  if (state.pendingViews.size > 0) scheduleFlush()
 }
