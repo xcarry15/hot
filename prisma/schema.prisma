@@ -85,6 +85,7 @@ model Article {
   publicRevokedAt    DateTime?
   publicPublicationReason String @default("")
   publicPublicationEvaluatedAt DateTime?
+  publicContentUpdatedAt DateTime? // 发布时初始化；此后仅内容/发布状态变化时更新
   // 不同 URL 的同文文章保留入库，避免信息丢失；重复文章默认跳过完整 AI。
   duplicateOfId      String?
   duplicateStatus    String    @default("none") // none, duplicate
@@ -112,6 +113,7 @@ model Article {
   @@index([reviewStatus, aiStatus, fetchStatus, createdAt])
   @@index([publicOverride, pinUntil, publishedAt])
   @@index([publicStatus, publishedAt])
+  @@index([publicStatus, publicContentUpdatedAt])
   @@index([duplicateStatus, createdAt])
   @@map("articles")
 }

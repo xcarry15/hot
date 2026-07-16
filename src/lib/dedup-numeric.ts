@@ -17,11 +17,14 @@ function normalizeNumericValue(value: string): string {
 
   const multiplier = mag === '亿' ? 1e8 : mag === '万' ? 1e4 : mag === '千' ? 1e3 : mag === '百' ? 1e2 : 1;
   const actual = base * multiplier;
+  // 金额单位“元”已被量级隐含：43.31亿元与 43.31亿应归一为同一事实；
+  // 币种（港元/美元等）必须保留，不能跨币种误合并。
+  const normalizedSuffix = suffix === '元' && actual >= 1e4 ? '' : suffix;
 
   // 单位是事实的一部分，不能把“100万元”和“100万人”都归一化成“100万”。
-  if (actual >= 1e8) return `${actual / 1e8}亿${suffix}`;
-  if (actual >= 1e4) return `${actual / 1e4}万${suffix}`;
-  return `${actual}${suffix}`;
+  if (actual >= 1e8) return `${actual / 1e8}亿${normalizedSuffix}`;
+  if (actual >= 1e4) return `${actual / 1e4}万${normalizedSuffix}`;
+  return `${actual}${normalizedSuffix}`;
 }
 
 function normalizeChineseMagnitude(raw: string): string | null {

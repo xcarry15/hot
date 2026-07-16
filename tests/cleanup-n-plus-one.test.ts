@@ -11,6 +11,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({
   articleFindMany: vi.fn(),
   articleDeleteMany: vi.fn(),
+  articleUpdateMany: vi.fn(),
+  articleUpdate: vi.fn(),
   pushLogDeleteMany: vi.fn(),
   discardedDeleteMany: vi.fn(),
   discardedRetryAuditDeleteMany: vi.fn(),
@@ -27,6 +29,7 @@ const mocks = vi.hoisted(() => ({
 // 方便测试断言实际传入的 where 条件
 mocks.pushLogDeleteMany.mockImplementation((args) => ({ _op: 'pushLog.deleteMany', args }));
 mocks.articleDeleteMany.mockImplementation((args) => ({ _op: 'article.deleteMany', args }));
+mocks.articleUpdateMany.mockImplementation((args) => ({ _op: 'article.updateMany', args }));
 mocks.discardedDeleteMany.mockImplementation(() => ({ _op: 'discardedItem.deleteMany', count: 0 }));
 mocks.fetchLogDeleteMany.mockImplementation(() => ({ _op: 'fetchLog.deleteMany', count: 0 }));
 mocks.jobDeleteMany.mockImplementation(() => ({ _op: 'job.deleteMany', count: 0 }));
@@ -38,6 +41,8 @@ vi.mock('@/lib/db', () => ({
     article: {
       findMany: mocks.articleFindMany,
       deleteMany: mocks.articleDeleteMany,
+      updateMany: mocks.articleUpdateMany,
+      update: mocks.articleUpdate,
     },
     pushLog: {
       deleteMany: mocks.pushLogDeleteMany,
@@ -78,6 +83,8 @@ describe('cleanup N+1 修复', () => {
     // 恢复 mockImplementation（clearAllMocks 会清除实现）
     mocks.pushLogDeleteMany.mockImplementation((args) => ({ _op: 'pushLog.deleteMany', args }));
     mocks.articleDeleteMany.mockImplementation((args) => ({ _op: 'article.deleteMany', args }));
+    mocks.articleUpdateMany.mockImplementation((args) => ({ _op: 'article.updateMany', args }));
+    mocks.articleUpdate.mockResolvedValue({});
     mocks.discardedDeleteMany.mockImplementation(() => ({ _op: 'discardedItem.deleteMany', count: 0 }));
     mocks.discardedRetryAuditDeleteMany.mockImplementation(() => ({ _op: 'discardedRetryAudit.deleteMany', count: 0 }));
     mocks.fetchLogDeleteMany.mockImplementation(() => ({ _op: 'fetchLog.deleteMany', count: 0 }));
@@ -88,13 +95,16 @@ describe('cleanup N+1 修复', () => {
 
   it('low-quality 清理：findMany 1 次 + $transaction 1 次（不再循环 deleteMany）', async () => {
     const mockIds = ['a1', 'a2', 'a3', 'a4', 'a5'];
-    mocks.articleFindMany.mockResolvedValue(mockIds.map(id => ({ id })));
-    // transaction 接收 ops 数组，对每个执行（这里简化：返回数组）
-    mocks.transaction.mockImplementation((ops) => {
-      return Promise.all(ops.map((op: { _op: string }) =>
-        op._op === 'pushLog.deleteMany' ? { count: 5 } : { count: 5 }
-      ));
-    });
+    mocks.articleFindMany
+      .mockResolvedValueOnce(mockIds.map(id => ({ id })))
+      .mockResolvedValueOnce([]);
+    mocks.pushLogDeleteMany.mockResolvedValue({ count: 5 });
+    mocks.articleUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.articleDeleteMany.mockResolvedValue({ count: 5 });
+    mocks.transaction.mockImplementation((operation) => operation({
+      pushLog: { deleteMany: mocks.pushLogDeleteMany },
+      article: { findMany: mocks.articleFindMany, update: mocks.articleUpdate, updateMany: mocks.articleUpdateMany, deleteMany: mocks.articleDeleteMany },
+    }));
 
     const req = new Request('http://localhost/api/cleanup', {
       method: 'POST',
@@ -106,7 +116,7 @@ describe('cleanup N+1 修复', () => {
 
     expect(body.deleted).toBe(5);
     expect(body.pushLogsDeleted).toBe(5);
-    expect(mocks.articleFindMany).toHaveBeenCalledTimes(1);
+    expect(mocks.articleFindMany).toHaveBeenCalledTimes(2);
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
 
     // 关键：pushLogDeleteMany 只被调 1 次（不是 5 次）
@@ -120,12 +130,16 @@ describe('cleanup N+1 修复', () => {
 
   it('pushed-articles 清理：同样走 $transaction 模式', async () => {
     const mockIds = ['x1', 'x2', 'x3'];
-    mocks.articleFindMany.mockResolvedValue(mockIds.map(id => ({ id })));
-    mocks.transaction.mockImplementation((ops) => {
-      return Promise.all(ops.map((op: { _op: string }) =>
-        op._op === 'pushLog.deleteMany' ? { count: 2 } : { count: 3 }
-      ));
-    });
+    mocks.articleFindMany
+      .mockResolvedValueOnce(mockIds.map(id => ({ id })))
+      .mockResolvedValueOnce([]);
+    mocks.pushLogDeleteMany.mockResolvedValue({ count: 2 });
+    mocks.articleUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.articleDeleteMany.mockResolvedValue({ count: 3 });
+    mocks.transaction.mockImplementation((operation) => operation({
+      pushLog: { deleteMany: mocks.pushLogDeleteMany },
+      article: { findMany: mocks.articleFindMany, update: mocks.articleUpdate, updateMany: mocks.articleUpdateMany, deleteMany: mocks.articleDeleteMany },
+    }));
 
     const req = new Request('http://localhost/api/cleanup', {
       method: 'POST',
@@ -221,5 +235,21 @@ describe('purge-all 清空后阻止 scheduler 重新采集', () => {
 
     const restoreCall = mocks.settingUpsert.mock.calls[2][0];
     expect(restoreCall.update.value).toBe('false');
+  });
+
+  it('清空事务失败时仍恢复自动采集开关', async () => {
+    mocks.settingFindUnique.mockResolvedValue({ value: 'true' });
+    mocks.transaction.mockRejectedValueOnce(new Error('transaction failed'));
+
+    const req = new Request('http://localhost/api/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'purge-all' }),
+    });
+    const res = await cleanupPOST(req);
+
+    expect(res.status).toBe(500);
+    const restoreCall = mocks.settingUpsert.mock.calls.at(-1)?.[0];
+    expect(restoreCall.where.key).toBe('auto_crawl_enabled');
+    expect(restoreCall.update.value).toBe('true');
   });
 });

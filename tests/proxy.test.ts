@@ -32,6 +32,35 @@ describe('proxy auth', () => {
     });
   }
 
+  it('派生会话 Cookie 可访问后台，Cookie 值本身不是 API_TOKEN', async () => {
+    process.env.API_TOKEN = 'secret123';
+    (process.env as Record<string,string>).NODE_ENV = 'production';
+    const [{ proxy }, { ADMIN_SESSION_COOKIE, createAdminSession }] = await Promise.all([
+      import('@/proxy'),
+      import('@/lib/admin-auth'),
+    ]);
+    const session = createAdminSession('secret123');
+    const req = makeRequest('GET', '/admin');
+    req.cookies.set(ADMIN_SESSION_COOKIE, session);
+    const res = proxy(req);
+
+    expect(session).not.toBe('secret123');
+    expect(res.status).not.toBe(307);
+  });
+
+  it('旧版原始 API_TOKEN Cookie 不再被视为后台会话', async () => {
+    process.env.API_TOKEN = 'secret123';
+    (process.env as Record<string,string>).NODE_ENV = 'production';
+    const [{ proxy }, { ADMIN_SESSION_COOKIE }] = await Promise.all([
+      import('@/proxy'),
+      import('@/lib/admin-auth'),
+    ]);
+    const req = makeRequest('GET', '/admin');
+    req.cookies.set(ADMIN_SESSION_COOKIE, 'secret123');
+
+    expect(proxy(req).status).toBe(307);
+  });
+
   it('生产环境 GET /api/articles 无 token → 401', async () => {
     process.env.API_TOKEN = 'secret123';
     (process.env as Record<string,string>).NODE_ENV = 'production';

@@ -33,6 +33,7 @@ type PublicPublicationCandidate = {
   publicStatus: string
   publicPublishedAt: Date | null
   publicRevokedAt: Date | null
+  publicContentUpdatedAt: Date | null
   source: {
     publicEnabled: boolean
     deletedAt: Date | null
@@ -73,6 +74,7 @@ async function syncCandidate(
   article: PublicPublicationCandidate,
   config: PublicPublicationConfig,
   client: PublicPublicationDb = db,
+  options: { contentChanged?: boolean } = {},
 ): Promise<void> {
   const now = new Date()
   const published = isPubliclyEligible(article, config)
@@ -99,6 +101,9 @@ async function syncCandidate(
           : null,
       publicPublicationReason: published ? 'eligible' : getRevokeReason(article, config),
       publicPublicationEvaluatedAt: now,
+      ...(published && (options.contentChanged || !wasPublished || article.publicContentUpdatedAt === null)
+        ? { publicContentUpdatedAt: now }
+        : {}),
     },
   })
 }
@@ -112,27 +117,35 @@ const publicationSelect = {
   publicStatus: true,
   publicPublishedAt: true,
   publicRevokedAt: true,
+  publicContentUpdatedAt: true,
   source: { select: { publicEnabled: true, deletedAt: true } },
 } as const
 
-export async function refreshPublicPublication(articleId: string, client: PublicPublicationDb = db): Promise<boolean> {
+export async function refreshPublicPublication(
+  articleId: string,
+  client: PublicPublicationDb = db,
+  options: { contentChanged?: boolean } = {},
+): Promise<boolean> {
   const article = await client.article.findUnique({ where: { id: articleId }, select: publicationSelect })
   if (!article || !article.source) return false
   const config = await getPublicPublicationConfig(client)
-  await syncCandidate(article, config, client)
+  await syncCandidate(article, config, client, options)
+  if (client === db) invalidatePublicArticleCache()
   return true
 }
 
 export async function refreshPublicPublications(
   articleIds: string[],
   client: PublicPublicationDb = db,
+  options: { contentChanged?: boolean } = {},
 ): Promise<number> {
   const ids = [...new Set(articleIds.filter(Boolean))]
   if (ids.length === 0) return 0
 
   const articles = await client.article.findMany({ where: { id: { in: ids } }, select: publicationSelect })
   const config = await getPublicPublicationConfig(client)
-  for (const article of articles) await syncCandidate(article, config, client)
+  for (const article of articles) await syncCandidate(article, config, client, options)
+  if (client === db) invalidatePublicArticleCache()
   return articles.length
 }
 
@@ -140,8 +153,14 @@ export async function refreshPublicPublicationsForSource(
   sourceId: string,
   client: PublicPublicationDb = db,
 ): Promise<number> {
-  const articles = await client.article.findMany({ where: { sourceId }, select: { id: true } })
-  return refreshPublicPublications(articles.map((article) => article.id), client)
+  const articles = await client.article.findMany({
+    where: { sourceId },
+    select: publicationSelect,
+  })
+  if (articles.length === 0) return 0
+  const config = await getPublicPublicationConfig(client)
+  for (const article of articles) await syncCandidate(article, config, client)
+  return articles.length
 }
 
 /**
@@ -149,18 +168,27 @@ export async function refreshPublicPublicationsForSource(
  * rule change. Public reads only consume publicStatus and do not recalculate
  * score/ad/source eligibility on every request.
  */
-async function rebuildWithClient(client: PublicPublicationDb): Promise<number> {
+async function rebuildWithClient(
+  client: PublicPublicationDb,
+  options: { contentChanged?: boolean } = {},
+): Promise<number> {
   const [articles, config] = await Promise.all([
     client.article.findMany({ select: publicationSelect }),
     getPublicPublicationConfig(client),
   ])
-  for (const article of articles ?? []) await syncCandidate(article, config, client)
+  for (const article of articles ?? []) await syncCandidate(article, config, client, options)
   return articles?.length ?? 0
 }
 
-export async function rebuildPublicPublicationSnapshot(client?: PublicPublicationDb): Promise<number> {
-  if (client) return rebuildWithClient(client)
-  const count = await db.$transaction((tx) => rebuildWithClient(tx), { maxWait: 10_000, timeout: 120_000 })
+export async function rebuildPublicPublicationSnapshot(
+  client?: PublicPublicationDb,
+  options: { contentChanged?: boolean } = {},
+): Promise<number> {
+  if (client) return rebuildWithClient(client, options)
+  const count = await db.$transaction(
+    (tx) => rebuildWithClient(tx, options),
+    { maxWait: 10_000, timeout: 120_000 },
+  )
   invalidatePublicArticleCache()
   return count
 }

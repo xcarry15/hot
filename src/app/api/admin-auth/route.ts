@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
-import { ADMIN_SESSION_COOKIE, ADMIN_SESSION_MAX_AGE } from '@/lib/admin-auth';
+import {
+  ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_MAX_AGE,
+  createAdminSession,
+  isValidApiToken,
+} from '@/lib/admin-auth';
 import { enforceAdminAuthRateLimit } from '@/lib/admin-auth-rate-limit';
 
 function cookieOptions() {
@@ -32,12 +37,12 @@ export async function POST(request: Request) {
   const token = body && typeof body === 'object' && 'token' in body
     ? (body as { token?: unknown }).token
     : undefined;
-  if (typeof token !== 'string' || token !== expected) {
+  if (typeof token !== 'string' || !isValidApiToken(token, expected)) {
     return NextResponse.json({ error: 'API Token 无效' }, { status: 401 });
   }
 
   const response = NextResponse.json({ success: true });
-  response.cookies.set(ADMIN_SESSION_COOKIE, expected, cookieOptions());
+  response.cookies.set(ADMIN_SESSION_COOKIE, createAdminSession(expected), cookieOptions());
   return response;
 }
 

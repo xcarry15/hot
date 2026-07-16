@@ -46,8 +46,6 @@ type PublicDateGroupRow = {
   count: number | bigint;
 };
 
-export { invalidatePublicArticleCache } from '@/lib/public-article-cache';
-
 function normalizeText(value: string | undefined, maxLength: number): string | undefined {
   const normalized = value?.trim();
   return normalized ? normalized.slice(0, maxLength) : undefined;
@@ -489,16 +487,30 @@ export async function getPublicArticleDetail(id: string, options: { recordView?:
 }
 
 export async function listPublicArticleIds(): Promise<Array<{ id: string; updatedAt: Date }>> {
-  return db.article.findMany({
+  const articles = await db.article.findMany({
     where: buildPublicWhere(),
-    select: { id: true, updatedAt: true },
+    select: {
+      id: true,
+      publicContentUpdatedAt: true,
+    },
     orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+  });
+  return articles.map((article) => {
+    if (!article.publicContentUpdatedAt) {
+      throw new Error(`公开文章缺少内容更新时间: ${article.id}`);
+    }
+    return { id: article.id, updatedAt: article.publicContentUpdatedAt };
   });
 }
 
 export async function recordOriginalClick(id: string): Promise<boolean> {
   const article = await db.article.findFirst({ where: { id, ...buildPublicWhere() }, select: { id: true } });
   if (!article) return false;
-  await db.article.update({ where: { id }, data: { originalClickCount: { increment: 1 } } });
+  // 点击统计同样不应修改内容更新时间。
+  await db.$executeRaw`
+    UPDATE "articles"
+    SET "originalClickCount" = "originalClickCount" + 1
+    WHERE "id" = ${id}
+  `;
   return true;
 }

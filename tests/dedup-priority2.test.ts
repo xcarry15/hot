@@ -237,9 +237,10 @@ describe('M1: dedupBeforeAI（合并 L3+P0）', () => {
   // 与 dedup.ts 内部 stripWs + stripLen 保持一致（去空格后取长度）
   const stripLenLocal = (s: string) => s.replace(/\s+/g, '').length;
 
-  it('pending↔pending shared ≥ numericSharedMin → 标重复', async () => {
+  it('pending↔pending 数值强信号 + 正文证据 → 标重复', async () => {
     mocksHoisted.settingFindUnique.mockResolvedValue({ value: 'normal' });
-    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元。门店1646家。';
+    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元。门店1646家。' +
+      '报告同时披露经营效率、门店质量、区域布局与现金流管理等信息。'.repeat(5);
     mockFindMany([
       makePendingArticle({ id: 'a1', cleanContent: sharedContent, publishedAt: new Date('2025-01-01') }),
       makePendingArticle({ id: 'a2', cleanContent: sharedContent + '附加信息', publishedAt: new Date('2025-01-02') }),
@@ -322,7 +323,8 @@ describe('M1: dedupBeforeAI（合并 L3+P0）', () => {
 
   it('pending↔done 命中 → 标 pending 为 skipped（保留 done，省 AI 调用）', async () => {
     mocksHoisted.settingFindUnique.mockResolvedValue({ value: 'normal' });
-    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家';
+    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家' +
+      '报告同时披露经营效率、门店质量、区域布局与现金流管理等信息。'.repeat(5);
     mockFindMany(
       [makePendingArticle({ id: 'p1', title: '新pending', cleanContent: sharedContent, publishedAt: new Date('2025-01-02') })],
       [makeDoneArticle({ id: 'd1', title: '已完成', cleanContent: sharedContent + 'x', publishedAt: new Date('2025-01-01') })],
@@ -351,7 +353,8 @@ describe('M1: dedupBeforeAI（合并 L3+P0）', () => {
 
   it('publishedAt 超出 windowDays → 跳过该对', async () => {
     mocksHoisted.settingFindUnique.mockResolvedValue({ value: 'normal' });
-    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家';
+    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家' +
+      '报告同时披露经营效率、门店质量、区域布局与现金流管理等信息。'.repeat(5);
     mockFindMany([
       makePendingArticle({ id: 'a1', cleanContent: sharedContent, publishedAt: new Date('2025-01-01') }),
       makePendingArticle({ id: 'a2', cleanContent: sharedContent + 'x', publishedAt: new Date('2025-12-31') }),
@@ -375,7 +378,8 @@ describe('M1: dedupBeforeAI（合并 L3+P0）', () => {
 
   it('numeric 缓存：三篇同事件链式去重', async () => {
     mocksHoisted.settingFindUnique.mockResolvedValue({ value: 'normal' });
-    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家';
+    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家' +
+      '报告同时披露经营效率、门店质量、区域布局与现金流管理等信息。'.repeat(5);
     mockFindMany([
       makePendingArticle({ id: 'a1', cleanContent: sharedContent, publishedAt: new Date('2025-01-01') }),
       makePendingArticle({ id: 'a2', cleanContent: sharedContent, publishedAt: new Date('2025-01-02') }),
@@ -393,7 +397,8 @@ describe('M1: dedupBeforeAI（合并 L3+P0）', () => {
 
   it('pending↔pending 均无 publishedAt → 回退 createdAt 仍去重', async () => {
     mocksHoisted.settingFindUnique.mockResolvedValue({ value: 'normal' });
-    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家';
+    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家' +
+      '报告同时披露经营效率、门店质量、区域布局与现金流管理等信息。'.repeat(5);
     mockFindMany([
       { id: 'a1', title: 'T1', cleanContent: sharedContent, publishedAt: null, createdAt: new Date('2025-01-01') },
       { id: 'a2', title: 'T2', cleanContent: sharedContent + 'x', publishedAt: null, createdAt: new Date('2025-01-02') },
@@ -408,7 +413,8 @@ describe('M1: dedupBeforeAI（合并 L3+P0）', () => {
 
   it('pending 无 publishedAt vs done 无 publishedAt → 回退 createdAt 仍标 pending（省 AI）', async () => {
     mocksHoisted.settingFindUnique.mockResolvedValue({ value: 'normal' });
-    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家';
+    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家' +
+      '报告同时披露经营效率、门店质量、区域布局与现金流管理等信息。'.repeat(5);
     mockFindMany(
       [{ id: 'p1', title: '新pending', cleanContent: sharedContent, publishedAt: null, createdAt: new Date('2025-01-02') }],
       [{ id: 'd1', title: '已完成', cleanContent: sharedContent + 'x', publishedAt: null, createdAt: new Date('2025-01-01') }],
@@ -422,7 +428,8 @@ describe('M1: dedupBeforeAI（合并 L3+P0）', () => {
 
   it('pending↔pending 一篇有 publishedAt 一篇无 → 按有效时间保留更老', async () => {
     mocksHoisted.settingFindUnique.mockResolvedValue({ value: 'normal' });
-    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家';
+    const sharedContent = '营收43.31亿元同比下滑12%净亏损2.39亿元门店1646家' +
+      '报告同时披露经营效率、门店质量、区域布局与现金流管理等信息。'.repeat(5);
     mockFindMany([
       // a1 无 publishedAt，createdAt 更早 → 应保留
       { id: 'a1', title: 'T1', cleanContent: sharedContent, publishedAt: null, createdAt: new Date('2025-01-01') },

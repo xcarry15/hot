@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { InvalidParserConfigError, serializeParserConfig } from '@/lib/source-config';
 import { sourceUpdateSchema } from '@/lib/source-schema';
-import { invalidatePublicArticleCache } from '@/lib/public-article-service';
+import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshPublicPublicationsForSource } from '@/lib/public-publication-service';
 
 export type SourceUpdateInput = z.infer<typeof sourceUpdateSchema>;

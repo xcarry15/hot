@@ -10,6 +10,7 @@ import { DAY_MS, DEDUP_AFTER_CAP, dedupWindowWhere, effectiveArticleTime, format
 import { buildLcsSnippets, buildNumericSnippets, sameDay, stripWs, totalLcsRunLength } from './dedup-text';
 import type { DedupEvidence, DedupSnippet } from './dedup-evidence';
 import { splitBrands } from './shared/article-codecs';
+import { buildDuplicateArticleData } from './article-duplicate-state';
 
 export interface KeyPointsDuplicateResult {
   isDuplicate: boolean;
@@ -307,14 +308,7 @@ export async function dedupAfterAiBatch(
       try {
         await db.article.update({
           where: { id: newer.id },
-          data: {
-            aiStatus: 'skipped',
-            score: 0,
-            skipReason: reason,
-            dedupDetail: JSON.stringify(evidence),
-            duplicateStatus: 'duplicate',
-            duplicateOfId: evidence.matchedId ?? null,
-          },
+          data: buildDuplicateArticleData(reason, evidence),
         });
       } catch (err) {
         console.error('[dedupAfterAiBatch] failed to skip article:', err);

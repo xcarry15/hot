@@ -25,6 +25,8 @@ import {
   startJobStage,
 } from '@/lib/job-progress';
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
+import { buildAiResetData } from '@/lib/article-duplicate-state';
+import { refreshPublicPublication } from '@/lib/public-publication-service';
 import { recordFailure, restoreBreakerIfElapsed } from '@/lib/pipeline/source-health';
 import type { CrawlItem, CrawlResult } from '@/contracts/crawl';
 
@@ -52,14 +54,23 @@ export async function collectItem(
     // 同 URL 重新抓取 → 更新标题和日期
     // 如果标题变了，重置 fetchStatus 以触发详情重抓
     const titleChanged = existing.title !== item.title;
+    const nextPublishedAt = item.publishedAt ? parseChineseDate(item.publishedAt) : undefined;
+    const publishedAtChanged = nextPublishedAt !== undefined
+      && existing.publishedAt?.getTime() !== nextPublishedAt.getTime();
     await db.article.update({
       where: { id: existing.id },
       data: {
         title: item.title,
-        publishedAt: item.publishedAt ? parseChineseDate(item.publishedAt) : undefined,
-        ...(titleChanged ? { fetchStatus: 'pending' as const } : {}),
+        publishedAt: nextPublishedAt,
+        ...(titleChanged ? {
+          ...buildAiResetData(),
+          fetchStatus: 'pending' as const,
+        } : {}),
       },
     });
+    if (titleChanged || publishedAtChanged) {
+      await refreshPublicPublication(existing.id, db, { contentChanged: true });
+    }
     console.log(`[dedup] URL exact match, updated: "${item.title}"${titleChanged ? ' (title changed, reset fetchStatus)' : ''}`);
     return existing.id;
   }

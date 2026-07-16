@@ -16,9 +16,12 @@ const mocks = vi.hoisted(() => ({
   articleFindUnique: vi.fn(),
   articleDeleteMany: vi.fn(),
   articleDelete: vi.fn(),
+  articleUpdateMany: vi.fn(),
+  articleUpdate: vi.fn(),
   articleCount: vi.fn(),
   pushLogDeleteMany: vi.fn(),
   transaction: vi.fn(),
+  invalidatePublicArticleCache: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -29,6 +32,8 @@ vi.mock('@/lib/db', () => ({
       findUnique: mocks.articleFindUnique,
       deleteMany: mocks.articleDeleteMany,
       delete: mocks.articleDelete,
+      updateMany: mocks.articleUpdateMany,
+      update: mocks.articleUpdate,
       count: mocks.articleCount,
     },
     pushLog: {
@@ -36,6 +41,10 @@ vi.mock('@/lib/db', () => ({
     },
     $transaction: mocks.transaction,
   },
+}));
+
+vi.mock('@/lib/public-article-cache', () => ({
+  invalidatePublicArticleCache: mocks.invalidatePublicArticleCache,
 }));
 
 import {
@@ -52,6 +61,24 @@ describe('article-service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.articleGroupBy.mockResolvedValue([]);
+    mocks.articleFindMany.mockResolvedValue([]);
+    mocks.articleUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.articleUpdate.mockResolvedValue({});
+    mocks.transaction.mockImplementation(async (operation: unknown) => {
+      if (typeof operation === 'function') {
+        return (operation as (tx: unknown) => Promise<unknown>)({
+          article: {
+            delete: mocks.articleDelete,
+            deleteMany: mocks.articleDeleteMany,
+            updateMany: mocks.articleUpdateMany,
+            update: mocks.articleUpdate,
+            findMany: mocks.articleFindMany,
+          },
+          pushLog: { deleteMany: mocks.pushLogDeleteMany },
+        });
+      }
+      return Promise.all(operation as Promise<unknown>[]);
+    });
   });
 
   describe('typed filter builders', () => {
@@ -172,6 +199,15 @@ describe('article-service', () => {
         aiRetryCount: 0,
         nextAiRetryAt: null,
         isAd: false,
+        reviewStatus: 'unreviewed',
+        reviewReasonTags: '[]',
+        reviewedAt: null,
+        publicOverride: 'auto',
+        pinUntil: null,
+        duplicateOfId: null,
+        duplicateStatus: 'none',
+        viewCount: 0,
+        originalClickCount: 0,
         pushedAt: null,
         nextRetryAt: null,
         pushUrgency: '',
@@ -211,23 +247,24 @@ describe('article-service', () => {
       expect(mocks.transaction).not.toHaveBeenCalled();
     });
 
-    it('单次 $transaction 调用，args 是包含 pushLog+article 的数组', async () => {
-      mocks.transaction.mockImplementation(() =>
-        Promise.resolve([{ count: 2 }, { count: 3 }]),
-      );
+    it('单次事务删除日志、解除重复引用并删除文章', async () => {
+      mocks.pushLogDeleteMany.mockResolvedValue({ count: 2 });
+      mocks.articleDeleteMany.mockResolvedValue({ count: 3 });
 
       const result = await deleteArticlesByIds(['a1', 'a2', 'a3']);
       expect(result).toEqual({ deleted: 3, pushLogsDeleted: 2 });
 
       expect(mocks.transaction).toHaveBeenCalledTimes(1);
-      // 我们只断言"被调一次 + 传的是数组"，不深入 PrismaPromise 内部
-      expect(Array.isArray(mocks.transaction.mock.calls[0][0])).toBe(true);
-      expect(mocks.transaction.mock.calls[0][0]).toHaveLength(2);
+      expect(mocks.invalidatePublicArticleCache).toHaveBeenCalledTimes(1);
+      expect(mocks.articleFindMany).toHaveBeenCalledWith({
+        where: { duplicateOfId: { in: ['a1', 'a2', 'a3'] }, id: { notIn: ['a1', 'a2', 'a3'] } },
+        select: { id: true, dedupDetail: true },
+      });
     });
   });
 
   describe('deleteArticleById', () => {
-    it('先 pushLogs(articleId=id) 再 article.delete by id', async () => {
+    it('同一事务内先删日志、解除重复引用，再删除文章', async () => {
       mocks.pushLogDeleteMany.mockResolvedValue({ count: 0 });
       mocks.articleDelete.mockResolvedValue({});
 
@@ -236,10 +273,15 @@ describe('article-service', () => {
       expect(mocks.pushLogDeleteMany).toHaveBeenCalledWith({
         where: { articleId: 'a1' },
       });
+      expect(mocks.articleFindMany).toHaveBeenCalledWith({
+        where: { duplicateOfId: { in: ['a1'] }, id: { notIn: ['a1'] } },
+        select: { id: true, dedupDetail: true },
+      });
       expect(mocks.articleDelete).toHaveBeenCalledWith({
         where: { id: 'a1' },
       });
-      // pushLog 必须在 article.delete 之前
+      expect(mocks.invalidatePublicArticleCache).toHaveBeenCalledTimes(1);
+      // pushLog 与引用清理都必须在 article.delete 之前
       expect(mocks.pushLogDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(
         mocks.articleDelete.mock.invocationCallOrder[0],
       );
@@ -249,9 +291,8 @@ describe('article-service', () => {
   describe('deleteArticlesByFilter', () => {
     it('deleteArticlesByFilter：findMany 取 ids 后复用 deleteArticlesByIds', async () => {
       mocks.articleFindMany.mockResolvedValue([{ id: 'x1' }, { id: 'x2' }]);
-      mocks.transaction.mockImplementation(() =>
-        Promise.resolve([{ count: 2 }, { count: 2 }]),
-      );
+      mocks.pushLogDeleteMany.mockResolvedValue({ count: 2 });
+      mocks.articleDeleteMany.mockResolvedValue({ count: 2 });
 
       const result = await deleteArticlesByFilter({ aiStatus: 'skipped' });
       expect(result).toEqual({ deleted: 2, pushLogsDeleted: 2 });
@@ -270,9 +311,8 @@ describe('article-service', () => {
 
     it('deleteArticlesByFilter：空 filter 仍走历史"全删"语义（不限流）', async () => {
       mocks.articleFindMany.mockResolvedValue([{ id: 'a' }, { id: 'b' }]);
-      mocks.transaction.mockImplementation(() =>
-        Promise.resolve([{ count: 2 }, { count: 2 }]),
-      );
+      mocks.pushLogDeleteMany.mockResolvedValue({ count: 2 });
+      mocks.articleDeleteMany.mockResolvedValue({ count: 2 });
       const result = await deleteArticlesByFilter({});
       expect(result.deleted).toBe(2);
       // findMany 收到的 where 就是空对象

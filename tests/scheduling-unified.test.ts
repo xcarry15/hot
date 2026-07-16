@@ -165,7 +165,7 @@ describe('Scheduler — production maybeEnqueueCrawl', () => {
     mockSettingStore['scheduler_last_crawl_at'] = '0';
 
     await maybeEnqueueCrawl({ ...mockSettingStore });
-    expect(mockRunJob).toHaveBeenCalledWith('full');
+    expect(mockRunJob).toHaveBeenCalledWith('full', { trigger: 'auto' });
   });
 
   it('interval exactly at boundary: invokes runJob("full")', async () => {
@@ -175,7 +175,7 @@ describe('Scheduler — production maybeEnqueueCrawl', () => {
     mockSettingStore['scheduler_last_crawl_at'] = String(Date.now() - 120 * 60 * 1000);
 
     await maybeEnqueueCrawl({ ...mockSettingStore });
-    expect(mockRunJob).toHaveBeenCalledWith('full');
+    expect(mockRunJob).toHaveBeenCalledWith('full', { trigger: 'auto' });
   });
 });
 

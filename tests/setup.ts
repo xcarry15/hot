@@ -67,6 +67,7 @@ vi.mock('@/lib/db', () => ({
     },
     $transaction: vi.fn(),
     $queryRaw: vi.fn(),
+    $executeRaw: vi.fn(),
   },
 }));
 

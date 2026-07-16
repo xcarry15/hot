@@ -28,7 +28,7 @@ import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
 import { recordKeywordCandidates } from '@/lib/keyword-candidate-service';
 import { captureInboxSnapshot } from '@/lib/inbox-snapshot-service';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
-import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
+import { buildDuplicateArticleData } from '@/lib/article-duplicate-state';
 
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_BATCH_SIZE = 500;
@@ -105,27 +105,23 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
             if (dup.isDuplicate && dup.dedupType) {
               // detail 存 canonical DedupEvidence（含去重方式/重复文章/URL/详情/内容对比片段），
               // 与 article.dedupDetail 同构 → 详情区用同一面板渲染。
+              const evidence = dup.evidence ?? {
+                methodKey: dup.dedupType,
+                method: dup.dedupType === 'content_fingerprint' ? '内容指纹 (SHA-256)' : '正文相似',
+                matchedTitle: dup.matchedTitle ?? '',
+                matchedUrl: dup.matchedUrl ?? '',
+                matchedId: dup.matchedId,
+                similarity: dup.similarity,
+                detail: `similarity=${dup.similarity.toFixed(2)}`,
+              };
               await db.article.update({
                 where: { id: article.id },
-                data: {
-                  aiStatus: 'skipped',
-                  score: 0,
-                  skipReason: `[重复] 与 "${dup.matchedTitle ?? '已有文章'}" 内容重复`,
-                  dedupDetail: JSON.stringify(dup.evidence ?? {
-                    methodKey: dup.dedupType,
-                    method: dup.dedupType === 'content_fingerprint' ? '内容指纹 (SHA-256)' : '正文相似',
-                    matchedTitle: dup.matchedTitle ?? '',
-                    matchedUrl: dup.matchedUrl ?? '',
-                    matchedId: dup.matchedId,
-                    similarity: dup.similarity,
-                    detail: `similarity=${dup.similarity.toFixed(2)}`,
-                  }),
-                  duplicateStatus: 'duplicate',
-                  duplicateOfId: dup.matchedId ?? null,
-                },
+                data: buildDuplicateArticleData(
+                  `[重复] 与 "${dup.matchedTitle ?? '已有文章'}" 内容重复`,
+                  evidence,
+                ),
               });
-              await refreshPublicPublication(article.id);
-              invalidatePublicArticleCache();
+              await refreshPublicPublication(article.id, db, { contentChanged: true });
               console.log(
                 `[processAllPending] dedup hit (${dup.dedupType}) ` +
                 `sim=${dup.similarity.toFixed(2)}: "${article.title}" → "${dup.matchedTitle}", retained as duplicate`
@@ -250,6 +246,7 @@ export async function repairPublishedDates(signal?: AbortSignal): Promise<void> 
                 where: { id: article.id },
                 data: { publishedAt: detailDate },
               });
+              await refreshPublicPublication(article.id, db, { contentChanged: true });
               console.log(`[repairPublishedDates] fixed article=${article.id} title="${article.title}" → ${detailDate.toISOString()}`);
             }
           } catch (err) {

@@ -29,6 +29,7 @@ describe('public-publication-service', () => {
       publicStatus: 'unpublished',
       publicPublishedAt: null,
       publicRevokedAt: null,
+      publicContentUpdatedAt: null,
       source: { publicEnabled: true, deletedAt: null },
     });
 
@@ -54,6 +55,7 @@ describe('public-publication-service', () => {
       publicStatus: 'published',
       publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'),
       publicRevokedAt: null,
+      publicContentUpdatedAt: new Date('2026-07-15T00:00:00.000Z'),
       source: { publicEnabled: true, deletedAt: null },
     });
 
@@ -81,6 +83,7 @@ describe('public-publication-service', () => {
       publicStatus: 'published',
       publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'),
       publicRevokedAt: null,
+      publicContentUpdatedAt: new Date('2026-07-15T00:00:00.000Z'),
       source: { publicEnabled: true, deletedAt: null },
       ...overrides,
     });
@@ -109,6 +112,7 @@ describe('public-publication-service', () => {
       publicStatus: 'revoked',
       publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'),
       publicRevokedAt: new Date('2026-07-15T01:00:00.000Z'),
+      publicContentUpdatedAt: new Date('2026-07-15T00:00:00.000Z'),
       source: { publicEnabled: true, deletedAt: null },
     });
 
@@ -121,5 +125,27 @@ describe('public-publication-service', () => {
         publicRevokedAt: null,
       }),
     }));
+  });
+
+  it('已发布文章内容变化时刷新公开内容时间轴', async () => {
+    const previous = new Date('2026-07-15T00:00:00.000Z');
+    mocks.article.findUnique.mockResolvedValue({
+      id: 'a1',
+      aiStatus: 'done',
+      score: 82,
+      isAd: false,
+      publicOverride: 'auto',
+      publicStatus: 'published',
+      publicPublishedAt: previous,
+      publicRevokedAt: null,
+      publicContentUpdatedAt: previous,
+      source: { publicEnabled: true, deletedAt: null },
+    });
+
+    await refreshPublicPublication('a1', db, { contentChanged: true });
+
+    const data = mocks.article.update.mock.calls[0][0].data;
+    expect(data.publicContentUpdatedAt).toBeInstanceOf(Date);
+    expect(data.publicContentUpdatedAt.getTime()).toBeGreaterThan(previous.getTime());
   });
 });

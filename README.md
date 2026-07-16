@@ -19,7 +19,7 @@ npm run db:seed
 npm run dev
 ```
 
-开发地址：`http://localhost:3011`。根路径 `/` 是公开新闻卡片页，文章详情使用 `/news/[id]`；后台位于 `/admin`，当前仅包含“情报收件箱”“抓取记录”“设置”三个页面。生产环境必须在 `.env` 设置 `API_TOKEN`，首次访问后台时输入该 token 建立临时 HttpOnly 会话；公开端保持匿名访问。生产部署还应将 `NEXT_PUBLIC_SITE_URL` 设置为正式访问地址，用于 canonical、Open Graph 和 sitemap。公开导航中的“工具”“数据”目前是占位入口，暂未提供实际页面。
+开发地址：`http://localhost:3011`。根路径 `/` 是公开新闻卡片页，文章详情使用 `/news/[id]`；后台位于 `/admin`，当前仅包含“情报收件箱”“抓取记录”“设置”三个页面。生产环境必须在 `.env` 设置 `API_TOKEN`，首次访问后台时输入该 token 建立临时 HttpOnly 会话；Cookie 保存由 Token 派生的会话值，不直接保存可调用 API 的原始 Token，旧版原始 Token Cookie 不再兼容。公开端保持匿名访问。生产部署还应将 `NEXT_PUBLIC_SITE_URL` 设置为正式访问地址，用于 canonical、Open Graph 和 sitemap。公开导航中的“工具”“数据”目前是占位入口，暂未提供实际页面。
 
 ## 项目结构
 
@@ -40,7 +40,7 @@ bat/                  Windows 启动、打包、部署和 Nginx 文档
 db/                   本地 SQLite 数据（不进入部署包）
 ```
 
-公开端只展示 AI 分析完成且符合「设置 → 公开」规则的文章，支持关键词筛选；默认展示最近 3 个有文章的日期，搜索结果默认展示最近 10 个匹配日期，之后按日期游标每次加载更早 3 个日期，同一天的文章始终完整展示。规则包含自动最低评分、数据源公开开关和软文处理；人工重要归类强制公开并置顶，一般/无关归类按映射执行。公开可见性写入 `Article.publicStatus` 持久化发布快照，公开列表和详情只按已发布状态读取；评分、软文规则、人工覆盖、AI 状态或数据源开关变化时由服务同步快照，避免每次公开请求重算规则。若需人工修复快照，可运行 `npm run db:rebuild-public`。公开读取接口为 `/api/public/articles`，与需要 Token 的管理 API 分离；筛选页、后台和 API 均不参与搜索引擎收录，首页和文章详情页参与收录。文章详情累计浏览量和原文点击量，浏览量采用短暂内存聚合后批量写入 SQLite，指标在后台概览与文章详情中展示。
+公开端只展示 AI 分析完成且符合「设置 → 公开」规则的文章，支持关键词筛选；默认展示最近 3 个有文章的日期，搜索结果默认展示最近 10 个匹配日期，之后按日期游标每次加载更早 3 个日期，同一天的文章始终完整展示。规则包含自动最低评分、数据源公开开关和软文处理；人工重要归类强制公开并置顶，一般/无关归类按映射执行。公开可见性写入 `Article.publicStatus` 持久化发布快照，公开列表和详情只按已发布状态读取；评分、软文规则、人工覆盖、AI 状态或数据源开关变化时由服务同步快照，避免每次公开请求重算规则。`Article.publicContentUpdatedAt` 单独记录公开内容更新时间，浏览量和原文点击量不会污染 sitemap 的 `lastModified`。若需人工修复快照，可运行 `npm run db:rebuild-public`。公开读取接口为 `/api/public/articles`，与需要 Token 的管理 API 分离；筛选页、后台和 API 均不参与搜索引擎收录，首页和文章详情页参与收录。文章详情累计浏览量和原文点击量，浏览量采用短暂内存聚合后批量写入 SQLite，指标在后台概览与文章详情中展示。
 
 ## 当前架构与数据事实
 
@@ -62,6 +62,8 @@ db/                   本地 SQLite 数据（不进入部署包）
 `Job`、`FetchLog`、`PushLog`、`DiscardedItem` 和 `DiscardedRetryAudit` 分别记录任务、采集、目标级推送、未入库条目和管理员重试事实。`Article` 还记录收件箱归类、预设反馈标签、公开覆盖、置顶、重复证据和浏览/点击计数；`KeywordCandidate` 保存未命中标题生成的本地候选词，`TuningSuggestion` 保存待管理员确认的调优建议。页面不得用 `sessionStorage` 或乐观步骤推断任务状态；抓取记录使用 Job snapshot。列表接口返回摘要投影，详情接口才返回正文、评分明细、去重证据和脱敏推送日志。
 
 设置默认值、校验、敏感性和导出策略集中在 `src/lib/settings-catalog.ts`；AI Provider 定义在 `src/contracts/ai-provider.ts`；预设数据源定义在 `src/lib/preset-sources.ts`。Webhook 默认值为空数组，仓库不得保存真实 Webhook。当前去重规则唯一来源是 `src/contracts/dedup-settings.ts`：时间窗口 15 天、特定数字最少重叠数 2、正文 LCS 单段 40 字符、总长 160 字符、品牌门控开启、短文兜底 1000 字符。标题 Jaccard 仅作证据，不单独触发去重。
+
+AI 重置与重复状态变更统一由 `src/lib/article-duplicate-state.ts` 生成更新数据；重新分析必须清空旧评分特征、模型审计、失败重试和重复证据，人工恢复重复文章时才保留 `dedupOverride`。删除文章会先解除其它文章的 `duplicateOfId` 逻辑引用，避免留下失效关联。
 
 ## 数据库与生产部署
 

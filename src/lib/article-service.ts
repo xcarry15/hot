@@ -22,6 +22,32 @@ import {
   type ArticleListResponseDto,
 } from '@/contracts/articles';
 import { splitBrands } from '@/lib/shared/article-codecs';
+import { parseDedupEvidence } from '@/lib/dedup-evidence';
+import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
+
+type ArticleMutationDb = Pick<typeof db, 'article' | 'pushLog' | '$transaction'>;
+
+async function clearDuplicateWinnerReferences(
+  client: Pick<ArticleMutationDb, 'article'>,
+  deletedIds: string[],
+): Promise<void> {
+  const affected = await client.article.findMany({
+    where: { duplicateOfId: { in: deletedIds }, id: { notIn: deletedIds } },
+    select: { id: true, dedupDetail: true },
+  });
+  for (const article of affected) {
+    const evidence = parseDedupEvidence(article.dedupDetail);
+    await client.article.update({
+      where: { id: article.id },
+      data: {
+        duplicateOfId: null,
+        dedupDetail: evidence
+          ? JSON.stringify({ ...evidence, matchedId: undefined })
+          : article.dedupDetail,
+      },
+    });
+  }
+}
 
 // ── 类型化筛选器 ────────────────────────────────────────────────
 
@@ -193,23 +219,32 @@ export interface ArticleDeleteResult {
  * 空 ids 直接返回零计数，不进入事务。
  */
 export async function deleteArticlesByIds(ids: string[]): Promise<ArticleDeleteResult> {
-  const cleaned = ids.filter(Boolean);
+  const cleaned = [...new Set(ids.filter(Boolean))];
   if (cleaned.length === 0) {
     return { deleted: 0, pushLogsDeleted: 0 };
   }
-  const [pushResult, articleResult] = await db.$transaction([
-    db.pushLog.deleteMany({ where: { articleId: { in: cleaned } } }),
-    db.article.deleteMany({ where: { id: { in: cleaned } } }),
-  ]);
-  return { deleted: articleResult.count, pushLogsDeleted: pushResult.count };
+  const result = await db.$transaction(async tx => {
+    const pushResult = await tx.pushLog.deleteMany({ where: { articleId: { in: cleaned } } });
+    // duplicateOfId 是逻辑关联而非外键。赢家被删除前先解除引用，
+    // 否则后台会长期展示一个不存在的“关联原文”。
+    await clearDuplicateWinnerReferences(tx, cleaned);
+    const articleResult = await tx.article.deleteMany({ where: { id: { in: cleaned } } });
+    return { deleted: articleResult.count, pushLogsDeleted: pushResult.count };
+  });
+  if (result.deleted > 0) invalidatePublicArticleCache();
+  return result;
 }
 
 /**
  * 单篇删除：先删推送日志（外键约束），再删文章。
  */
 export async function deleteArticleById(id: string): Promise<void> {
-  await db.pushLog.deleteMany({ where: { articleId: id } });
-  await db.article.delete({ where: { id } });
+  await db.$transaction(async tx => {
+    await tx.pushLog.deleteMany({ where: { articleId: id } });
+    await clearDuplicateWinnerReferences(tx, [id]);
+    await tx.article.delete({ where: { id } });
+  });
+  invalidatePublicArticleCache();
 }
 
 /**

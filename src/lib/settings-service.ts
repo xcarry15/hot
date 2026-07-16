@@ -7,7 +7,7 @@ import {
 import { SETTING_KEYS } from '@/lib/settings-catalog';
 import { applyScorePolicy, buildScorePolicySnapshot } from '@/lib/score-policy';
 import { parseWebhookConfigs, serializeWebhookConfigsForServer } from '@/contracts/webhook';
-import { invalidatePublicArticleCache } from '@/lib/public-article-service';
+import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { PUBLIC_PUBLICATION_REBUILD_KEYS, rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
 
 const settingsUpdateSchema = z.record(z.string(), z.string());
@@ -113,7 +113,9 @@ export async function updateSettings(input: unknown): Promise<
         });
       }
     }
-    if (publicationNeedsRebuild) await rebuildPublicPublicationSnapshot(tx);
+    if (publicationNeedsRebuild) {
+      await rebuildPublicPublicationSnapshot(tx, { contentChanged: weightChanged });
+    }
   }, { maxWait: 10_000, timeout: 120_000 });
   invalidateAISettingsCache();
   invalidatePublicArticleCache();

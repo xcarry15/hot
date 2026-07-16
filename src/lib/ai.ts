@@ -20,8 +20,8 @@ import { advanceJobProgress, startJobStage } from './job-progress';
 import { z } from 'zod';
 import { applyScorePolicy, buildScorePolicySnapshot } from './score-policy';
 import { refreshPublicPublication } from './public-publication-service';
-import { invalidatePublicArticleCache } from './public-article-cache';
 import { createHash } from 'node:crypto';
+import { buildAiResetData, buildDuplicateArticleData } from './article-duplicate-state';
 
 // v8：精简、口语化、多样化的行业洞察。
 const PROMPT_VERSION = 'v8';
@@ -162,8 +162,7 @@ export async function processWithAI(article: { id: string; title: string; aiStat
         skipReason: `内容不足（< ${MIN_MEANINGFUL_CHARS} 字符）`,
       },
     });
-    await refreshPublicPublication(articleId);
-    invalidatePublicArticleCache();
+    await refreshPublicPublication(articleId, db, { contentChanged: true });
     return { status: 'skipped' };
   }
 
@@ -229,28 +228,20 @@ export async function processWithAI(article: { id: string; title: string; aiStat
       );
       assertNotAborted(signal);
       if (dupCheck.isDuplicate) {
+        if (!dupCheck.evidence) throw new Error('重复判定缺少证据');
         await db.article.update({
           where: { id: articleId },
-          data: {
-            aiStatus: 'skipped',
-            score: 0,
-            skipReason: dupCheck.skipReason,
-            dedupDetail: dupCheck.evidence ? JSON.stringify(dupCheck.evidence) : undefined,
-            duplicateStatus: 'duplicate',
-            duplicateOfId: dupCheck.evidence?.matchedId ?? null,
-          },
+          data: buildDuplicateArticleData(dupCheck.skipReason, dupCheck.evidence),
         });
         console.log(
           `[dedup:after-ai] "${title}" marked as duplicate of "${dupCheck.matchedTitle}" ` +
           `(${dupCheck.sharedCount} shared values)`
         );
-        await refreshPublicPublication(articleId);
-        invalidatePublicArticleCache();
+        await refreshPublicPublication(articleId, db, { contentChanged: true });
         return { status: 'skipped' }; // 当前文章被跳过，不再继续
       }
     }
-    await refreshPublicPublication(articleId);
-    invalidatePublicArticleCache();
+    await refreshPublicPublication(articleId, db, { contentChanged: true });
     return { status: 'done' };
   } else {
     // AI 调用完全失败 — 指数退避 + 失败计数。
@@ -282,8 +273,7 @@ export async function processWithAI(article: { id: string; title: string; aiStat
         },
       });
     }
-    await refreshPublicPublication(articleId);
-    invalidatePublicArticleCache();
+    await refreshPublicPublication(articleId, db, { contentChanged: true });
     return { status: 'failed', errorKind: 'content' };
   }
 }
@@ -323,9 +313,7 @@ export async function reprocessWithAI(
   await db.article.update({
     where: { id: articleId },
     data: {
-      aiStatus: 'pending',
-      aiRetryCount: 0,
-      nextAiRetryAt: null,
+      ...buildAiResetData({ dedupOverride: 'preserve' }),
       fetchStatus: articleData.fetchStatus === 'failed' ? 'pending' : undefined,
     },
   });
@@ -334,7 +322,6 @@ export async function reprocessWithAI(
     result = await processWithAI({ ...articleData, aiStatus: 'pending', aiRetryCount: 0 } as Article, signal);
   } catch (error) {
     await refreshPublicPublication(articleId);
-    invalidatePublicArticleCache();
     throw error;
   }
   if (jobId) {

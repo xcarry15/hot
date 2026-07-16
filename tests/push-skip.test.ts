@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   articleUpdate: vi.fn(),
   pushLogCreate: vi.fn(),
   settingFindUnique: vi.fn(),
+  settingFindMany: vi.fn(),
+  pushLogFindMany: vi.fn(),
   fetch: vi.fn(),
 }));
 
@@ -24,9 +26,11 @@ vi.mock('@/lib/db', () => ({
     },
     pushLog: {
       create: mocks.pushLogCreate,
+      findMany: mocks.pushLogFindMany,
     },
     setting: {
       findUnique: mocks.settingFindUnique,
+      findMany: mocks.settingFindMany,
     },
   },
 }));
@@ -40,7 +44,22 @@ describe('pushArticleToFeishu skip logic', () => {
     vi.clearAllMocks();
     mocks.articleUpdate.mockResolvedValue({});
     mocks.pushLogCreate.mockResolvedValue({});
-    mocks.settingFindUnique.mockResolvedValue({ value: '' }); // webhook URL empty
+    mocks.settingFindUnique.mockImplementation(({ where }: { where: { key: string } }) => {
+      const values: Record<string, string> = {
+        push_mode: 'realtime',
+        push_min_score: '50',
+        push_min_relevance: '50',
+        feishu_webhook_url: '',
+      };
+      return Promise.resolve({ value: values[where.key] ?? '' });
+    });
+    mocks.settingFindMany.mockResolvedValue([
+      { key: 'push_mode', value: 'realtime' },
+      { key: 'push_min_score', value: '50' },
+      { key: 'push_min_relevance', value: '50' },
+      { key: 'feishu_webhook_url', value: '' },
+    ]);
+    mocks.pushLogFindMany.mockResolvedValue([]);
   });
 
   it('已成功推送（pushedAt 有值）→ 跳过', async () => {

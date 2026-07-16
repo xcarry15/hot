@@ -7,18 +7,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({
   articleFindMany: vi.fn(),
   articleDeleteMany: vi.fn(),
+  articleUpdateMany: vi.fn(),
+  articleUpdate: vi.fn(),
   pushLogDeleteMany: vi.fn(),
   transaction: vi.fn(),
 }));
 
 mocks.pushLogDeleteMany.mockImplementation((args) => ({ _op: 'pushLog.deleteMany', args }));
 mocks.articleDeleteMany.mockImplementation((args) => ({ _op: 'article.deleteMany', args }));
+mocks.articleUpdateMany.mockImplementation((args) => ({ _op: 'article.updateMany', args }));
 
 vi.mock('@/lib/db', () => ({
   db: {
     article: {
       findMany: mocks.articleFindMany,
       deleteMany: mocks.articleDeleteMany,
+      updateMany: mocks.articleUpdateMany,
+      update: mocks.articleUpdate,
     },
     pushLog: {
       deleteMany: mocks.pushLogDeleteMany,
@@ -38,15 +43,20 @@ describe('articles DELETE 修复', () => {
     vi.clearAllMocks();
     mocks.pushLogDeleteMany.mockImplementation((args) => ({ _op: 'pushLog.deleteMany', args }));
     mocks.articleDeleteMany.mockImplementation((args) => ({ _op: 'article.deleteMany', args }));
+    mocks.articleUpdateMany.mockImplementation((args) => ({ _op: 'article.updateMany', args }));
+    mocks.articleFindMany.mockResolvedValue([]);
+    mocks.articleUpdate.mockResolvedValue({});
   });
 
   it('按 ids 删除：单次 $transaction 包含 pushLog + article', async () => {
     const ids = ['a1', 'a2', 'a3'];
-    mocks.transaction.mockImplementation((ops) => {
-      return Promise.all(ops.map((op: { _op: string }) =>
-        op._op === 'pushLog.deleteMany' ? { count: 3 } : { count: 3 }
-      ));
-    });
+    mocks.pushLogDeleteMany.mockResolvedValue({ count: 3 });
+    mocks.articleUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.articleDeleteMany.mockResolvedValue({ count: 3 });
+    mocks.transaction.mockImplementation((operation) => operation({
+      pushLog: { deleteMany: mocks.pushLogDeleteMany },
+      article: { findMany: mocks.articleFindMany, update: mocks.articleUpdate, updateMany: mocks.articleUpdateMany, deleteMany: mocks.articleDeleteMany },
+    }));
 
     const req = new Request(`http://localhost/api/articles?ids=${ids.join(',')}`, {
       method: 'DELETE',
@@ -60,6 +70,7 @@ describe('articles DELETE 修复', () => {
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
     expect(mocks.pushLogDeleteMany).toHaveBeenCalledTimes(1);
     expect(mocks.articleDeleteMany).toHaveBeenCalledTimes(1);
+    expect(mocks.articleFindMany).toHaveBeenCalledTimes(1);
     expect(mocks.pushLogDeleteMany.mock.calls[0][0].where.articleId).toEqual({ in: ids });
     expect(mocks.articleDeleteMany.mock.calls[0][0].where.id).toEqual({ in: ids });
   });
@@ -79,12 +90,16 @@ describe('articles DELETE 修复', () => {
 
   it('按过滤条件删除：findMany + $transaction', async () => {
     const ids = ['f1', 'f2', 'f3', 'f4'];
-    mocks.articleFindMany.mockResolvedValue(ids.map(id => ({ id })));
-    mocks.transaction.mockImplementation((ops) => {
-      return Promise.all(ops.map((op: { _op: string }) =>
-        op._op === 'pushLog.deleteMany' ? { count: 4 } : { count: 4 }
-      ));
-    });
+    mocks.articleFindMany
+      .mockResolvedValueOnce(ids.map(id => ({ id })))
+      .mockResolvedValueOnce([]);
+    mocks.pushLogDeleteMany.mockResolvedValue({ count: 4 });
+    mocks.articleUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.articleDeleteMany.mockResolvedValue({ count: 4 });
+    mocks.transaction.mockImplementation((operation) => operation({
+      pushLog: { deleteMany: mocks.pushLogDeleteMany },
+      article: { findMany: mocks.articleFindMany, update: mocks.articleUpdate, updateMany: mocks.articleUpdateMany, deleteMany: mocks.articleDeleteMany },
+    }));
 
     const req = new Request('http://localhost/api/articles?status=skipped', {
       method: 'DELETE',
@@ -94,7 +109,7 @@ describe('articles DELETE 修复', () => {
     const body = await res.json();
 
     expect(body.deleted).toBe(4);
-    expect(mocks.articleFindMany).toHaveBeenCalledTimes(1);
+    expect(mocks.articleFindMany).toHaveBeenCalledTimes(2);
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
   });
 });

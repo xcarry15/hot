@@ -13,7 +13,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Article ID is required' }, { status: 400 });
     }
 
-    return NextResponse.json(await runExclusiveMutation('单篇重新抓取', () => refetchArticle(articleId)));
+    const result = await runExclusiveMutation('单篇重新抓取', () => refetchArticle(articleId));
+    if (!result) return NextResponse.json({ error: 'Article not found' }, { status: 404 });
+    return NextResponse.json(result);
   } catch (error: unknown) {
     return apiError(error, 'Refetch failed');
   }

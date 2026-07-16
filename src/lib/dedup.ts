@@ -29,6 +29,7 @@
 
 import { db } from './db';
 import { getDedupConfig, type DedupConfig } from './dedup-config';
+import { buildDuplicateArticleData } from './article-duplicate-state';
 import {
   extractNumericValues,
   getSharedNumericValues,
@@ -478,7 +479,7 @@ export async function dedupBeforeAI(
     try {
       await db.article.update({
         where: { id: newerId },
-        data: { aiStatus: 'skipped', score: 0, skipReason: reason, dedupDetail: JSON.stringify(evidence), duplicateStatus: 'duplicate', duplicateOfId: evidence.matchedId ?? null },
+        data: buildDuplicateArticleData(reason, evidence),
       });
       skipIds.add(newerId);
       skipped++;

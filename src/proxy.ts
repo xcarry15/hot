@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { ADMIN_SESSION_COOKIE } from '@/lib/admin-auth';
+import { ADMIN_SESSION_COOKIE, isValidAdminSession, isValidApiToken } from '@/lib/admin-auth';
 
 /**
  * API 鉴权代理（原 middleware，Next.js 16 重命名为 proxy）
@@ -49,19 +49,20 @@ export function proxy(request: NextRequest) {
   const isAdminPage = pathname === '/admin' || pathname.startsWith('/admin/');
   const isAdminLoginPage = pathname === '/admin/login';
   const session = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
+  const sessionValid = Boolean(expected && isValidAdminSession(session, expected));
   if (isAdminPage && !isAdminLoginPage) {
     if (!expected && process.env.NODE_ENV !== 'production') return NextResponse.next();
     if (!expected) {
       return NextResponse.redirect(new URL('/admin/login?error=config', request.url));
     }
-    if (session !== expected) {
+    if (!sessionValid) {
       const next = `${pathname}${request.nextUrl.search}`;
       return NextResponse.redirect(new URL(`/admin/login?next=${encodeURIComponent(next)}`, request.url));
     }
     return NextResponse.next();
   }
 
-  if (isAdminLoginPage && expected && session === expected) {
+  if (isAdminLoginPage && sessionValid) {
     return NextResponse.redirect(new URL('/admin', request.url));
   }
   if (isAdminLoginPage && !expected && process.env.NODE_ENV !== 'production') {
@@ -83,12 +84,12 @@ export function proxy(request: NextRequest) {
   // 校验 Bearer token
   const auth = request.headers.get('authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (expected && session === expected) {
+  if (expected && sessionValid) {
     const headers = new Headers(request.headers);
     headers.set('authorization', `Bearer ${expected}`);
     return NextResponse.next({ request: { headers } });
   }
-  if (!token || token !== expected) {
+  if (!token || !isValidApiToken(token, expected)) {
     return NextResponse.json(
       { error: 'Unauthorized' },
       { status: 401 }

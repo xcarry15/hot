@@ -18,6 +18,7 @@ import { getDbFileSize, runVacuum } from '@/lib/maintenance/sqlite';
 import { deleteArticlesByIds } from '@/lib/article-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
+import { buildAiResetData } from '@/lib/article-duplicate-state';
 
 // ── 只读：统计 ──────────────────────────────────────────────────
 
@@ -135,21 +136,7 @@ function pauseAndResetOps() {
 
 // ── 重置 AI 状态 ────────────────────────────────────────────────
 
-const AI_RESET_DATA = {
-  aiStatus: 'pending',
-  isAd: false,
-  score: 0,
-  relevance: 0,
-  summary: '',
-  brand: '',
-  category: '',
-  tags: '[]',
-  keyPoints: '[]',
-  aiRetryCount: 0,
-  nextAiRetryAt: null,
-  skipReason: null,
-  dedupDetail: null,
-} as const;
+const AI_RESET_DATA = buildAiResetData();
 
 export async function resetAllAi(): Promise<{ reset: number }> {
   let reset = 0;
@@ -220,17 +207,17 @@ export async function deleteAllArticles() {
   // Guard: temporarily disable auto-crawl so scheduler doesn't immediately re-fill deleted articles
   const { prevWasEnabled } = await pauseAutoCrawlForWindow();
   invalidatePublicArticleCache();
-
-  const [pushResult, articleResult] = await db.$transaction([
-    db.pushLog.deleteMany(),
-    db.article.deleteMany(),
-    ...pauseAndResetOps(),
-  ]);
-
-  await restoreAutoCrawl(prevWasEnabled);
-  invalidatePublicArticleCache();
-
-  return { deleted: articleResult.count, pushLogsDeleted: pushResult.count };
+  try {
+    const [pushResult, articleResult] = await db.$transaction([
+      db.pushLog.deleteMany(),
+      db.article.deleteMany(),
+      ...pauseAndResetOps(),
+    ]);
+    return { deleted: articleResult.count, pushLogsDeleted: pushResult.count };
+  } finally {
+    await restoreAutoCrawl(prevWasEnabled);
+    invalidatePublicArticleCache();
+  }
 }
 
 // ── purge-all：清空所有业务数据 + 暂停 scheduler + 中止当前 Job ──
@@ -250,31 +237,31 @@ export async function purgeAllData(): Promise<{ deleted: PurgeAllDeleted }> {
   abortCurrentJob();
   const { prevWasEnabled } = await pauseAutoCrawlForWindow();
   invalidatePublicArticleCache();
-
-  const [pushResult, articleResult, discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
-    await db.$transaction([
-      db.pushLog.deleteMany(),
-      db.article.deleteMany(),
-      db.discardedItem.deleteMany(),
-      db.discardedRetryAudit.deleteMany(),
-      db.fetchLog.deleteMany(),
-      db.job.deleteMany(),
-      ...pauseAndResetOps(),
-    ]);
-
-  await restoreAutoCrawl(prevWasEnabled);
-  invalidatePublicArticleCache();
-
-  return {
-    deleted: {
-      articles: articleResult.count,
-      pushLogs: pushResult.count,
-      discarded: discardedResult.count,
-      discardedRetryAudits: discardedRetryAuditResult.count,
-      fetchLogs: fetchResult.count,
-      jobs: jobResult.count,
-    },
-  };
+  try {
+    const [pushResult, articleResult, discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
+      await db.$transaction([
+        db.pushLog.deleteMany(),
+        db.article.deleteMany(),
+        db.discardedItem.deleteMany(),
+        db.discardedRetryAudit.deleteMany(),
+        db.fetchLog.deleteMany(),
+        db.job.deleteMany(),
+        ...pauseAndResetOps(),
+      ]);
+    return {
+      deleted: {
+        articles: articleResult.count,
+        pushLogs: pushResult.count,
+        discarded: discardedResult.count,
+        discardedRetryAudits: discardedRetryAuditResult.count,
+        fetchLogs: fetchResult.count,
+        jobs: jobResult.count,
+      },
+    };
+  } finally {
+    await restoreAutoCrawl(prevWasEnabled);
+    invalidatePublicArticleCache();
+  }
 }
 
 // ── 调度入口 ───────────────────────────────────────────────────

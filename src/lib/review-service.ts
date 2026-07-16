@@ -1,8 +1,9 @@
 import { db } from '@/lib/db';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
-import { invalidatePublicArticleCache } from '@/lib/public-article-service';
+import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshPublicPublication, updatePublicPublicationSetting } from '@/lib/public-publication-service';
 import { captureInboxSnapshot } from '@/lib/inbox-snapshot-service';
+import { buildAiResetData } from '@/lib/article-duplicate-state';
 
 export const REVIEW_STATUSES = ['unreviewed', 'important', 'general', 'irrelevant'] as const;
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
@@ -72,14 +73,7 @@ export async function reviewArticle(input: {
         publicOverride,
         pinUntil: isImportant ? new Date(now.getTime() + pinHours * 60 * 60 * 1000) : null,
         ...(restoreDuplicate ? {
-          duplicateStatus: 'none',
-          duplicateOfId: null,
-          dedupOverride: true,
-          aiStatus: 'pending',
-          aiRetryCount: 0,
-          nextAiRetryAt: null,
-          skipReason: null,
-          score: 50,
+          ...buildAiResetData({ dedupOverride: true }),
         } : {}),
       },
       select: {
@@ -91,7 +85,7 @@ export async function reviewArticle(input: {
         aiStatus: true,
       },
     });
-    await refreshPublicPublication(input.articleId, tx);
+    await refreshPublicPublication(input.articleId, tx, { contentChanged: true });
     return updatedArticle;
   });
   invalidatePublicArticleCache();

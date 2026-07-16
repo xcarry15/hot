@@ -3,9 +3,11 @@ import { db } from '@/lib/db';
 import {
   getPublicArticleDetail,
   getPublicArticleFeedRevision,
-  invalidatePublicArticleCache,
+  listPublicArticleIds,
   listPublicArticles,
+  recordOriginalClick,
 } from '@/lib/public-article-service';
+import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 
 const mocks = db as unknown as {
   article: {
@@ -17,6 +19,7 @@ const mocks = db as unknown as {
   source: { findMany: ReturnType<typeof vi.fn> };
   setting: { findUnique: ReturnType<typeof vi.fn> };
   $queryRaw: ReturnType<typeof vi.fn>;
+  $executeRaw: ReturnType<typeof vi.fn>;
 };
 
 function makeArticle(id: string, publishedAt: string) {
@@ -192,5 +195,25 @@ describe('public-article-service', () => {
     await expect(getPublicArticleDetail('private-article')).resolves.toBeNull();
     const where = mocks.article.findFirst.mock.calls[0][0].where;
     expect(where).toMatchObject({ id: 'private-article', publicStatus: 'published' });
+  });
+
+  it('sitemap 使用公开内容更新时间，不读取互动计数污染的 updatedAt', async () => {
+    mocks.article.findMany.mockResolvedValue([{
+      id: 'a1',
+      publicContentUpdatedAt: new Date('2026-07-16T01:00:00.000Z'),
+    }]);
+
+    await expect(listPublicArticleIds()).resolves.toEqual([{
+      id: 'a1',
+      updatedAt: new Date('2026-07-16T01:00:00.000Z'),
+    }]);
+  });
+
+  it('原文点击使用原生 SQL 递增，不触发 Prisma updatedAt', async () => {
+    mocks.article.findFirst.mockResolvedValue({ id: 'a1' });
+    mocks.$executeRaw.mockResolvedValue(1);
+
+    await expect(recordOriginalClick('a1')).resolves.toBe(true);
+    expect(mocks.$executeRaw).toHaveBeenCalledTimes(1);
   });
 });

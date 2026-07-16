@@ -18,7 +18,7 @@ describe('POST /api/crawl input boundary', () => {
       body: JSON.stringify({ sourceId: 'source-1', stage: 'all' }),
     }));
     expect(res.status).toBe(200);
-    expect(runJob).toHaveBeenCalledWith('collect', { sourceId: 'source-1' });
+    expect(runJob).toHaveBeenCalledWith('collect', { sourceId: 'source-1', trigger: 'manual' });
   });
 
   it('拒绝空 sourceId 与未知 stage，不静默降级为全流程', async () => {

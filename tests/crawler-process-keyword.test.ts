@@ -2,7 +2,7 @@
  * processAllPending 阶段集成测试
  *
  * 覆盖:
- * - Gate 1（全文内容指纹/正文 LCS 去重）：命中 → 删除 + DiscardedItem
+ * - Gate 1（全文内容指纹/正文 LCS 去重）：命中 → 保留文章并标记重复
  * - Gate 2（全文关键字匹配）：不命中 → 删除 + DiscardedItem
  * - 详情抓取失败：跳过两道路闸
  * - 关键字 DB 抛错：宁可放过不可误杀（fall through 到 processed++）
@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({
   // db.article
   articleFindMany: vi.fn(),
+  articleCount: vi.fn(),
   articleUpdate: vi.fn(),
   articleUpdateMany: vi.fn(),
   articleDelete: vi.fn(),
@@ -30,6 +31,10 @@ const mocks = vi.hoisted(() => ({
   settingFindUnique: vi.fn(),
   // db.keyword (matchKeyword)
   keywordFindMany: vi.fn(),
+  keywordCandidateFindUnique: vi.fn(),
+  keywordCandidateUpsert: vi.fn(),
+  inboxSnapshotUpsert: vi.fn(),
+  inboxSnapshotDeleteMany: vi.fn(),
   // detail-fetcher
   fetchArticleDetail: vi.fn(),
   // utils-shared
@@ -43,6 +48,7 @@ vi.mock('@/lib/db', () => ({
   db: {
     article: {
       findMany: mocks.articleFindMany,
+      count: mocks.articleCount,
       update: mocks.articleUpdate,
       updateMany: mocks.articleUpdateMany,
       delete: mocks.articleDelete,
@@ -61,6 +67,14 @@ vi.mock('@/lib/db', () => ({
     },
     keyword: {
       findMany: mocks.keywordFindMany,
+    },
+    keywordCandidate: {
+      findUnique: mocks.keywordCandidateFindUnique,
+      upsert: mocks.keywordCandidateUpsert,
+    },
+    inboxSnapshot: {
+      upsert: mocks.inboxSnapshotUpsert,
+      deleteMany: mocks.inboxSnapshotDeleteMany,
     },
   },
 }));
@@ -99,6 +113,7 @@ beforeEach(() => {
   // 默认 article.update / updateMany / delete 返 {}
   mocks.articleUpdate.mockResolvedValue({});
   mocks.articleUpdateMany.mockResolvedValue({ count: 0 });
+  mocks.articleCount.mockResolvedValue(0);
   mocks.articleDelete.mockResolvedValue({});
   // 默认 discardedItem.upsert 返 {}
   mocks.discardedItemUpsert.mockResolvedValue({});
@@ -109,6 +124,10 @@ beforeEach(() => {
   mocks.settingFindUnique.mockResolvedValue(null);
   // 默认 keyword DB 空 → matchKeyword 返 true
   mocks.keywordFindMany.mockResolvedValue([]);
+  mocks.keywordCandidateFindUnique.mockResolvedValue(null);
+  mocks.keywordCandidateUpsert.mockResolvedValue({});
+  mocks.inboxSnapshotUpsert.mockResolvedValue({});
+  mocks.inboxSnapshotDeleteMany.mockResolvedValue({ count: 0 });
 });
 
 // 触发 processAllPending 的最小数据：一条 pending article
@@ -160,7 +179,7 @@ describe('processAllPending Gate 2: 全文关键字匹配', () => {
 });
 
 describe('processAllPending Gate 1: 全文内容去重', () => {
-  it('指纹去重命中 → 文章删除 + DiscardedItem 写入 dedup:content，winnerArticleId 指向赢家', async () => {
+  it('指纹去重命中 → 文章保留并标记重复，关联赢家文章', async () => {
     const article = mockPendingArticle();
     mocks.articleFindMany.mockResolvedValueOnce([article]);
 
@@ -181,16 +200,21 @@ describe('processAllPending Gate 1: 全文内容去重', () => {
 
     const result = await processAllPending();
 
-    expect(result.processed).toBe(0);
+    expect(result.processed).toBe(1);
     expect(result.errors).toBe(0);
-    expect(mocks.articleDelete).toHaveBeenCalledWith({ where: { id: 'art-001' } });
-    expect(mocks.discardedItemUpsert).toHaveBeenCalledTimes(1);
-    const upsertArgs = mocks.discardedItemUpsert.mock.calls[0][0];
-    expect(upsertArgs.create.reason).toBe('dedup:content');
-    expect(upsertArgs.create.winnerArticleId).toBe(winnerId);
+    expect(mocks.articleDelete).not.toHaveBeenCalled();
+    expect(mocks.discardedItemUpsert).not.toHaveBeenCalled();
+    expect(mocks.articleUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'art-001' },
+      data: expect.objectContaining({
+        aiStatus: 'skipped',
+        duplicateStatus: 'duplicate',
+        duplicateOfId: winnerId,
+      }),
+    }));
   });
 
-  it('正文 LCS 去重命中 → 文章删除 + DiscardedItem 写入 dedup:near', async () => {
+  it('正文 LCS 去重命中 → 文章保留并标记重复', async () => {
     const article = mockPendingArticle();
     mocks.articleFindMany.mockResolvedValueOnce([article]);
 
@@ -217,12 +241,18 @@ describe('processAllPending Gate 1: 全文内容去重', () => {
 
     const result = await processAllPending();
 
-    expect(result.processed).toBe(0);
+    expect(result.processed).toBe(1);
     expect(result.errors).toBe(0);
-    expect(mocks.articleDelete).toHaveBeenCalledWith({ where: { id: 'art-001' } });
-    expect(mocks.discardedItemUpsert).toHaveBeenCalledTimes(1);
-    const upsertArgs = mocks.discardedItemUpsert.mock.calls[0][0];
-    expect(upsertArgs.create.reason).toBe('dedup:near');
+    expect(mocks.articleDelete).not.toHaveBeenCalled();
+    expect(mocks.discardedItemUpsert).not.toHaveBeenCalled();
+    expect(mocks.articleUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'art-001' },
+      data: expect.objectContaining({
+        aiStatus: 'skipped',
+        duplicateStatus: 'duplicate',
+        duplicateOfId: 'old-001',
+      }),
+    }));
   });
 });
 

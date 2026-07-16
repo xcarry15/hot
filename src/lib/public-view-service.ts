@@ -48,7 +48,13 @@ export async function flushPublicArticleViews(): Promise<void> {
 
   for (const [articleId, count] of batch) {
     try {
-      await db.article.update({ where: { id: articleId }, data: { viewCount: { increment: count } } })
+      // 互动计数不属于内容变更，绕过 Prisma @updatedAt，避免 sitemap 的
+      // lastModified 被每次浏览刷新并向搜索引擎发送错误信号。
+      await db.$executeRaw`
+        UPDATE "articles"
+        SET "viewCount" = "viewCount" + ${count}
+        WHERE "id" = ${articleId}
+      `
     } catch {
       // 文章可能已被删除；浏览统计不应阻塞公开页面或反复重试写入。
     }
