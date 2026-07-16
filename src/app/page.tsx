@@ -57,7 +57,7 @@ async function PublicHomeContent({ searchParams }: { searchParams: Promise<Searc
 
   return (
     <div className="public-site flex min-h-[100dvh] flex-col bg-background text-foreground">
-      <PublicHeader active="articles" search={search} sourceId={sourceId} from={from} to={to} hasFilter={hasFilter} />
+      <PublicHeader active="articles" />
 
       <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-5 sm:px-6 sm:py-8">
         <PublicArticleFeed

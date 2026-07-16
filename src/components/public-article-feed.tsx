@@ -183,8 +183,24 @@ export default function PublicArticleFeed({
 
   return (
     <>
-      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="public-display text-3xl leading-tight text-[var(--public-ink)] sm:text-4xl">文章列表</h1>
+      <div className="mb-5 flex items-center justify-between gap-4">
+        <h1 className="public-display shrink-0 text-3xl leading-tight text-[var(--public-ink)] sm:text-4xl">文章列表</h1>
+        <form method="get" className="flex min-w-0 max-w-[330px] flex-1 items-center justify-end gap-2">
+          <label className="min-w-0 flex-1">
+            <span className="sr-only">搜索文章</span>
+            <input
+              name="q"
+              defaultValue={search}
+              placeholder="搜索标题、摘要或品牌"
+              className="h-9 w-full rounded-none border border-[var(--public-hairline)] bg-transparent px-3 text-sm text-[var(--public-ink)] outline-none transition-[border-color,box-shadow] placeholder:text-[var(--public-muted-soft)] focus:border-[var(--public-primary)] focus:ring-4 focus:ring-[color:rgb(204_120_92_/_0.15)]"
+            />
+          </label>
+          {sourceId && <input type="hidden" name="source" value={sourceId} />}
+          {from && <input type="hidden" name="from" value={from} />}
+          {to && <input type="hidden" name="to" value={to} />}
+          <button type="submit" className="h-9 shrink-0 rounded-none bg-[var(--public-primary)] px-4 text-sm font-medium text-white transition-[background-color,transform] hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color:rgb(204_120_92_/_0.25)] active:translate-y-px motion-reduce:transition-none">搜索</button>
+          {hasFilter && <Link href="/" className="shrink-0 px-1 text-sm text-[var(--public-muted)] underline-offset-4 transition-colors hover:text-[var(--public-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">清除</Link>}
+        </form>
       </div>
 
       {hasNewArticles && (
