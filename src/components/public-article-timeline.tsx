@@ -1,7 +1,7 @@
 'use client'
 
 import { ChevronDown } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { PublicArticleDateGroupDto } from '@/contracts/public-articles'
 import { getPublicDateLabel } from '@/lib/shared/public-date'
 import PublicArticleCard from '@/components/public-article-card'
@@ -13,6 +13,13 @@ interface Props {
 export default function PublicArticleTimeline({ groups }: Props) {
   const [firstGroup, ...restGroups] = groups
   const [openDates, setOpenDates] = useState(() => new Set(firstGroup ? [firstGroup.date] : []))
+  const previousLatestDate = useRef(firstGroup?.date)
+
+  useEffect(() => {
+    if (!firstGroup || previousLatestDate.current === firstGroup.date) return
+    previousLatestDate.current = firstGroup.date
+    setOpenDates((current) => new Set(current).add(firstGroup.date))
+  }, [firstGroup])
 
   function toggleDate(date: string) {
     setOpenDates((current) => {

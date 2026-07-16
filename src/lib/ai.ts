@@ -19,6 +19,8 @@ import { assertNotAborted } from './worker-stop';
 import { advanceJobProgress, startJobStage } from './job-progress';
 import { z } from 'zod';
 import { applyScorePolicy, buildScorePolicySnapshot } from './score-policy';
+import { refreshPublicPublication } from './public-publication-service';
+import { invalidatePublicArticleCache } from './public-article-cache';
 import { createHash } from 'node:crypto';
 
 // v8：精简、口语化、多样化的行业洞察。
@@ -160,6 +162,8 @@ export async function processWithAI(article: { id: string; title: string; aiStat
         skipReason: `内容不足（< ${MIN_MEANINGFUL_CHARS} 字符）`,
       },
     });
+    await refreshPublicPublication(articleId);
+    invalidatePublicArticleCache();
     return { status: 'skipped' };
   }
 
@@ -240,9 +244,13 @@ export async function processWithAI(article: { id: string; title: string; aiStat
           `[dedup:after-ai] "${title}" marked as duplicate of "${dupCheck.matchedTitle}" ` +
           `(${dupCheck.sharedCount} shared values)`
         );
+        await refreshPublicPublication(articleId);
+        invalidatePublicArticleCache();
         return { status: 'skipped' }; // 当前文章被跳过，不再继续
       }
     }
+    await refreshPublicPublication(articleId);
+    invalidatePublicArticleCache();
     return { status: 'done' };
   } else {
     // AI 调用完全失败 — 指数退避 + 失败计数。
@@ -274,6 +282,8 @@ export async function processWithAI(article: { id: string; title: string; aiStat
         },
       });
     }
+    await refreshPublicPublication(articleId);
+    invalidatePublicArticleCache();
     return { status: 'failed', errorKind: 'content' };
   }
 }
@@ -319,7 +329,14 @@ export async function reprocessWithAI(
       fetchStatus: articleData.fetchStatus === 'failed' ? 'pending' : undefined,
     },
   });
-  const result = await processWithAI({ ...articleData, aiRetryCount: 0 } as Article, signal);
+  let result: AIProcessResult;
+  try {
+    result = await processWithAI({ ...articleData, aiStatus: 'pending', aiRetryCount: 0 } as Article, signal);
+  } catch (error) {
+    await refreshPublicPublication(articleId);
+    invalidatePublicArticleCache();
+    throw error;
+  }
   if (jobId) {
     await advanceJobProgress(jobId, {
       doneDelta: 1,

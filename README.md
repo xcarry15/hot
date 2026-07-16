@@ -40,7 +40,7 @@ bat/                  Windows 启动、打包、部署和 Nginx 文档
 db/                   本地 SQLite 数据（不进入部署包）
 ```
 
-公开端只展示 AI 分析完成且符合「设置 → 公开」规则的文章，支持数据源、时间范围和关键词筛选，每页 20 篇并使用分页。规则包含自动最低评分、数据源公开开关和软文处理；人工重要归类强制公开并置顶，一般/无关归类按映射执行。公开读取接口为 `/api/public/articles`，与需要 Token 的管理 API 分离；筛选页、后台和 API 均不参与搜索引擎收录，首页和文章详情页参与收录。文章详情累计浏览量和原文点击量，指标在后台概览与文章详情中展示。
+公开端只展示 AI 分析完成且符合「设置 → 公开」规则的文章，支持关键词筛选；默认展示最近 3 个有文章的日期，搜索结果默认展示最近 10 个匹配日期，之后按日期游标每次加载更早 3 个日期，同一天的文章始终完整展示。规则包含自动最低评分、数据源公开开关和软文处理；人工重要归类强制公开并置顶，一般/无关归类按映射执行。公开可见性写入 `Article.publicStatus` 持久化发布快照，公开列表和详情只按已发布状态读取；评分、软文规则、人工覆盖、AI 状态或数据源开关变化时由服务同步快照，避免每次公开请求重算规则。若需人工修复快照，可运行 `npm run db:rebuild-public`。公开读取接口为 `/api/public/articles`，与需要 Token 的管理 API 分离；筛选页、后台和 API 均不参与搜索引擎收录，首页和文章详情页参与收录。文章详情累计浏览量和原文点击量，浏览量采用短暂内存聚合后批量写入 SQLite，指标在后台概览与文章详情中展示。
 
 ## 当前架构与数据事实
 
@@ -83,7 +83,7 @@ npm run build
 pm2 delete h2-hot2 && pm2 start npm --name h2-hot2 -- start
 ```
 
-日常运维：`npm run db:migrate:status`、`npm run db:cleanup-logs`、`pm2 status`、`pm2 logs h2-hot2`。日志保留周期由 `src/lib/log-retention.ts` 统一负责：FetchLog 30 天，PushLog 90 天但保留未完成全部投递的记录，已完成/失败 Job 30 天；不会删除 Article、Source、DiscardedItem 或 pending/running Job。`db:reset`、`db:push` 仅限明确的本地重建或应急场景。
+日常运维：`npm run db:migrate:status`、`npm run db:cleanup-logs`、`npm run db:rebuild-public`、`pm2 status`、`pm2 logs h2-hot2`。日志保留周期由 `src/lib/log-retention.ts` 统一负责：FetchLog 30 天，PushLog 90 天但保留未完成全部投递的记录，已完成/失败 Job 30 天；不会删除 Article、Source、DiscardedItem 或 pending/running Job。`db:reset`、`db:push` 仅限明确的本地重建或应急场景。
 
 ## 开发、验证与防漂移规则
 

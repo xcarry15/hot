@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
 import { invalidatePublicArticleCache } from '@/lib/public-article-service';
+import { refreshPublicPublication, updatePublicPublicationSetting } from '@/lib/public-publication-service';
 import { captureInboxSnapshot } from '@/lib/inbox-snapshot-service';
 
 export const REVIEW_STATUSES = ['unreviewed', 'important', 'general', 'irrelevant'] as const;
@@ -61,35 +62,38 @@ export async function reviewArticle(input: {
   const publicOverride = isImportant ? 'public' : rules[input.status];
   const now = new Date();
 
-  const updated = await db.article.update({
-    where: { id: input.articleId },
-    data: {
-      reviewStatus: input.status,
-      reviewReasonTags: JSON.stringify(parseReasonTags(input.reasonTags)),
-      reviewedAt: now,
-      publicOverride,
-      pinUntil: isImportant ? new Date(now.getTime() + pinHours * 60 * 60 * 1000) : null,
-      ...(restoreDuplicate ? {
-        duplicateStatus: 'none',
-        duplicateOfId: null,
-        dedupOverride: true,
-        aiStatus: 'pending',
-        aiRetryCount: 0,
-        nextAiRetryAt: null,
-        skipReason: null,
-        score: 50,
-      } : {}),
-    },
-    select: {
-      id: true,
-      reviewStatus: true,
-      publicOverride: true,
-      pinUntil: true,
-      duplicateStatus: true,
-      aiStatus: true,
-    },
+  const updated = await db.$transaction(async tx => {
+    const updatedArticle = await tx.article.update({
+      where: { id: input.articleId },
+      data: {
+        reviewStatus: input.status,
+        reviewReasonTags: JSON.stringify(parseReasonTags(input.reasonTags)),
+        reviewedAt: now,
+        publicOverride,
+        pinUntil: isImportant ? new Date(now.getTime() + pinHours * 60 * 60 * 1000) : null,
+        ...(restoreDuplicate ? {
+          duplicateStatus: 'none',
+          duplicateOfId: null,
+          dedupOverride: true,
+          aiStatus: 'pending',
+          aiRetryCount: 0,
+          nextAiRetryAt: null,
+          skipReason: null,
+          score: 50,
+        } : {}),
+      },
+      select: {
+        id: true,
+        reviewStatus: true,
+        publicOverride: true,
+        pinUntil: true,
+        duplicateStatus: true,
+        aiStatus: true,
+      },
+    });
+    await refreshPublicPublication(input.articleId, tx);
+    return updatedArticle;
   });
-
   invalidatePublicArticleCache();
   await captureInboxSnapshot().catch(() => undefined);
   return { article: updated, restoredDuplicate: restoreDuplicate };
@@ -147,8 +151,7 @@ export async function applyTuningSuggestion(id: string) {
   if (payload.settingKey && typeof payload.delta === 'number') {
     const current = Number(await getSetting(payload.settingKey));
     const next = Math.max(0, Math.min(100, (Number.isFinite(current) ? current : 70) + payload.delta));
-    await db.setting.upsert({ where: { key: payload.settingKey }, update: { value: String(next) }, create: { key: payload.settingKey, value: String(next) } });
-    invalidatePublicArticleCache();
+    await updatePublicPublicationSetting(payload.settingKey, String(next));
   }
   await db.tuningSuggestion.update({ where: { id }, data: { status: 'applied', appliedAt: new Date() } });
   return { id, applied: true };

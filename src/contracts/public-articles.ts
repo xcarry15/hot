@@ -43,30 +43,22 @@ export interface PublicArticleDetailDto extends PublicArticleListItemDto {
   related: PublicArticleRelatedDto[];
 }
 
-export interface PublicArticleSourceFacetDto {
-  id: string;
-  name: string;
-  count: number;
-}
-
 export interface PublicArticleDateGroupDto {
   date: string;
   count: number;
   items: PublicArticleListItemDto[];
 }
 
-export interface PublicArticlePaginationDto {
+export interface PublicArticleListResponseDto {
   total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-}
-
-export interface PublicArticleListResponseDto extends PublicArticlePaginationDto {
   items: PublicArticleListItemDto[];
   groups: PublicArticleDateGroupDto[];
-  pageStartDate: string | null;
-  pageEndDate: string | null;
-  sources: PublicArticleSourceFacetDto[];
-  minScore: number;
+  displayedArticleCount: number;
+  displayedDateCount: number;
+  nextDate: string | null;
+  hasMore: boolean;
+}
+
+export interface PublicArticleFeedRevisionDto {
+  total: number;
 }

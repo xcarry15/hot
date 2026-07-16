@@ -80,6 +80,11 @@ model Article {
   reviewedAt         DateTime?
   publicOverride     String    @default("auto") // auto, public, hidden
   pinUntil           DateTime?
+  publicStatus       String    @default("unpublished") // unpublished, published, revoked
+  publicPublishedAt  DateTime?
+  publicRevokedAt    DateTime?
+  publicPublicationReason String @default("")
+  publicPublicationEvaluatedAt DateTime?
   // 不同 URL 的同文文章保留入库，避免信息丢失；重复文章默认跳过完整 AI。
   duplicateOfId      String?
   duplicateStatus    String    @default("none") // none, duplicate
@@ -106,6 +111,7 @@ model Article {
   @@index([brand, createdAt])
   @@index([reviewStatus, aiStatus, fetchStatus, createdAt])
   @@index([publicOverride, pinUntil, publishedAt])
+  @@index([publicStatus, publishedAt])
   @@index([duplicateStatus, createdAt])
   @@map("articles")
 }

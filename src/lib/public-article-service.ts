@@ -1,37 +1,32 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
-import { SETTING_KEYS } from '@/lib/settings-catalog';
 import { parseJsonArray, splitBrands, stripHtml } from '@/lib/shared/article-codecs';
 import { getPublicDateKey } from '@/lib/shared/public-date';
+import { enqueuePublicArticleView } from '@/lib/public-view-service';
+import { publicArticleListCache } from '@/lib/public-article-cache';
 import type {
   PublicArticleDateGroupDto,
   PublicArticleDetailDto,
+  PublicArticleFeedRevisionDto,
   PublicArticleListItemDto,
   PublicArticleListResponseDto,
   PublicArticleRelatedDto,
 } from '@/contracts/public-articles';
 
-const DEFAULT_PUBLIC_MIN_SCORE = 70;
-const PUBLIC_MIN_SCORE_FLOOR = 0;
-const PUBLIC_PAGE_SIZE = 20;
+const PUBLIC_INITIAL_DATE_LIMIT = 3;
+const PUBLIC_SEARCH_DATE_LIMIT = 10;
+const PUBLIC_LOAD_MORE_DATE_LIMIT = 3;
 const PUBLIC_CACHE_TTL_MS = 60_000;
 const PUBLIC_CACHE_MAX_ENTRIES = 100;
 
 type PublicArticleListParams = {
-  page?: number;
-  pageSize?: number;
   search?: string;
   sourceId?: string;
   from?: string;
   to?: string;
+  before?: string;
+  dateLimit?: number;
 };
-
-type CacheEntry = {
-  expiresAt: number;
-  value: Promise<PublicArticleListResponseDto>;
-};
-
-type PublicConfig = { minScore: number; hideAds: boolean };
 
 type PublicArticleSortRow = {
   id: string;
@@ -45,33 +40,20 @@ type PublicDateGroup = {
   ids: string[];
 };
 
-const listCache = new Map<string, CacheEntry>();
+type PublicDateGroupRow = {
+  date: string;
+  count: number | bigint;
+};
 
-export function invalidatePublicArticleCache(): void {
-  listCache.clear();
-}
-
-export async function getPublicMinScore(): Promise<number> {
-  const row = await db.setting.findUnique({
-    where: { key: SETTING_KEYS.PUBLIC_MIN_SCORE },
-    select: { value: true },
-  });
-  const value = Number(row?.value ?? DEFAULT_PUBLIC_MIN_SCORE);
-  if (!Number.isFinite(value)) return DEFAULT_PUBLIC_MIN_SCORE;
-  return Math.min(100, Math.max(PUBLIC_MIN_SCORE_FLOOR, Math.round(value)));
-}
-
-async function getPublicConfig(): Promise<PublicConfig> {
-  const [minScore, hideAds] = await Promise.all([
-    getPublicMinScore(),
-    db.setting.findUnique({ where: { key: SETTING_KEYS.PUBLIC_HIDE_ADS }, select: { value: true } }),
-  ]);
-  return { minScore, hideAds: hideAds?.value !== 'false' };
-}
+export { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 
 function normalizeText(value: string | undefined, maxLength: number): string | undefined {
   const normalized = value?.trim();
   return normalized ? normalized.slice(0, maxLength) : undefined;
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
 }
 
 function parseDate(value: string | undefined, endOfDay = false): Date | undefined {
@@ -111,25 +93,24 @@ function addEffectiveDateFilter(
   ];
 }
 
-function buildPublicWhere(
-  minScore: number,
-  params: PublicArticleListParams = {},
-  config: Pick<PublicConfig, 'hideAds'> = { hideAds: true },
-): Prisma.ArticleWhereInput {
+function getDateLimit(params: PublicArticleListParams, hasSearch: boolean): number {
+  const fallback = params.before
+    ? PUBLIC_LOAD_MORE_DATE_LIMIT
+    : hasSearch ? PUBLIC_SEARCH_DATE_LIMIT : PUBLIC_INITIAL_DATE_LIMIT;
+  const value = Number.isFinite(params.dateLimit) ? Math.floor(params.dateLimit!) : fallback;
+  return Math.min(PUBLIC_SEARCH_DATE_LIMIT, Math.max(1, value));
+}
+
+function buildPublicWhere(params: PublicArticleListParams = {}): Prisma.ArticleWhereInput {
   const search = normalizeText(params.search, 100);
-  const andClauses: Prisma.ArticleWhereInput[] = [
-    { OR: [{ publicOverride: 'public' }, { publicOverride: 'auto', score: { gte: minScore } }] },
-  ];
-  // 人工“重要”覆盖是强制公开；隐藏软文只约束自动公开文章。
-  if (config.hideAds) andClauses.push({ OR: [{ publicOverride: 'public' }, { isAd: false }] });
+  const andClauses: Prisma.ArticleWhereInput[] = [];
   if (search) andClauses.push({ OR: [
     { title: { contains: search } },
     { summary: { contains: search } },
     { brand: { contains: search } },
   ] });
   const where: Prisma.ArticleWhereInput = {
-    aiStatus: 'done',
-    source: { deletedAt: null, publicEnabled: true },
+    publicStatus: 'published',
     AND: andClauses,
   };
 
@@ -137,6 +118,72 @@ function buildPublicWhere(
   if (sourceId) where.sourceId = sourceId;
   addEffectiveDateFilter(where, params.from, params.to);
   return where;
+}
+
+function buildPublicSqlWhere(params: PublicArticleListParams = {}): Prisma.Sql {
+  const clauses: Prisma.Sql[] = [Prisma.sql`"publicStatus" = 'published'`];
+  const search = normalizeText(params.search, 100);
+  const effectiveDate = Prisma.sql`COALESCE("publishedAt", "createdAt")`;
+
+  if (search) {
+    const pattern = `%${escapeLikePattern(search)}%`;
+    clauses.push(Prisma.sql`(
+      "title" LIKE ${pattern} ESCAPE '\\'
+      OR "summary" LIKE ${pattern} ESCAPE '\\'
+      OR "brand" LIKE ${pattern} ESCAPE '\\'
+    )`);
+  }
+
+  const sourceId = normalizeText(params.sourceId, 80);
+  if (sourceId) clauses.push(Prisma.sql`"sourceId" = ${sourceId}`);
+
+  const fromDate = parseDate(params.from);
+  const toDate = parseDate(params.to, true);
+  const beforeDate = parseDate(params.before);
+  if (fromDate) clauses.push(Prisma.sql`${effectiveDate} >= ${fromDate.getTime()}`);
+  if (toDate) clauses.push(Prisma.sql`${effectiveDate} <= ${toDate.getTime()}`);
+  if (beforeDate) clauses.push(Prisma.sql`${effectiveDate} < ${beforeDate.getTime()}`);
+
+  return Prisma.join(clauses, ' AND ');
+}
+
+async function loadPublicDateGroups(
+  params: PublicArticleListParams,
+  dateLimit: number,
+): Promise<PublicDateGroupRow[]> {
+  const dateKey = Prisma.sql`strftime('%Y-%m-%d', datetime(COALESCE("publishedAt", "createdAt") / 1000, 'unixepoch', '+8 hours'))`;
+  return db.$queryRaw<PublicDateGroupRow[]>(Prisma.sql`
+    SELECT ${dateKey} AS date, COUNT(*) AS count
+    FROM "articles"
+    WHERE ${buildPublicSqlWhere(params)}
+    GROUP BY ${dateKey}
+    ORDER BY date DESC
+    LIMIT ${dateLimit + 1}
+  `);
+}
+
+async function countPublicArticles(params: PublicArticleListParams = {}): Promise<number> {
+  const rows = await db.$queryRaw<Array<{ count: number | bigint }>>(Prisma.sql`
+    SELECT COUNT(*) AS count
+    FROM "articles"
+    WHERE ${buildPublicSqlWhere(params)}
+  `);
+  return Number(rows[0]?.count ?? 0);
+}
+
+async function loadPublicArticleIds(
+  params: PublicArticleListParams,
+  dates: string[],
+): Promise<string[]> {
+  if (dates.length === 0) return [];
+  const dateKey = Prisma.sql`strftime('%Y-%m-%d', datetime(COALESCE("publishedAt", "createdAt") / 1000, 'unixepoch', '+8 hours'))`;
+  const rows = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id"
+    FROM "articles"
+    WHERE ${buildPublicSqlWhere(params)}
+      AND ${dateKey} IN (${Prisma.join(dates)})
+  `);
+  return rows.map((row) => row.id);
 }
 
 function toIso(value: Date | string | null): string | null {
@@ -213,57 +260,24 @@ function buildPublicDateGroups(rows: PublicArticleSortRow[], now: number): Publi
   return [...groups.values()];
 }
 
-function paginatePublicDateGroups(groups: PublicDateGroup[], targetSize: number): PublicDateGroup[][] {
-  const pages: PublicDateGroup[][] = [];
-  let currentPage: PublicDateGroup[] = [];
-  let currentSize = 0;
-
-  for (const group of groups) {
-    if (currentPage.length > 0 && currentSize + group.ids.length > targetSize) {
-      pages.push(currentPage);
-      currentPage = [];
-      currentSize = 0;
-    }
-    currentPage.push(group);
-    currentSize += group.ids.length;
-  }
-
-  if (currentPage.length > 0) pages.push(currentPage);
-  return pages;
-}
-
 async function loadPublicArticleList(
   params: PublicArticleListParams,
 ): Promise<PublicArticleListResponseDto> {
-  const config = await getPublicConfig();
-  const minScore = config.minScore;
-  const page = Math.min(10_000, Math.max(1, Math.floor(params.page ?? 1)));
-  const pageSize = Math.min(50, Math.max(1, Math.floor(params.pageSize ?? PUBLIC_PAGE_SIZE)));
-  await db.article.updateMany({ where: { pinUntil: { lt: new Date() } }, data: { pinUntil: null } });
-  const where = buildPublicWhere(minScore, params, config);
-  const facetWhere = buildPublicWhere(minScore, {}, config);
+  const search = normalizeText(params.search, 100);
+  const dateLimit = getDateLimit(params, Boolean(search));
+  const totalParams = { ...params, before: undefined };
 
-  const [candidateRows, sourceRows] = await Promise.all([
-    db.article.findMany({
-      where,
-      select: { id: true, publishedAt: true, createdAt: true, pinUntil: true },
-    }),
-    db.article.groupBy({
-      by: ['sourceId'],
-      where: facetWhere,
-      _count: { _all: true },
-    }),
+  const [dateRows, total] = await Promise.all([
+    loadPublicDateGroups(params, dateLimit),
+    countPublicArticles(totalParams),
   ]);
 
-  const now = Date.now();
-  const dateGroups = buildPublicDateGroups(candidateRows, now);
-  const pages = paginatePublicDateGroups(dateGroups, pageSize);
-  const resolvedPage = pages.length === 0 ? 1 : Math.min(page, pages.length);
-  const selectedGroups = pages[resolvedPage - 1] ?? [];
-  const pageIds = selectedGroups.flatMap((group) => group.ids);
+  const selectedDateRows = dateRows.slice(0, dateLimit);
+  const selectedDates = selectedDateRows.map((row) => row.date);
+  const pageIds = await loadPublicArticleIds(params, selectedDates);
 
   const items = pageIds.length === 0 ? [] : await db.article.findMany({
-      where: { ...where, id: { in: pageIds } },
+      where: { id: { in: pageIds } },
       select: {
         id: true,
         url: true,
@@ -277,45 +291,42 @@ async function loadPublicArticleList(
         score: true,
         publishedAt: true,
         createdAt: true,
+        pinUntil: true,
         source: { select: { id: true, name: true, type: true } },
       },
     });
 
   const itemMap = new Map(items.map((item) => [item.id, serializeListItem(item)]));
-  const groups: PublicArticleDateGroupDto[] = selectedGroups.map((group) => ({
-    date: group.date,
-    count: group.ids.length,
-    items: group.ids.flatMap((id) => {
+  const itemGroups = buildPublicDateGroups(items, Date.now());
+  const groups: PublicArticleDateGroupDto[] = selectedDateRows.map((row) => {
+    const itemGroup = itemGroups.find((group) => group.date === row.date);
+    return {
+      date: row.date,
+      count: Number(row.count),
+      items: itemGroup?.ids.flatMap((id) => {
       const item = itemMap.get(id);
       return item ? [item] : [];
-    }),
-  }));
-  const serializedItems = groups.flatMap((group) => group.items);
-
-  const sources = await db.source.findMany({
-    where: { id: { in: sourceRows.map((row) => row.sourceId) }, deletedAt: null },
-    select: { id: true, name: true },
+      }) ?? [],
+    };
   });
-  const sourceNames = new Map(sources.map((source) => [source.id, source.name]));
+  const serializedItems = groups.flatMap((group) => group.items);
 
   return {
     items: serializedItems,
     groups,
-    pageStartDate: groups[0]?.date ?? null,
-    pageEndDate: groups.at(-1)?.date ?? null,
-    total: candidateRows.length,
-    page: resolvedPage,
-    pageSize,
-    totalPages: pages.length,
-    sources: sourceRows
-      .map((row) => ({
-        id: row.sourceId,
-        name: sourceNames.get(row.sourceId) ?? row.sourceId,
-        count: row._count._all,
-      }))
-      .filter((source) => source.name !== source.id)
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-CN')),
-    minScore,
+    total,
+    displayedArticleCount: serializedItems.length,
+    displayedDateCount: groups.length,
+    nextDate: selectedDateRows.at(-1)?.date ?? null,
+    hasMore: dateRows.length > selectedDateRows.length,
+  };
+}
+
+export async function getPublicArticleFeedRevision(
+  params: Pick<PublicArticleListParams, 'search' | 'sourceId' | 'from' | 'to'> = {},
+): Promise<PublicArticleFeedRevisionDto> {
+  return {
+    total: await countPublicArticles(params),
   };
 }
 
@@ -323,33 +334,30 @@ export async function listPublicArticles(
   params: PublicArticleListParams = {},
 ): Promise<PublicArticleListResponseDto> {
   const key = JSON.stringify({
-    page: params.page ?? 1,
-    pageSize: params.pageSize ?? PUBLIC_PAGE_SIZE,
     search: normalizeText(params.search, 100) ?? '',
     sourceId: normalizeText(params.sourceId, 80) ?? '',
     from: params.from ?? '',
     to: params.to ?? '',
+    before: params.before ?? '',
+    dateLimit: params.dateLimit ?? '',
   });
-  const existing = listCache.get(key);
+  const existing = publicArticleListCache.get(key);
   if (existing && existing.expiresAt > Date.now()) return existing.value;
 
   const value = loadPublicArticleList(params);
-  listCache.set(key, { value, expiresAt: Date.now() + PUBLIC_CACHE_TTL_MS });
-  while (listCache.size > PUBLIC_CACHE_MAX_ENTRIES) {
-    const firstKey = listCache.keys().next().value;
+  publicArticleListCache.set(key, { value, expiresAt: Date.now() + PUBLIC_CACHE_TTL_MS });
+  while (publicArticleListCache.size > PUBLIC_CACHE_MAX_ENTRIES) {
+    const firstKey = publicArticleListCache.keys().next().value;
     if (!firstKey) break;
-    listCache.delete(firstKey);
+    publicArticleListCache.delete(firstKey);
   }
-  void value.catch(() => listCache.delete(key));
+  void value.catch(() => publicArticleListCache.delete(key));
   return value;
 }
 
 export async function getPublicArticleDetail(id: string, options: { recordView?: boolean } = {}): Promise<PublicArticleDetailDto | null> {
-  const config = await getPublicConfig();
-  const minScore = config.minScore;
-  await db.article.updateMany({ where: { pinUntil: { lt: new Date() } }, data: { pinUntil: null } });
   const article = await db.article.findFirst({
-    where: { id, ...buildPublicWhere(minScore, {}, config) },
+    where: { id, ...buildPublicWhere() },
     select: {
       id: true,
       url: true,
@@ -368,21 +376,39 @@ export async function getPublicArticleDetail(id: string, options: { recordView?:
     },
   });
   if (!article) return null;
-  if (options.recordView) await db.article.update({ where: { id }, data: { viewCount: { increment: 1 } } });
+  if (options.recordView) enqueuePublicArticleView(id);
 
   const base = serializeListItem(article);
   const brands = splitBrands(article.brand).filter(Boolean).slice(0, 8);
-  const related = brands.length > 0
-    ? await db.article.findMany({
-        where: {
-          ...buildPublicWhere(minScore, {}, config),
-          id: { not: id },
-          OR: brands.flatMap((brand) => [
-            { brand: { contains: brand } },
-            { title: { contains: brand } },
-            { summary: { contains: brand } },
-          ]),
-        },
+  const relatedLikeClauses = brands.flatMap((brand) => {
+    const pattern = `%${escapeLikePattern(brand)}%`;
+    return [
+      Prisma.sql`"brand" LIKE ${pattern} ESCAPE '\\'`,
+      Prisma.sql`"title" LIKE ${pattern} ESCAPE '\\'`,
+      Prisma.sql`"summary" LIKE ${pattern} ESCAPE '\\'`,
+    ];
+  });
+  const relatedIdRows = relatedLikeClauses.length === 0
+    ? []
+    : await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id"
+        FROM "articles"
+        WHERE "publicStatus" = 'published'
+          AND "id" <> ${id}
+          AND (${Prisma.join(relatedLikeClauses, ' OR ')})
+        ORDER BY
+          CASE WHEN "pinUntil" IS NOT NULL AND "pinUntil" > ${Date.now()} THEN 0 ELSE 1 END,
+          "pinUntil" DESC,
+          COALESCE("publishedAt", "createdAt") DESC,
+          "createdAt" DESC,
+          "id" ASC
+        LIMIT 5
+      `);
+  const relatedIds = relatedIdRows.map((row) => row.id);
+  const relatedRows = relatedIds.length === 0
+    ? []
+    : await db.article.findMany({
+        where: { id: { in: relatedIds } },
         select: {
           id: true,
           title: true,
@@ -391,10 +417,12 @@ export async function getPublicArticleDetail(id: string, options: { recordView?:
           createdAt: true,
           source: { select: { name: true, type: true } },
         },
-        orderBy: [{ pinUntil: 'desc' }, { publishedAt: 'desc' }, { createdAt: 'desc' }],
-        take: 5,
-      })
-    : [];
+      });
+  const relatedById = new Map(relatedRows.map((item) => [item.id, item]));
+  const related = relatedIds.flatMap((relatedId) => {
+    const item = relatedById.get(relatedId);
+    return item ? [item] : [];
+  });
 
   const relatedDto: PublicArticleRelatedDto[] = related.map((item) => ({
     id: item.id,
@@ -414,18 +442,15 @@ export async function getPublicArticleDetail(id: string, options: { recordView?:
 }
 
 export async function listPublicArticleIds(): Promise<Array<{ id: string; updatedAt: Date }>> {
-  const config = await getPublicConfig();
-  const minScore = config.minScore;
   return db.article.findMany({
-    where: buildPublicWhere(minScore, {}, config),
+    where: buildPublicWhere(),
     select: { id: true, updatedAt: true },
     orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
   });
 }
 
 export async function recordOriginalClick(id: string): Promise<boolean> {
-  const config = await getPublicConfig();
-  const article = await db.article.findFirst({ where: { id, ...buildPublicWhere(config.minScore, {}, config) }, select: { id: true } });
+  const article = await db.article.findFirst({ where: { id, ...buildPublicWhere() }, select: { id: true } });
   if (!article) return false;
   await db.article.update({ where: { id }, data: { originalClickCount: { increment: 1 } } });
   return true;

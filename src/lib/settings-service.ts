@@ -8,6 +8,7 @@ import { SETTING_KEYS } from '@/lib/settings-catalog';
 import { applyScorePolicy, buildScorePolicySnapshot } from '@/lib/score-policy';
 import { parseWebhookConfigs, serializeWebhookConfigsForServer } from '@/contracts/webhook';
 import { invalidatePublicArticleCache } from '@/lib/public-article-service';
+import { PUBLIC_PUBLICATION_REBUILD_KEYS, rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
 
 const settingsUpdateSchema = z.record(z.string(), z.string());
 
@@ -81,6 +82,7 @@ export async function updateSettings(input: unknown): Promise<
     (key === SETTING_KEYS.AI_WEIGHT_EVENT || key === SETTING_KEYS.AI_WEIGHT_CONTENT)
     && Number(previousWeightMap[key] ?? (key === SETTING_KEYS.AI_WEIGHT_EVENT ? 70 : 30)) !== Number(value)
   );
+  const publicationNeedsRebuild = weightChanged || updates.some(([key]) => PUBLIC_PUBLICATION_REBUILD_KEYS.has(key));
   const updateMap = Object.fromEntries(updates);
   const nextWeightEvent = Number(updateMap[SETTING_KEYS.AI_WEIGHT_EVENT] ?? effectiveEventWeight);
   const nextWeightContent = Number(updateMap[SETTING_KEYS.AI_WEIGHT_CONTENT] ?? effectiveContentWeight);
@@ -90,27 +92,29 @@ export async function updateSettings(input: unknown): Promise<
     for (const [key, value] of updates) {
       await tx.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
     }
-    if (!weightChanged) return;
-    const articles = await tx.article.findMany({
-      where: { eventScore: { not: null }, contentScore: { not: null } },
-      select: { id: true, eventScore: true, contentScore: true, adProbability: true, isAd: true },
-    });
-    for (const article of articles) {
-      const result = applyScorePolicy(
-        article.eventScore!, article.contentScore!, article.adProbability ?? (article.isAd ? 100 : 0),
-        article.isAd, nextWeightEvent, nextWeightContent,
-      );
-      await tx.article.update({
-        where: { id: article.id },
-        data: {
-          score: result.finalScore,
-          rawScore: result.rawScore,
-          scorePolicyVersion: result.version,
-          scorePolicySnapshot: buildScorePolicySnapshot(nextWeightEvent, nextWeightContent),
-        },
+    if (weightChanged) {
+      const articles = await tx.article.findMany({
+        where: { eventScore: { not: null }, contentScore: { not: null } },
+        select: { id: true, eventScore: true, contentScore: true, adProbability: true, isAd: true },
       });
+      for (const article of articles) {
+        const result = applyScorePolicy(
+          article.eventScore!, article.contentScore!, article.adProbability ?? (article.isAd ? 100 : 0),
+          article.isAd, nextWeightEvent, nextWeightContent,
+        );
+        await tx.article.update({
+          where: { id: article.id },
+          data: {
+            score: result.finalScore,
+            rawScore: result.rawScore,
+            scorePolicyVersion: result.version,
+            scorePolicySnapshot: buildScorePolicySnapshot(nextWeightEvent, nextWeightContent),
+          },
+        });
+      }
     }
-  }, { maxWait: 10_000, timeout: 60_000 });
+    if (publicationNeedsRebuild) await rebuildPublicPublicationSnapshot(tx);
+  }, { maxWait: 10_000, timeout: 120_000 });
   invalidateAISettingsCache();
   invalidatePublicArticleCache();
   return { ok: true };

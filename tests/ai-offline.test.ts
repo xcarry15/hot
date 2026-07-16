@@ -35,7 +35,8 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-vi.mock('@/lib/ai-client', () => ({
+vi.mock('@/lib/ai-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ai-client')>()),
   getAISettings: mocks.getAISettings,
   createChatCompletion: mocks.createChatCompletion,
 }));
@@ -50,7 +51,8 @@ vi.mock('@/lib/cleaner', () => ({
   meaningfulTextLength: (s: string) => s.replace(/<[^>]*>/g, '').replace(/\s+/g, '').length,
 }));
 
-vi.mock('@/lib/prompts', () => ({
+vi.mock('@/lib/prompts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/prompts')>()),
   buildStep2Prompt: vi.fn(),
 }));
 

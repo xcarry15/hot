@@ -31,16 +31,6 @@ export function getPublicDateLabel(dateKey: string): string {
   }).format(date)
 }
 
-export function getPublicShortDateLabel(dateKey: string): string {
-  const date = new Date(`${dateKey}T00:00:00+08:00`)
-  if (Number.isNaN(date.getTime())) return dateKey
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: PUBLIC_TIME_ZONE,
-    month: 'numeric',
-    day: 'numeric',
-  }).format(date)
-}
-
 export function formatPublicTime(value: DateInput): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '--:--'
@@ -64,10 +54,4 @@ export function formatPublicDateTime(value: DateInput): string {
     minute: '2-digit',
     hour12: false,
   }).format(date)
-}
-
-export function formatPublicDateRange(start: string | null, end: string | null): string {
-  if (!start || !end) return ''
-  if (start === end) return getPublicDateLabel(start)
-  return `${getPublicShortDateLabel(start)} — ${getPublicShortDateLabel(end)}`
 }

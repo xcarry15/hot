@@ -17,13 +17,46 @@ const PUBLIC_NAV_ITEMS: Array<{ key: PublicNavKey; label: string; href: string }
 
 interface Props {
   active?: PublicNavKey
+  search?: string
+  sourceId?: string
+  from?: string
+  to?: string
+  hasFilter?: boolean
 }
 
-export default function PublicHeader({ active = 'articles' }: Props) {
+export default function PublicHeader({
+  active = 'articles',
+  search = '',
+  sourceId = '',
+  from = '',
+  to = '',
+  hasFilter = false,
+}: Props) {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   function closeMobileMenu() {
     setMobileOpen(false)
+  }
+
+  function renderSearchForm(mobile = false) {
+    return (
+      <form method="get" className={`flex items-center gap-2 ${mobile ? 'w-full' : 'w-[330px]'}`}>
+        <label className="min-w-0 flex-1">
+          <span className="sr-only">搜索文章</span>
+          <input
+            name="q"
+            defaultValue={search}
+            placeholder="搜索标题、摘要或品牌"
+            className="h-9 w-full rounded-none border border-[var(--public-hairline)] bg-transparent px-3 text-sm text-[var(--public-ink)] outline-none transition-[border-color,box-shadow] placeholder:text-[var(--public-muted-soft)] focus:border-[var(--public-primary)] focus:ring-4 focus:ring-[color:rgb(204_120_92_/_0.15)]"
+          />
+        </label>
+        {sourceId && <input type="hidden" name="source" value={sourceId} />}
+        {from && <input type="hidden" name="from" value={from} />}
+        {to && <input type="hidden" name="to" value={to} />}
+        <button type="submit" className="h-9 shrink-0 rounded-none bg-[var(--public-primary)] px-4 text-sm font-medium text-white transition-[background-color,transform] hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color:rgb(204_120_92_/_0.25)] active:translate-y-px motion-reduce:transition-none">搜索</button>
+        {hasFilter && <Link href="/" onClick={mobile ? closeMobileMenu : undefined} className="shrink-0 px-1 text-sm text-[var(--public-muted)] underline-offset-4 transition-colors hover:text-[var(--public-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">清除</Link>}
+      </form>
+    )
   }
 
   function renderNavItems(mobile = false) {
@@ -57,7 +90,7 @@ export default function PublicHeader({ active = 'articles' }: Props) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--public-hairline)] bg-[var(--public-canvas)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--public-canvas)]/85">
-      <div className="mx-auto flex min-h-16 max-w-[1200px] items-center justify-between gap-4 px-4 sm:px-6">
+      <div className="mx-auto flex min-h-16 max-w-[1200px] items-center gap-4 px-4 sm:px-6 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
         <Link href="/" onClick={closeMobileMenu} className="flex min-w-0 items-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]">
           <img src="/icon-192x192.png" alt="新闻聚合" className="h-9 w-9 rounded-none" />
           <div className="min-w-0">
@@ -66,25 +99,29 @@ export default function PublicHeader({ active = 'articles' }: Props) {
           </div>
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex" aria-label="公开导航">
+        <nav className="hidden items-center gap-1 md:flex md:justify-self-center" aria-label="公开导航">
           {renderNavItems()}
         </nav>
 
-        <button
-          type="button"
-          aria-label={mobileOpen ? '关闭导航菜单' : '打开导航菜单'}
-          aria-expanded={mobileOpen}
-          aria-controls="public-mobile-navigation"
-          className="inline-flex h-10 w-10 items-center justify-center rounded-md text-[var(--public-ink)] transition-colors hover:bg-[var(--public-surface-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] md:hidden"
-          onClick={() => setMobileOpen((open) => !open)}
-        >
-          {mobileOpen ? <X aria-hidden="true" className="h-5 w-5" /> : <Menu aria-hidden="true" className="h-5 w-5" />}
-        </button>
+        <div className="ml-auto flex items-center gap-2 md:ml-0 md:justify-self-end">
+          {active === 'articles' && <div className="hidden md:block">{renderSearchForm()}</div>}
+          <button
+            type="button"
+            aria-label={mobileOpen ? '关闭导航菜单' : '打开导航菜单'}
+            aria-expanded={mobileOpen}
+            aria-controls="public-mobile-navigation"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-[var(--public-ink)] transition-colors hover:bg-[var(--public-surface-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] md:hidden"
+            onClick={() => setMobileOpen((open) => !open)}
+          >
+            {mobileOpen ? <X aria-hidden="true" className="h-5 w-5" /> : <Menu aria-hidden="true" className="h-5 w-5" />}
+          </button>
+        </div>
       </div>
 
       {mobileOpen && (
         <div id="public-mobile-navigation" className="border-t border-[var(--public-hairline)] px-4 py-3 md:hidden">
           <nav className="mx-auto max-w-[1200px] space-y-1" aria-label="移动端公开导航">
+            {active === 'articles' && <div className="mb-3">{renderSearchForm(true)}</div>}
             {renderNavItems(true)}
           </nav>
         </div>

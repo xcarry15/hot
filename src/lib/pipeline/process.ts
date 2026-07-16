@@ -27,6 +27,8 @@ import { findDuplicateArticle } from '@/lib/dedup';
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
 import { recordKeywordCandidates } from '@/lib/keyword-candidate-service';
 import { captureInboxSnapshot } from '@/lib/inbox-snapshot-service';
+import { refreshPublicPublication } from '@/lib/public-publication-service';
+import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_BATCH_SIZE = 500;
@@ -122,6 +124,8 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
                   duplicateOfId: dup.matchedId ?? null,
                 },
               });
+              await refreshPublicPublication(article.id);
+              invalidatePublicArticleCache();
               console.log(
                 `[processAllPending] dedup hit (${dup.dedupType}) ` +
                 `sim=${dup.similarity.toFixed(2)}: "${article.title}" → "${dup.matchedTitle}", retained as duplicate`

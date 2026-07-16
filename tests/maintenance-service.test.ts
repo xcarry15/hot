@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   pushLogCount: vi.fn(),
   jobCount: vi.fn(),
   articleUpdateMany: vi.fn(),
+  articleFindMany: vi.fn(),
+  articleUpdate: vi.fn(),
+  settingFindUnique: vi.fn(),
   discardedItemDeleteMany: vi.fn(),
   fetchLogDeleteMany: vi.fn(),
   pushLogDeleteMany: vi.fn(),
@@ -40,7 +43,10 @@ vi.mock('@/lib/db', () => ({
     article: {
       count: mocks.articleCount,
       updateMany: mocks.articleUpdateMany,
+      findMany: mocks.articleFindMany,
+      update: mocks.articleUpdate,
     },
+    setting: { findUnique: mocks.settingFindUnique },
     discardedItem: {
       count: mocks.discardedItemCount,
       deleteMany: mocks.discardedItemDeleteMany,
@@ -81,8 +87,19 @@ describe('maintenance-service', () => {
     mocks.pushLogCount.mockResolvedValue(0);
     mocks.jobCount.mockResolvedValue(0);
     mocks.articleUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.articleFindMany.mockResolvedValue([]);
+    mocks.articleUpdate.mockResolvedValue({});
+    mocks.settingFindUnique.mockResolvedValue(undefined);
     mocks.discardedRetryAuditDeleteMany.mockResolvedValue({ count: 0 });
-    mocks.transaction.mockImplementation(async (operations: Promise<unknown>[]) => Promise.all(operations));
+    mocks.transaction.mockImplementation(async (operations: Promise<unknown>[] | ((tx: unknown) => Promise<unknown>)) => {
+      if (typeof operations === 'function') {
+        return operations({
+          setting: { findUnique: mocks.settingFindUnique },
+          article: { findMany: mocks.articleFindMany, update: mocks.articleUpdate, updateMany: mocks.articleUpdateMany },
+        });
+      }
+      return Promise.all(operations);
+    });
     mocks.getDbFileSize.mockReturnValue(0);
   });
 

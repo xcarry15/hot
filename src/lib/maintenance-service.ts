@@ -16,6 +16,8 @@ import { db } from '@/lib/db';
 import { abortCurrentJob } from '@/lib/worker-stop';
 import { getDbFileSize, runVacuum } from '@/lib/maintenance/sqlite';
 import { deleteArticlesByIds } from '@/lib/article-service';
+import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
+import { rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
 
 // ── 只读：统计 ──────────────────────────────────────────────────
 
@@ -150,19 +152,31 @@ const AI_RESET_DATA = {
 } as const;
 
 export async function resetAllAi(): Promise<{ reset: number }> {
-  const result = await db.article.updateMany({
-    where: { aiStatus: { not: 'pending' } },
-    data: AI_RESET_DATA,
+  let reset = 0;
+  await db.$transaction(async tx => {
+    const result = await tx.article.updateMany({
+      where: { aiStatus: { not: 'pending' } },
+      data: AI_RESET_DATA,
+    });
+    reset = result.count;
+    if (reset > 0) await rebuildPublicPublicationSnapshot(tx);
   });
-  return { reset: result.count };
+  if (reset > 0) invalidatePublicArticleCache();
+  return { reset };
 }
 
 export async function resetFailedAi(): Promise<{ reset: number }> {
-  const result = await db.article.updateMany({
-    where: { aiStatus: { in: ['failed', 'skipped'] } },
-    data: AI_RESET_DATA,
+  let reset = 0;
+  await db.$transaction(async tx => {
+    const result = await tx.article.updateMany({
+      where: { aiStatus: { in: ['failed', 'skipped'] } },
+      data: AI_RESET_DATA,
+    });
+    reset = result.count;
+    if (reset > 0) await rebuildPublicPublicationSnapshot(tx);
   });
-  return { reset: result.count };
+  if (reset > 0) invalidatePublicArticleCache();
+  return { reset };
 }
 
 // ── 清空日志类 ─────────────────────────────────────────────────
@@ -205,6 +219,7 @@ export async function deletePushedArticles() {
 export async function deleteAllArticles() {
   // Guard: temporarily disable auto-crawl so scheduler doesn't immediately re-fill deleted articles
   const { prevWasEnabled } = await pauseAutoCrawlForWindow();
+  invalidatePublicArticleCache();
 
   const [pushResult, articleResult] = await db.$transaction([
     db.pushLog.deleteMany(),
@@ -213,6 +228,7 @@ export async function deleteAllArticles() {
   ]);
 
   await restoreAutoCrawl(prevWasEnabled);
+  invalidatePublicArticleCache();
 
   return { deleted: articleResult.count, pushLogsDeleted: pushResult.count };
 }
@@ -233,6 +249,7 @@ export async function purgeAllData(): Promise<{ deleted: PurgeAllDeleted }> {
   // $transaction 保证原子性。
   abortCurrentJob();
   const { prevWasEnabled } = await pauseAutoCrawlForWindow();
+  invalidatePublicArticleCache();
 
   const [pushResult, articleResult, discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
     await db.$transaction([
@@ -246,6 +263,7 @@ export async function purgeAllData(): Promise<{ deleted: PurgeAllDeleted }> {
     ]);
 
   await restoreAutoCrawl(prevWasEnabled);
+  invalidatePublicArticleCache();
 
   return {
     deleted: {

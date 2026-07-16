@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
-import { listPublicArticles } from '@/lib/public-article-service';
-import { parsePositiveInt } from '@/lib/pagination';
+import { getPublicArticleFeedRevision, listPublicArticles } from '@/lib/public-article-service';
 import { enforcePublicRateLimit } from '@/lib/public-rate-limit';
 
 /**
@@ -13,15 +12,26 @@ export async function GET(request: Request) {
     const limited = enforcePublicRateLimit(request);
     if (limited) return limited;
     const { searchParams } = new URL(request.url);
-    const response = NextResponse.json(await listPublicArticles({
-      page: parsePositiveInt(searchParams.get('page'), 1),
-      pageSize: 20,
+    const filters = {
       search: searchParams.get('q') ?? undefined,
       sourceId: searchParams.get('source') ?? undefined,
       from: searchParams.get('from') ?? undefined,
       to: searchParams.get('to') ?? undefined,
+    };
+    if (searchParams.get('probe') === '1') {
+      const response = NextResponse.json(await getPublicArticleFeedRevision(filters));
+      response.headers.set('Cache-Control', 'no-store');
+      return response;
+    }
+
+    const dateLimitRaw = searchParams.get('dateLimit');
+    const dateLimitValue = dateLimitRaw === null ? undefined : Number(dateLimitRaw);
+    const response = NextResponse.json(await listPublicArticles({
+      ...filters,
+      before: searchParams.get('before') ?? undefined,
+      dateLimit: Number.isFinite(dateLimitValue) ? dateLimitValue : undefined,
     }));
-    response.headers.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    response.headers.set('Cache-Control', 'private, no-store');
     return response;
   } catch (error: unknown) {
     return apiError(error, 'Failed to fetch public articles');

@@ -24,6 +24,8 @@ import {
   startJobStage,
 } from '@/lib/job-progress';
 import { dedupBeforeAI, dedupAfterAiBatch } from '@/lib/dedup';
+import { refreshPublicPublications } from '@/lib/public-publication-service';
+import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 
 const AI_TIMEOUT_MS = 90_000;
 const MAX_BATCH_SIZE = 500;
@@ -140,6 +142,11 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
       );
     }
   }
+
+  // 批量去重可能把刚完成的文章改为 skipped，统一把本批文章的
+  // 持久化公开状态与最终 aiStatus/score 对齐。
+  await refreshPublicPublications(pending.map((article) => article.id));
+  invalidatePublicArticleCache();
 
   return { total: pending.length, processed, errors };
 }

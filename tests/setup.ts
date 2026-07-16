@@ -66,6 +66,7 @@ vi.mock('@/lib/db', () => ({
       deleteMany: vi.fn(),
     },
     $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
   },
 }));
 
