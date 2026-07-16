@@ -21,7 +21,7 @@ import {
   parseWebhookConfigs,
   serializeWebhookConfigsForEditor,
 } from '@/contracts/webhook'
-import { testWebhook as testWebhookApi } from '@/features/settings-api.client'
+import { previewPushSettings, testWebhook as testWebhookApi, type PushPreviewResult } from '@/features/settings-api.client'
 
 // 去重阈值：UI 唯一来源。push.tsx 渲染、settings-tab.tsx 初始值、API 校验共用这套边界。
 interface DedupFieldDef {
@@ -59,6 +59,8 @@ export default function PushTab({ settings, setSettings }: Props) {
 
   // 各 webhook 的测试状态
   const [testStates, setTestStates] = useState<Record<number, { testing: boolean; result: WebhookTestResult | null }>>({})
+  const [preview, setPreview] = useState<PushPreviewResult | null>(null)
+  const [previewing, setPreviewing] = useState(false)
 
   const updateSetting = useCallback((key: keyof Settings, value: string) => {
     setSettings(prev => ({ ...prev, [key]: value }))
@@ -123,6 +125,13 @@ export default function PushTab({ settings, setSettings }: Props) {
     () => Object.values(testStates).some(s => s.testing),
     [testStates]
   )
+
+  const previewPush = useCallback(async () => {
+    setPreviewing(true)
+    try {
+      setPreview(await previewPushSettings({ minScore: Number(settings.push_min_score) || 0, minRelevance: Number(settings.push_min_relevance) || 0, pushMode: settings.push_mode }))
+    } catch { toast.error('推送规则预览失败') } finally { setPreviewing(false) }
+  }, [settings.push_min_relevance, settings.push_min_score, settings.push_mode])
 
   return (
     <div className="space-y-3">
@@ -272,6 +281,11 @@ export default function PushTab({ settings, setSettings }: Props) {
                 max="100"
               />
             </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+            <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={previewing} onClick={() => void previewPush()}>{previewing ? '预览中…' : '预览推送结果'}</Button>
+            {preview && <span className="text-xs text-muted-foreground">当前约 {preview.pushable} 篇符合阈值；{preview.webhookCount} 个 Webhook 可用，预计本轮推送 {preview.willPush} 篇。</span>}
           </div>
 
           <div className="space-y-2">

@@ -1,5 +1,6 @@
 import { db } from './db';
 import { applyScorePolicy } from './score-policy';
+import { SETTING_KEYS } from './settings-catalog';
 
 export async function previewScorePolicy(weightEvent: number, weightContent: number) {
   const articles = await db.article.findMany({
@@ -21,4 +22,43 @@ export async function previewScorePolicy(weightEvent: number, weightContent: num
     decreased: changes.filter(x => x.delta < 0).length,
     samples: changes.filter(x => x.delta !== 0).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 10),
   };
+}
+
+export async function previewPublicPublication(minScore: number, hideAds: boolean) {
+  const base = {
+    aiStatus: 'done',
+    source: { publicEnabled: true, deletedAt: null },
+  } as const;
+  const eligible = await db.article.count({
+    where: {
+      ...base,
+      OR: [
+        { publicOverride: 'public' },
+        { publicOverride: 'auto', score: { gte: minScore }, ...(hideAds ? { isAd: false } : {}) },
+      ],
+    },
+  });
+  const candidates = await db.article.count({ where: base });
+  return { candidates, eligible, wouldPublish: eligible, wouldHide: Math.max(0, candidates - eligible), minScore, hideAds };
+}
+
+export async function previewPushDelivery(minScore: number, minRelevance: number, pushMode: string) {
+  const pushable = await db.article.count({
+    where: {
+      pushedAt: null,
+      aiStatus: 'done',
+      score: { gte: minScore },
+      relevance: { gte: minRelevance },
+      OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: new Date() } }],
+    },
+  });
+  const webhooks = await db.setting.findUnique({ where: { key: SETTING_KEYS.FEISHU_WEBHOOK_URL }, select: { value: true } });
+  let webhookCount = 0;
+  try {
+    const parsed = JSON.parse(webhooks?.value ?? '[]') as unknown;
+    webhookCount = Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object' && (item as { enabled?: unknown }).enabled === true && typeof (item as { url?: unknown }).url === 'string' && (item as { url: string }).url.trim()).length : 0;
+  } catch {
+    webhookCount = 0;
+  }
+  return { pushMode, pushable, webhookCount, willPush: pushMode !== 'off' && webhookCount > 0 ? pushable : 0 };
 }

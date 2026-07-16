@@ -6,6 +6,16 @@ import { DiscardedRow } from './discarded-row'
 import { DISCARD_REASON_LABELS } from './helpers'
 import type { SourceProgress, DiscardedRow as DiscardedRowType } from './types'
 
+function humanizeSourceError(value?: string): string {
+  if (!value) return ''
+  if (/circuit breaker active/i.test(value)) return '数据源连续失败，暂时熔断'
+  if (/source disabled/i.test(value)) return '数据源已停用'
+  if (/source not found/i.test(value)) return '数据源不存在或已删除'
+  if (/timeout/i.test(value)) return '请求超时，可稍后重试'
+  if (/fetch failed|network|econn|socket/i.test(value)) return '网络请求失败，可稍后重试'
+  return value.length > 180 ? `${value.slice(0, 180)}…` : value
+}
+
 // ========== Source Block ==========
 
 export const SourceBlock = memo(function SourceBlock({
@@ -117,7 +127,7 @@ export const SourceBlock = memo(function SourceBlock({
           <Badge
             variant="secondary"
             className={`text-[10px] px-1.5 py-0 rounded-full ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
-            title={source.lastRunError || '源级最近一次采集结果'}
+            title={humanizeSourceError(source.lastRunError) || '源级最近一次采集结果'}
           >
             {lastRunLabel}
           </Badge>
@@ -242,7 +252,7 @@ export const SourceBlock = memo(function SourceBlock({
       {source.error && (
         <div className="px-2 py-1 text-xs text-destructive bg-red-50/50">
           <div className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 break-words">{source.error}</span>
+            <span className="min-w-0 flex-1 break-words">{humanizeSourceError(source.error)}</span>
             {onRetrySource && (
               <button
                 type="button"

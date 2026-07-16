@@ -20,6 +20,7 @@
  */
 
 import { collectAllSources, crawlSource } from './pipeline/collect';
+import type { CrawlResult } from '@/contracts/crawl';
 import { processAllPending } from './pipeline/process';
 import { analyzeAllPending } from './pipeline/analyze';
 import { reprocessWithAI } from './ai';
@@ -226,6 +227,37 @@ async function executeCollectJob(
   jobId?: string,
 ): Promise<Record<string, unknown>> {
   const sourceId = payload.sourceId as string | undefined;
+  const sourceIds = Array.isArray(payload.sourceIds)
+    ? [...new Set(payload.sourceIds.filter((id): id is string => typeof id === 'string' && id.length > 0))].slice(0, 50)
+    : [];
+  if (sourceIds.length > 0) {
+    const results: Array<CrawlResult & { sourceId: string; sourceName: string }> = [];
+    if (jobId) await startJobStage(jobId, { stage: 'collect', total: sourceIds.length });
+    for (const id of sourceIds) {
+      assertNotAborted(signal);
+      if (payload.resetSourceHealth === true) {
+        await db.source.updateMany({
+          where: { id },
+          data: { consecutiveFailures: 0, status: 'normal', circuitBreakerUntil: null },
+        });
+      }
+      const result = await collectSingleSource(id, signal);
+      results.push(...result.results);
+      if (jobId) {
+        const sourceResult = result.results[0];
+        await advanceJobProgress(jobId, {
+          doneDelta: sourceResult?.success ? 1 : 0,
+          errorDelta: sourceResult?.success ? 0 : 1,
+          currentItemLabel: sourceResult?.sourceName ?? id,
+        });
+      }
+    }
+    return summarizeCollectResult({
+      results,
+      totalNewArticles: results.reduce((sum, item) => sum + item.items.length, 0),
+      errors: results.filter(item => !item.success).length,
+    });
+  }
   if (sourceId) {
     if (payload.resetSourceHealth === true) {
       await db.source.update({
@@ -267,6 +299,28 @@ async function executeAiJob(
   jobId?: string,
 ): Promise<Record<string, unknown>> {
   const articleId = typeof payload.articleId === 'string' ? payload.articleId : undefined;
+  const articleIds = Array.isArray(payload.articleIds)
+    ? [...new Set(payload.articleIds.slice(0, 100).filter((id): id is string => typeof id === 'string' && id.length > 0))]
+    : [];
+  if (articleIds.length > 0) {
+    if (jobId) await startJobStage(jobId, { stage: 'ai', total: articleIds.length });
+    let processed = 0;
+    let errors = 0;
+    for (const id of articleIds) {
+      assertNotAborted(signal);
+      try {
+        const result = await reprocessWithAI(id, signal);
+        const failed = !result || result.status === 'failed';
+        if (failed) errors++;
+        else processed++;
+        if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, errorDelta: failed ? 1 : 0 });
+      } catch {
+        errors++;
+        if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, errorDelta: 1 });
+      }
+    }
+    return { articleIds, processed, errors };
+  }
   if (articleId) {
     const result = await reprocessWithAI(articleId, signal, jobId);
     return { articleId, result: result ?? { status: 'not_found' } };

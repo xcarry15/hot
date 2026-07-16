@@ -171,7 +171,17 @@ export async function batchToggleSources(body: Record<string, unknown>) {
 }
 
 export async function retrySource(body: Record<string, unknown>) {
-  const sourceId = typeof body.sourceId === 'string' ? body.sourceId : '';
+  const sourceIds = Array.isArray(body.sourceIds)
+    ? [...new Set(body.sourceIds.slice(0, 50).filter((id): id is string => typeof id === 'string' && id.length > 0))]
+    : [];
+  const sourceId = typeof body.sourceId === 'string' ? body.sourceId : sourceIds[0] ?? '';
+  if (sourceIds.length > 0) {
+    const existing = await db.source.findMany({ where: { id: { in: sourceIds }, deletedAt: null }, select: { id: true } });
+    if (existing.length === 0) return { error: 'Source not found', status: 404 as const };
+    const res = await runJob('collect', { sourceIds: existing.map(source => source.id), reason: 'retry', trigger: 'manual', resetSourceHealth: true });
+    if (!res.queued) return { queued: false, error: '已有抓取任务在执行中' };
+    return { queued: true, jobId: res.jobId, sourceIds: existing.map(source => source.id) };
+  }
   if (!sourceId) {
     return { error: 'Source ID is required', status: 400 as const };
   }

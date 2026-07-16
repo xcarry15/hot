@@ -399,6 +399,19 @@ export async function listPublicArticles(
   return value;
 }
 
+export async function listPublicSourceOptions(): Promise<Array<{ id: string; name: string }>> {
+  const sources = await db.source.findMany({
+    where: {
+      deletedAt: null,
+      publicEnabled: true,
+      articles: { some: { publicStatus: 'published' } },
+    },
+    select: { id: true, name: true },
+    orderBy: { name: 'asc' },
+  });
+  return sources;
+}
+
 export async function getPublicArticleDetail(id: string, options: { recordView?: boolean } = {}): Promise<PublicArticleDetailDto | null> {
   const article = await db.article.findFirst({
     where: { id, ...buildPublicWhere() },

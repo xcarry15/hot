@@ -24,6 +24,8 @@ export async function saveSettings(
   return requestJson('PUT', '/api/settings', { body: patch, signal });
 }
 
+export interface SettingsSaveResult { ok: true; scoreRecomputed?: number; publicationRebuilt?: boolean; success?: boolean }
+
 /**
  * 解密指定敏感字段。服务端仍会以 SENSITIVE_SETTING_KEYS 做白名单过滤，
  * 避免进入某个编辑页时把无关密钥一并发送到浏览器。
@@ -80,6 +82,16 @@ export async function previewScoreSettings(input: ScorePreviewInput, signal?: Ab
     body: { action: 'score-preview', ...input },
     signal,
   });
+}
+
+export interface PublicPreviewResult { candidates: number; eligible: number; wouldPublish: number; wouldHide: number; minScore: number; hideAds: boolean }
+export interface PushPreviewResult { pushMode: string; pushable: number; webhookCount: number; willPush: number }
+export async function previewPushSettings(input: { minScore: number; minRelevance: number; pushMode: string }, signal?: AbortSignal): Promise<PushPreviewResult> {
+  return requestJson('POST', '/api/settings', { body: { action: 'push-preview', ...input }, signal });
+}
+
+export async function previewPublicSettings(input: { minScore: number; hideAds: boolean }, signal?: AbortSignal): Promise<PublicPreviewResult> {
+  return requestJson('POST', '/api/settings', { body: { action: 'public-preview', ...input }, signal });
 }
 
 export interface WebhookTestResultDto {

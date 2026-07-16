@@ -1,16 +1,33 @@
 'use client'
 
-import { ExternalLink } from 'lucide-react'
+import { Check, Copy, ExternalLink } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 interface Props {
   href: string
   articleId: string
+  shareUrl?: string
   className?: string
 }
 
-export default function PublicOriginalLink({ href, articleId, className }: Props) {
+export function PublicShareButton({ shareUrl, className }: { shareUrl: string; className?: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleShare = async () => {
+    try {
+      if (navigator.share) await navigator.share({ title: document.title, url: shareUrl })
+      else {
+        await navigator.clipboard.writeText(shareUrl)
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1600)
+      }
+    } catch { /* 用户取消分享或浏览器拒绝剪贴板时不打断阅读 */ }
+  }
+  return <button type="button" onClick={() => void handleShare()} className={`inline-flex h-7 items-center gap-1 px-2 text-xs text-[var(--public-muted)] transition-colors hover:bg-[var(--public-surface-soft)] hover:text-[var(--public-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] ${className ?? ''}`} aria-label="分享文章">{copied ? '已复制' : '分享'}</button>
+}
+
+export default function PublicOriginalLink({ href, articleId, shareUrl, className }: Props) {
   const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
   const handleClick = () => {
@@ -18,6 +35,17 @@ export default function PublicOriginalLink({ href, articleId, className }: Props
       method: 'POST',
       keepalive: true,
     })
+  }
+
+  const handleCopy = async () => {
+    const url = shareUrl ?? window.location.href
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      setCopied(false)
+    }
   }
 
   useEffect(() => {
@@ -58,6 +86,7 @@ export default function PublicOriginalLink({ href, articleId, className }: Props
           <p className="text-sm font-medium text-[var(--public-ink)]">打开原文？</p>
           <p className="mt-1 text-xs leading-5 text-[var(--public-muted)]">将前往来源网站继续阅读。</p>
           <div className="mt-3 flex justify-end gap-2">
+            <button type="button" onClick={() => void handleCopy()} className="inline-flex h-8 items-center gap-1 px-2 text-xs text-[var(--public-muted)] transition-colors hover:text-[var(--public-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]" title="复制文章链接">{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied ? '已复制' : '复制链接'}</button>
             <button type="button" onClick={() => setOpen(false)} className="h-8 px-3 text-xs text-[var(--public-muted)] transition-colors hover:text-[var(--public-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">
               取消
             </button>

@@ -6,7 +6,7 @@ import PublicHomeSkeleton from '@/components/public-home-skeleton'
 import PublicArticleFeed from '@/components/public-article-feed'
 import PublicFooter from '@/components/public-footer'
 import PublicHeader from '@/components/public-header'
-import { listPublicArticles } from '@/lib/public-article-service'
+import { listPublicArticles, listPublicSourceOptions } from '@/lib/public-article-service'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,8 +48,12 @@ async function PublicHomeContent({ searchParams }: { searchParams: Promise<Searc
   const from = first(params.from)
   const to = first(params.to)
   let data
+  let sourceOptions
   try {
-    data = await listPublicArticles({ search, sourceId, from, to })
+    [data, sourceOptions] = await Promise.all([
+      listPublicArticles({ search, sourceId, from, to }),
+      listPublicSourceOptions(),
+    ])
   } catch {
     return <PublicErrorState />
   }
@@ -67,6 +71,7 @@ async function PublicHomeContent({ searchParams }: { searchParams: Promise<Searc
           from={from}
           to={to}
           hasFilter={hasFilter}
+          sourceOptions={sourceOptions}
         />
       </main>
 

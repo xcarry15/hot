@@ -38,7 +38,7 @@ export async function revealSensitiveSettings(requestedKeys?: string[]) {
 }
 
 export async function updateSettings(input: unknown): Promise<
-  | { ok: true }
+  | { ok: true; success?: boolean; scoreRecomputed?: number; publicationRebuilt?: boolean }
   | { ok: false; error: string; details: unknown[] }
 > {
   const parsed = settingsUpdateSchema.safeParse(input);
@@ -88,10 +88,11 @@ export async function updateSettings(input: unknown): Promise<
   const nextWeightContent = Number(updateMap[SETTING_KEYS.AI_WEIGHT_CONTENT] ?? effectiveContentWeight);
 
   // 设置与历史文章重算在同一事务提交，避免“权重已保存、文章只更新一部分”。
-  await db.$transaction(async tx => {
+  const scoreRecomputed = weightChanged ? await db.$transaction(async tx => {
     for (const [key, value] of updates) {
       await tx.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
     }
+    let recomputed = 0;
     if (weightChanged) {
       const articles = await tx.article.findMany({
         where: { eventScore: { not: null }, contentScore: { not: null } },
@@ -111,13 +112,19 @@ export async function updateSettings(input: unknown): Promise<
             scorePolicySnapshot: buildScorePolicySnapshot(nextWeightEvent, nextWeightContent),
           },
         });
+        recomputed++;
       }
     }
     if (publicationNeedsRebuild) {
       await rebuildPublicPublicationSnapshot(tx, { contentChanged: weightChanged });
     }
+    return recomputed;
+  }, { maxWait: 10_000, timeout: 120_000 }) : await db.$transaction(async tx => {
+    for (const [key, value] of updates) await tx.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
+    if (publicationNeedsRebuild) await rebuildPublicPublicationSnapshot(tx, { contentChanged: false });
+    return 0;
   }, { maxWait: 10_000, timeout: 120_000 });
   invalidateAISettingsCache();
   invalidatePublicArticleCache();
-  return { ok: true };
+  return { ok: true, success: true, scoreRecomputed, publicationRebuilt: publicationNeedsRebuild };
 }

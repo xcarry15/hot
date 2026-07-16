@@ -47,6 +47,7 @@ export default function SettingsTab() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('dashboard')
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const settingsBaselineRef = useRef<string | null>(null)
   const revealAttemptedRef = useRef(false)
   const pendingRevealBaselineRef = useRef<string | null>(null)
@@ -181,10 +182,14 @@ export default function SettingsTab() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await saveSettings(buildSavePayload())
+      const result = await saveSettings(buildSavePayload()) as { scoreRecomputed?: number; publicationRebuilt?: boolean }
       if (mountedRef.current) {
         settingsBaselineRef.current = currentSettingsFingerprint
-        toast.success('设置已保存')
+        const details = [
+          result.scoreRecomputed ? `已重算 ${result.scoreRecomputed} 篇评分` : '',
+          result.publicationRebuilt ? '已同步公开状态' : '',
+        ].filter(Boolean).join('，')
+        toast.success(details ? `设置已保存，${details}` : '设置已保存')
       }
     } catch (err) {
       if (mountedRef.current) {
@@ -234,12 +239,19 @@ export default function SettingsTab() {
             <TabsTrigger value="public" className="text-xs px-3 h-7 whitespace-nowrap">公开</TabsTrigger>
             <TabsTrigger value="sources" className="text-xs px-3 h-7 whitespace-nowrap">源管理</TabsTrigger>
             <TabsTrigger value="keywords" className="text-xs px-3 h-7 whitespace-nowrap">关键词</TabsTrigger>
-            <TabsTrigger value="ai-model" className="text-xs px-3 h-7 whitespace-nowrap">AI 模型</TabsTrigger>
-            <TabsTrigger value="prompts" className="text-xs px-3 h-7 whitespace-nowrap">提示词</TabsTrigger>
-            <TabsTrigger value="push" className="text-xs px-3 h-7 whitespace-nowrap">推送</TabsTrigger>
-            <TabsTrigger value="account" className="text-xs px-3 h-7 whitespace-nowrap">账户</TabsTrigger>
-            <TabsTrigger value="data" className="text-xs px-3 h-7 whitespace-nowrap">数据清理</TabsTrigger>
+            {advancedOpen && <>
+              <TabsTrigger value="ai-model" className="text-xs px-3 h-7 whitespace-nowrap">AI 模型</TabsTrigger>
+              <TabsTrigger value="prompts" className="text-xs px-3 h-7 whitespace-nowrap">提示词</TabsTrigger>
+              <TabsTrigger value="push" className="text-xs px-3 h-7 whitespace-nowrap">推送</TabsTrigger>
+              <TabsTrigger value="account" className="text-xs px-3 h-7 whitespace-nowrap">账户</TabsTrigger>
+              <TabsTrigger value="data" className="text-xs px-3 h-7 whitespace-nowrap">数据清理</TabsTrigger>
+            </>}
           </TabsList>
+        </div>
+
+        <div className="mx-3 mt-2 flex shrink-0 items-center justify-between rounded-md border bg-muted/20 px-3 py-2 sm:mx-4">
+          <div><p className="text-xs font-medium">常用设置</p><p className="text-[11px] text-muted-foreground">概览、公开、源管理、关键词是日常操作入口。</p></div>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setAdvancedOpen((value) => { const next = !value; if (!next) setActiveTab('dashboard'); return next })}>{advancedOpen ? '收起高级' : '展开高级设置'}</Button>
         </div>
 
         <TabsContent value="dashboard" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
@@ -250,7 +262,7 @@ export default function SettingsTab() {
           <PublicTab settings={settings} setSettings={setSettings} />
         </TabsContent>
 
-        <TabsContent value="data" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="data" className={`flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4 ${advancedOpen ? '' : 'hidden'}`}>
           <DataTab />
         </TabsContent>
 
@@ -258,7 +270,7 @@ export default function SettingsTab() {
           <SourcesManagement />
         </TabsContent>
 
-        <TabsContent value="ai-model" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="ai-model" className={`flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4 ${advancedOpen ? '' : 'hidden'}`}>
           <AiModelTab
             settings={settings}
             setSettings={setSettings}
@@ -267,15 +279,15 @@ export default function SettingsTab() {
           />
         </TabsContent>
 
-        <TabsContent value="prompts" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="prompts" className={`flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4 ${advancedOpen ? '' : 'hidden'}`}>
           <PromptsTab settings={settings} setSettings={setSettings} />
         </TabsContent>
 
-        <TabsContent value="push" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="push" className={`flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4 ${advancedOpen ? '' : 'hidden'}`}>
           <PushTab settings={settings} setSettings={setSettings} />
         </TabsContent>
 
-        <TabsContent value="account" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="account" className={`flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4 ${advancedOpen ? '' : 'hidden'}`}>
           <AccountTab />
         </TabsContent>
 

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import PublicArticleTimeline from '@/components/public-article-timeline'
 import type {
   PublicArticleDateGroupDto,
+  PublicArticleSourceOptionDto,
   PublicArticleListResponseDto,
 } from '@/contracts/public-articles'
 
@@ -19,6 +20,7 @@ type Props = {
   from: string
   to: string
   hasFilter: boolean
+  sourceOptions: PublicArticleSourceOptionDto[]
 }
 
 function buildFeedUrl(params: {
@@ -94,6 +96,7 @@ export default function PublicArticleFeed({
   from,
   to,
   hasFilter,
+  sourceOptions,
 }: Props) {
   const [state, setState] = useState(initialData)
   const [loading, setLoading] = useState(false)
@@ -185,7 +188,7 @@ export default function PublicArticleFeed({
     <>
       <div className="mb-5 flex items-center justify-between gap-4">
         <h1 className="public-display shrink-0 text-3xl leading-tight text-[var(--public-ink)] sm:text-4xl">文章列表</h1>
-        <form method="get" className="flex min-w-0 max-w-[330px] flex-1 items-center justify-end gap-2">
+        <form method="get" className="flex min-w-0 max-w-[760px] flex-1 flex-wrap items-center justify-end gap-2">
           <label className="min-w-0 flex-1">
             <span className="sr-only">搜索文章</span>
             <input
@@ -195,9 +198,15 @@ export default function PublicArticleFeed({
               className="h-9 w-full rounded-none border border-[var(--public-hairline)] bg-transparent px-3 text-sm text-[var(--public-ink)] outline-none transition-[border-color,box-shadow] placeholder:text-[var(--public-muted-soft)] focus:border-[var(--public-primary)] focus:ring-4 focus:ring-[color:rgb(204_120_92_/_0.15)]"
             />
           </label>
-          {sourceId && <input type="hidden" name="source" value={sourceId} />}
-          {from && <input type="hidden" name="from" value={from} />}
-          {to && <input type="hidden" name="to" value={to} />}
+          <label className="sr-only" htmlFor="public-source-filter">数据源</label>
+          <select id="public-source-filter" name="source" defaultValue={sourceId} className="h-9 max-w-[150px] border border-[var(--public-hairline)] bg-transparent px-2 text-xs text-[var(--public-ink)] outline-none focus:border-[var(--public-primary)]">
+            <option value="">全部来源</option>
+            {sourceOptions.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}
+          </select>
+          <label className="sr-only" htmlFor="public-from-filter">开始日期</label>
+          <input id="public-from-filter" type="date" name="from" defaultValue={from} className="h-9 border border-[var(--public-hairline)] bg-transparent px-2 text-xs text-[var(--public-ink)] outline-none focus:border-[var(--public-primary)]" />
+          <label className="sr-only" htmlFor="public-to-filter">结束日期</label>
+          <input id="public-to-filter" type="date" name="to" defaultValue={to} className="h-9 border border-[var(--public-hairline)] bg-transparent px-2 text-xs text-[var(--public-ink)] outline-none focus:border-[var(--public-primary)]" />
           <button type="submit" className="h-9 shrink-0 rounded-none bg-[var(--public-primary)] px-4 text-sm font-medium text-white transition-[background-color,transform] hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color:rgb(204_120_92_/_0.25)] active:translate-y-px motion-reduce:transition-none">搜索</button>
           {hasFilter && <Link href="/" className="shrink-0 px-1 text-sm text-[var(--public-muted)] underline-offset-4 transition-colors hover:text-[var(--public-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">清除</Link>}
         </form>

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import PublicErrorState from '@/components/public-error-state'
 import PublicFooter from '@/components/public-footer'
 import PublicHeader from '@/components/public-header'
-import PublicOriginalLink from '@/components/public-original-link'
+import PublicOriginalLink, { PublicShareButton } from '@/components/public-original-link'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import { getTagToneClass } from '@/features/article-tag-style'
 import { getPublicArticleDetail } from '@/lib/public-article-service'
@@ -86,7 +86,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
               <span>{article.source.name}</span>
               {article.originalSource && article.originalSource !== article.source.name && <><span className="text-[var(--public-hairline-strong)]">|</span><span>原始来源：{article.originalSource}</span></>}
               {article.category && <><span className="text-[var(--public-hairline-strong)]">|</span><span>{article.category}</span></>}
-              {originalUrl && <PublicOriginalLink href={originalUrl} articleId={article.id} className="ml-auto" />}
+              <div className="ml-auto flex items-center gap-1"><PublicShareButton shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} />{originalUrl && <PublicOriginalLink href={originalUrl} articleId={article.id} shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} />}</div>
             </div>
 
             <h1 className="public-display mt-2 text-3xl leading-[1.25] text-[var(--public-ink)] sm:mt-2 sm:text-4xl">{article.title}</h1>

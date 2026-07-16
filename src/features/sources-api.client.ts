@@ -66,6 +66,10 @@ export async function retrySource(
   return requestJson('POST', '/api/sources/retry', { body: { sourceId }, signal });
 }
 
+export async function retrySources(sourceIds: string[], signal?: AbortSignal): Promise<unknown> {
+  return requestJson('POST', '/api/sources/retry', { body: { sourceIds }, signal });
+}
+
 /* ── Preset sources ────────────────────────────────────────────── */
 
 export interface PresetSource {

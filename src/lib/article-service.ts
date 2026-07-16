@@ -12,6 +12,7 @@
  *   - 删除事务顺序与原 Route 完全一致（pushLog → article）；
  *   - 不建立通用 Repository；与 maintenance-service 各保留本地事务 helper。
  */
+import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import {
   ARTICLE_DETAIL_SELECT,
@@ -68,8 +69,8 @@ export interface ArticleListFilter {
   inbox?: boolean;
 }
 
-export function buildArticleListWhere(filter: ArticleListFilter): Record<string, unknown> {
-  const where: Record<string, unknown> = {};
+export function buildArticleListWhere(filter: ArticleListFilter): Prisma.ArticleWhereInput {
+  const where: Prisma.ArticleWhereInput = {};
   if (filter.aiStatus) where.aiStatus = filter.aiStatus;
   if (filter.brandContains) where.brand = { contains: filter.brandContains };
   if (filter.category) where.category = filter.category;
@@ -77,7 +78,7 @@ export function buildArticleListWhere(filter: ArticleListFilter): Record<string,
   if (Number.isFinite(filter.minRelevance)) where.relevance = { gte: filter.minRelevance };
   if (filter.sourceId) where.sourceId = filter.sourceId;
   if (filter.reviewStatus) where.reviewStatus = filter.reviewStatus;
-  if (filter.fetchStatus) where.fetchStatus = filter.fetchStatus;
+  if (filter.fetchStatus) where.fetchStatus = filter.fetchStatus as 'pending' | 'fetched' | 'failed';
   if (filter.inbox) {
     where.fetchStatus = 'fetched';
     where.reviewStatus = 'unreviewed';
@@ -102,8 +103,8 @@ export interface ArticleDeleteFilter {
   maxScore?: number;
 }
 
-export function buildArticleDeleteWhere(filter: ArticleDeleteFilter): Record<string, unknown> {
-  const where: Record<string, unknown> = {};
+export function buildArticleDeleteWhere(filter: ArticleDeleteFilter): Prisma.ArticleWhereInput {
+  const where: Prisma.ArticleWhereInput = {};
   if (filter.aiStatus) where.aiStatus = filter.aiStatus;
   if (filter.category) where.category = filter.category;
   if (Number.isFinite(filter.maxScore)) where.score = { lte: filter.maxScore };

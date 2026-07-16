@@ -37,7 +37,7 @@ import {
   triggerCrawlStage,
 } from '@/features/jobs-api.client'
 import { triggerPushArticle } from '@/features/articles-api.client'
-import { retrySource } from '@/features/sources-api.client'
+import { retrySource, retrySources } from '@/features/sources-api.client'
 
 // ========== Main Component ==========
 
@@ -111,6 +111,8 @@ export default function CrawlLogTab() {
   }, [sources, filterState.sourceId])
 
   const allSources = useMemo(() => sources.map(s => ({ id: s.id, name: s.name })), [sources])
+  const failedSources = useMemo(() => sources.filter(source => source.lastRunStatus === 'failed' || source.status === 'error'), [sources])
+  const failedArticles = useMemo(() => sources.reduce((count, source) => count + source.articles.filter(article => article.ai === 'failed' || article.process === 'failed' || article.push === 'failed').length, 0), [sources])
 
   // 展开/折叠偏好是纯 UI 状态：从 snapshot 派生的 expanded 字段是默认值，
   // 本地 overrides 覆盖之。
@@ -261,6 +263,17 @@ export default function CrawlLogTab() {
       void refreshSnapshot()
     } catch {
       toast.error('数据源重试触发失败')
+    }
+  }
+
+  const handleRetryFailedSources = async () => {
+    if (isAnyRunning || failedSources.length === 0) return
+    try {
+      await retrySources(failedSources.map(source => source.id))
+      toast.info(`已将 ${failedSources.length} 个异常源加入重试任务`)
+      void refreshSnapshot()
+    } catch {
+      toast.error('批量重试失败，请确认当前没有其他任务运行')
     }
   }
 
@@ -742,6 +755,14 @@ export default function CrawlLogTab() {
           <p className="text-xs text-muted-foreground">
             数据源抓取时将在这里实时显示进度
           </p>
+        )}
+        {(failedSources.length > 0 || failedArticles > 0) && (
+          <div className="flex flex-wrap items-center gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <span className="font-medium">异常摘要</span>
+            {failedSources.length > 0 && <span>{failedSources.length} 个数据源失败</span>}
+            {failedArticles > 0 && <span>{failedArticles} 篇文章步骤失败</span>}
+            <Button size="sm" variant="outline" className="ml-auto h-7 border-amber-300 px-2 text-xs text-amber-900" disabled={isAnyRunning} onClick={() => void handleRetryFailedSources()}>一键重试异常源</Button>
+          </div>
         )}
       </div>
 

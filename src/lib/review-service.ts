@@ -1,7 +1,7 @@
 import { db } from '@/lib/db';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
-import { refreshPublicPublication, updatePublicPublicationSetting } from '@/lib/public-publication-service';
+import { refreshPublicPublication, refreshPublicPublications, updatePublicPublicationSetting } from '@/lib/public-publication-service';
 import { captureInboxSnapshot } from '@/lib/inbox-snapshot-service';
 import { buildAiResetData } from '@/lib/article-duplicate-state';
 
@@ -91,6 +91,46 @@ export async function reviewArticle(input: {
   invalidatePublicArticleCache();
   await captureInboxSnapshot().catch(() => undefined);
   return { article: updated, restoredDuplicate: restoreDuplicate };
+}
+
+export async function reviewArticles(input: {
+  articleIds: string[];
+  status: ReviewStatus;
+  reasonTags?: unknown;
+}) {
+  if (!REVIEW_STATUSES.includes(input.status)) throw new Error('无效的归类状态');
+  const ids = [...new Set(input.articleIds.filter(Boolean))].slice(0, 100);
+  if (ids.length === 0) return { updated: 0, restoredDuplicateIds: [] as string[] };
+  const rules = await getReviewRules();
+  const pinHours = Math.max(1, Math.min(720, Number(await getSetting(SETTING_KEYS.PUBLIC_PIN_HOURS)) || 24));
+  const isImportant = input.status === 'important';
+  const publicOverride = isImportant ? 'public' : rules[input.status];
+  const now = new Date();
+  const tags = JSON.stringify(parseReasonTags(input.reasonTags));
+  const result = await db.$transaction(async tx => {
+    const articles = await tx.article.findMany({ where: { id: { in: ids } }, select: { id: true, duplicateStatus: true } });
+    const restoredDuplicateIds = isImportant
+      ? articles.filter(article => article.duplicateStatus === 'duplicate').map(article => article.id)
+      : [];
+    await tx.article.updateMany({
+      where: { id: { in: articles.map(article => article.id) } },
+      data: {
+        reviewStatus: input.status,
+        reviewReasonTags: tags,
+        reviewedAt: now,
+        publicOverride,
+        pinUntil: isImportant ? new Date(now.getTime() + pinHours * 60 * 60 * 1000) : null,
+      },
+    });
+    for (const id of restoredDuplicateIds) {
+      await tx.article.update({ where: { id }, data: buildAiResetData({ dedupOverride: true }) });
+    }
+    await refreshPublicPublications(articles.map(article => article.id), tx, { contentChanged: true });
+    return { updated: articles.length, restoredDuplicateIds };
+  });
+  invalidatePublicArticleCache();
+  await captureInboxSnapshot().catch(() => undefined);
+  return result;
 }
 
 export async function listTuningSuggestions() {

@@ -55,6 +55,14 @@ export async function reviewArticle(
   return requestJson('POST', '/api/articles/review', { body: { articleId, status, reasonTags } });
 }
 
+export async function reviewArticles(
+  articleIds: string[],
+  status: string,
+  reasonTags: string[] = [],
+): Promise<{ updated: number; restoredDuplicateIds?: string[]; aiQueued?: boolean }> {
+  return requestJson('POST', '/api/articles/review', { body: { articleIds, status, reasonTags } });
+}
+
 export async function fetchArticleDetail(
   articleId: string,
   signal?: AbortSignal,
@@ -93,6 +101,14 @@ export async function triggerArticleRefetch(
   signal?: AbortSignal,
 ): Promise<unknown> {
   return requestJson('POST', '/api/articles/refetch', { body: { articleId }, signal });
+}
+
+export async function triggerArticlesRefetch(articleIds: string[]): Promise<{ processed: number; failed: number }> {
+  return requestJson('POST', '/api/articles/refetch', { body: { articleIds } });
+}
+
+export async function triggerArticlesReprocess(articleIds: string[]): Promise<{ success: boolean; queued: boolean; jobId?: string }> {
+  return requestJson('POST', '/api/articles/reprocess', { body: { articleIds } });
 }
 
 export async function triggerPushArticle(

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
 import { fetchSources, updateSource } from '@/features/sources-api.client'
+import { previewPublicSettings, type PublicPreviewResult } from '@/features/settings-api.client'
 import type { SourceDto } from '@/contracts/sources'
 import type { Settings } from './types'
 
@@ -20,6 +21,8 @@ interface Props {
 export default function PublicTab({ settings, setSettings }: Props) {
   const [sources, setSources] = useState<SourceDto[]>([])
   const [loadingSources, setLoadingSources] = useState(true)
+  const [preview, setPreview] = useState<PublicPreviewResult | null>(null)
+  const [previewing, setPreviewing] = useState(false)
 
   useEffect(() => {
     fetchSources().then(setSources).catch(() => toast.error('获取数据源公开状态失败')).finally(() => setLoadingSources(false))
@@ -33,6 +36,13 @@ export default function PublicTab({ settings, setSettings }: Props) {
     } catch {
       toast.error('更新数据源公开状态失败')
     }
+  }
+
+  const previewRules = async () => {
+    setPreviewing(true)
+    try {
+      setPreview(await previewPublicSettings({ minScore: Number(settings.public_min_score) || 0, hideAds: settings.public_hide_ads !== 'false' }))
+    } catch { toast.error('公开规则预览失败') } finally { setPreviewing(false) }
   }
 
   return (
@@ -88,6 +98,10 @@ export default function PublicTab({ settings, setSettings }: Props) {
                 </div>
               ))}
             </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+            <button type="button" onClick={() => void previewRules()} disabled={previewing} className="h-8 rounded-md border px-3 text-xs font-medium hover:bg-muted disabled:opacity-60">{previewing ? '预览中…' : '预览公开结果'}</button>
+            {preview && <span className="text-xs text-muted-foreground">当前约 {preview.wouldPublish} 篇可公开，{preview.wouldHide} 篇会被隐藏（候选 {preview.candidates} 篇）</span>}
           </div>
         </CardContent>
       </Card>
