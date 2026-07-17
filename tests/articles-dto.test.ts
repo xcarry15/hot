@@ -26,6 +26,7 @@ function articleRecord(): Omit<ArticleDetailRecord, 'source' | 'pushLogs'> {
     adProbability: 10,
     aiConfidence: 90,
     aiStatus: 'done',
+    fetchStatus: 'fetched',
     skipReason: null,
     dedupDetail: null,
     isAd: false,
@@ -33,9 +34,14 @@ function articleRecord(): Omit<ArticleDetailRecord, 'source' | 'pushLogs'> {
     reviewReasonTags: '[]',
     reviewedAt: null,
     publicOverride: 'auto',
+    publicStatus: 'published',
     pinUntil: null,
     duplicateOfId: null,
     duplicateStatus: 'none',
+    aiSnapshot: '{}',
+    manualOverrides: '[]',
+    manualCorrectedAt: null,
+    publicPublicationReason: 'eligible',
     viewCount: 0,
     originalClickCount: 0,
     pushedAt: new Date('2026-07-11T01:00:00Z'),
@@ -74,6 +80,7 @@ describe('Article API DTO', () => {
     });
     expect(list.publishedAt).toBe('2026-07-10T01:00:00.000Z');
     expect(list.excerpt).toBe('summary');
+    expect(list.aiConfidence).toBe(90);
     expect(list).not.toHaveProperty('cleanContent');
     expect(list).not.toHaveProperty('rawContent');
     expect(list).not.toHaveProperty('articleBody');

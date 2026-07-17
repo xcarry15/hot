@@ -22,9 +22,18 @@ import {
   type ArticleDetailDto,
   type ArticleListResponseDto,
 } from '@/contracts/articles';
-import { splitBrands } from '@/lib/shared/article-codecs';
 import { parseDedupEvidence } from '@/lib/dedup-evidence';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
+import { refreshPublicPublication } from '@/lib/public-publication-service';
+import { splitBrands } from '@/lib/shared/article-codecs';
+import { getAISettings } from '@/lib/ai-client';
+import {
+  buildEffectiveScoreUpdate,
+  buildManualOverrideUpdate,
+  parseArticleAiSnapshot,
+  type ManualOverrideField,
+} from '@/lib/article-calibration';
+import { buildAiResetDataForArticle } from '@/lib/article-duplicate-state';
 
 type ArticleMutationDb = Pick<typeof db, 'article' | 'pushLog' | '$transaction'>;
 
@@ -67,6 +76,9 @@ export interface ArticleListFilter {
   reviewStatus?: string;
   fetchStatus?: string;
   inbox?: boolean;
+  anomaly?: 'needs_attention';
+  manualOnly?: boolean;
+  sort?: 'newest' | 'oldest' | 'score_desc' | 'score_asc' | 'relevance_desc' | 'relevance_asc' | 'event_desc' | 'event_asc' | 'content_desc' | 'content_asc' | 'ad_desc' | 'ad_asc' | 'confidence_desc' | 'confidence_asc';
 }
 
 export function buildArticleListWhere(filter: ArticleListFilter): Prisma.ArticleWhereInput {
@@ -83,12 +95,36 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
     where.fetchStatus = 'fetched';
     where.reviewStatus = 'unreviewed';
   }
-  if (filter.search) {
+  if (filter.anomaly === 'needs_attention') {
     where.OR = [
+      { fetchStatus: 'failed' },
+      { aiStatus: { in: ['failed', 'skipped'] } },
+      { duplicateStatus: 'duplicate' },
+      { aiConfidence: { lt: 70 } },
+      { publicStatus: 'published', reviewStatus: 'unreviewed' },
+    ];
+  }
+  if (filter.manualOnly) {
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      { NOT: { manualOverrides: '[]' } },
+    ];
+  }
+  if (filter.anomaly === 'needs_attention') {
+    const attention = where.OR ?? [];
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      { OR: attention },
+    ];
+    delete where.OR;
+  }
+  if (filter.search) {
+    const searchWhere: Prisma.ArticleWhereInput = { OR: [
       { title: { contains: filter.search } },
       { summary: { contains: filter.search } },
       { brand: { contains: filter.search } },
-    ];
+    ] };
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), searchWhere];
   }
   return where;
 }
@@ -117,6 +153,7 @@ export interface ListArticlesParams {
   filter?: ArticleListFilter;
   page?: number;
   pageSize?: number;
+  all?: boolean;
 }
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -129,8 +166,8 @@ const MAX_PAGE_SIZE = 100;
 export async function listArticles(
   params: ListArticlesParams = {},
 ): Promise<ArticleListResponseDto> {
-  const page = Math.max(1, params.page ?? 1);
-  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, params.pageSize ?? DEFAULT_PAGE_SIZE));
+  const page = params.all ? 1 : Math.max(1, params.page ?? 1);
+  const pageSize = params.all ? undefined : Math.min(MAX_PAGE_SIZE, Math.max(1, params.pageSize ?? DEFAULT_PAGE_SIZE));
   const where = buildArticleListWhere(params.filter ?? {});
 
   const [items, total, categoryRows, brandRows] = await Promise.all([
@@ -140,11 +177,39 @@ export async function listArticles(
         ...ARTICLE_LIST_SELECT,
         source: { select: { name: true, type: true } },
       },
-      orderBy: params.filter?.inbox
-        ? [{ createdAt: 'asc' }]
-        : [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-      skip: (page - 1) * pageSize,
-      take: pageSize,
+      orderBy: params.filter?.sort === 'oldest'
+        ? [{ publishedAt: 'asc' }, { createdAt: 'asc' }]
+        : params.filter?.sort === 'score_desc'
+          ? [{ score: 'desc' }, { createdAt: 'desc' }]
+          : params.filter?.sort === 'score_asc'
+            ? [{ score: 'asc' }, { createdAt: 'desc' }]
+            : params.filter?.sort === 'relevance_desc'
+              ? [{ relevance: 'desc' }, { createdAt: 'desc' }]
+              : params.filter?.sort === 'relevance_asc'
+                ? [{ relevance: 'asc' }, { createdAt: 'desc' }]
+                : params.filter?.sort === 'event_desc'
+                  ? [{ eventScore: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
+                  : params.filter?.sort === 'event_asc'
+                    ? [{ eventScore: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
+                    : params.filter?.sort === 'content_desc'
+                      ? [{ contentScore: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
+                      : params.filter?.sort === 'content_asc'
+                        ? [{ contentScore: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
+                        : params.filter?.sort === 'ad_desc'
+                          ? [{ adProbability: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
+                          : params.filter?.sort === 'ad_asc'
+                            ? [{ adProbability: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
+                            : params.filter?.sort === 'confidence_desc'
+                              ? [{ aiConfidence: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
+                              : params.filter?.sort === 'confidence_asc'
+                                ? [{ aiConfidence: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
+                                : params.filter?.inbox
+                                  ? [{ createdAt: 'asc' }]
+                                  : [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+      ...(pageSize === undefined ? {} : {
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
     }),
     db.article.count({ where }),
     db.article.groupBy({
@@ -169,8 +234,8 @@ export async function listArticles(
     items: items.map(serializeArticleListItem),
     total,
     page,
-    pageSize,
-    totalPages: total === 0 ? 0 : Math.ceil(total / pageSize),
+    pageSize: pageSize ?? total,
+    totalPages: pageSize === undefined ? (total === 0 ? 0 : 1) : Math.ceil(total / pageSize),
     facets: {
       categories: categoryRows
         .map((row) => ({ value: row.category, count: row._count.category }))
@@ -179,6 +244,156 @@ export async function listArticles(
         .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, 'zh-CN')),
     },
   };
+}
+
+export interface UpdateArticleEditorialInput {
+  summary?: string;
+  brand?: string;
+  category?: string;
+  tags?: Array<{ name: string; tone?: string }>;
+  keyPoints?: string[];
+  publicOverride?: 'auto' | 'public' | 'hidden';
+  relevance?: number;
+  eventScore?: number | null;
+  contentScore?: number | null;
+  adProbability?: number | null;
+  isAd?: boolean;
+  restoreFields?: ManualOverrideField[];
+}
+
+function cleanScore(value: number | null | undefined): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function cleanText(value: string | undefined, max: number): string | undefined {
+  if (value === undefined) return undefined;
+  return value.trim().slice(0, max);
+}
+
+function isRestorableSnapshotValue(field: ManualOverrideField, value: unknown): value is string | number | boolean {
+  if (['relevance', 'eventScore', 'contentScore', 'adProbability'].includes(field)) {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+  if (field === 'isAd') return typeof value === 'boolean';
+  return typeof value === 'string';
+}
+
+/** 保存人工纠错或单篇公开状态，并同步持久化公开快照。 */
+export async function updateArticleEditorial(id: string, input: UpdateArticleEditorialInput): Promise<ArticleDetailDto | null> {
+  const current = await db.article.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      summary: true,
+      brand: true,
+      category: true,
+      tags: true,
+      keyPoints: true,
+      relevance: true,
+      eventScore: true,
+      contentScore: true,
+      adProbability: true,
+      isAd: true,
+      manualOverrides: true,
+      aiSnapshot: true,
+    },
+  });
+  if (!current) return null;
+  const data: Prisma.ArticleUpdateInput = {};
+  const touched: ManualOverrideField[] = [];
+  const restored = input.restoreFields ?? [];
+  const snapshot = parseArticleAiSnapshot(current.aiSnapshot);
+  const summary = cleanText(input.summary, 10_000);
+  const category = cleanText(input.category, 100);
+  if (summary !== undefined) { data.summary = summary; touched.push('summary'); }
+  if (category !== undefined) { data.category = category; touched.push('category'); }
+  if (input.brand !== undefined) { data.brand = JSON.stringify(splitBrands(input.brand).slice(0, 20)); touched.push('brand'); }
+  if (input.tags !== undefined) { data.tags = JSON.stringify(input.tags.slice(0, 30).map((tag) => ({ n: tag.name.trim().slice(0, 50), t: (tag.tone || '中').trim().slice(0, 10) })).filter((tag) => tag.n)); touched.push('tags'); }
+  if (input.keyPoints !== undefined) { data.keyPoints = JSON.stringify(input.keyPoints.map((item) => item.trim().slice(0, 500)).filter(Boolean).slice(0, 20)); touched.push('keyPoints'); }
+  if (input.publicOverride !== undefined) data.publicOverride = input.publicOverride;
+  const relevance = cleanScore(input.relevance);
+  const eventScore = cleanScore(input.eventScore);
+  const contentScore = cleanScore(input.contentScore);
+  const adProbability = cleanScore(input.adProbability);
+  if (typeof relevance === 'number') { data.relevance = relevance; touched.push('relevance'); }
+  if (typeof eventScore === 'number') { data.eventScore = eventScore; touched.push('eventScore'); }
+  if (typeof contentScore === 'number') { data.contentScore = contentScore; touched.push('contentScore'); }
+  if (typeof adProbability === 'number') { data.adProbability = adProbability; touched.push('adProbability'); }
+  if (input.isAd !== undefined) { data.isAd = input.isAd; touched.push('isAd'); }
+
+  const validRestored = restored.filter((field) => isRestorableSnapshotValue(field, snapshot[field]));
+  for (const field of validRestored) {
+    const value = snapshot[field];
+    data[field] = value as never;
+  }
+
+  const nextEventScore = typeof data.eventScore === 'number' ? data.eventScore : current.eventScore;
+  const nextContentScore = typeof data.contentScore === 'number' ? data.contentScore : current.contentScore;
+  const nextAdProbability = typeof data.adProbability === 'number' ? data.adProbability : current.adProbability;
+  const nextIsAd = typeof data.isAd === 'boolean' ? data.isAd : current.isAd;
+  if (nextEventScore != null && nextContentScore != null && nextAdProbability != null) {
+    const { weightEvent, weightContent } = await getAISettings();
+    Object.assign(data, buildEffectiveScoreUpdate({
+      eventScore: nextEventScore,
+      contentScore: nextContentScore,
+      adProbability: nextAdProbability,
+      isAd: nextIsAd,
+      weightEvent,
+      weightContent,
+    }));
+  }
+  Object.assign(data, buildManualOverrideUpdate(current.manualOverrides, touched, validRestored));
+  const contentChanged = touched.some((field) => ['summary', 'brand', 'category', 'tags', 'keyPoints'].includes(field))
+    || validRestored.some((field) => ['summary', 'brand', 'category', 'tags', 'keyPoints'].includes(field));
+  await db.$transaction(async (tx) => {
+    await tx.article.update({ where: { id }, data });
+    await refreshPublicPublication(id, tx, { contentChanged });
+  });
+  invalidatePublicArticleCache();
+  return getArticleDetail(id);
+}
+
+/** 仅恢复重复状态并交回 AI，不附带归类、公开或置顶副作用。 */
+export async function getArticleDuplicateState(id: string): Promise<'duplicate' | 'other' | null> {
+  const article = await db.article.findUnique({ where: { id }, select: { duplicateStatus: true } });
+  if (!article) return null;
+  return article.duplicateStatus === 'duplicate' ? 'duplicate' : 'other';
+}
+
+export async function restoreDuplicateForAnalysis(id: string): Promise<boolean> {
+  const article = await db.article.findUnique({
+    where: { id },
+    select: {
+      duplicateStatus: true,
+      manualOverrides: true,
+      manualCorrectedAt: true,
+      relevance: true,
+      summary: true,
+      brand: true,
+      category: true,
+      tags: true,
+      keyPoints: true,
+      eventScore: true,
+      contentScore: true,
+      adProbability: true,
+      isAd: true,
+    },
+  });
+  if (!article) return false;
+  if (article.duplicateStatus !== 'duplicate') throw new Error('文章当前不是重复状态');
+  await db.$transaction(async tx => {
+    await tx.article.update({
+      where: { id },
+      data: {
+        ...buildAiResetDataForArticle(article, { dedupOverride: true }),
+      },
+    });
+    await refreshPublicPublication(id, tx);
+  });
+  invalidatePublicArticleCache();
+  return true;
 }
 
 /** 详情（含最近 5 条 PushLog）；找不到时返回 null。 */

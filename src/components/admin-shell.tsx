@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import type { ComponentType } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from '@/components/theme-provider'
-import { Activity, Inbox, LogOut, Settings, Sun, Moon } from 'lucide-react'
+import { Activity, ExternalLink, Inbox, LogOut, Settings, Sun, Moon } from 'lucide-react'
 import IntelligenceInbox from '@/components/intelligence-inbox'
 import CrawlLogTab from '@/components/crawl-log-tab'
 import SettingsTab from '@/components/settings-tab'
@@ -109,10 +109,17 @@ function AdminContent() {
           <div className="px-2 py-3 border-t border-border/70">
             <button
               onClick={handleLogout}
-              className="mb-2 w-full flex h-9 items-center gap-2 rounded-md px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="w-full flex h-9 items-center gap-2 rounded-md px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               <LogOut className="h-[15px] w-[15px] shrink-0" strokeWidth={1.8} />
               <span>退出后台</span>
+            </button>
+            <button
+              onClick={() => router.push('/')}
+              className="mb-2 w-full flex h-9 items-center gap-2 rounded-md px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              <ExternalLink className="h-[15px] w-[15px] shrink-0" strokeWidth={1.8} />
+              <span>返回前台</span>
             </button>
             {mounted ? (
               <button

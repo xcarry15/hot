@@ -69,6 +69,9 @@ model Article {
   scorePolicySnapshot String @default("") // JSON：本次权重及广告规则快照
   promptVersion String    @default("v1")
   aiStatus      String    @default("pending") // pending, done, skipped, failed
+  aiSnapshot    String    @default("{}") // 最近一次 AI 原始结构化结果；人工修改不覆盖此快照
+  manualOverrides String  @default("[]") // JSON string[]；记录当前由人工覆盖的字段
+  manualCorrectedAt DateTime?
   skipReason    String?   // 跳过原因（dedup 命中 / 内容不足等）。与 summary 解耦：summary 保留 AI 洞察不被覆盖
   dedupDetail   String?   // JSON: canonical DedupEvidence（去重方式/重复文章/URL/详情/内容对比片段）。仅 dedup 命中并标 skipped 时写入；列表用 skipReason，详情用本字段
   aiRetryCount  Int       @default(0) // AI 失败累计重试次数；≥5 次标 skipped 放弃（防 provider 故障持续烧 token）

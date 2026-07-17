@@ -1,4 +1,7 @@
 import { db } from '@/lib/db';
+import { retryDiscardedItem } from '@/lib/discarded-retry-service';
+
+const MAX_CANDIDATE_RESTORE = 50;
 
 const STOP_WORDS = new Set(['我们', '公司', '行业', '市场', '相关', '表示', '发布', '消息', '最新', '多个', '进行', '以及']);
 
@@ -47,7 +50,8 @@ export async function recordKeywordCandidates(title: string): Promise<void> {
       update: {
         occurrences: { increment: 1 },
         sampleTitles: JSON.stringify(samples),
-        status: current?.status === 'approved' ? 'approved' : 'pending',
+        // 已采用和永久忽略都保持终态，后续相同标题不能把候选重新激活。
+        status: current?.status ?? 'pending',
       },
       create: { phrase, occurrences: 1, sampleTitles: JSON.stringify([title]) },
     });
@@ -60,10 +64,19 @@ export async function listKeywordCandidates() {
     orderBy: [{ occurrences: 'desc' }, { updatedAt: 'desc' }],
     take: 100,
   });
-  return rows.map((row) => ({
-    ...row,
-    sampleTitles: parseSampleTitles(row.sampleTitles),
-  }));
+  const discarded = await db.discardedItem.findMany({
+    where: { reason: 'filter:keyword' },
+    select: { id: true, title: true, sourceId: true },
+  });
+  return rows.map((row) => {
+    const matches = discarded.filter((item) => item.title.toLocaleLowerCase().includes(row.phrase.toLocaleLowerCase()));
+    return {
+      ...row,
+      sampleTitles: [...new Set([...parseSampleTitles(row.sampleTitles), ...matches.slice(0, 5).map((item) => item.title)])].slice(0, 5),
+      sourceCount: new Set(matches.map((item) => item.sourceId)).size,
+      recallCount: matches.length,
+    };
+  });
 }
 
 export async function updateKeywordCandidate(id: string, action: 'approve' | 'dismiss') {
@@ -78,8 +91,24 @@ export async function updateKeywordCandidate(id: string, action: 'approve' | 'di
       }),
       db.keywordCandidate.update({ where: { id }, data: { status: 'approved' } }),
     ]);
+    const discarded = await db.discardedItem.findMany({
+      where: { reason: 'filter:keyword', title: { contains: candidate.phrase } },
+      select: { id: true },
+      orderBy: { createdAt: 'desc' },
+      take: MAX_CANDIDATE_RESTORE,
+    });
+    const articleIds: string[] = [];
+    let restored = 0;
+    for (const item of discarded) {
+      const result = await retryDiscardedItem(item.id);
+      if (result.kind === 'created' || result.kind === 'existing') {
+        restored += 1;
+        articleIds.push(result.articleId);
+      }
+    }
+    return { id, action, restored, articleIds, restoreLimit: MAX_CANDIDATE_RESTORE };
   } else {
     await db.keywordCandidate.update({ where: { id }, data: { status: 'dismissed' } });
   }
-  return { id, action };
+  return { id, action, restored: 0, articleIds: [] as string[], restoreLimit: MAX_CANDIDATE_RESTORE };
 }

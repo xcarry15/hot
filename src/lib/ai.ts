@@ -18,10 +18,18 @@ import { dedupAfterAI } from './dedup';
 import { assertNotAborted } from './worker-stop';
 import { advanceJobProgress, startJobStage } from './job-progress';
 import { z } from 'zod';
-import { applyScorePolicy, buildScorePolicySnapshot } from './score-policy';
+import { applyScorePolicy } from './score-policy';
 import { refreshPublicPublication } from './public-publication-service';
 import { createHash } from 'node:crypto';
-import { buildAiResetData, buildDuplicateArticleData } from './article-duplicate-state';
+import { buildAiResetDataForArticle, buildDuplicateArticleData } from './article-duplicate-state';
+import {
+  buildArticleAiSnapshot,
+  buildEffectiveScoreUpdate,
+  mergeAiResultWithManualOverrides,
+  parseManualOverrides,
+  type ArticleAiSnapshot,
+  type ManualCalibrationValues,
+} from './article-calibration';
 
 // v8：精简、口语化、多样化的行业洞察。
 const PROMPT_VERSION = 'v8';
@@ -144,7 +152,12 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
  * 打分：原始特征经本地策略引擎加权，并按广告概率扣分/封顶。
  */
 export type AIProcessResult = { status: 'done' | 'skipped' | 'failed'; errorKind?: string; globalError?: boolean };
-export async function processWithAI(article: { id: string; title: string; aiStatus: string | null; cleanContent: string | null; summary: string | null; publishedAt: Date | null; createdAt?: Date | null; aiRetryCount?: number; dedupOverride?: boolean }, signal?: AbortSignal): Promise<AIProcessResult> {
+type AIProcessArticle = Pick<Article, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'publishedAt'> &
+  Partial<Omit<Article, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'publishedAt' | 'summary'>> & {
+    summary: string | null;
+  };
+
+export async function processWithAI(article: AIProcessArticle, signal?: AbortSignal): Promise<AIProcessResult> {
   const { id: articleId, title } = article;
   assertNotAborted(signal);
 
@@ -162,7 +175,7 @@ export async function processWithAI(article: { id: string; title: string; aiStat
         skipReason: `内容不足（< ${MIN_MEANINGFUL_CHARS} 字符）`,
       },
     });
-    await refreshPublicPublication(articleId, db, { contentChanged: true });
+    await refreshPublicPublication(articleId, db);
     return { status: 'skipped' };
   }
 
@@ -191,31 +204,62 @@ export async function processWithAI(article: { id: string; title: string; aiStat
       step2.eventScore, step2.contentScore, step2.adProbability,
       step2.isAd, weightEvent, weightContent,
     );
+    const aiSnapshot: ArticleAiSnapshot = {
+      relevance: step2.relevance,
+      summary: step2.summary,
+      brand: step2.brand,
+      category: step2.category,
+      tags: JSON.stringify(step2.tags),
+      keyPoints: JSON.stringify(step2.keyPoints),
+      score: policy.finalScore,
+      rawScore: policy.rawScore,
+      eventScore: step2.eventScore,
+      contentScore: step2.contentScore,
+      adProbability: step2.adProbability,
+      aiConfidence: step2.confidence,
+      isAd: step2.isAd,
+      model: step2.model,
+      provider: step2.provider,
+      promptHash: step2.promptHash,
+      promptVersion: PROMPT_VERSION,
+    };
+    const effective = mergeAiResultWithManualOverrides(
+      aiSnapshot,
+      article as ManualCalibrationValues,
+      article.manualOverrides,
+    );
+    const effectiveScore = buildEffectiveScoreUpdate({
+      eventScore: effective.eventScore,
+      contentScore: effective.contentScore,
+      adProbability: effective.adProbability,
+      isAd: effective.isAd,
+      weightEvent,
+      weightContent,
+    });
 
     assertNotAborted(signal);
     await db.article.update({
       where: { id: articleId },
       data: {
-        relevance: step2.relevance,
-        category: step2.category,
-        summary: step2.summary,
-        brand: step2.brand,
-        tags: JSON.stringify(step2.tags),
-        keyPoints: JSON.stringify(step2.keyPoints),
-        score: policy.finalScore,
-        rawScore: policy.rawScore,
-        eventScore: step2.eventScore,
-        contentScore: step2.contentScore,
-        adProbability: step2.adProbability,
+        relevance: effective.relevance,
+        category: effective.category,
+        summary: effective.summary,
+        brand: effective.brand,
+        tags: effective.tags,
+        keyPoints: effective.keyPoints,
+        ...effectiveScore,
+        eventScore: effective.eventScore,
+        contentScore: effective.contentScore,
+        adProbability: effective.adProbability,
         aiConfidence: step2.confidence,
-        scorePolicyVersion: policy.version,
         aiModel: step2.model,
         aiProvider: step2.provider,
         promptHash: step2.promptHash,
-        scorePolicySnapshot: buildScorePolicySnapshot(weightEvent, weightContent),
-        isAd: step2.isAd,
+        isAd: effective.isAd,
         promptVersion: PROMPT_VERSION,
         aiStatus: 'done',
+        aiSnapshot: buildArticleAiSnapshot(aiSnapshot),
+        skipReason: null,
       },
     });
 
@@ -237,7 +281,7 @@ export async function processWithAI(article: { id: string; title: string; aiStat
           `[dedup:after-ai] "${title}" marked as duplicate of "${dupCheck.matchedTitle}" ` +
           `(${dupCheck.sharedCount} shared values)`
         );
-        await refreshPublicPublication(articleId, db, { contentChanged: true });
+        await refreshPublicPublication(articleId, db);
         return { status: 'skipped' }; // 当前文章被跳过，不再继续
       }
     }
@@ -257,7 +301,7 @@ export async function processWithAI(article: { id: string; title: string; aiStat
           aiRetryCount: retryCount,
           nextAiRetryAt: null,
           skipReason: `AI 连续失败 ${retryCount} 次，已放弃`,
-          summary: '[AI 处理失败]',
+          ...(parseManualOverrides(article.manualOverrides).includes('summary') ? {} : { summary: '[AI 处理失败]' }),
         },
       });
     } else {
@@ -269,11 +313,11 @@ export async function processWithAI(article: { id: string; title: string; aiStat
           aiStatus: 'failed',
           aiRetryCount: retryCount,
           nextAiRetryAt: new Date(Date.now() + backoffMs),
-          summary: '[AI 处理失败]',
+          ...(parseManualOverrides(article.manualOverrides).includes('summary') ? {} : { summary: '[AI 处理失败]' }),
         },
       });
     }
-    await refreshPublicPublication(articleId, db, { contentChanged: true });
+    await refreshPublicPublication(articleId, db);
     return { status: 'failed', errorKind: 'content' };
   }
 }
@@ -285,6 +329,7 @@ export async function reprocessWithAI(
   articleId: string,
   signal?: AbortSignal,
   jobId?: string,
+  restoreDuplicate = false,
 ): Promise<AIProcessResult | null> {
   assertNotAborted(signal);
   // 重置 AI 状态为 pending。
@@ -303,9 +348,28 @@ export async function reprocessWithAI(
       publishedAt: true,
       createdAt: true,
       summary: true,
+      relevance: true,
+      category: true,
+      brand: true,
+      tags: true,
+      keyPoints: true,
+      score: true,
+      eventScore: true,
+      contentScore: true,
+      rawScore: true,
+      adProbability: true,
+      aiConfidence: true,
+      isAd: true,
+      manualOverrides: true,
+      aiSnapshot: true,
+      manualCorrectedAt: true,
+      dedupOverride: true,
+      duplicateStatus: true,
+      aiRetryCount: true,
     },
   });
   if (!articleData) return null;
+  if (restoreDuplicate && articleData.duplicateStatus !== 'duplicate') return null;
   if (jobId) {
     await startJobStage(jobId, { stage: 'ai', total: 1, currentItemLabel: articleData.title });
   }
@@ -313,7 +377,7 @@ export async function reprocessWithAI(
   await db.article.update({
     where: { id: articleId },
     data: {
-      ...buildAiResetData({ dedupOverride: 'preserve' }),
+      ...buildAiResetDataForArticle(articleData, { dedupOverride: restoreDuplicate ? true : 'preserve' }),
       fetchStatus: articleData.fetchStatus === 'failed' ? 'pending' : undefined,
     },
   });

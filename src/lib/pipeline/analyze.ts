@@ -14,6 +14,7 @@
  *     · justDone 阈值 ≥ 2 才走 batch dedup
  *     · Promise.allSettled 把 rejected 计入 errors
  */
+import type { Article } from '@prisma/client';
 import { db } from '@/lib/db';
 import { processWithAI } from '@/lib/ai';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
@@ -65,10 +66,25 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
       fetchStatus: true,
       publishedAt: true,
       createdAt: true,
-      summary: true,
       aiStatus: true,
       aiRetryCount: true,
       dedupOverride: true,
+      relevance: true,
+      summary: true,
+      brand: true,
+      category: true,
+      tags: true,
+      keyPoints: true,
+      score: true,
+      eventScore: true,
+      contentScore: true,
+      rawScore: true,
+      adProbability: true,
+      aiConfidence: true,
+      isAd: true,
+      manualOverrides: true,
+      aiSnapshot: true,
+      manualCorrectedAt: true,
     },
     orderBy: { createdAt: 'asc' },
     take: MAX_BATCH_SIZE,
@@ -97,7 +113,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
     const batch = pending.slice(i, i + concurrency);
     const results = await Promise.allSettled(
       batch.map(a => withTimeout(
-        timeoutSignal => processWithAI(a, timeoutSignal),
+        timeoutSignal => processWithAI(a as Article, timeoutSignal),
         AI_TIMEOUT_MS,
         `AI分析超时 "${a.title}"`,
         signal,
@@ -144,11 +160,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
 
   // 批量去重可能把刚完成的文章改为 skipped，统一把本批文章的
   // 持久化公开状态与最终 aiStatus/score 对齐。
-  await refreshPublicPublications(
-    pending.map((article) => article.id),
-    db,
-    { contentChanged: true },
-  );
+  await refreshPublicPublications(pending.map((article) => article.id), db);
 
   return { total: pending.length, processed, errors };
 }

@@ -86,7 +86,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
               <span>{article.source.name}</span>
               {article.originalSource && article.originalSource !== article.source.name && <><span className="text-[var(--public-hairline-strong)]">|</span><span>原始来源：{article.originalSource}</span></>}
               {article.category && <><span className="text-[var(--public-hairline-strong)]">|</span><span>{article.category}</span></>}
-              <div className="ml-auto flex items-center gap-1"><PublicShareButton shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} />{originalUrl && <PublicOriginalLink href={originalUrl} articleId={article.id} shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} />}</div>
+              {originalUrl && <div className="ml-auto"><PublicOriginalLink href={originalUrl} articleId={article.id} shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} /></div>}
             </div>
 
             <h1 className="public-display mt-2 text-3xl leading-[1.25] text-[var(--public-ink)] sm:mt-2 sm:text-4xl">{article.title}</h1>
@@ -128,6 +128,10 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
                 )}
               </div>
             )}
+
+            <div className="mt-7 flex justify-center pt-2">
+              <PublicShareButton shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} title={article.title} summary={article.summary || article.excerpt} publishedAt={formatPublicDateTime(effectiveDate)} />
+            </div>
 
             <nav className="mt-5 border-t border-[var(--public-hairline)] pt-4" aria-label="文章导航">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6">

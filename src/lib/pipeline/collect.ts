@@ -25,7 +25,7 @@ import {
   startJobStage,
 } from '@/lib/job-progress';
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
-import { buildAiResetData } from '@/lib/article-duplicate-state';
+import { buildAiResetDataForArticle } from '@/lib/article-duplicate-state';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
 import { recordFailure, restoreBreakerIfElapsed } from '@/lib/pipeline/source-health';
 import type { CrawlItem, CrawlResult } from '@/contracts/crawl';
@@ -63,13 +63,13 @@ export async function collectItem(
         title: item.title,
         publishedAt: nextPublishedAt,
         ...(titleChanged ? {
-          ...buildAiResetData(),
+          ...buildAiResetDataForArticle(existing, { dedupOverride: 'preserve' }),
           fetchStatus: 'pending' as const,
         } : {}),
       },
     });
     if (titleChanged || publishedAtChanged) {
-      await refreshPublicPublication(existing.id, db, { contentChanged: true });
+      await refreshPublicPublication(existing.id, db, { contentChanged: titleChanged });
     }
     console.log(`[dedup] URL exact match, updated: "${item.title}"${titleChanged ? ' (title changed, reset fetchStatus)' : ''}`);
     return existing.id;

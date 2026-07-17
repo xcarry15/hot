@@ -18,7 +18,7 @@ import { getDbFileSize, runVacuum } from '@/lib/maintenance/sqlite';
 import { deleteArticlesByIds } from '@/lib/article-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
-import { buildAiResetData } from '@/lib/article-duplicate-state';
+import { buildAiResetDataForArticle } from '@/lib/article-duplicate-state';
 
 // ── 只读：统计 ──────────────────────────────────────────────────
 
@@ -136,16 +136,14 @@ function pauseAndResetOps() {
 
 // ── 重置 AI 状态 ────────────────────────────────────────────────
 
-const AI_RESET_DATA = buildAiResetData();
-
 export async function resetAllAi(): Promise<{ reset: number }> {
   let reset = 0;
   await db.$transaction(async tx => {
-    const result = await tx.article.updateMany({
-      where: { aiStatus: { not: 'pending' } },
-      data: AI_RESET_DATA,
-    });
-    reset = result.count;
+    const articles = await tx.article.findMany({ where: { aiStatus: { not: 'pending' } } });
+    for (const article of articles) {
+      await tx.article.update({ where: { id: article.id }, data: buildAiResetDataForArticle(article, { dedupOverride: 'preserve' }) });
+    }
+    reset = articles.length;
     if (reset > 0) await rebuildPublicPublicationSnapshot(tx);
   });
   if (reset > 0) invalidatePublicArticleCache();
@@ -155,11 +153,11 @@ export async function resetAllAi(): Promise<{ reset: number }> {
 export async function resetFailedAi(): Promise<{ reset: number }> {
   let reset = 0;
   await db.$transaction(async tx => {
-    const result = await tx.article.updateMany({
-      where: { aiStatus: { in: ['failed', 'skipped'] } },
-      data: AI_RESET_DATA,
-    });
-    reset = result.count;
+    const articles = await tx.article.findMany({ where: { aiStatus: { in: ['failed', 'skipped'] } } });
+    for (const article of articles) {
+      await tx.article.update({ where: { id: article.id }, data: buildAiResetDataForArticle(article, { dedupOverride: 'preserve' }) });
+    }
+    reset = articles.length;
     if (reset > 0) await rebuildPublicPublicationSnapshot(tx);
   });
   if (reset > 0) invalidatePublicArticleCache();

@@ -24,6 +24,8 @@ export interface KeywordCandidate {
   phrase: string;
   occurrences: number;
   sampleTitles: string[];
+  sourceCount: number;
+  recallCount: number;
 }
 
 export async function fetchKeywordCandidates(signal?: AbortSignal): Promise<KeywordCandidate[]> {
@@ -34,7 +36,7 @@ export async function updateKeywordCandidate(
   id: string,
   action: 'approve-candidate' | 'dismiss-candidate',
   signal?: AbortSignal,
-): Promise<unknown> {
+): Promise<{ restored: number; processQueued: boolean; restoreLimit: number }> {
   return requestJson('POST', '/api/keywords', { body: { id, action }, signal });
 }
 

@@ -81,7 +81,7 @@ export default function PublicArticleTimeline({ groups }: Props) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-1">
       {monthGroups.map((monthGroup, monthIndex) => {
         const isMonthOpen = openMonth === monthGroup.key
         const monthContentId = `public-month-content-${monthGroup.key}`
@@ -92,7 +92,7 @@ export default function PublicArticleTimeline({ groups }: Props) {
               type="button"
               aria-controls={monthContentId}
               aria-expanded={isMonthOpen}
-              className={`group/month flex w-full items-center justify-between gap-4 border-t px-1 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)] ${isMonthOpen ? 'border-[var(--public-hairline-strong)]' : 'border-[var(--public-hairline)] hover:border-[var(--public-primary)]'}`}
+              className={`group/month flex w-full items-center justify-between gap-4 border-t px-1 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)] ${isMonthOpen ? 'border-[var(--public-hairline-strong)]' : 'border-[var(--public-hairline)] hover:border-[var(--public-primary)]'}`}
               onClick={() => toggleMonth(monthGroup.key)}
             >
               <span className="flex min-w-0 items-baseline gap-3">
@@ -114,8 +114,8 @@ export default function PublicArticleTimeline({ groups }: Props) {
               className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none ${isMonthOpen ? 'grid-rows-[1fr] opacity-100' : 'pointer-events-none grid-rows-[0fr] opacity-0'}`}
             >
               <div className="min-h-0 overflow-hidden">
-                <div className="ml-2 pl-4 pt-4 sm:ml-4 sm:pl-5">
-                  <div className="space-y-7">
+                <div className="pt-2">
+                  <div className="space-y-3">
                     {monthGroup.groups.map((group, dateIndex) => {
                       const isOpen = openDates.has(group.date)
                       const contentId = `public-date-group-${group.date}`
@@ -127,7 +127,7 @@ export default function PublicArticleTimeline({ groups }: Props) {
                             type="button"
                             aria-controls={contentId}
                             aria-expanded={isOpen}
-                            className="group/date flex w-full items-center justify-between gap-4 pb-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]"
+                            className="group/date flex w-full items-center justify-between gap-4 pb-1 pl-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]"
                             onClick={() => toggleDate(group.date)}
                           >
                             <span className="flex min-w-0 items-baseline gap-2 sm:gap-3">
@@ -149,7 +149,7 @@ export default function PublicArticleTimeline({ groups }: Props) {
                             className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'pointer-events-none grid-rows-[0fr] opacity-0'}`}
                           >
                             <div className="min-h-0 overflow-hidden">
-                              <ol className="pt-2" aria-label={`${getPublicDateLabel(group.date)}文章`}>
+                              <ol className="pt-1" aria-label={`${getPublicDateLabel(group.date)}文章`}>
                                 {group.items.map((article) => <PublicArticleCard key={article.id} article={article} />)}
                               </ol>
                             </div>
