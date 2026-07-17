@@ -29,7 +29,7 @@ describe('article-refetch-service', () => {
     expect(mocks.article.update).not.toHaveBeenCalled();
   });
 
-  it('重新抓取前清空旧 AI 与重复状态', async () => {
+  it('重新抓取前重置 AI 状态但保留人工校准契约', async () => {
     mocks.article.findUnique.mockResolvedValue({ id: 'a1' });
     await expect(refetchArticle('a1')).resolves.toEqual({ success: true, contentLength: 6 });
     expect(mocks.article.update).toHaveBeenCalledWith(expect.objectContaining({
@@ -40,6 +40,7 @@ describe('article-refetch-service', () => {
         eventScore: null,
         duplicateStatus: 'none',
         duplicateOfId: null,
+        manualOverrides: expect.anything(),
       }),
     }));
   });

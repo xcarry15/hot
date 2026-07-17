@@ -96,7 +96,7 @@ export async function updateSettings(input: unknown): Promise<
     if (weightChanged) {
       const articles = await tx.article.findMany({
         where: { eventScore: { not: null }, contentScore: { not: null } },
-        select: { id: true, eventScore: true, contentScore: true, adProbability: true, isAd: true },
+        select: { id: true, eventScore: true, contentScore: true, adProbability: true, isAd: true, manualOverrides: true },
       });
       for (const article of articles) {
         const result = applyScorePolicy(

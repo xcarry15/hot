@@ -121,7 +121,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
                   evidence,
                 ),
               });
-              await refreshPublicPublication(article.id, db, { contentChanged: true });
+              await refreshPublicPublication(article.id, db);
               console.log(
                 `[processAllPending] dedup hit (${dup.dedupType}) ` +
                 `sim=${dup.similarity.toFixed(2)}: "${article.title}" → "${dup.matchedTitle}", retained as duplicate`

@@ -300,8 +300,9 @@ async function executeAiJob(
 ): Promise<Record<string, unknown>> {
   const articleId = typeof payload.articleId === 'string' ? payload.articleId : undefined;
   const articleIds = Array.isArray(payload.articleIds)
-    ? [...new Set(payload.articleIds.slice(0, 100).filter((id): id is string => typeof id === 'string' && id.length > 0))]
+    ? [...new Set(payload.articleIds.filter((id): id is string => typeof id === 'string' && id.length > 0))]
     : [];
+  if (articleIds.length > 100) throw new Error('单次最多重新分析 100 篇文章');
   if (articleIds.length > 0) {
     if (jobId) await startJobStage(jobId, { stage: 'ai', total: articleIds.length });
     let processed = 0;
@@ -322,7 +323,7 @@ async function executeAiJob(
     return { articleIds, processed, errors };
   }
   if (articleId) {
-    const result = await reprocessWithAI(articleId, signal, jobId);
+    const result = await reprocessWithAI(articleId, signal, jobId, payload.restoreDuplicate === true);
     return { articleId, result: result ?? { status: 'not_found' } };
   }
   const result = await analyzeAllPending(signal, jobId);

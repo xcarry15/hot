@@ -12,11 +12,6 @@ export interface PublicArticleSourceDto {
   type: string;
 }
 
-export interface PublicArticleSourceOptionDto {
-  id: string;
-  name: string;
-}
-
 export interface PublicArticleListItemDto {
   id: string;
   url: string;

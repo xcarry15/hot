@@ -6,29 +6,45 @@
  */
 import { maskWebhookTarget } from '@/lib/webhook-display';
 
+const ARTICLE_SCORE_SELECT = {
+  eventScore: true,
+  contentScore: true,
+  rawScore: true,
+  adProbability: true,
+} as const;
+
 export const ARTICLE_LIST_SELECT = {
+  eventScore: true,
+  contentScore: true,
+  adProbability: true,
   id: true,
   sourceId: true,
   url: true,
   title: true,
   originalSource: true,
-  cleanContent: true,
   relevance: true,
   summary: true,
   brand: true,
   category: true,
   tags: true,
   score: true,
+  aiConfidence: true,
   aiStatus: true,
+  fetchStatus: true,
   skipReason: true,
   isAd: true,
   reviewStatus: true,
   reviewReasonTags: true,
   reviewedAt: true,
   publicOverride: true,
+  publicStatus: true,
+  publicPublicationReason: true,
   pinUntil: true,
   duplicateOfId: true,
   duplicateStatus: true,
+  aiSnapshot: true,
+  manualOverrides: true,
+  manualCorrectedAt: true,
   viewCount: true,
   originalClickCount: true,
   pushedAt: true,
@@ -37,17 +53,10 @@ export const ARTICLE_LIST_SELECT = {
   updatedAt: true,
 } as const;
 
-const ARTICLE_SCORE_SELECT = {
-  eventScore: true,
-  contentScore: true,
-  rawScore: true,
-  adProbability: true,
-  aiConfidence: true,
-} as const;
-
 export const ARTICLE_DETAIL_SELECT = {
   ...ARTICLE_LIST_SELECT,
   ...ARTICLE_SCORE_SELECT,
+  cleanContent: true,
   keyPoints: true,
   dedupDetail: true,
 } as const;
@@ -69,16 +78,27 @@ export interface ArticleListFieldsDto {
   category: string;
   tags: string;
   score: number;
+  /** 评分构成（仅 AI 完成后有值） */
+  eventScore: number | null;
+  contentScore: number | null;
+  adProbability: number | null;
+  aiConfidence: number | null;
   aiStatus: string;
+  fetchStatus: string;
   skipReason: string | null;
   isAd: boolean;
   reviewStatus: string;
   reviewReasonTags: string;
   reviewedAt: string | null;
   publicOverride: string;
+  publicStatus: string;
+  publicPublicationReason: string;
   pinUntil: string | null;
   duplicateOfId: string | null;
   duplicateStatus: string;
+  aiSnapshot: string;
+  manualOverrides: string;
+  manualCorrectedAt: string | null;
   viewCount: number;
   originalClickCount: number;
   pushedAt: string | null;
@@ -93,12 +113,7 @@ export interface ArticleFieldsDto extends ArticleListFieldsDto {
   cleanContent: string;
   keyPoints: string;
   dedupDetail: string | null;
-  /** 评分明细（仅 AI 完成后有值） */
-  eventScore: number | null;
-  contentScore: number | null;
   rawScore: number | null;
-  adProbability: number | null;
-  aiConfidence: number | null;
 }
 
 export interface ArticleSourceSummaryDto {
@@ -156,6 +171,7 @@ type ListDates = {
   pushedAt: NullableDateValue;
   publishedAt: NullableDateValue;
   reviewedAt: NullableDateValue;
+  manualCorrectedAt: NullableDateValue;
   pinUntil: NullableDateValue;
   createdAt: DateValue;
   updatedAt: DateValue;
@@ -163,15 +179,15 @@ type ListDates = {
 
 export type ArticleListRecord = Omit<
   ArticleListFieldsDto,
-  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'pinUntil' | 'createdAt' | 'updatedAt'
+  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'manualCorrectedAt' | 'pinUntil' | 'createdAt' | 'updatedAt'
 > & ListDates & {
-  cleanContent: string;
+  cleanContent?: string;
   source: ArticleSourceSummaryDto;
 };
 
 export type ArticleDetailRecord = Omit<
   ArticleFieldsDto,
-  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'pinUntil' | 'createdAt' | 'updatedAt'
+  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'manualCorrectedAt' | 'pinUntil' | 'createdAt' | 'updatedAt'
 > & ListDates & {
   source: ArticleSourceDetailDto;
   pushLogs: ArticlePushLogRecord[];
@@ -197,7 +213,7 @@ function toRequiredIso(value: DateValue): string {
   return toIso(value)!;
 }
 
-function toExcerpt(summary: string, cleanContent: string): string {
+function toExcerpt(summary: string, cleanContent = ''): string {
   if (summary) return summary;
   const text = cleanContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   return text.length > 120 ? `${text.slice(0, 120)}…` : text;
@@ -219,16 +235,26 @@ function serializeArticleListFields(
     category: article.category,
     tags: article.tags,
     score: article.score,
+    eventScore: article.eventScore ?? null,
+    contentScore: article.contentScore ?? null,
+    adProbability: article.adProbability ?? null,
+    aiConfidence: article.aiConfidence ?? null,
     aiStatus: article.aiStatus,
+    fetchStatus: article.fetchStatus,
     skipReason: article.skipReason,
     isAd: article.isAd,
     reviewStatus: article.reviewStatus,
     reviewReasonTags: article.reviewReasonTags,
     reviewedAt: toIso(article.reviewedAt),
     publicOverride: article.publicOverride,
+    publicStatus: article.publicStatus,
+    publicPublicationReason: article.publicPublicationReason,
     pinUntil: toIso(article.pinUntil),
     duplicateOfId: article.duplicateOfId,
     duplicateStatus: article.duplicateStatus,
+    aiSnapshot: article.aiSnapshot,
+    manualOverrides: article.manualOverrides,
+    manualCorrectedAt: toIso(article.manualCorrectedAt),
     viewCount: article.viewCount,
     originalClickCount: article.originalClickCount,
     pushedAt: toIso(article.pushedAt),
@@ -253,11 +279,7 @@ export function serializeArticleDetail(article: ArticleDetailRecord): ArticleDet
     cleanContent: article.cleanContent,
     keyPoints: article.keyPoints,
     dedupDetail: article.dedupDetail,
-    eventScore: article.eventScore ?? null,
-    contentScore: article.contentScore ?? null,
     rawScore: article.rawScore ?? null,
-    adProbability: article.adProbability ?? null,
-    aiConfidence: article.aiConfidence ?? null,
     source: article.source,
     pushLogs: article.pushLogs.map((log) => ({
       id: log.id,

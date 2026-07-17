@@ -14,10 +14,12 @@ import type {
   ArticleDetailDto,
   ArticleListResponseDto,
 } from '@/contracts/articles';
+import type { ManualOverrideField } from '@/lib/shared/article-calibration';
 
 export interface ArticleListFilter {
   page?: number;
   pageSize?: number;
+  all?: boolean;
   search?: string;
   category?: string;
   brand?: string;
@@ -26,6 +28,10 @@ export interface ArticleListFilter {
   reviewStatus?: string;
   fetchStatus?: string;
   inbox?: boolean;
+  sourceId?: string;
+  anomaly?: 'needs_attention';
+  manualOnly?: boolean;
+  sort?: 'newest' | 'oldest' | 'score_desc' | 'score_asc' | 'relevance_desc' | 'relevance_asc' | 'event_desc' | 'event_asc' | 'content_desc' | 'content_asc' | 'ad_desc' | 'ad_asc' | 'confidence_desc' | 'confidence_asc';
 }
 
 export async function fetchArticleList(
@@ -35,6 +41,7 @@ export async function fetchArticleList(
   const params = new URLSearchParams();
   if (filter.page != null) params.set('page', String(filter.page));
   if (filter.pageSize != null) params.set('pageSize', String(filter.pageSize));
+  if (filter.all) params.set('all', 'true');
   if (filter.search) params.set('search', filter.search);
   if (filter.category) params.set('category', filter.category);
   if (filter.brand) params.set('brand', filter.brand);
@@ -43,8 +50,23 @@ export async function fetchArticleList(
   if (filter.reviewStatus) params.set('reviewStatus', filter.reviewStatus);
   if (filter.fetchStatus) params.set('fetchStatus', filter.fetchStatus);
   if (filter.inbox) params.set('inbox', 'true');
+  if (filter.sourceId) params.set('sourceId', filter.sourceId);
+  if (filter.anomaly) params.set('anomaly', filter.anomaly);
+  if (filter.manualOnly) params.set('manualOnly', 'true');
+  if (filter.sort) params.set('sort', filter.sort);
 
   return requestJson<ArticleListResponseDto>('GET', `/api/articles?${params}`, { signal });
+}
+
+export async function updateArticleEditorial(
+  articleId: string,
+  input: { summary?: string; brand?: string; category?: string; tags?: Array<{ name: string; tone?: string }>; keyPoints?: string[]; publicOverride?: 'auto' | 'public' | 'hidden'; relevance?: number; eventScore?: number; contentScore?: number; adProbability?: number; isAd?: boolean; restoreFields?: ManualOverrideField[] },
+): Promise<ArticleDetailDto> {
+  return requestJson<ArticleDetailDto>('PATCH', `/api/articles/${articleId}`, { body: input });
+}
+
+export async function restoreDuplicateArticle(articleId: string): Promise<{ restored: boolean; queued: boolean; jobId?: string }> {
+  return requestJson('POST', `/api/articles/${articleId}/restore-duplicate`);
 }
 
 export async function reviewArticle(
@@ -59,7 +81,7 @@ export async function reviewArticles(
   articleIds: string[],
   status: string,
   reasonTags: string[] = [],
-): Promise<{ updated: number; restoredDuplicateIds?: string[]; aiQueued?: boolean }> {
+): Promise<{ updated: number }> {
   return requestJson('POST', '/api/articles/review', { body: { articleIds, status, reasonTags } });
 }
 

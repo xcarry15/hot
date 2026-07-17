@@ -78,10 +78,10 @@ export default function KeywordsTab() {
 
   const handleCandidate = async (candidate: KeywordCandidate, action: 'approve-candidate' | 'dismiss-candidate') => {
     try {
-      await updateKeywordCandidate(candidate.id, action)
+      const result = await updateKeywordCandidate(candidate.id, action)
       setCandidates((prev) => prev.filter((item) => item.id !== candidate.id))
       if (action === 'approve-candidate') await loadKeywords()
-      toast.success(action === 'approve-candidate' ? `已将「${candidate.phrase}」加入关键词` : '候选词已忽略')
+      toast.success(action === 'approve-candidate' ? `已采用「${candidate.phrase}」，恢复 ${result.restored} 篇${result.processQueued ? '，处理流水线已启动' : ''}` : '候选词已永久忽略')
     } catch {
       toast.error('候选词操作失败')
     }
@@ -271,7 +271,7 @@ export default function KeywordsTab() {
 
           {candidates.length > 0 && <section className="rounded-md border bg-amber-50/50 p-3 dark:bg-amber-950/10">
             <div className="mb-2 flex items-center gap-2"><span className="text-sm font-medium">未命中候选词</span><Badge variant="secondary" className="text-xs">{candidates.length}</Badge><span className="text-xs text-muted-foreground">本地统计生成，需人工确认后加入词库</span></div>
-            <div className="space-y-1.5">{candidates.slice(0, 12).map((candidate) => <div key={candidate.id} className="flex items-center gap-2 rounded border bg-background px-2 py-1.5"><span className="min-w-0 flex-1 truncate text-sm font-medium">{candidate.phrase}</span><span className="shrink-0 text-xs text-muted-foreground">{candidate.occurrences} 次</span><Button size="sm" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'approve-candidate')}>采用</Button><Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'dismiss-candidate')}>忽略</Button></div>)}</div>
+            <div className="space-y-1.5">{candidates.slice(0, 12).map((candidate) => <div key={candidate.id} className="rounded border bg-background px-3 py-2"><div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-sm font-medium">{candidate.phrase}</span><span className="shrink-0 text-xs text-muted-foreground">出现 {candidate.occurrences} 次 · {candidate.sourceCount} 个来源 · 可恢复 {candidate.recallCount} 篇</span><Button size="sm" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'approve-candidate')}>采用并恢复</Button><Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'dismiss-candidate')}>永久忽略</Button></div>{candidate.sampleTitles.length > 0 && <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">{candidate.sampleTitles.slice(0, 3).map((title) => <p key={title} className="truncate">· {title}</p>)}</div>}</div>)}</div>
           </section>}
 
           {/* Search */}

@@ -6,6 +6,7 @@ import {
 } from '@/lib/keyword-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 import { listKeywordCandidates, updateKeywordCandidate } from '@/lib/keyword-candidate-service';
+import { runJob } from '@/lib/execution';
 
 // GET /api/keywords - List all keywords
 //   ?format=csv   → export as CSV
@@ -42,7 +43,8 @@ export async function POST(request: Request) {
       const body = await request.json();
       if ((body.action === 'approve-candidate' || body.action === 'dismiss-candidate') && typeof body.id === 'string') {
         const result = await updateKeywordCandidate(body.id, body.action === 'approve-candidate' ? 'approve' : 'dismiss');
-        return result ? { kind: 'ok' as const, data: result } : { kind: 'invalid' as const };
+        if (!result) return { kind: 'invalid' as const };
+        return { kind: 'candidate' as const, data: result };
       }
       if (body.action === 'import-csv' && body.csv) {
         return { kind: 'ok' as const, data: await importKeywordsCsv(String(body.csv)) };
@@ -56,6 +58,12 @@ export async function POST(request: Request) {
     });
     if (result.kind === 'invalid') {
       return NextResponse.json({ error: '未输入任何关键词' }, { status: 400 });
+    }
+    if (result.kind === 'candidate') {
+      const processQueued = result.data.action === 'approve' && result.data.restored > 0
+        ? (await runJob('process', { trigger: 'keyword-candidate', candidateId: result.data.id })).queued
+        : false;
+      return NextResponse.json({ ...result.data, processQueued });
     }
     if (result.kind === 'ok') return NextResponse.json(result.data);
 

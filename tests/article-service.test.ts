@@ -108,11 +108,31 @@ describe('article-service', () => {
         score: { gte: 60 },
         relevance: { gte: 70 },
         sourceId: 'src-1',
+        AND: [{
+          OR: [
+            { title: { contains: '咖啡' } },
+            { summary: { contains: '咖啡' } },
+            { brand: { contains: '咖啡' } },
+          ],
+        }],
+      });
+    });
+
+    it('人工介入筛选与搜索条件同时生效，不能互相覆盖', () => {
+      expect(buildArticleListWhere({ anomaly: 'needs_attention', search: '咖啡' })).toEqual({
         OR: [
-          { title: { contains: '咖啡' } },
-          { summary: { contains: '咖啡' } },
-          { brand: { contains: '咖啡' } },
+          { aiStatus: { in: ['failed', 'skipped'] } },
+          { duplicateStatus: 'duplicate' },
+          { aiConfidence: { lt: 70 } },
+          { publicStatus: 'published', reviewStatus: 'unreviewed' },
         ],
+        AND: [{
+          OR: [
+            { title: { contains: '咖啡' } },
+            { summary: { contains: '咖啡' } },
+            { brand: { contains: '咖啡' } },
+          ],
+        }],
       });
     });
 
@@ -142,6 +162,18 @@ describe('article-service', () => {
       expect(call.where).toEqual({ aiStatus: 'failed' });
       // select 必含 source 摘要
       expect(call.select.source).toEqual({ select: { name: true, type: true } });
+    });
+
+    it('all 模式返回全部结果，不向 Prisma 传 skip/take', async () => {
+      mocks.articleFindMany.mockResolvedValue([]);
+      mocks.articleCount.mockResolvedValue(250);
+
+      const result = await listArticles({ all: true, page: 3, pageSize: 20 });
+
+      const call = mocks.articleFindMany.mock.calls[0][0];
+      expect(call).not.toHaveProperty('skip');
+      expect(call).not.toHaveProperty('take');
+      expect(result).toMatchObject({ page: 1, pageSize: 250, totalPages: 1, total: 250 });
     });
 
     it('计数与 findMany 并行；返回 totalPages=0 当 total=0', async () => {

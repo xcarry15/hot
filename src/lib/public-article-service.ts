@@ -22,9 +22,6 @@ const PUBLIC_CACHE_MAX_ENTRIES = 100;
 
 type PublicArticleListParams = {
   search?: string;
-  sourceId?: string;
-  from?: string;
-  to?: string;
   before?: string;
   dateLimit?: number;
 };
@@ -61,37 +58,6 @@ function parseDate(value: string | undefined, endOfDay = false): Date | undefine
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-function addEffectiveDateFilter(
-  where: Prisma.ArticleWhereInput,
-  from?: string,
-  to?: string,
-): void {
-  const fromDate = parseDate(from);
-  const toDate = parseDate(to, true);
-  if (!fromDate && !toDate) return;
-
-  const publishedAt: Prisma.DateTimeNullableFilter = {};
-  const createdAt: Prisma.DateTimeFilter = {};
-  if (fromDate) {
-    publishedAt.gte = fromDate;
-    createdAt.gte = fromDate;
-  }
-  if (toDate) {
-    publishedAt.lte = toDate;
-    createdAt.lte = toDate;
-  }
-
-  where.AND = [
-    ...(Array.isArray(where.AND) ? where.AND : []),
-    {
-      OR: [
-        { publishedAt },
-        { publishedAt: null, createdAt },
-      ],
-    },
-  ];
-}
-
 function getDateLimit(params: PublicArticleListParams, hasSearch: boolean): number {
   const fallback = params.before
     ? PUBLIC_LOAD_MORE_DATE_LIMIT
@@ -113,9 +79,6 @@ function buildPublicWhere(params: PublicArticleListParams = {}): Prisma.ArticleW
     AND: andClauses,
   };
 
-  const sourceId = normalizeText(params.sourceId, 80);
-  if (sourceId) where.sourceId = sourceId;
-  addEffectiveDateFilter(where, params.from, params.to);
   return where;
 }
 
@@ -133,14 +96,7 @@ function buildPublicSqlWhere(params: PublicArticleListParams = {}): Prisma.Sql {
     )`);
   }
 
-  const sourceId = normalizeText(params.sourceId, 80);
-  if (sourceId) clauses.push(Prisma.sql`"sourceId" = ${sourceId}`);
-
-  const fromDate = parseDate(params.from);
-  const toDate = parseDate(params.to, true);
   const beforeDate = parseDate(params.before);
-  if (fromDate) clauses.push(Prisma.sql`${effectiveDate} >= ${fromDate.getTime()}`);
-  if (toDate) clauses.push(Prisma.sql`${effectiveDate} <= ${toDate.getTime()}`);
   if (beforeDate) clauses.push(Prisma.sql`${effectiveDate} < ${beforeDate.getTime()}`);
 
   return Prisma.join(clauses, ' AND ');
@@ -367,7 +323,7 @@ async function loadPublicArticleNavigation(articleId: string): Promise<{
 }
 
 export async function getPublicArticleFeedRevision(
-  params: Pick<PublicArticleListParams, 'search' | 'sourceId' | 'from' | 'to'> = {},
+  params: Pick<PublicArticleListParams, 'search'> = {},
 ): Promise<PublicArticleFeedRevisionDto> {
   return {
     total: await countPublicArticles(params),
@@ -379,9 +335,6 @@ export async function listPublicArticles(
 ): Promise<PublicArticleListResponseDto> {
   const key = JSON.stringify({
     search: normalizeText(params.search, 100) ?? '',
-    sourceId: normalizeText(params.sourceId, 80) ?? '',
-    from: params.from ?? '',
-    to: params.to ?? '',
     before: params.before ?? '',
     dateLimit: params.dateLimit ?? '',
   });
@@ -397,19 +350,6 @@ export async function listPublicArticles(
   }
   void value.catch(() => publicArticleListCache.delete(key));
   return value;
-}
-
-export async function listPublicSourceOptions(): Promise<Array<{ id: string; name: string }>> {
-  const sources = await db.source.findMany({
-    where: {
-      deletedAt: null,
-      publicEnabled: true,
-      articles: { some: { publicStatus: 'published' } },
-    },
-    select: { id: true, name: true },
-    orderBy: { name: 'asc' },
-  });
-  return sources;
 }
 
 export async function getPublicArticleDetail(id: string, options: { recordView?: boolean } = {}): Promise<PublicArticleDetailDto | null> {

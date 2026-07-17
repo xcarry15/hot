@@ -14,9 +14,6 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const filters = {
       search: searchParams.get('q') ?? undefined,
-      sourceId: searchParams.get('source') ?? undefined,
-      from: searchParams.get('from') ?? undefined,
-      to: searchParams.get('to') ?? undefined,
     };
     if (searchParams.get('probe') === '1') {
       const response = NextResponse.json(await getPublicArticleFeedRevision(filters));

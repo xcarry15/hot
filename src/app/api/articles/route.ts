@@ -29,14 +29,22 @@ export async function GET(request: Request) {
       reviewStatus: searchParams.get('reviewStatus') ?? undefined,
       fetchStatus: searchParams.get('fetchStatus') ?? undefined,
       inbox: searchParams.get('inbox') === 'true',
+      anomaly: searchParams.get('anomaly') === 'needs_attention' ? 'needs_attention' as const : undefined,
+      manualOnly: searchParams.get('manualOnly') === 'true',
+      sort: parseSort(searchParams.get('sort')),
     };
     const page = parsePositiveInt(searchParams.get('page'), 1);
     const pageSize = parsePositiveInt(searchParams.get('pageSize'), 20, 100);
+    const all = searchParams.get('all') === 'true';
 
-    return NextResponse.json(await listArticles({ filter, page, pageSize }));
+    return NextResponse.json(await listArticles({ filter, page, pageSize, all }));
   } catch (error: unknown) {
     return apiError(error, 'Failed to fetch articles');
   }
+}
+
+function parseSort(raw: string | null): 'newest' | 'oldest' | 'score_desc' | 'score_asc' | 'relevance_desc' | 'relevance_asc' | 'event_desc' | 'event_asc' | 'content_desc' | 'content_asc' | 'ad_desc' | 'ad_asc' | 'confidence_desc' | 'confidence_asc' | undefined {
+  return raw === 'newest' || raw === 'oldest' || raw === 'score_desc' || raw === 'score_asc' || raw === 'relevance_desc' || raw === 'relevance_asc' || raw === 'event_desc' || raw === 'event_asc' || raw === 'content_desc' || raw === 'content_asc' || raw === 'ad_desc' || raw === 'ad_asc' || raw === 'confidence_desc' || raw === 'confidence_asc' ? raw : undefined;
 }
 
 // DELETE /api/articles - Batch delete articles

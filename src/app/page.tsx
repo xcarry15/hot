@@ -6,7 +6,7 @@ import PublicHomeSkeleton from '@/components/public-home-skeleton'
 import PublicArticleFeed from '@/components/public-article-feed'
 import PublicFooter from '@/components/public-footer'
 import PublicHeader from '@/components/public-header'
-import { listPublicArticles, listPublicSourceOptions } from '@/lib/public-article-service'
+import { listPublicArticles } from '@/lib/public-article-service'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +18,7 @@ function first(value: string | string[] | undefined): string {
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<SearchParams> }): Promise<Metadata> {
   const params = await searchParams
-  const hasFilter = Boolean(first(params.q) || first(params.source) || first(params.from) || first(params.to))
+  const hasFilter = Boolean(first(params.q))
   return {
     title: hasFilter ? '文章筛选 · 行业新闻聚合' : '行业新闻聚合',
     description: '聚合行业动态，提供经过质量筛选的新闻文章。',
@@ -44,20 +44,13 @@ async function PublicHomeContent({ searchParams }: { searchParams: Promise<Searc
   }
 
   const search = first(params.q)
-  const sourceId = first(params.source)
-  const from = first(params.from)
-  const to = first(params.to)
   let data
-  let sourceOptions
   try {
-    [data, sourceOptions] = await Promise.all([
-      listPublicArticles({ search, sourceId, from, to }),
-      listPublicSourceOptions(),
-    ])
+    data = await listPublicArticles({ search })
   } catch {
     return <PublicErrorState />
   }
-  const hasFilter = Boolean(search || sourceId || from || to)
+  const hasFilter = Boolean(search)
 
   return (
     <div className="public-site flex min-h-[100dvh] flex-col bg-background text-foreground">
@@ -67,11 +60,7 @@ async function PublicHomeContent({ searchParams }: { searchParams: Promise<Searc
         <PublicArticleFeed
           initialData={data}
           search={search}
-          sourceId={sourceId}
-          from={from}
-          to={to}
           hasFilter={hasFilter}
-          sourceOptions={sourceOptions}
         />
       </main>
 
