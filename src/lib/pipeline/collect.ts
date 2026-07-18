@@ -25,8 +25,9 @@ import {
   startJobStage,
 } from '@/lib/job-progress';
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
-import { buildAiResetDataForArticle } from '@/lib/article-duplicate-state';
+import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
+import { recalculateEventById } from '@/lib/event-service';
 import { recordFailure, restoreBreakerIfElapsed } from '@/lib/pipeline/source-health';
 import type { CrawlItem, CrawlResult } from '@/contracts/crawl';
 
@@ -57,20 +58,29 @@ export async function collectItem(
     const nextPublishedAt = item.publishedAt ? parseChineseDate(item.publishedAt) : undefined;
     const publishedAtChanged = nextPublishedAt !== undefined
       && existing.publishedAt?.getTime() !== nextPublishedAt.getTime();
+    const resetData = titleChanged ? {
+      ...buildAiResetDataForArticle(existing),
+      event: { disconnect: true },
+      clusterStatus: 'pending',
+      clusteredAt: null,
+      clusterError: null,
+      clusterRetryCount: 0,
+      nextClusterRetryAt: null,
+      eventKey: '',
+      fetchStatus: 'pending' as const,
+    } : {};
     await db.article.update({
       where: { id: existing.id },
       data: {
         title: item.title,
         publishedAt: nextPublishedAt,
-        ...(titleChanged ? {
-          ...buildAiResetDataForArticle(existing, { dedupOverride: 'preserve' }),
-          fetchStatus: 'pending' as const,
-        } : {}),
+        ...resetData,
       },
     });
     if (titleChanged || publishedAtChanged) {
       await refreshPublicPublication(existing.id, db, { contentChanged: titleChanged });
     }
+    if (titleChanged && existing.eventId) await recalculateEventById(existing.eventId);
     console.log(`[dedup] URL exact match, updated: "${item.title}"${titleChanged ? ' (title changed, reset fetchStatus)' : ''}`);
     return existing.id;
   }
@@ -98,9 +108,8 @@ export async function collectItem(
     return;
   }
 
-  // 注意：关键字匹配与内容指纹去重都已搬到 processAllPending，
-  // 这里只做 URL 去重 + 长度门控。理由：item.content 只是列表页摘要，
-  // 用它做关键字/去重会漏判（详见 tranquil-petting-goose.md）。
+  // 注意：关键字匹配已搬到 processAllPending，内容指纹由后续聚类使用。
+  // 这里只做 URL 唯一约束 + 长度门控；item.content 只是列表页摘要，不能用于事件判断。
 
   // ---- Step 5: Save article (direct create, P2002 fallback) ----
   // SQLite WAL 模式下写操作串行化，Step 1 的 findUnique 后极不可能发生并发插入。
@@ -130,7 +139,7 @@ export async function collectItem(
     return created.id;
   } catch (err: unknown) {
     // P2002: 极少见 — 常规竞态已由 Step 1 URL 去重消除；极端并发下仍可能触发。
-    // 不抛出中断整个 for 循环：当作 dedup 命中跳过即可。
+  // 不抛出中断整个 for 循环：按 URL 唯一约束命中跳过即可。
     // 注意：此处不执行 title-change update（P2002 概率极低，无必要），与 Step 1 的
     // 正常 update 路径一致——Step 1 已处理非并发场景下的标题更新。
     if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'P2002') {
@@ -225,7 +234,6 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
 
 
     // Collect each item (no detail fetch, no AI — those are separate stages).
-    // 批次内同事件去重交给 collectItem → findDuplicateArticle（查 DB 近期文章，
     // 含同批次已入库的）。不再用 entity 互查（假阳性高，已废弃）。
     for (const item of result.items) {
       assertNotAborted(signal);

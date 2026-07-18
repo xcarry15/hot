@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Loader2,
@@ -14,8 +15,6 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Settings, WebhookConfig, WebhookTestResult } from './types'
-import { Switch } from '@/components/ui/switch'
-import { DEDUP_SETTING_DEFINITIONS } from '@/contracts/dedup-settings'
 import {
   WEBHOOK_MAX_COUNT,
   parseWebhookConfigs,
@@ -23,27 +22,6 @@ import {
 } from '@/contracts/webhook'
 import { previewPushSettings, testWebhook as testWebhookApi, type PushPreviewResult } from '@/features/settings-api.client'
 
-// 去重阈值：UI 唯一来源。push.tsx 渲染、settings-tab.tsx 初始值、API 校验共用这套边界。
-interface DedupFieldDef {
-  key: keyof Settings
-  label: string
-  defaultValue: string
-  min: number
-  max: number
-  step?: number
-  description: string
-  fullWidth?: boolean
-}
-
-const DEDUP_FIELDS: readonly DedupFieldDef[] = [
-  { ...DEDUP_SETTING_DEFINITIONS.windowDays, label: '比对时间范围（天）', description: '只与最近 N 天内的文章比对，超过的视为新事件' },
-  { ...DEDUP_SETTING_DEFINITIONS.numericSharedMin, label: '数字特征匹配数', description: '两篇出现 N 个相同数字，且至少包含一个有区分度的事实值，才判为同一事件' },
-  { ...DEDUP_SETTING_DEFINITIONS.bodyLcsMin, label: '单段重复最少字数', description: '连续相同的字数达到此值才算一段重复，默认更保守' },
-  { ...DEDUP_SETTING_DEFINITIONS.lcsTotalMin, label: '重复字数累计阈值', step: 50, description: '所有重复片段字数累加达到此值才最终判重，默认更保守' },
-  { ...DEDUP_SETTING_DEFINITIONS.shortBodyThreshold, label: '短文额外比对上限', step: 100, description: '两篇都低于此字数时启用补充比对，调大去重更激进', fullWidth: true },
-] as const
-
-const BRAND_GATE_SETTING = DEDUP_SETTING_DEFINITIONS.brandGateEnabled
 
 interface Props {
   settings: Settings
@@ -288,46 +266,6 @@ export default function PushTab({ settings, setSettings }: Props) {
             {preview && <span className="text-xs text-muted-foreground">当前约 {preview.pushable} 篇符合阈值；{preview.webhookCount} 个 Webhook 可用，预计本轮推送 {preview.willPush} 篇。</span>}
           </div>
 
-          <div className="space-y-2">
-            <span className="text-xs font-semibold">去重规则</span>
-            <p className="text-[11px] text-muted-foreground">
-              以下参数控制「两篇文章是否重复」的判断标准。默认值已适配通用场景，谨慎调整。
-            </p>
-
-            <div className="flex items-center justify-between gap-2 p-2 rounded-lg border bg-muted/20">
-              <div className="space-y-0.5 min-w-0">
-                <Label htmlFor="brand-gate" className="text-xs">仅同品牌判重</Label>
-                <p className="text-[11px] text-muted-foreground truncate">开启后不同品牌的文章不会合并（推荐开启）</p>
-              </div>
-              <Switch
-                id="brand-gate"
-                checked={(settings[BRAND_GATE_SETTING.key] || BRAND_GATE_SETTING.defaultValue) === 'true'}
-                onCheckedChange={(checked) => updateSetting(BRAND_GATE_SETTING.key, checked ? 'true' : 'false')}
-                aria-label="仅同品牌判重"
-                className="scale-90 shrink-0"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {DEDUP_FIELDS.map((f) => (
-                <div key={f.key} className={f.fullWidth ? 'sm:col-span-2' : ''}>
-                  <div className="flex items-center gap-2">
-                    <Label className="text-xs shrink-0">{f.label}</Label>
-                    <Input
-                      type="number"
-                      value={(settings[f.key] as string) || f.defaultValue}
-                      min={f.min}
-                      max={f.max}
-                      step={f.step}
-                      onChange={(e) => updateSetting(f.key, e.target.value)}
-                      className="h-7 text-xs w-[72px]"
-                    />
-                  </div>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{f.description}</p>
-                </div>
-              ))}
-            </div>
-          </div>
         </CardContent>
       </Card>
 

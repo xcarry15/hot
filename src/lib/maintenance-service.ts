@@ -18,7 +18,7 @@ import { getDbFileSize, runVacuum } from '@/lib/maintenance/sqlite';
 import { deleteArticlesByIds } from '@/lib/article-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
-import { buildAiResetDataForArticle } from '@/lib/article-duplicate-state';
+import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
 
 // ── 只读：统计 ──────────────────────────────────────────────────
 
@@ -49,12 +49,9 @@ export async function getCleanupStats(): Promise<CleanupStats> {
   ] = await Promise.all([
     db.article.count(),
     db.article.count({ where: { score: { lt: 40 }, aiStatus: { in: ['skipped', 'failed'] } } }),
-    db.article.count({ where: { pushedAt: { not: null } } }),
+    db.event.count({ where: { pushedAt: { not: null } } }),
     db.article.count({ where: { aiStatus: { in: ['pending', 'failed'] } } }),
-    Promise.all([
-      db.discardedItem.count({ where: { reason: { startsWith: 'dedup:' } } }),
-      db.article.count({ where: { aiStatus: 'skipped', dedupDetail: { not: null } } }),
-    ]).then(([discarded, marked]) => discarded + marked),
+    db.event.count({ where: { articleCount: { gt: 1 } } }),
     db.fetchLog.count(),
     db.pushLog.count(),
     db.discardedItem.count(),
@@ -141,7 +138,7 @@ export async function resetAllAi(): Promise<{ reset: number }> {
   await db.$transaction(async tx => {
     const articles = await tx.article.findMany({ where: { aiStatus: { not: 'pending' } } });
     for (const article of articles) {
-      await tx.article.update({ where: { id: article.id }, data: buildAiResetDataForArticle(article, { dedupOverride: 'preserve' }) });
+      await tx.article.update({ where: { id: article.id }, data: buildAiResetDataForArticle(article) });
     }
     reset = articles.length;
     if (reset > 0) await rebuildPublicPublicationSnapshot(tx);
@@ -155,7 +152,7 @@ export async function resetFailedAi(): Promise<{ reset: number }> {
   await db.$transaction(async tx => {
     const articles = await tx.article.findMany({ where: { aiStatus: { in: ['failed', 'skipped'] } } });
     for (const article of articles) {
-      await tx.article.update({ where: { id: article.id }, data: buildAiResetDataForArticle(article, { dedupOverride: 'preserve' }) });
+      await tx.article.update({ where: { id: article.id }, data: buildAiResetDataForArticle(article) });
     }
     reset = articles.length;
     if (reset > 0) await rebuildPublicPublicationSnapshot(tx);
@@ -167,15 +164,8 @@ export async function resetFailedAi(): Promise<{ reset: number }> {
 // ── 清空日志类 ─────────────────────────────────────────────────
 
 export async function clearDedupLogs(): Promise<{ deleted: number }> {
-  const [discardedResult, articleResult] = await db.$transaction([
-    db.discardedItem.deleteMany({ where: { reason: { startsWith: 'dedup:' } } }),
-    // AI 后去重记录保存在 Article.dedupDetail；清理日志不应重置 AI 状态。
-    db.article.updateMany({
-      where: { aiStatus: 'skipped', dedupDetail: { not: null } },
-      data: { dedupDetail: null },
-    }),
-  ]);
-  return { deleted: discardedResult.count + articleResult.count };
+  const result = await db.discardedItem.deleteMany({ where: { reason: { startsWith: 'dedup:' } } });
+  return { deleted: result.count };
 }
 
 export async function clearFetchLogs(): Promise<{ deleted: number }> {
@@ -193,7 +183,7 @@ export async function deleteLowQualityArticles() {
 
 export async function deletePushedArticles() {
   const pushed = await db.article.findMany({
-    where: { pushedAt: { not: null } },
+    where: { event: { is: { pushedAt: { not: null } } } },
     select: { id: true },
   });
   return deleteArticlesByIds(pushed.map((a) => a.id));
@@ -208,7 +198,9 @@ export async function deleteAllArticles() {
   try {
     const [pushResult, articleResult] = await db.$transaction([
       db.pushLog.deleteMany(),
+      db.eventClusterAudit.deleteMany(),
       db.article.deleteMany(),
+      db.event.deleteMany(),
       ...pauseAndResetOps(),
     ]);
     return { deleted: articleResult.count, pushLogsDeleted: pushResult.count };
@@ -222,6 +214,8 @@ export async function deleteAllArticles() {
 
 export interface PurgeAllDeleted {
   articles: number;
+  events: number;
+  eventClusterAudits: number;
   pushLogs: number;
   discarded: number;
   discardedRetryAudits: number;
@@ -236,10 +230,12 @@ export async function purgeAllData(): Promise<{ deleted: PurgeAllDeleted }> {
   const { prevWasEnabled } = await pauseAutoCrawlForWindow();
   invalidatePublicArticleCache();
   try {
-    const [pushResult, articleResult, discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
+    const [pushResult, eventAuditResult, articleResult, eventResult, discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
       await db.$transaction([
         db.pushLog.deleteMany(),
+        db.eventClusterAudit.deleteMany(),
         db.article.deleteMany(),
+        db.event.deleteMany(),
         db.discardedItem.deleteMany(),
         db.discardedRetryAudit.deleteMany(),
         db.fetchLog.deleteMany(),
@@ -249,6 +245,8 @@ export async function purgeAllData(): Promise<{ deleted: PurgeAllDeleted }> {
     return {
       deleted: {
         articles: articleResult.count,
+        events: eventResult.count,
+        eventClusterAudits: eventAuditResult.count,
         pushLogs: pushResult.count,
         discarded: discardedResult.count,
         discardedRetryAudits: discardedRetryAuditResult.count,

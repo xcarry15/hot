@@ -22,7 +22,6 @@ import {
   type ArticleDetailDto,
   type ArticleListResponseDto,
 } from '@/contracts/articles';
-import { parseDedupEvidence } from '@/lib/dedup-evidence';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
 import { splitBrands } from '@/lib/shared/article-codecs';
@@ -33,31 +32,7 @@ import {
   parseArticleAiSnapshot,
   type ManualOverrideField,
 } from '@/lib/article-calibration';
-import { buildAiResetDataForArticle } from '@/lib/article-duplicate-state';
-
-type ArticleMutationDb = Pick<typeof db, 'article' | 'pushLog' | '$transaction'>;
-
-async function clearDuplicateWinnerReferences(
-  client: Pick<ArticleMutationDb, 'article'>,
-  deletedIds: string[],
-): Promise<void> {
-  const affected = await client.article.findMany({
-    where: { duplicateOfId: { in: deletedIds }, id: { notIn: deletedIds } },
-    select: { id: true, dedupDetail: true },
-  });
-  for (const article of affected) {
-    const evidence = parseDedupEvidence(article.dedupDetail);
-    await client.article.update({
-      where: { id: article.id },
-      data: {
-        duplicateOfId: null,
-        dedupDetail: evidence
-          ? JSON.stringify({ ...evidence, matchedId: undefined })
-          : article.dedupDetail,
-      },
-    });
-  }
-}
+import { recalculateArticleEvent, reconcileEventAfterArticleDeletion } from '@/lib/event-service';
 
 // ── 类型化筛选器 ────────────────────────────────────────────────
 
@@ -99,7 +74,7 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
     where.OR = [
       { fetchStatus: 'failed' },
       { aiStatus: { in: ['failed', 'skipped'] } },
-      { duplicateStatus: 'duplicate' },
+      { clusterStatus: { in: ['failed', 'needs_review'] } },
       { aiConfidence: { lt: 70 } },
       { publicStatus: 'published', reviewStatus: 'unreviewed' },
     ];
@@ -352,48 +327,8 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
     await refreshPublicPublication(id, tx, { contentChanged });
   });
   invalidatePublicArticleCache();
+  await recalculateArticleEvent(id);
   return getArticleDetail(id);
-}
-
-/** 仅恢复重复状态并交回 AI，不附带归类、公开或置顶副作用。 */
-export async function getArticleDuplicateState(id: string): Promise<'duplicate' | 'other' | null> {
-  const article = await db.article.findUnique({ where: { id }, select: { duplicateStatus: true } });
-  if (!article) return null;
-  return article.duplicateStatus === 'duplicate' ? 'duplicate' : 'other';
-}
-
-export async function restoreDuplicateForAnalysis(id: string): Promise<boolean> {
-  const article = await db.article.findUnique({
-    where: { id },
-    select: {
-      duplicateStatus: true,
-      manualOverrides: true,
-      manualCorrectedAt: true,
-      relevance: true,
-      summary: true,
-      brand: true,
-      category: true,
-      tags: true,
-      keyPoints: true,
-      eventScore: true,
-      contentScore: true,
-      adProbability: true,
-      isAd: true,
-    },
-  });
-  if (!article) return false;
-  if (article.duplicateStatus !== 'duplicate') throw new Error('文章当前不是重复状态');
-  await db.$transaction(async tx => {
-    await tx.article.update({
-      where: { id },
-      data: {
-        ...buildAiResetDataForArticle(article, { dedupOverride: true }),
-      },
-    });
-    await refreshPublicPublication(id, tx);
-  });
-  invalidatePublicArticleCache();
-  return true;
 }
 
 /** 详情（含最近 5 条 PushLog）；找不到时返回 null。 */
@@ -403,24 +338,28 @@ export async function getArticleDetail(id: string): Promise<ArticleDetailDto | n
     select: {
       ...ARTICLE_DETAIL_SELECT,
       source: { select: { name: true, type: true, url: true } },
-      pushLogs: {
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-        select: {
-          id: true,
-          articleId: true,
-          status: true,
-          errorMessage: true,
-          retryCount: true,
-          webhookUrl: true,
-          webhookRemark: true,
-          createdAt: true,
-        },
-      },
     },
   });
   if (!article) return null;
-  return serializeArticleDetail(article);
+  const pushLogs = article.eventId ? await db.pushLog.findMany({
+    where: { eventId: article.eventId },
+    orderBy: { createdAt: 'desc' },
+    take: 5,
+    select: {
+      id: true,
+      representativeArticleId: true,
+      status: true,
+      errorMessage: true,
+      retryCount: true,
+      webhookUrl: true,
+      webhookRemark: true,
+      createdAt: true,
+    },
+  }) : [];
+  return serializeArticleDetail({
+    ...article,
+    pushLogs: pushLogs.map((log) => ({ ...log, articleId: log.representativeArticleId ?? article.id })),
+  });
 }
 
 // ── 删除用例 ───────────────────────────────────────────────────
@@ -439,14 +378,16 @@ export async function deleteArticlesByIds(ids: string[]): Promise<ArticleDeleteR
   if (cleaned.length === 0) {
     return { deleted: 0, pushLogsDeleted: 0 };
   }
+  const eventIds = (await db.article.findMany({ where: { id: { in: cleaned } }, select: { eventId: true } }))
+    .flatMap((article) => article.eventId ? [article.eventId] : []);
   const result = await db.$transaction(async tx => {
-    const pushResult = await tx.pushLog.deleteMany({ where: { articleId: { in: cleaned } } });
-    // duplicateOfId 是逻辑关联而非外键。赢家被删除前先解除引用，
-    // 否则后台会长期展示一个不存在的“关联原文”。
-    await clearDuplicateWinnerReferences(tx, cleaned);
     const articleResult = await tx.article.deleteMany({ where: { id: { in: cleaned } } });
-    return { deleted: articleResult.count, pushLogsDeleted: pushResult.count };
+    return { deleted: articleResult.count, pushLogsDeleted: 0 };
   });
+  for (const eventId of new Set(eventIds)) {
+    const reconciled = await reconcileEventAfterArticleDeletion(eventId);
+    result.pushLogsDeleted += reconciled.pushLogsDeleted;
+  }
   if (result.deleted > 0) invalidatePublicArticleCache();
   return result;
 }
@@ -455,11 +396,11 @@ export async function deleteArticlesByIds(ids: string[]): Promise<ArticleDeleteR
  * 单篇删除：先删推送日志（外键约束），再删文章。
  */
 export async function deleteArticleById(id: string): Promise<void> {
+  const article = await db.article.findUnique({ where: { id }, select: { eventId: true } });
   await db.$transaction(async tx => {
-    await tx.pushLog.deleteMany({ where: { articleId: id } });
-    await clearDuplicateWinnerReferences(tx, [id]);
     await tx.article.delete({ where: { id } });
   });
+  if (article?.eventId) await reconcileEventAfterArticleDeletion(article.eventId);
   invalidatePublicArticleCache();
 }
 

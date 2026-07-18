@@ -213,8 +213,7 @@ export async function getDashboardAnalytics(
         aiStatus: true,
         score: true,
         isAd: true,
-        pushedAt: true,
-        dedupDetail: true,
+        event: { select: { pushedAt: true, articleCount: true } },
         viewCount: true,
         originalClickCount: true,
       },
@@ -300,7 +299,7 @@ export async function getDashboardAnalytics(
       trend.ads += row.isAd ? 1 : 0;
     }
 
-    if (isAnalyzed && row.pushedAt) {
+    if (isAnalyzed && row.event?.pushedAt) {
       source.pushed += 1;
       trend.pushed += 1;
       if (row.isAd) {
@@ -309,7 +308,7 @@ export async function getDashboardAnalytics(
       }
     }
 
-    if (row.aiStatus === 'skipped' && row.dedupDetail) {
+    if ((row.event?.articleCount ?? 0) > 1) {
       source.duplicates += 1;
       source.duplicateArticles += 1;
       trend.duplicates += 1;

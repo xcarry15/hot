@@ -86,6 +86,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
               <span>{article.source.name}</span>
               {article.originalSource && article.originalSource !== article.source.name && <><span className="text-[var(--public-hairline-strong)]">|</span><span>原始来源：{article.originalSource}</span></>}
               {article.category && <><span className="text-[var(--public-hairline-strong)]">|</span><span>{article.category}</span></>}
+              {article.sourceCount > 1 && <><span className="text-[var(--public-hairline-strong)]">|</span><span>{article.sourceCount} 个来源</span></>}
               {originalUrl && <div className="ml-auto"><PublicOriginalLink href={originalUrl} articleId={article.id} shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} /></div>}
             </div>
 
@@ -132,6 +133,19 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
             <div className="mt-7 flex justify-center pt-2">
               <PublicShareButton shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} title={article.title} summary={article.summary || article.excerpt} publishedAt={formatPublicDateTime(effectiveDate)} />
             </div>
+
+            {article.sources.length > 1 && (
+              <section className="mt-7 border-t border-[var(--public-hairline)] pt-5" aria-labelledby="event-sources-title">
+                <h2 id="event-sources-title" className="text-sm font-semibold text-[var(--public-primary)]">其他报道来源</h2>
+                <ul className="mt-3 space-y-2 text-sm">
+                  {article.sources.map((item) => (
+                    <li key={item.id} className="flex items-start justify-between gap-4 border-b border-[var(--public-hairline)] pb-2">
+                      <div className="min-w-0"><a href={item.url} target="_blank" rel="noreferrer" className="line-clamp-2 text-[var(--public-body)] hover:text-[var(--public-primary)] hover:underline">{item.title}</a><p className="mt-1 text-xs text-[var(--public-muted)]">{item.source.name}</p></div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             <nav className="mt-5 border-t border-[var(--public-hairline)] pt-4" aria-label="文章导航">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6">

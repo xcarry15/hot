@@ -7,6 +7,10 @@ const mocks = db as unknown as {
     findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
+  event: {
+    findUnique: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
   setting: { findUnique: ReturnType<typeof vi.fn> };
 };
 
@@ -14,6 +18,12 @@ describe('public-publication-service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.article.update.mockResolvedValue({});
+    mocks.event.findUnique.mockResolvedValue({
+      representativeArticleId: 'a1',
+      publicStatus: 'unpublished',
+      publicPublishedAt: null,
+    });
+    mocks.event.update.mockResolvedValue({});
     mocks.setting.findUnique
       .mockResolvedValueOnce({ value: '70' })
       .mockResolvedValueOnce({ value: 'true' });
@@ -22,6 +32,8 @@ describe('public-publication-service', () => {
   it('符合规则的文章会被持久化标记为已发布', async () => {
     mocks.article.findUnique.mockResolvedValue({
       id: 'a1',
+      eventId: 'e1',
+      clusterStatus: 'clustered',
       aiStatus: 'done',
       score: 82,
       isAd: false,
@@ -48,6 +60,8 @@ describe('public-publication-service', () => {
   it('规则不再满足时会持久化撤回状态', async () => {
     mocks.article.findUnique.mockResolvedValue({
       id: 'a1',
+      eventId: 'e1',
+      clusterStatus: 'clustered',
       aiStatus: 'done',
       score: 62,
       isAd: false,
@@ -76,6 +90,8 @@ describe('public-publication-service', () => {
   ])('%s 时不会继续公开', async (_label, overrides, reason) => {
     mocks.article.findUnique.mockResolvedValue({
       id: 'a1',
+      eventId: 'e1',
+      clusterStatus: 'clustered',
       aiStatus: 'done',
       score: 82,
       isAd: false,
@@ -105,6 +121,8 @@ describe('public-publication-service', () => {
       .mockResolvedValueOnce({ value: 'true' });
     mocks.article.findUnique.mockResolvedValue({
       id: 'a1',
+      eventId: 'e1',
+      clusterStatus: 'clustered',
       aiStatus: 'done',
       score: 20,
       isAd: true,
@@ -131,6 +149,8 @@ describe('public-publication-service', () => {
     const previous = new Date('2026-07-15T00:00:00.000Z');
     mocks.article.findUnique.mockResolvedValue({
       id: 'a1',
+      eventId: 'e1',
+      clusterStatus: 'clustered',
       aiStatus: 'done',
       score: 82,
       isAd: false,

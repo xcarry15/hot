@@ -112,8 +112,7 @@ export async function getCrawlLogSnapshot(
         adProbability: true,
         aiConfidence: true,
         category: true,
-         pushedAt: true,
-         nextRetryAt: true,
+         event: { select: { pushedAt: true, nextPushRetryAt: true } },
          nextAiRetryAt: true,
         relevance: true,
         createdAt: true,
@@ -251,8 +250,8 @@ export async function getCrawlLogSnapshot(
       aiStatus: a.aiStatus,
       score: a.score,
       relevance: a.relevance,
-      pushedAt: a.pushedAt,
-      nextRetryAt: a.nextRetryAt,
+      eventPushedAt: a.event?.pushedAt ?? null,
+      eventNextRetryAt: a.event?.nextPushRetryAt ?? null,
     };
     const projection = projectArticleSteps(stepInput, push);
     // P0-4: 不再应用全局阶段 overlay——没有 currentItemId 时伪造转圈会失真
@@ -281,7 +280,7 @@ export async function getCrawlLogSnapshot(
       isAd: a.isAd,
       lastTime: a.updatedAt.getTime(),
       // P1-6: 推送/AI 重试时间，方便管理员判断"何时自动重试"
-      pushRetryAt: projection.pushRetryAt ?? (a.nextRetryAt ? a.nextRetryAt.toISOString() : null),
+      pushRetryAt: projection.pushRetryAt ?? (a.event?.nextPushRetryAt ? a.event.nextPushRetryAt.toISOString() : null),
       aiRetryAt: a.aiStatus === 'failed' && a.nextAiRetryAt ? a.nextAiRetryAt.toISOString() : null,
     };
     group.articles.push(articleProgress);

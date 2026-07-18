@@ -22,6 +22,7 @@
 import { collectAllSources, crawlSource } from './pipeline/collect';
 import type { CrawlResult } from '@/contracts/crawl';
 import { processAllPending } from './pipeline/process';
+import { clusterAllPending } from './pipeline/cluster';
 import { analyzeAllPending } from './pipeline/analyze';
 import { reprocessWithAI } from './ai';
 import { pushAllPendingArticles } from './pipeline/push-bridge';
@@ -48,7 +49,7 @@ import {
   advanceJobProgress,
 } from './job-progress';
 
-export type JobType = 'full' | 'collect' | 'process' | 'ai' | 'push';
+export type JobType = 'full' | 'collect' | 'process' | 'cluster' | 'ai' | 'push';
 type JobExecutor = (
   payload: Record<string, unknown>,
   signal?: AbortSignal,
@@ -163,6 +164,7 @@ const JOB_EXECUTORS: Record<JobType, JobExecutor> = {
   full: executeFullJob,
   collect: executeCollectJob,
   process: executeProcessJob,
+  cluster: executeClusterJob,
   ai: executeAiJob,
   push: executePushJob,
 };
@@ -199,6 +201,8 @@ async function executeFullJob(
   }
 
   assertNotAborted(signal);
+  const clusterResult = await clusterAllPending(signal, jobId);
+  assertNotAborted(signal);
   const aiResult = await analyzeAllPending(signal, jobId);
   assertNotAborted(signal);
 
@@ -206,6 +210,7 @@ async function executeFullJob(
     stages: {
       collect: summarizeCollectResult(collectResult),
       process: mergedProcess,
+      cluster: clusterResult,
       ai: aiResult,
     },
   };
@@ -284,6 +289,14 @@ async function executeCollectJob(
   return { result: summarizeCollectResult(result) };
 }
 
+async function executeClusterJob(
+  _payload: Record<string, unknown>,
+  signal?: AbortSignal,
+  jobId?: string,
+): Promise<Record<string, unknown>> {
+  return { result: await clusterAllPending(signal, jobId) };
+}
+
 async function executeProcessJob(
   _payload: Record<string, unknown>,
   signal?: AbortSignal,
@@ -323,7 +336,7 @@ async function executeAiJob(
     return { articleIds, processed, errors };
   }
   if (articleId) {
-    const result = await reprocessWithAI(articleId, signal, jobId, payload.restoreDuplicate === true);
+    const result = await reprocessWithAI(articleId, signal, jobId);
     return { articleId, result: result ?? { status: 'not_found' } };
   }
   const result = await analyzeAllPending(signal, jobId);

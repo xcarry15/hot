@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { cleanContent, extractArticleBody } from '../src/lib/cleaner';
-import { computeContentFingerprint, longestCommonSubstring } from '../src/lib/dedup';
+import { computeContentFingerprint } from '../src/lib/content-fingerprint';
 
 // linkshop.com 真实页脚结构（从 茉莉奶白 LV 案文章提取的 DOM 简化版）
 const LINKSHOP_DATA_LIST = '数据\n2026年中国超市Top100发布：沃尔玛居首，盒马第二\n耐克大中华区2026财年营收下降11％\n鲜制零食全景图：6类玩家和34个品牌盘点\n胖东来2026年累计销售139.5亿，同比增长24.23％\n巴奴更新招股书，2025年经调整利润增长88.7％\n2025年商业零售TOP100企业发布：京东居首\n拆解近三年中国连锁百强榜，看到了这些惊人变化\n2026年5月社会消费品零售总额同比下降0.6％\n2026年中国连锁Top100发布：沃尔玛居首，盒马第二';
@@ -213,13 +213,11 @@ describe('端到端：真实 linkshop 结构 → 清理 → dedup 信号', () =>
     // 重叠（同事件两篇文章用不同句式表达是常见情况）。
   });
 
-  it('不同事件（奈雪 vs 茉莉奶白）：cleanedContent 后 LCS 应小于 80（不被 boilerplate 误判）', () => {
+  it('不同事件（奈雪 vs 茉莉奶白）：全文指纹保持可区分', () => {
     const a = cleanedBody(naixueEventArticles[0]);
     const b = cleanedBody(moliEvent);
-    const lcsLen = longestCommonSubstring(a, b);
-    // 关键断言：剥离 boilerplate 后，两篇完全不同主题的文章
-    // 公共子串应很小（不包含"沃尔玛居首"等站级块）
-    expect(lcsLen).toBeLessThan(80);
+    expect(computeContentFingerprint(naixueEventArticles[0].title, a))
+      .not.toBe(computeContentFingerprint(moliEvent.title, b));
     // 数值也不应重叠（奈雪有 96%/11亿/43.31亿；茉莉奶白有 1030万）
     expect(a).toContain('96%');
     expect(b).not.toContain('96%');

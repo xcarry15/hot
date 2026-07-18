@@ -2,19 +2,18 @@
  * DiscardedItem 写入助手。
  *
  * 单一职责：把采集/抓取/AI 阶段判定"被丢弃"的文章或抓取项写入
- * `discardedItem` 表，dedup:* 与 filter:* 两种 reason 都由本模块统一收敛。
+ * `discardedItem` 表。
  *
  * 历史：
  *   - 逻辑原先内联在 `crawler.ts.recordDiscardedItem`；
  *   - B12 抽离后保持语义完全一致：
- *     · 用 (url, reason) 做 upsert，第一次保留 detail，后续视为同一条去重
+ *     · 用 (url, reason) 做 upsert，更新最近一次诊断信息
  *     · url 截断 1000、title 截断 500
  *     · detail 为对象时 JSON.stringify，为 falsy 时写空串
  *     · publishedAt 走 parseChineseDate 解析
  *     · 失败仅 console.error，并返回 false 让调用方避免删除原文章
  */
 import { db } from '@/lib/db';
-import type { DedupEvidence } from '@/lib/dedup-evidence';
 import { parseChineseDate } from '@/lib/date-utils';
 
 export interface DiscardedItemInput {
@@ -22,15 +21,15 @@ export interface DiscardedItemInput {
   title: string;
   url: string;
   reason: string;
-  /** JSON 序列化写入 discarded.detail。dedup:* 存 canonical DedupEvidence，filter:* 存自由字段 */
-  detail?: Record<string, unknown> | DedupEvidence;
+  /** JSON 序列化写入 discarded.detail。 */
+  detail?: Record<string, unknown>;
   publishedAt?: string;
-  /** 命中去重时指向「赢家」Article.id；filter 拒绝则不传 */
+  /** 可选关联 Article.id。 */
   winnerArticleId?: string;
 }
 
 /**
- * upsert (url, reason)；已存在则更新最近一次判定证据，避免管理员看到过期匹配信息。
+ * upsert (url, reason)；已存在则更新最近一次诊断信息。
  */
 export async function recordDiscardedItem(input: DiscardedItemInput): Promise<boolean> {
   try {

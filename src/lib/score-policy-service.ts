@@ -43,13 +43,12 @@ export async function previewPublicPublication(minScore: number, hideAds: boolea
 }
 
 export async function previewPushDelivery(minScore: number, minRelevance: number, pushMode: string) {
-  const pushable = await db.article.count({
+  const pushable = await db.event.count({
     where: {
       pushedAt: null,
-      aiStatus: 'done',
-      score: { gte: minScore },
-      relevance: { gte: minRelevance },
-      OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: new Date() } }],
+      status: 'active',
+      representativeArticle: { is: { aiStatus: 'done', score: { gte: minScore }, relevance: { gte: minRelevance } } },
+      OR: [{ nextPushRetryAt: null }, { nextPushRetryAt: { lte: new Date() } }],
     },
   });
   const webhooks = await db.setting.findUnique({ where: { key: SETTING_KEYS.FEISHU_WEBHOOK_URL }, select: { value: true } });

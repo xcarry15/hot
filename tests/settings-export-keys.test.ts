@@ -7,7 +7,7 @@ import { EXPORTABLE_SETTING_KEYS } from '@/lib/settings';
 describe('EXPORTABLE_SETTING_KEYS', () => {
   const set = new Set(EXPORTABLE_SETTING_KEYS);
 
-  it('包含 AI 模型、推送、调度、去重的核心参数键', () => {
+  it('包含 AI 模型、推送和调度的核心参数键', () => {
     for (const k of [
       'ai_provider', 'ai_temperature', 'ai_max_tokens', 'ai_system_prompt',
       'ai_step2_content_max_chars', 'ai_weight_event', 'ai_weight_content',
@@ -15,7 +15,6 @@ describe('EXPORTABLE_SETTING_KEYS', () => {
       'deepseek_api_key', 'deepseek_base_url', 'deepseek_model',
       'push_mode', 'push_min_score', 'push_min_relevance', 'push_time', 'feishu_webhook_url',
       'auto_crawl_enabled', 'crawl_interval_min',
-      'dedup_window_days', 'dedup_brand_gate_enabled',
     ]) {
       expect(set.has(k), `缺少键 ${k}`).toBe(true);
     }

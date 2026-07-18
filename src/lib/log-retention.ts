@@ -35,7 +35,7 @@ export async function purgeExpiredLogs(db: LogRetentionDb, now = new Date()) {
       where: {
         createdAt: { lt: cutoffs.pushLogsBefore },
         // 未完成投递的 Article 仍依赖 PushLog 成功记录作为目标级事实。
-        article: { pushedAt: { not: null } },
+        event: { pushedAt: { not: null } },
       },
     }),
     db.job.deleteMany({

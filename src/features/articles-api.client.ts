@@ -65,10 +65,6 @@ export async function updateArticleEditorial(
   return requestJson<ArticleDetailDto>('PATCH', `/api/articles/${articleId}`, { body: input });
 }
 
-export async function restoreDuplicateArticle(articleId: string): Promise<{ restored: boolean; queued: boolean; jobId?: string }> {
-  return requestJson('POST', `/api/articles/${articleId}/restore-duplicate`);
-}
-
 export async function reviewArticle(
   articleId: string,
   status: string,

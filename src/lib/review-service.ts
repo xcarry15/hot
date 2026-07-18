@@ -4,6 +4,7 @@ import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshPublicPublication, refreshPublicPublications, updatePublicPublicationSetting } from '@/lib/public-publication-service';
 import { captureInboxSnapshot } from '@/lib/inbox-snapshot-service';
 import { parseArticleAiSnapshot, parseManualOverrides, type ManualOverrideField } from '@/lib/article-calibration';
+import { recalculateArticleEvent } from '@/lib/event-service';
 
 export const REVIEW_STATUSES = ['unreviewed', 'important', 'general', 'irrelevant'] as const;
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
@@ -83,6 +84,7 @@ export async function reviewArticle(input: {
     return updatedArticle;
   });
   invalidatePublicArticleCache();
+  await recalculateArticleEvent(input.articleId);
   await captureInboxSnapshot().catch(() => undefined);
   return { article: updated };
 }
@@ -118,6 +120,7 @@ export async function reviewArticles(input: {
     return { updated: articles.length };
   });
   invalidatePublicArticleCache();
+  for (const articleId of ids) await recalculateArticleEvent(articleId);
   await captureInboxSnapshot().catch(() => undefined);
   return result;
 }

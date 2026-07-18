@@ -1,7 +1,9 @@
+import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { fetchArticleDetail } from '@/lib/detail-fetcher';
-import { buildAiResetDataForArticle } from '@/lib/article-duplicate-state';
+import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
+import { recalculateEventById } from '@/lib/event-service';
 
 export async function refetchArticle(articleId: string) {
   const article = await db.article.findUnique({
@@ -20,16 +22,26 @@ export async function refetchArticle(articleId: string) {
       contentScore: true,
       adProbability: true,
       isAd: true,
+      eventId: true,
     },
   });
   if (!article) return null;
+  const resetData: Prisma.ArticleUpdateInput = {
+    ...buildAiResetDataForArticle(article),
+    fetchStatus: 'pending',
+    event: { disconnect: true },
+    clusterStatus: 'pending',
+    clusteredAt: null,
+    clusterError: null,
+    clusterRetryCount: 0,
+    nextClusterRetryAt: null,
+    eventKey: '',
+  };
   await db.article.update({
     where: { id: articleId },
-    data: {
-      ...buildAiResetDataForArticle(article, { dedupOverride: 'preserve' }),
-      fetchStatus: 'pending',
-    },
+    data: resetData,
   });
+  if (article.eventId) await recalculateEventById(article.eventId);
   await refreshPublicPublication(articleId);
   const content = await fetchArticleDetail(articleId);
   return { success: true, contentLength: content.length };

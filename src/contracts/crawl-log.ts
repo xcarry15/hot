@@ -67,9 +67,9 @@ export interface SourceProgress {
   lastRunError?: string;
 }
 
-export type JobType = 'full' | 'collect' | 'process' | 'ai' | 'push' | 'fastProcess';
+export type JobType = 'full' | 'collect' | 'process' | 'cluster' | 'ai' | 'push' | 'fastProcess';
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type JobStage = 'collect' | 'process' | 'ai' | 'push';
+export type JobStage = 'collect' | 'process' | 'cluster' | 'ai' | 'push';
 
 export interface JobSnapshot {
   id: string;

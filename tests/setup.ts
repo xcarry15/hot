@@ -25,6 +25,22 @@ vi.mock('@/lib/db', () => ({
       upsert: vi.fn(),
       groupBy: vi.fn(),
     },
+    event: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+      delete: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    eventClusterAudit: {
+      create: vi.fn(),
+      count: vi.fn(),
+      deleteMany: vi.fn(),
+    },
     source: {
       findUnique: vi.fn(),
       findMany: vi.fn(),

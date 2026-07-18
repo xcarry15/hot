@@ -47,6 +47,13 @@ model Article {
   rawContent    String    @default("")
   cleanContent  String    @default("")
   contentHash   String    @default("")
+  eventId       String?
+  clusterStatus String    @default("pending") // pending, clustered, failed, needs_review
+  clusteredAt   DateTime?
+  clusterError  String?
+  clusterRetryCount Int   @default(0)
+  nextClusterRetryAt DateTime?
+  eventKey      String    @default("")
   fetchStatus   FetchStatus @default(pending) // pending=待抓取, fetched=已抓取有内容, failed=已确认抓取失败
   articleBody   String    @default("") // 已从 rawContent 提取的正文（缓存，避免每次 AI 重新 extractArticleBody）
   // AI fields
@@ -73,7 +80,6 @@ model Article {
   manualOverrides String  @default("[]") // JSON string[]；记录当前由人工覆盖的字段
   manualCorrectedAt DateTime?
   skipReason    String?   // 跳过原因（dedup 命中 / 内容不足等）。与 summary 解耦：summary 保留 AI 洞察不被覆盖
-  dedupDetail   String?   // JSON: canonical DedupEvidence（去重方式/重复文章/URL/详情/内容对比片段）。仅 dedup 命中并标 skipped 时写入；列表用 skipReason，详情用本字段
   aiRetryCount  Int       @default(0) // AI 失败累计重试次数；≥5 次标 skipped 放弃（防 provider 故障持续烧 token）
   nextAiRetryAt DateTime? // AI 失败后的下次允许重试时间（指数退避：2^n 分钟，上限 6h）
   isAd          Boolean   @default(false) // AI 判定为软文/广告时为 true（分数会被 clamp 到 0-34，标题加 [软文] 标记）
@@ -89,36 +95,83 @@ model Article {
   publicPublicationReason String @default("")
   publicPublicationEvaluatedAt DateTime?
   publicContentUpdatedAt DateTime? // 发布时初始化；此后仅内容/发布状态变化时更新
-  // 不同 URL 的同文文章保留入库，避免信息丢失；重复文章默认跳过完整 AI。
-  duplicateOfId      String?
-  duplicateStatus    String    @default("none") // none, duplicate
-  dedupOverride      Boolean   @default(false) // 管理员明确恢复重复文章后，允许其完成 AI
   viewCount          Int       @default(0)
   originalClickCount Int       @default(0)
-  // Push
-  pushedAt      DateTime?
-  nextRetryAt   DateTime? // 推送失败后的下次允许重试时间（用于失败重试队列）
   publishedAt   DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   source    Source     @relation(fields: [sourceId], references: [id])
-  pushLogs  PushLog[]
+  event     Event?     @relation("EventArticles", fields: [eventId], references: [id])
+  representedEvent Event? @relation("EventRepresentative")
+  clusterAudits EventClusterAudit[]
 
   @@unique([url])
   @@index([contentHash])
+  @@index([eventId, createdAt])
+  @@index([clusterStatus, nextClusterRetryAt, createdAt])
   @@index([fetchStatus])
   @@index([aiStatus, createdAt])
   // AI worker filters by status + retry window, then processes oldest rows first.
   @@index([aiStatus, nextAiRetryAt, createdAt])
-  @@index([pushedAt, score, relevance, aiStatus])
   @@index([brand, createdAt])
   @@index([reviewStatus, aiStatus, fetchStatus, createdAt])
   @@index([publicOverride, pinUntil, publishedAt])
   @@index([publicStatus, publishedAt])
   @@index([publicStatus, publicContentUpdatedAt])
-  @@index([duplicateStatus, createdAt])
   @@map("articles")
+}
+
+model Event {
+  id                      String    @id @default(cuid())
+  status                  String    @default("active") // active, merged
+  mergedIntoId            String?
+  representativeArticleId String?   @unique
+  representativeManual    Boolean   @default(false)
+  firstSeenAt             DateTime
+  lastSeenAt              DateTime
+  articleCount            Int       @default(0)
+  publicStatus            String    @default("unpublished") // unpublished, published, revoked
+  publicPublishedAt       DateTime?
+  publicRevokedAt         DateTime?
+  pushedAt                DateTime?
+  nextPushRetryAt         DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  mergedInto              Event?    @relation("EventMerge", fields: [mergedIntoId], references: [id])
+  mergedEvents            Event[]   @relation("EventMerge")
+  representativeArticle   Article?  @relation("EventRepresentative", fields: [representativeArticleId], references: [id])
+  articles                Article[] @relation("EventArticles")
+  pushLogs                PushLog[]
+  assignedAudits          EventClusterAudit[] @relation("AssignedEventAudits")
+  candidateAudits         EventClusterAudit[] @relation("CandidateEventAudits")
+
+  @@index([status, lastSeenAt])
+  @@index([publicStatus, firstSeenAt])
+  @@index([pushedAt, nextPushRetryAt])
+  @@map("events")
+}
+
+model EventClusterAudit {
+  id               String   @id @default(cuid())
+  articleId        String
+  assignedEventId  String
+  candidateEventId String?
+  actor             String   // system, admin
+  action            String   // create, attach, fallback_create, merge, split, representative_change
+  decisionSource    String   // exact, rule, ai, admin
+  confidence        Int?
+  evidence          String   @default("{}")
+  createdAt         DateTime @default(now())
+
+  article        Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  assignedEvent  Event   @relation("AssignedEventAudits", fields: [assignedEventId], references: [id])
+  candidateEvent Event?  @relation("CandidateEventAudits", fields: [candidateEventId], references: [id])
+
+  @@index([articleId, createdAt])
+  @@index([assignedEventId, createdAt])
+  @@map("event_cluster_audits")
 }
 
 model KeywordCandidate {
@@ -185,7 +238,8 @@ model FetchLog {
 
 model PushLog {
   id            String   @id @default(cuid())
-  articleId     String
+  eventId       String
+  representativeArticleId String?
   status        String   // success, failure
   errorMessage  String   @default("")
   retryCount    Int      @default(0)
@@ -193,9 +247,9 @@ model PushLog {
   webhookRemark String   @default("")
   createdAt     DateTime @default(now())
 
-  article Article @relation(fields: [articleId], references: [id])
+  event Event @relation(fields: [eventId], references: [id])
 
-  @@index([articleId, status, webhookUrl])
+  @@index([eventId, status, webhookUrl])
   @@index([status, webhookRemark, createdAt])
   @@index([createdAt])
   @@map("push_logs")
@@ -256,9 +310,10 @@ model DiscardedRetryAudit {
 }
 
 enum JobType {
-  full     // collect -> process -> ai -> push
+  full     // collect -> process -> cluster -> ai -> push
   collect  // only collect all sources
   process  // only fetch pending details
+  cluster  // only cluster fetched articles into events
   ai       // only run AI on pending articles
   push     // only push unpushed articles
   fastProcess  // @deprecated 已移除，仅保留以兼容历史 Job 记录
@@ -274,6 +329,7 @@ enum JobStatus {
 enum JobStage {
   collect
   process
+  cluster
   ai
   push
 }

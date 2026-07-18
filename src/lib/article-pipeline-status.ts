@@ -43,8 +43,8 @@ export interface ArticleStepInput {
   aiStatus: string;
   score: number;
   relevance: number;
-  pushedAt: Date | null;
-  nextRetryAt: Date | null;
+  eventPushedAt: Date | null;
+  eventNextRetryAt: Date | null;
 }
 
 export interface ArticleStepProjection {
@@ -104,7 +104,7 @@ export function projectArticleSteps(
   let pushStatus: StepStatus = 'pending';
   let pushRetryAt: string | null = null;
 
-  if (article.pushedAt) {
+  if (article.eventPushedAt) {
     pushStatus = 'done';
   } else if (process !== 'done' || (ai !== 'done' && ai !== 'failed' && ai !== 'skipped')) {
     // process 未完成，或 ai 尚未 ready（含 pending / blocked）
@@ -115,9 +115,9 @@ export function projectArticleSteps(
     pushStatus = 'not_applicable';
   } else if (article.score < push.minScore || article.relevance < push.minRelevance) {
     pushStatus = 'filtered';
-  } else if (article.nextRetryAt && article.nextRetryAt > push.now) {
+  } else if (article.eventNextRetryAt && article.eventNextRetryAt > push.now) {
     pushStatus = 'failed';
-    pushRetryAt = article.nextRetryAt.toISOString();
+    pushRetryAt = article.eventNextRetryAt.toISOString();
   } else {
     pushStatus = 'pending';
   }
@@ -170,9 +170,6 @@ export function deriveSkipReason(article: {
 }): string | undefined {
   if (article.aiStatus === 'skipped') {
     return article.skipReason || article.summary || '内容不足';
-  }
-  if (article.skipReason && article.skipReason.startsWith('[重复]')) {
-    return article.skipReason;
   }
   return undefined;
 }

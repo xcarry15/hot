@@ -8,7 +8,7 @@
     "start": "next start -p 3011",
     "lint": "eslint .",
     "test": "vitest run --exclude tests/db-baseline.test.ts",
-    "test:critical": "vitest run tests/ai-client.test.ts tests/parsers-direct.test.ts tests/source-schema.test.ts tests/dedup-adversarial.test.ts tests/execution-concurrency.test.ts tests/timeout-cancellation.test.ts tests/push-partial-delivery.test.ts tests/cleanup-n-plus-one.test.ts tests/crawl-log-snapshot.test.ts tests/article-pipeline-status.test.ts tests/settings-transaction.test.ts",
+    "test:critical": "vitest run tests/ai-client.test.ts tests/parsers-direct.test.ts tests/source-schema.test.ts tests/event-clustering.test.ts tests/execution-concurrency.test.ts tests/timeout-cancellation.test.ts tests/public-article-service.test.ts tests/crawl-log-snapshot.test.ts tests/article-pipeline-status.test.ts tests/settings-transaction.test.ts",
     "test:all": "vitest run",
     "test:db-baseline": "vitest run tests/db-baseline.test.ts --maxWorkers=1 --reporter=verbose",
     "test:watch": "vitest",

@@ -34,7 +34,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     db.article.count({ where: { aiStatus: 'pending' } }),
     db.article.count({ where: { aiStatus: 'failed' } }),
     db.pushLog.count({ where: { status: 'failure', createdAt: { gte: last24Hours } } }),
-    db.article.count({ where: urgentWhere }),
+    db.event.count({ where: urgentWhere }),
     db.job.count({ where: { status: 'failed', updatedAt: { gte: last24Hours } } }),
     db.fetchLog.count({ where: { status: 'failure', createdAt: { gte: last24Hours } } }),
   ]);

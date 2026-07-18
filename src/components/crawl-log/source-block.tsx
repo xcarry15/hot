@@ -63,25 +63,10 @@ export const SourceBlock = memo(function SourceBlock({
   // 稳定引用：source.articles 缺失时 `|| []` 会返回新数组，破坏下游 useMemo 的依赖判断
   const articles = useMemo(() => source.articles ?? [], [source.articles])
   const [normalExpanded, setNormalExpanded] = useState(true)
-  const [dupExpanded, setDupExpanded] = useState(true)
   const [collapsedDiscardGroups, setCollapsedDiscardGroups] = useState<Set<string>>(() => new Set())
   const savedCount = articles.filter(a => a.crawl === 'done' || a.crawl === 'running').length
   const aiDoneCount = articles.filter(a => a.ai === 'done').length
   const totalCount = articles.length
-
-  // 拆分已入库：正常文章 vs 重复文章（AI 判定为同事件重复）
-  const { normalArticles, duplicateArticles } = useMemo(() => {
-    const normal: typeof articles = []
-    const dup: typeof articles = []
-    for (const a of articles) {
-      if (a.ai === 'skipped' && a.skipReason?.startsWith('[重复]')) {
-        dup.push(a)
-      } else {
-        normal.push(a)
-      }
-    }
-    return { normalArticles: normal, duplicateArticles: dup }
-  }, [articles])
 
   // 按 reason 分组，组内按 publishedAt desc 排序
   const discardedGroups = useMemo(() => {
@@ -157,47 +142,20 @@ export const SourceBlock = memo(function SourceBlock({
 
       {source.expanded && articles.length > 0 && (
         <div className="bg-background/50">
-          {/* 正常文章（默认展开，排最前） */}
-          {normalArticles.length > 0 && (
+          {/* 已入库文章默认展开；事件归属在情报收件箱中统一校准。 */}
+          {articles.length > 0 && (
             <div>
                   <button
                     className="flex items-center gap-1 text-xs text-muted-foreground px-2 py-1 hover:text-foreground w-full"
                     onClick={() => setNormalExpanded(!normalExpanded)}
                   >
                     <span>{normalExpanded ? '▾' : '▸'}</span>
-                    <span>正常文章</span>
-                    <span className="text-muted-foreground/60">({normalArticles.length})</span>
+                    <span>已入库文章</span>
+                    <span className="text-muted-foreground/60">({articles.length})</span>
                   </button>
                   {normalExpanded && (
                     <div className="ml-2 overflow-y-auto max-h-[50vh] sm:max-h-none divide-y divide-border/20">
-                      {normalArticles.map(article => (
-                        <ArticleRow
-                          key={article.id}
-                          article={article}
-                          onStepAction={onStepAction}
-                          onStepActionLoading={onStepActionLoading}
-                          onOpenArticle={onOpenArticle}
-                          isJobRunning={isJobRunning}
-                        />
-                      ))}
-                    </div>
-                  )}
-            </div>
-          )}
-          {/* 重复文章（同事件检测，默认折叠） */}
-          {duplicateArticles.length > 0 && (
-            <div className="border-t border-dashed">
-                  <button
-                    className="flex items-center gap-1 text-xs text-muted-foreground px-2 py-1 hover:text-foreground w-full"
-                    onClick={() => setDupExpanded(!dupExpanded)}
-                  >
-                    <span>{dupExpanded ? '▾' : '▸'}</span>
-                    <span>重复文章</span>
-                    <span className="text-muted-foreground/60">({duplicateArticles.length})</span>
-                  </button>
-                  {dupExpanded && (
-                    <div className="ml-2 overflow-y-auto max-h-[50vh] sm:max-h-none divide-y divide-border/20">
-                      {duplicateArticles.map(article => (
+                      {articles.map(article => (
                         <ArticleRow
                           key={article.id}
                           article={article}

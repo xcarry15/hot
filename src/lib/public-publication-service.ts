@@ -17,7 +17,7 @@ export const PUBLIC_PUBLICATION_REBUILD_KEYS: ReadonlySet<string> = new Set([
   PUBLIC_HIDE_ADS_KEY,
 ])
 
-export type PublicPublicationDb = Pick<Prisma.TransactionClient, 'article' | 'setting'>
+export type PublicPublicationDb = Pick<Prisma.TransactionClient, 'article' | 'event' | 'setting'>
 
 type PublicPublicationConfig = {
   minScore: number
@@ -26,6 +26,8 @@ type PublicPublicationConfig = {
 
 type PublicPublicationCandidate = {
   id: string
+  eventId: string | null
+  clusterStatus: string
   aiStatus: string
   score: number
   isAd: boolean
@@ -53,6 +55,7 @@ async function getPublicPublicationConfig(client: PublicPublicationDb = db): Pro
 }
 
 function getRevokeReason(article: PublicPublicationCandidate, config: PublicPublicationConfig): string {
+  if (!article.eventId || !['clustered', 'needs_review'].includes(article.clusterStatus)) return 'event-not-ready'
   if (article.aiStatus !== 'done') return 'ai-not-done'
   if (article.source.deletedAt || !article.source.publicEnabled) return 'source-disabled'
   if (article.publicOverride === 'hidden') return 'manual-hidden'
@@ -62,6 +65,7 @@ function getRevokeReason(article: PublicPublicationCandidate, config: PublicPubl
 }
 
 function isPubliclyEligible(article: PublicPublicationCandidate, config: PublicPublicationConfig): boolean {
+  if (!article.eventId || !['clustered', 'needs_review'].includes(article.clusterStatus)) return false
   if (article.aiStatus !== 'done') return false
   if (article.source.deletedAt || !article.source.publicEnabled) return false
   if (article.publicOverride !== 'public' && article.publicOverride !== 'auto') return false
@@ -106,10 +110,29 @@ async function syncCandidate(
         : {}),
     },
   })
+  if (article.eventId) {
+    const event = await client.event.findUnique({
+      where: { id: article.eventId },
+      select: { representativeArticleId: true, publicStatus: true, publicPublishedAt: true },
+    })
+    if (event?.representativeArticleId === article.id) {
+      const eventWasPublished = event.publicStatus === PUBLIC_PUBLICATION_STATUS.published
+      await client.event.update({
+        where: { id: article.eventId },
+        data: {
+          publicStatus: nextStatus,
+          publicPublishedAt: published ? event.publicPublishedAt ?? now : event.publicPublishedAt,
+          publicRevokedAt: published ? null : eventWasPublished ? now : undefined,
+        },
+      })
+    }
+  }
 }
 
 const publicationSelect = {
   id: true,
+  eventId: true,
+  clusterStatus: true,
   aiStatus: true,
   score: true,
   isAd: true,

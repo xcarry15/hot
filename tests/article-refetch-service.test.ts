@@ -38,9 +38,8 @@ describe('article-refetch-service', () => {
         fetchStatus: 'pending',
         aiStatus: 'pending',
         eventScore: null,
-        duplicateStatus: 'none',
-        duplicateOfId: null,
-        manualOverrides: expect.anything(),
+        clusterStatus: 'pending',
+        event: { disconnect: true },
       }),
     }));
   });

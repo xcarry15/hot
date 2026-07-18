@@ -39,12 +39,6 @@ export interface Settings extends Record<PromptBlockKey, string> {
   ai_weight_event: string
   ai_weight_content: string
   ai_step2_content_max_chars: string
-  dedup_window_days: string
-  dedup_numeric_shared_min: string
-  dedup_body_lcs_min: string
-  dedup_lcs_total_min: string
-  dedup_brand_gate_enabled: string
-  dedup_short_body_threshold: string
 }
 
 export interface AiTestResult {

@@ -7,7 +7,7 @@ import { abortableDelay, withTimeout } from './shared/async';
 import { MIN_MEANINGFUL_CHARS } from './shared/content-policy';
 import { fetchHtml, BROWSER_HEADERS } from './http';
 import { extractMetaPublishedAt } from './date-utils';
-import { computeContentFingerprint } from './dedup';
+import { computeContentFingerprint } from './content-fingerprint';
 import { assertNotAborted } from './worker-stop';
 
 const PAGE_READER_TIMEOUT_MS = 30000;
@@ -117,7 +117,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
             cleanContent: cleaned,
             articleBody,
             // 详情抓回后用全文重算指纹（采集阶段算的是列表页摘要，旧 hash 不可信）。
-            // 这是 process 阶段内容去重的基础；之前的 detail-fetcher 从不更新此字段。
+            // 内容指纹是事件聚类的强证据；详情正文变化时必须同步更新。
             contentHash: computeContentFingerprint(article.title, cleaned),
             fetchStatus: meaningful ? 'fetched' : 'failed',
             ...(detailPublishedAt ? { publishedAt: detailPublishedAt } : {}),

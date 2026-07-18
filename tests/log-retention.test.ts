@@ -27,7 +27,7 @@ describe('log retention', () => {
     expect(db.pushLog.deleteMany).toHaveBeenCalledWith({
       where: {
         createdAt: { lt: new Date('2026-04-12T00:00:00.000Z') },
-        article: { pushedAt: { not: null } },
+        event: { pushedAt: { not: null } },
       },
     });
     expect(db.job.deleteMany).toHaveBeenCalledWith({

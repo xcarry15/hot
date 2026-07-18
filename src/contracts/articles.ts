@@ -14,6 +14,10 @@ const ARTICLE_SCORE_SELECT = {
 } as const;
 
 export const ARTICLE_LIST_SELECT = {
+  eventId: true,
+  clusterStatus: true,
+  clusteredAt: true,
+  eventKey: true,
   eventScore: true,
   contentScore: true,
   adProbability: true,
@@ -40,17 +44,22 @@ export const ARTICLE_LIST_SELECT = {
   publicStatus: true,
   publicPublicationReason: true,
   pinUntil: true,
-  duplicateOfId: true,
-  duplicateStatus: true,
   aiSnapshot: true,
   manualOverrides: true,
   manualCorrectedAt: true,
   viewCount: true,
   originalClickCount: true,
-  pushedAt: true,
   publishedAt: true,
   createdAt: true,
   updatedAt: true,
+  event: {
+    select: {
+      id: true,
+      articleCount: true,
+      representativeArticleId: true,
+      pushedAt: true,
+    },
+  },
 } as const;
 
 export const ARTICLE_DETAIL_SELECT = {
@@ -58,7 +67,6 @@ export const ARTICLE_DETAIL_SELECT = {
   ...ARTICLE_SCORE_SELECT,
   cleanContent: true,
   keyPoints: true,
-  dedupDetail: true,
 } as const;
 
 type DateValue = Date | string;
@@ -66,6 +74,16 @@ type NullableDateValue = Date | string | null;
 
 export interface ArticleListFieldsDto {
   id: string;
+  eventId: string | null;
+  clusterStatus: string;
+  clusteredAt: string | null;
+  eventKey: string;
+  event: {
+    id: string;
+    articleCount: number;
+    representativeArticleId: string | null;
+    pushedAt: string | null;
+  } | null;
   sourceId: string;
   url: string;
   title: string;
@@ -94,8 +112,6 @@ export interface ArticleListFieldsDto {
   publicStatus: string;
   publicPublicationReason: string;
   pinUntil: string | null;
-  duplicateOfId: string | null;
-  duplicateStatus: string;
   aiSnapshot: string;
   manualOverrides: string;
   manualCorrectedAt: string | null;
@@ -108,11 +124,10 @@ export interface ArticleListFieldsDto {
   updatedAt: string;
 }
 
-/** 详情返回正文预览、去重证据和评分诊断；抓取缓存与重试内部字段不出 API。 */
+/** 详情返回正文预览和评分诊断；抓取缓存与重试内部字段不出 API。 */
 export interface ArticleFieldsDto extends ArticleListFieldsDto {
   cleanContent: string;
   keyPoints: string;
-  dedupDetail: string | null;
   rawScore: number | null;
 }
 
@@ -168,29 +183,41 @@ export interface ArticleListResponseDto extends ArticlePaginationDto {
 }
 
 type ListDates = {
-  pushedAt: NullableDateValue;
   publishedAt: NullableDateValue;
   reviewedAt: NullableDateValue;
   manualCorrectedAt: NullableDateValue;
   pinUntil: NullableDateValue;
   createdAt: DateValue;
   updatedAt: DateValue;
+  clusteredAt: NullableDateValue;
 };
 
 export type ArticleListRecord = Omit<
   ArticleListFieldsDto,
-  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'manualCorrectedAt' | 'pinUntil' | 'createdAt' | 'updatedAt'
+  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'manualCorrectedAt' | 'pinUntil' | 'clusteredAt' | 'event' | 'createdAt' | 'updatedAt'
 > & ListDates & {
   cleanContent?: string;
   source: ArticleSourceSummaryDto;
+  event: {
+    id: string;
+    articleCount: number;
+    representativeArticleId: string | null;
+    pushedAt: NullableDateValue;
+  } | null;
 };
 
 export type ArticleDetailRecord = Omit<
   ArticleFieldsDto,
-  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'manualCorrectedAt' | 'pinUntil' | 'createdAt' | 'updatedAt'
+  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'manualCorrectedAt' | 'pinUntil' | 'clusteredAt' | 'event' | 'createdAt' | 'updatedAt'
 > & ListDates & {
   source: ArticleSourceDetailDto;
   pushLogs: ArticlePushLogRecord[];
+  event: {
+    id: string;
+    articleCount: number;
+    representativeArticleId: string | null;
+    pushedAt: NullableDateValue;
+  } | null;
 };
 
 export interface ArticlePushLogRecord {
@@ -224,6 +251,14 @@ function serializeArticleListFields(
 ): ArticleListFieldsDto {
   return {
     id: article.id,
+    eventId: article.eventId,
+    clusterStatus: article.clusterStatus,
+    clusteredAt: toIso(article.clusteredAt),
+    eventKey: article.eventKey,
+    event: article.event ? {
+      ...article.event,
+      pushedAt: toIso(article.event.pushedAt),
+    } : null,
     sourceId: article.sourceId,
     url: article.url,
     title: article.title,
@@ -250,14 +285,12 @@ function serializeArticleListFields(
     publicStatus: article.publicStatus,
     publicPublicationReason: article.publicPublicationReason,
     pinUntil: toIso(article.pinUntil),
-    duplicateOfId: article.duplicateOfId,
-    duplicateStatus: article.duplicateStatus,
     aiSnapshot: article.aiSnapshot,
     manualOverrides: article.manualOverrides,
     manualCorrectedAt: toIso(article.manualCorrectedAt),
     viewCount: article.viewCount,
     originalClickCount: article.originalClickCount,
-    pushedAt: toIso(article.pushedAt),
+    pushedAt: toIso(article.event?.pushedAt ?? null),
     // 紧急度是评分的派生状态，不读取可能过期的数据库缓存。
     pushUrgency: article.score >= 95 ? 'urgent' : 'normal',
     publishedAt: toIso(article.publishedAt),
@@ -278,7 +311,6 @@ export function serializeArticleDetail(article: ArticleDetailRecord): ArticleDet
     ...serializeArticleListFields(article),
     cleanContent: article.cleanContent,
     keyPoints: article.keyPoints,
-    dedupDetail: article.dedupDetail,
     rawScore: article.rawScore ?? null,
     source: article.source,
     pushLogs: article.pushLogs.map((log) => ({

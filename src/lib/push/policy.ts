@@ -33,7 +33,7 @@ export async function shouldPushAtPipelineEnd(): Promise<boolean> {
 }
 
 /**
- * 可推送文章的统一 where 条件——countPushableArticles 与 pushAllUnpushed 共用,
+ * 可推送事件的统一 where 条件——countPushableArticles 与 pushAllUnpushed 共用,
  * 避免两份复制 where 演化时口径分叉。
  *
  * 契约:只推 AI 真正分析过的文章(aiStatus='done')。'failed' 文章不进推送队列,
@@ -42,12 +42,18 @@ export async function shouldPushAtPipelineEnd(): Promise<boolean> {
 export function pushableWhere(settings: PushSettings) {
   return {
     pushedAt: null,
-    score: { gte: settings.minScore },
-    relevance: { gte: settings.minRelevance },
-    aiStatus: 'done' as const,
+    status: 'active' as const,
+    representativeArticle: {
+      is: {
+        score: { gte: settings.minScore },
+        relevance: { gte: settings.minRelevance },
+        aiStatus: 'done' as const,
+        clusterStatus: { in: ['clustered', 'needs_review'] },
+      },
+    },
     OR: [
-      { nextRetryAt: null },
-      { nextRetryAt: { lte: new Date() } },
+      { nextPushRetryAt: null },
+      { nextPushRetryAt: { lte: new Date() } },
     ],
   };
 }

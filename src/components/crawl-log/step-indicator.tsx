@@ -133,20 +133,11 @@ export function StepIndicator({
 
 /**
  * Map the article's free-form `summary` (used as skipReason) to a short
- * pill label. The source-of-truth strings live in dedup.ts / crawler.ts;
- * new skip reasons should add a case here when introduced.
+ * pill label. New skip reasons should add a case here when introduced.
  */
 function shortSkipLabel(reason: string): string {
   if (reason.startsWith('[AI 处理失败]')) return 'AI 失败'
   if (reason === '内容不足') return '内容不足'
-  if (reason.startsWith('[重复]')) {
-    if (reason.includes('被更新日期的同内容文章替代')) return '旧版替换'
-    if (reason.includes('实体重叠')) return '实体重叠'
-    if (reason.includes('要点重叠')) return '内容重复'
-    if (reason.includes('正文数值重叠') || reason.includes('报道同一事件')) return '内容重复'
-    if (reason.includes('正文重叠')) return '内容重复'
-    return '内容重复'
-  }
   // 未知形态：截断防溢出。
   return reason.length > 8 ? `${reason.slice(0, 8)}…` : reason
 }

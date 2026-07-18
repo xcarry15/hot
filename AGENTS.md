@@ -6,7 +6,7 @@ Hot2 is a Next.js 16 App Router application with React 19, TypeScript, Prisma, a
 
 - `src/app/`: public pages, the token-protected `/admin` shell, and API route handlers. Public article pages are under `src/app/news/`; `robots.ts` and `sitemap.ts` define indexing boundaries.
 - `src/components/`: UI; `intelligence-inbox.tsx` is the default admin workbench, while `src/features/` and `src/contracts/` contain client helpers and shared contracts.
-- `src/lib/`: server services and pipeline code. Collection, processing, analysis, push, review, deduplication, and public visibility rules live here; keep business rules in services rather than components or Route Handlers.
+- `src/lib/`: server services and pipeline code. Collection, processing, event clustering, analysis, push, review, and public visibility rules live here; keep business rules in services rather than components or Route Handlers. Article remains the AI/manual-calibration record; Event is the only public/push deduplication gate.
 - `prisma/`: schema, seed data, and ordered migrations; `tests/`: Vitest tests.
 - `scripts/`: maintenance/migration utilities; `bat/`: Windows deployment and operations files; `public/`: static assets.
 

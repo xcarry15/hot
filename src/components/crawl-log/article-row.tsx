@@ -23,13 +23,6 @@ export const ArticleRow = memo(function ArticleRow({
   const isSkipped = article.crawl === 'skipped'
   const pubDate = formatPubDate(article.publishedAt)
 
-  // 从 skipReason 中提取被匹配的文章标题
-  // 格式: "[重复] 与 \"xxx\" 报道同一事件" 或 "与 \"xxx\" 正文数值重叠"
-  const matchedTitle = (() => {
-    if (!article.skipReason) return undefined
-    const m = article.skipReason.match(/与\s*"([^"]+)"/)
-    return m ? m[1] : undefined
-  })()
 
   const handleProcess = useCallback(() => {
     onStepAction?.(article.id, 'process')
@@ -79,9 +72,6 @@ export const ArticleRow = memo(function ArticleRow({
       {article.isAd && (
         <span className="text-[10px] px-1 py-0 rounded-full bg-red-100 text-red-700 shrink-0 leading-5">软文</span>
       )}
-      {article.skipReason?.startsWith('[重复]') && (
-        <span className="text-[10px] px-1 py-0 rounded-full bg-red-100 text-red-700 shrink-0 leading-5">重复</span>
-      )}
       <button
         className="truncate min-w-0 flex-1 text-muted-foreground group-hover:text-foreground text-left"
         title={article.title}
@@ -89,11 +79,6 @@ export const ArticleRow = memo(function ArticleRow({
       >
         {article.title}
       </button>
-      {matchedTitle && (
-        <span className="text-xs text-red-500 shrink-0 truncate max-w-[200px]" title={`匹配: ${matchedTitle}`}>
-          ←{matchedTitle}
-        </span>
-      )}
       {(isSkipped || article.ai === 'skipped') && article.skipReason && (
         <SkipBadge reason={article.skipReason} />
       )}

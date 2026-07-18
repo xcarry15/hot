@@ -14,14 +14,13 @@ import {
   pickTagArray,
   type TagItem,
 } from './ai-helpers';
-import { dedupAfterAI } from './dedup';
 import { assertNotAborted } from './worker-stop';
 import { advanceJobProgress, startJobStage } from './job-progress';
 import { z } from 'zod';
 import { applyScorePolicy } from './score-policy';
 import { refreshPublicPublication } from './public-publication-service';
 import { createHash } from 'node:crypto';
-import { buildAiResetDataForArticle, buildDuplicateArticleData } from './article-duplicate-state';
+import { buildAiResetDataForArticle } from './article-ai-reset';
 import {
   buildArticleAiSnapshot,
   buildEffectiveScoreUpdate,
@@ -30,6 +29,7 @@ import {
   type ArticleAiSnapshot,
   type ManualCalibrationValues,
 } from './article-calibration';
+import { recalculateArticleEvent } from './event-service';
 
 // v8：精简、口语化、多样化的行业洞察。
 const PROMPT_VERSION = 'v8';
@@ -158,7 +158,7 @@ type AIProcessArticle = Pick<Article, 'id' | 'title' | 'aiStatus' | 'cleanConten
   };
 
 export async function processWithAI(article: AIProcessArticle, signal?: AbortSignal): Promise<AIProcessResult> {
-  const { id: articleId, title } = article;
+  const { id: articleId } = article;
   assertNotAborted(signal);
 
   // 已完成 → 不再处理
@@ -179,7 +179,6 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
     return { status: 'skipped' };
   }
 
-  // P0 (pending↔done 正文数值去重) 已合并进 dedupBeforeAI，在 analyzeAllPending
   // 开头统一跑，processWithAI 不再单独查。
 
   // 读取设置，获取动态权重（默认事件重要性 70 / 内容质量 30）。
@@ -263,29 +262,8 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       },
     });
 
-    // --- AI 后去重：同品牌 + keyPoints 数值重叠 ---
-    // 同品牌文章若共享 ≥2 个具体数值（营收43.31亿、跌96%…），
-    // 几乎可以确定是同一事件的不同媒体报道。旧文章保留，新文章标记为重复。
-    if (!article.dedupOverride && step2.brand && step2.keyPoints?.length > 0) {
-      const dupCheck = await dedupAfterAI(
-        articleId, step2.brand, step2.keyPoints, article.publishedAt, article.createdAt,
-      );
-      assertNotAborted(signal);
-      if (dupCheck.isDuplicate) {
-        if (!dupCheck.evidence) throw new Error('重复判定缺少证据');
-        await db.article.update({
-          where: { id: articleId },
-          data: buildDuplicateArticleData(dupCheck.skipReason, dupCheck.evidence),
-        });
-        console.log(
-          `[dedup:after-ai] "${title}" marked as duplicate of "${dupCheck.matchedTitle}" ` +
-          `(${dupCheck.sharedCount} shared values)`
-        );
-        await refreshPublicPublication(articleId, db);
-        return { status: 'skipped' }; // 当前文章被跳过，不再继续
-      }
-    }
     await refreshPublicPublication(articleId, db, { contentChanged: true });
+    await recalculateArticleEvent(articleId);
     return { status: 'done' };
   } else {
     // AI 调用完全失败 — 指数退避 + 失败计数。
@@ -329,7 +307,6 @@ export async function reprocessWithAI(
   articleId: string,
   signal?: AbortSignal,
   jobId?: string,
-  restoreDuplicate = false,
 ): Promise<AIProcessResult | null> {
   assertNotAborted(signal);
   // 重置 AI 状态为 pending。
@@ -363,13 +340,10 @@ export async function reprocessWithAI(
       manualOverrides: true,
       aiSnapshot: true,
       manualCorrectedAt: true,
-      dedupOverride: true,
-      duplicateStatus: true,
       aiRetryCount: true,
     },
   });
   if (!articleData) return null;
-  if (restoreDuplicate && articleData.duplicateStatus !== 'duplicate') return null;
   if (jobId) {
     await startJobStage(jobId, { stage: 'ai', total: 1, currentItemLabel: articleData.title });
   }
@@ -377,7 +351,7 @@ export async function reprocessWithAI(
   await db.article.update({
     where: { id: articleId },
     data: {
-      ...buildAiResetDataForArticle(articleData, { dedupOverride: restoreDuplicate ? true : 'preserve' }),
+      ...buildAiResetDataForArticle(articleData),
       fetchStatus: articleData.fetchStatus === 'failed' ? 'pending' : undefined,
     },
   });

@@ -2,15 +2,14 @@
  * Pipeline / process 阶段应用服务。
  *
  * 单一职责：
- *   - processAllPending：抓取 fetchStatus='pending' 的详情页 → 全文去重 → 关键字门控
+ *   - processAllPending：抓取 fetchStatus='pending' 的详情页 → 关键字门控 → 聚类素材准备
  *   - repairPublishedDates：从 rawContent HTML 中提取精确发布时间，覆盖日期-only
  *
  * 历史：
  *   - 逻辑原先内联在 `crawler.ts` 中；B13 抽离后保留：
  *     · MAX_BATCH_SIZE=500、CONCURRENCY=5、DELAY_MS=150、FETCH_TIMEOUT_MS=30_000
  *     · 2 小时退避后的 fetchStatus='failed' → 'pending' 重置
- *     · Gate 1 全文去重失败仅 console.error 继续走 Gate 2
- *     · Gate 2 关键字 DB 异常仅 console.error 不阻塞主流程
+ *     · 关键字 DB 异常仅 console.error 不阻塞主流程
  *     · repair 只处理近 7 天 fetched 且有 rawContent 的文章
  */
 import { db } from '@/lib/db';
@@ -23,12 +22,10 @@ import {
   advanceJobProgress,
   startJobStage,
 } from '@/lib/job-progress';
-import { findDuplicateArticle } from '@/lib/dedup';
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
 import { recordKeywordCandidates } from '@/lib/keyword-candidate-service';
 import { captureInboxSnapshot } from '@/lib/inbox-snapshot-service';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
-import { buildDuplicateArticleData } from '@/lib/article-duplicate-state';
 
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_BATCH_SIZE = 500;
@@ -97,45 +94,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
             return;
           }
 
-          // ---- Gate 1: 全文内容指纹 + 正文 LCS 去重 ----
-          // 用 process 刚抓到的全文 content（不是 DB 里旧的 contentHash），
-          // 排除自己防止自我命中。
-          try {
-            const dup = await findDuplicateArticle(article.title, content, article.id, article.sourceId);
-            if (dup.isDuplicate && dup.dedupType) {
-              // detail 存 canonical DedupEvidence（含去重方式/重复文章/URL/详情/内容对比片段），
-              // 与 article.dedupDetail 同构 → 详情区用同一面板渲染。
-              const evidence = dup.evidence ?? {
-                methodKey: dup.dedupType,
-                method: dup.dedupType === 'content_fingerprint' ? '内容指纹 (SHA-256)' : '正文相似',
-                matchedTitle: dup.matchedTitle ?? '',
-                matchedUrl: dup.matchedUrl ?? '',
-                matchedId: dup.matchedId,
-                similarity: dup.similarity,
-                detail: `similarity=${dup.similarity.toFixed(2)}`,
-              };
-              await db.article.update({
-                where: { id: article.id },
-                data: buildDuplicateArticleData(
-                  `[重复] 与 "${dup.matchedTitle ?? '已有文章'}" 内容重复`,
-                  evidence,
-                ),
-              });
-              await refreshPublicPublication(article.id, db);
-              console.log(
-                `[processAllPending] dedup hit (${dup.dedupType}) ` +
-                `sim=${dup.similarity.toFixed(2)}: "${article.title}" → "${dup.matchedTitle}", retained as duplicate`
-              );
-              processed++;
-              return;
-            }
-          } catch (err) {
-            // 去重失败不应阻塞 process 流程，记录错误后继续走关键字门控
-            const errMsg = err instanceof Error ? err.message : String(err);
-            console.error(`[processAllPending] dedup check failed for article=${article.id}:`, errMsg);
-          }
-
-          // ---- Gate 2: 全文关键字匹配 ----
+          // ---- 全文关键字匹配 ----
           // 标题 + cleaned 前 1000 字（与 fingerprint 取窗一致，便于对称），
           // 子串命中即通过。
           try {

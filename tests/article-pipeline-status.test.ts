@@ -32,8 +32,8 @@ function article(overrides: Partial<ArticleStepInput> = {}): ArticleStepInput {
     aiStatus: 'done',
     score: 70,
     relevance: 7,
-    pushedAt: null,
-    nextRetryAt: null,
+    eventPushedAt: null,
+    eventNextRetryAt: null,
     ...overrides,
   };
 }
@@ -81,8 +81,8 @@ describe('article-pipeline-status — ai', () => {
 });
 
 describe('article-pipeline-status — push', () => {
-  it('pushedAt 有值 → done', () => {
-    const proj = projectArticleSteps(article({ pushedAt: new Date() }), push());
+  it('Event.pushedAt 有值 → done', () => {
+    const proj = projectArticleSteps(article({ eventPushedAt: new Date() }), push());
     expect(proj.push).toBe('done');
   });
   it('process 未完成 → blocked', () => {
@@ -117,15 +117,15 @@ describe('article-pipeline-status — push', () => {
     const proj = projectArticleSteps(article({ relevance: 5 }), push({ minRelevance: 5 }));
     expect(proj.push).toBe('pending');
   });
-  it('nextRetryAt 未到期 → failed 并返回 retryAt', () => {
+  it('Event.nextPushRetryAt 未到期 → failed 并返回 retryAt', () => {
     const retryAt = new Date(now.getTime() + 3600_000);
-    const proj = projectArticleSteps(article({ nextRetryAt: retryAt }), push());
+    const proj = projectArticleSteps(article({ eventNextRetryAt: retryAt }), push());
     expect(proj.push).toBe('failed');
     expect(proj.pushRetryAt).toBe(retryAt.toISOString());
   });
-  it('nextRetryAt 已过期 → pending', () => {
+  it('Event.nextPushRetryAt 已过期 → pending', () => {
     const retryAt = new Date(now.getTime() - 3600_000);
-    const proj = projectArticleSteps(article({ nextRetryAt: retryAt }), push());
+    const proj = projectArticleSteps(article({ eventNextRetryAt: retryAt }), push());
     expect(proj.push).toBe('pending');
   });
   it('nextRetryAt=null + 满足阈值 → pending', () => {
@@ -187,12 +187,8 @@ describe('deriveSkipReason', () => {
     expect(deriveSkipReason({ aiStatus: 'skipped', skipReason: null, summary: 'AI 跳过' }))
       .toBe('AI 跳过');
   });
-  it('aiStatus=done + 非 [重复] skipReason → undefined', () => {
+  it('aiStatus=done + 历史 skipReason → undefined', () => {
     expect(deriveSkipReason({ aiStatus: 'done', skipReason: '其他原因', summary: '' }))
       .toBeUndefined();
-  });
-  it('aiStatus=done + skipReason=[重复]... → 透传（去重提示）', () => {
-    expect(deriveSkipReason({ aiStatus: 'done', skipReason: '[重复] 命中', summary: '' }))
-      .toBe('[重复] 命中');
   });
 });

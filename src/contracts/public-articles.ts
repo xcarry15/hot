@@ -25,6 +25,7 @@ export interface PublicArticleListItemDto {
   score: number;
   publishedAt: string | null;
   createdAt: string;
+  sourceCount: number;
   source: PublicArticleSourceDto;
 }
 
@@ -44,6 +45,14 @@ export interface PublicArticleNavigationItemDto {
 
 export interface PublicArticleDetailDto extends PublicArticleListItemDto {
   keyPoints: string[];
+  sources: Array<{
+    id: string;
+    title: string;
+    url: string;
+    publishedAt: string | null;
+    createdAt: string;
+    source: Pick<PublicArticleSourceDto, 'name' | 'type'>;
+  }>;
   related: PublicArticleRelatedDto[];
   navigation: {
     previous: PublicArticleNavigationItemDto | null;

@@ -154,11 +154,12 @@ export default function CrawlLogTab() {
   // 当前阶段按钮的 loading 状态：activeJob.currentStage 已知 → 标记对应按钮。
   // stageRequestLoading 仅记录"用户刚点了还没返回"瞬间，不持久化。
   const stageLoading = useMemo(() => {
-    const empty = { collect: false, process: false, ai: false, push: false, all: false }
+    const empty = { collect: false, process: false, cluster: false, ai: false, push: false, all: false }
     if (!activeJob) return empty
     const stage = activeJob.currentStage
     if (stage === 'collect') return { ...empty, collect: true, all: activeJob.type === 'full' }
     if (stage === 'process') return { ...empty, process: true, all: activeJob.type === 'full' }
+    if (stage === 'cluster') return { ...empty, cluster: true, all: activeJob.type === 'full' }
     if (stage === 'ai') return { ...empty, ai: true, all: activeJob.type === 'full' }
     if (stage === 'push') return { ...empty, push: true, all: activeJob.type === 'full' }
     return empty
@@ -173,6 +174,7 @@ export default function CrawlLogTab() {
       const stageLabel =
         activeJob.currentStage === 'collect' ? '采集'
         : activeJob.currentStage === 'process' ? '处理'
+        : activeJob.currentStage === 'cluster' ? '事件聚类'
         : activeJob.currentStage === 'ai' ? 'AI分析'
         : activeJob.currentStage === 'push' ? '推送'
         : ''
@@ -205,6 +207,7 @@ export default function CrawlLogTab() {
         const done = stageResult.processed ?? (latestJob.status === 'completed' ? total : 0)
         const stageLabel = latestJob.currentStage === 'collect' ? '采集'
           : latestJob.currentStage === 'process' ? '处理'
+          : latestJob.currentStage === 'cluster' ? '事件聚类'
           : latestJob.currentStage === 'ai' ? 'AI分析'
           : latestJob.currentStage === 'push' ? '推送'
           : ''

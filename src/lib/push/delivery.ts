@@ -1,10 +1,10 @@
 /**
- * 文章级 push delivery。
+ * Event 级 push delivery。
  *
  * 职责：
- *   - 同一 articleId 同一时刻只允许一次推送（inFlightPushes 锁，按 plan 归本模块管辖）
+ *   - 同一 eventId 同一时刻只允许一次推送（inFlightPushes 锁）
  *   - 在 PushLog 中按目标级记录成功/失败事实；部分成功重试只补未成功 URL
- *   - 推送结束后根据全部目标结果更新 article.pushedAt / nextRetryAt
+ *   - 推送结束后根据全部目标结果更新 Event.pushedAt / nextPushRetryAt
  *
  * 不依赖 Next.js / Route，调用方为 pushAllUnpushed 与 /api/push。
  */
@@ -16,7 +16,7 @@ import { PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/push/policy';
 import { getPushUrgency, buildFeishuCard } from '@/lib/push/feishu-card';
 import { sendFeishuWebhook } from '@/lib/push/feishu-transport';
 
-/** 同 articleId 并发去重；同一时刻只允许一次推送尝试。 */
+/** 同 eventId 并发防重；同一时刻只允许一次推送尝试。 */
 const inFlightPushes = new Map<string, Promise<PushArticleResult>>();
 
 /** 推送结果：区分全部成功/部分成功/全部失败/无 Webhook */
@@ -36,13 +36,24 @@ export function pushArticleToFeishu(
   force = false,
   signal?: AbortSignal,
 ): Promise<PushArticleResult> {
-  const existing = inFlightPushes.get(articleId);
+  return db.article.findUnique({ where: { id: articleId }, select: { eventId: true } }).then((article) => {
+    if (!article?.eventId) return { status: 'failed', succeeded: 0, failed: 0, message: '文章尚未完成事件聚类' };
+    return pushEventToFeishu(article.eventId, force, signal);
+  });
+}
+
+export function pushEventToFeishu(
+  eventId: string,
+  force = false,
+  signal?: AbortSignal,
+): Promise<PushArticleResult> {
+  const existing = inFlightPushes.get(eventId);
   if (existing) return existing;
 
-  const task = pushArticleToFeishuInternal(articleId, force, signal).finally(() => {
-    if (inFlightPushes.get(articleId) === task) inFlightPushes.delete(articleId);
+  const task = pushEventToFeishuInternal(eventId, force, signal).finally(() => {
+    if (inFlightPushes.get(eventId) === task) inFlightPushes.delete(eventId);
   });
-  inFlightPushes.set(articleId, task);
+  inFlightPushes.set(eventId, task);
   return task;
 }
 
@@ -51,23 +62,27 @@ export function getInFlightPushes(): ReadonlyMap<string, Promise<PushArticleResu
   return inFlightPushes;
 }
 
-async function pushArticleToFeishuInternal(
-  articleId: string,
+async function pushEventToFeishuInternal(
+  eventId: string,
   force = false,
   signal?: AbortSignal,
 ): Promise<PushArticleResult> {
   assertNotAborted(signal);
-  const article = await db.article.findUnique({
-    where: { id: articleId },
-    include: { source: { select: { name: true } } },
+  const event = await db.event.findUnique({
+    where: { id: eventId },
+    include: { representativeArticle: { include: { source: { select: { name: true } } } } },
   });
-  if (!article) return { status: 'failed', succeeded: 0, failed: 0, message: '文章不存在' };
+  if (!event || event.status !== 'active' || !event.representativeArticle) return { status: 'failed', succeeded: 0, failed: 0, message: '事件或代表文章不存在' };
+  const article = event.representativeArticle;
+  if (!['clustered', 'needs_review'].includes(article.clusterStatus)) {
+    return { status: 'failed', succeeded: 0, failed: 0, message: '文章尚未完成事件聚类，不能推送' };
+  }
 
   // Already pushed (skip unless force)
-  if (article.pushedAt && !force) return { status: 'completed', succeeded: 0, failed: 0, message: '已推送过' };
-  // nextRetryAt 未到（最近失败过）— 跳过避免重投重复卡片
-  if (article.nextRetryAt && article.nextRetryAt > new Date() && !force) {
-    return { status: 'failed', succeeded: 0, failed: 0, message: `推送重试等待中，可重试时间: ${article.nextRetryAt.toISOString()}` };
+  if (event.pushedAt && !force) return { status: 'completed', succeeded: 0, failed: 0, message: '该事件已推送过' };
+  // 事件级重试时间未到（最近失败过）— 跳过避免重投重复卡片
+  if (event.nextPushRetryAt && event.nextPushRetryAt > new Date() && !force) {
+    return { status: 'failed', succeeded: 0, failed: 0, message: `推送重试等待中，可重试时间: ${event.nextPushRetryAt.toISOString()}` };
   }
 
   if (!force) {
@@ -98,7 +113,8 @@ async function pushArticleToFeishuInternal(
   if (enabled.length === 0) {
     await db.pushLog.create({
       data: {
-        articleId,
+        eventId,
+        representativeArticleId: article.id,
         status: 'failure',
         errorMessage: '没有配置启用的 Feishu Webhook URL',
       },
@@ -115,12 +131,12 @@ async function pushArticleToFeishuInternal(
   const card = buildFeishuCard(article, urgency, { relatedArticles });
 
   // A successful destination is durable in PushLog. On a partial retry, only
-  // send to destinations that have never succeeded for this article.
+    // send to destinations that have never succeeded for this event.
   const previousSuccesses = force
     ? []
     : await db.pushLog.findMany({
         where: {
-          articleId,
+          eventId,
           status: 'success',
           webhookUrl: { in: enabled.map((c) => c.url) },
         },
@@ -131,7 +147,7 @@ async function pushArticleToFeishuInternal(
   for (const config of enabled) {
     assertNotAborted(signal);
     if (!force && succeededUrls.has(config.url)) continue;
-    const ok = await pushToSingleWebhook(articleId, config, card, signal);
+    const ok = await pushToSingleWebhook(eventId, article.id, config, card, signal);
     if (ok) succeededUrls.add(config.url);
   }
 
@@ -141,17 +157,17 @@ async function pushArticleToFeishuInternal(
 
   if (allSucceeded) {
     // 全部成功：标记已推送
-    await db.article.update({
-      where: { id: articleId },
-      data: { pushedAt: new Date(), nextRetryAt: null },
+    await db.event.update({
+      where: { id: eventId },
+      data: { pushedAt: new Date(), nextPushRetryAt: null },
     });
     return { status: 'completed', succeeded, failed: 0, message: `已推送到 ${succeeded} 个 Webhook` };
   }
 
   // 部分或全部失败：设置重试延迟
-  await db.article.update({
-    where: { id: articleId },
-    data: { nextRetryAt: new Date(Date.now() + PUSH_RETRY_DELAY_MS) },
+  await db.event.update({
+    where: { id: eventId },
+    data: { nextPushRetryAt: new Date(Date.now() + PUSH_RETRY_DELAY_MS) },
   });
 
   if (succeeded > 0) {
@@ -164,7 +180,8 @@ async function pushArticleToFeishuInternal(
  * 向单个 webhook 发送推送（含 PushLog 写入）；失败/成功都记目标级日志。
  */
 async function pushToSingleWebhook(
-  articleId: string,
+  eventId: string,
+  representativeArticleId: string,
   config: WebhookConfig,
   card: Record<string, unknown>,
   signal?: AbortSignal,
@@ -173,7 +190,8 @@ async function pushToSingleWebhook(
   if (result.ok) {
     await db.pushLog.create({
       data: {
-        articleId,
+        eventId,
+        representativeArticleId,
         status: 'success',
         retryCount: result.retryCount,
         webhookUrl: config.url,
@@ -185,7 +203,8 @@ async function pushToSingleWebhook(
 
   await db.pushLog.create({
     data: {
-      articleId,
+      eventId,
+      representativeArticleId,
       status: 'failure',
       errorMessage: result.errorMessage ?? 'Push request failed',
       retryCount: result.retryCount,

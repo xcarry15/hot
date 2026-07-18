@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, ExternalLink, Loader2, RefreshCw, RotateCcw, Save, Sparkles, Square, Undo2 } from 'lucide-react'
+import { Check, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, ExternalLink, Loader2, RefreshCw, RotateCcw, Save, Sparkles, Square, Undo2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import type { ArticleDetailDto, ArticleListItemDto, ArticleListResponseDto } from '@/contracts/articles'
 import type { SourceDto } from '@/contracts/sources'
-import { fetchArticleDetail, fetchArticleList, restoreDuplicateArticle, reviewArticle, reviewArticles, triggerArticlesRefetch, triggerArticlesReprocess, updateArticleEditorial } from '@/features/articles-api.client'
+import { fetchArticleDetail, fetchArticleList, reviewArticle, reviewArticles, triggerArticlesRefetch, triggerArticlesReprocess, updateArticleEditorial } from '@/features/articles-api.client'
 import { fetchSources } from '@/features/sources-api.client'
 import { getSnapshotValue, parseManualOverrides } from '@/lib/shared/article-calibration'
 import { isRequestAborted } from '@/lib/request-json.client'
@@ -22,6 +22,14 @@ type SortMode = 'newest' | 'oldest' | 'score_desc' | 'score_asc' | 'relevance_de
 type ViewMode = 'all' | 'attention' | 'unreviewed' | 'important' | 'general' | 'irrelevant' | 'manual'
 type SortField = 'date' | 'score' | 'relevance' | 'event' | 'content' | 'ad' | 'confidence'
 type NumericField = 'relevance' | 'eventScore' | 'contentScore' | 'adProbability'
+type EventDetail = {
+  id: string
+  representativeArticleId: string | null
+  representativeManual: boolean
+  articleCount: number
+  pushedAt: string | null
+  articles: Array<{ id: string; title: string; url: string; score: number; relevance: number; reviewStatus: string; clusterStatus: string; publishedAt: string | null; createdAt: string; source: { name: string; type: string } }>
+}
 
 const PAGE_SIZE = 50
 const MAX_BULK = 100
@@ -42,8 +50,9 @@ function timeLabel(value: string): string {
   return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
-function processingLabel(item: Pick<ArticleListItemDto, 'aiStatus' | 'fetchStatus' | 'skipReason' | 'duplicateStatus'>): string {
-  if (item.duplicateStatus === 'duplicate' || item.skipReason?.startsWith('[重复]')) return '重复'
+function processingLabel(item: Pick<ArticleListItemDto, 'aiStatus' | 'fetchStatus' | 'skipReason' | 'clusterStatus'>): string {
+  if (item.clusterStatus === 'failed') return '聚类失败'
+  if (item.clusterStatus === 'needs_review') return '聚类复核'
   if (item.fetchStatus === 'failed') return '抓取失败'
   if (item.fetchStatus === 'pending' && item.aiStatus !== 'done') return '待抓取'
   if (item.aiStatus === 'failed') return 'AI失败'
@@ -53,12 +62,12 @@ function processingLabel(item: Pick<ArticleListItemDto, 'aiStatus' | 'fetchStatu
   return '正常'
 }
 
-function needsAttention(item: Pick<ArticleListItemDto, 'aiStatus' | 'fetchStatus' | 'duplicateStatus' | 'aiConfidence' | 'publicStatus' | 'reviewStatus'>): boolean {
-  return item.fetchStatus === 'failed' || item.aiStatus === 'failed' || item.aiStatus === 'skipped' || item.duplicateStatus === 'duplicate' || (item.aiConfidence != null && item.aiConfidence < 70) || (item.publicStatus === 'published' && item.reviewStatus === 'unreviewed')
+function needsAttention(item: Pick<ArticleListItemDto, 'aiStatus' | 'fetchStatus' | 'clusterStatus' | 'aiConfidence' | 'publicStatus' | 'reviewStatus'>): boolean {
+  return item.fetchStatus === 'failed' || item.aiStatus === 'failed' || item.aiStatus === 'skipped' || ['failed', 'needs_review'].includes(item.clusterStatus) || (item.aiConfidence != null && item.aiConfidence < 70) || (item.publicStatus === 'published' && item.reviewStatus === 'unreviewed')
 }
 
 function verificationTone(item: ArticleListItemDto): string {
-  if (item.duplicateStatus === 'duplicate' || item.aiStatus === 'failed') return 'font-semibold text-red-700 bg-red-50'
+  if (item.clusterStatus === 'failed' || item.aiStatus === 'failed') return 'font-semibold text-red-700 bg-red-50'
   if (item.fetchStatus === 'failed') return 'font-semibold text-red-700 bg-red-50'
   if (item.fetchStatus === 'pending') return 'text-blue-700 bg-blue-50'
   if (item.aiStatus === 'skipped' || (item.aiConfidence != null && item.aiConfidence < 70)) return 'font-medium text-amber-700 bg-amber-50'
@@ -80,22 +89,6 @@ function publicReasonLabel(reason: string): string {
     'ad-hidden': '软文规则隐藏',
     'not-publicly-eligible': '不符合公开规则',
   } as Record<string, string>)[reason] ?? '等待公开规则评估'
-}
-
-function parseDedupEvidence(value: string | null): { matchedTitle?: string; matchedUrl?: string; detail?: string } {
-  if (!value) return {}
-  try {
-    const parsed: unknown = JSON.parse(value)
-    if (!parsed || typeof parsed !== 'object') return {}
-    const record = parsed as Record<string, unknown>
-    return {
-      matchedTitle: typeof record.matchedTitle === 'string' ? record.matchedTitle : undefined,
-      matchedUrl: typeof record.matchedUrl === 'string' ? record.matchedUrl : undefined,
-      detail: typeof record.detail === 'string' ? record.detail : undefined,
-    }
-  } catch {
-    return {}
-  }
 }
 
 function sortValue(field: SortField, direction: 'asc' | 'desc'): SortMode {
@@ -122,7 +115,7 @@ export default function IntelligenceInbox() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkLoading, setBulkLoading] = useState<'review' | 'ai' | 'refetch' | null>(null)
   const [rowSavingId, setRowSavingId] = useState<string | null>(null)
-  const [detailAction, setDetailAction] = useState<'review' | 'edit' | 'duplicate' | null>(null)
+  const [detailAction, setDetailAction] = useState<'review' | 'edit' | null>(null)
   const [preferencesLoaded, setPreferencesLoaded] = useState(false)
   const [reasonTags, setReasonTags] = useState<string[]>([])
   const [searchInput, setSearchInput] = useState('')
@@ -135,6 +128,9 @@ export default function IntelligenceInbox() {
   const [sources, setSources] = useState<SourceDto[]>([])
   const [editing, setEditing] = useState(false)
   const [showFullContent, setShowFullContent] = useState(false)
+  const [eventDetail, setEventDetail] = useState<EventDetail | null>(null)
+  const [eventAction, setEventAction] = useState<string | null>(null)
+  const [mergeTargetId, setMergeTargetId] = useState('')
   const [draft, setDraft] = useState({ summary: '', brand: '', category: '', tags: '', keyPoints: '' })
   const listRequestId = useRef(0)
   const rowWriteQueue = useRef<Promise<void>>(Promise.resolve())
@@ -220,6 +216,54 @@ export default function IntelligenceInbox() {
       .finally(() => { if (!controller.signal.aborted) setDetailLoading(false) })
     return () => controller.abort()
   }, [selectedId])
+
+  const loadEventDetail = useCallback(async (eventId: string | null | undefined) => {
+    if (!eventId) { setEventDetail(null); return }
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(eventId)}`)
+      if (!response.ok) throw new Error('事件详情加载失败')
+      setEventDetail(await response.json() as EventDetail)
+    } catch (error) {
+      setEventDetail(null)
+      toast.error(errorMessage(error, '事件详情加载失败'))
+    }
+  }, [])
+
+  useEffect(() => { void loadEventDetail(detail?.eventId) }, [detail?.eventId, loadEventDetail])
+
+  const setRepresentative = async (articleId: string) => {
+    if (!detail?.eventId || eventAction) return
+    setEventAction('representative')
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(detail.eventId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ representativeArticleId: articleId }) })
+      if (!response.ok) throw new Error((await response.json().catch(() => ({})) as { error?: string }).error || '指定代表文章失败')
+      await Promise.all([loadEventDetail(detail.eventId), loadList(detail.id)])
+      toast.success('代表文章已更新')
+    } catch (error) { toast.error(errorMessage(error, '指定代表文章失败')) } finally { setEventAction(null) }
+  }
+
+  const splitArticle = async (articleId: string) => {
+    if (!detail?.eventId || eventAction || (eventDetail?.articleCount ?? 0) <= 1) return
+    setEventAction(`split:${articleId}`)
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(detail.eventId)}/split`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ articleIds: [articleId] }) })
+      if (!response.ok) throw new Error((await response.json().catch(() => ({})) as { error?: string }).error || '拆分事件失败')
+      await loadList(articleId)
+      toast.success('文章已拆分为新事件，默认不会补推')
+    } catch (error) { toast.error(errorMessage(error, '拆分事件失败')) } finally { setEventAction(null) }
+  }
+
+  const mergeCurrentEvent = async () => {
+    if (!detail?.eventId || !mergeTargetId.trim() || eventAction) return
+    setEventAction('merge')
+    try {
+      const response = await fetch('/api/events/merge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceEventId: detail.eventId, targetEventId: mergeTargetId.trim() }) })
+      if (!response.ok) throw new Error((await response.json().catch(() => ({})) as { error?: string }).error || '合并事件失败')
+      setMergeTargetId('')
+      await loadList(detail.id)
+      toast.success('事件已合并，不会补推或撤回历史消息')
+    } catch (error) { toast.error(errorMessage(error, '合并事件失败')) } finally { setEventAction(null) }
+  }
 
   const visibleIds = useMemo(() => data?.items.map((item) => item.id) ?? [], [data?.items])
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
@@ -340,21 +384,6 @@ export default function IntelligenceInbox() {
     }
   }
 
-  const restoreDuplicate = async () => {
-    if (!selectedId || detail?.id !== selectedId || detailAction) return
-    setDetailAction('duplicate')
-    try {
-      await restoreDuplicateArticle(selectedId)
-      await loadList(selectedId)
-      toast.success('已取消重复标记并提交重新分析')
-    } catch (error) {
-      await loadList(selectedId)
-      toast.error(errorMessage(error, '恢复重复文章失败'))
-    } finally {
-      setDetailAction(null)
-    }
-  }
-
   const submitSearch = () => { setPage(1); setSearch(searchInput.trim()) }
   const changeView = (value: ViewMode) => { setView(value); setPage(1); setSelectedIds(new Set()) }
   const changeSource = (value: string) => { setSourceId(value); setPage(1); setSelectedIds(new Set()) }
@@ -376,8 +405,6 @@ export default function IntelligenceInbox() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [data?.items, handleDetailReview, selectedId])
-
-  const dedupEvidence = detail ? parseDedupEvidence(detail.dedupDetail) : {}
 
   return <div className="flex h-full min-h-0 flex-col">
     <div className="shrink-0 border-b bg-background px-3 py-2 sm:px-4">
@@ -405,13 +432,13 @@ export default function IntelligenceInbox() {
 
       <section className="min-h-0 flex-1 overflow-hidden bg-muted/10">
         {detailLoading ? <div className="space-y-4 p-5"><Skeleton className="h-7 w-3/4" /><Skeleton className="h-5 w-1/3" /><Skeleton className="h-24 w-full" /></div> : detail ? <ScrollArea className="h-full"><div className="mx-auto max-w-4xl space-y-3 p-4 sm:p-5">
-          <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground"><span>{timeLabel(detail.publishedAt ?? detail.createdAt)}</span><span>{detail.source.name}</span><Badge variant="outline" className="h-5 rounded-sm px-1.5">{processingLabel(detail)}</Badge>{parseManualOverrides(detail.manualOverrides).length > 0 && <Badge variant="secondary" className="h-5 rounded-sm px-1.5">人工修正 {parseManualOverrides(detail.manualOverrides).length} 项</Badge>}</div><h1 className="mt-1.5 text-xl font-semibold leading-snug">{detail.title}</h1></div><Button size="sm" variant="outline" className="h-8 shrink-0 text-xs" disabled={detailAction !== null} onClick={() => setEditing((value) => !value)}>{editing ? '取消编辑' : '编辑内容'}</Button></div>
+          <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground"><span>{timeLabel(detail.publishedAt ?? detail.createdAt)}</span><span>{detail.source.name}</span><Badge variant="outline" className="h-5 rounded-sm px-1.5">{processingLabel(detail)}</Badge><Badge variant="outline" className="h-5 rounded-sm px-1.5">{detail.clusterStatus === 'clustered' ? `事件 · ${detail.event?.articleCount ?? 1} 来源` : detail.clusterStatus === 'needs_review' ? '事件待复核' : detail.clusterStatus === 'failed' ? '聚类失败' : '待聚类'}</Badge>{detail.event?.representativeArticleId === detail.id && <Badge variant="secondary" className="h-5 rounded-sm px-1.5">代表文章</Badge>}{parseManualOverrides(detail.manualOverrides).length > 0 && <Badge variant="secondary" className="h-5 rounded-sm px-1.5">人工修正 {parseManualOverrides(detail.manualOverrides).length} 项</Badge>}</div><h1 className="mt-1.5 text-xl font-semibold leading-snug">{detail.title}</h1></div><Button size="sm" variant="outline" className="h-8 shrink-0 text-xs" disabled={detailAction !== null} onClick={() => setEditing((value) => !value)}>{editing ? '取消编辑' : '编辑内容'}</Button></div>
           <div className="grid grid-cols-2 border bg-background text-xs sm:grid-cols-4"><div className="border-b border-r p-2.5 sm:border-b-0"><p className="text-muted-foreground">最终总分</p><p className="mt-1 text-lg font-semibold">{detail.score}</p></div><div className="border-b border-r p-2.5 sm:border-b-0"><p className="text-muted-foreground">人工归类</p><p className="mt-1 font-semibold">{reviewLabel(detail.reviewStatus)}</p></div><div className="border-b border-r p-2.5 sm:border-b-0"><p className="text-muted-foreground">公开策略 / 结果</p><p className="mt-1 font-semibold">{detail.publicOverride === 'auto' ? '自动' : detail.publicOverride === 'public' ? '强制公开' : '强制隐藏'} · {publicResultLabel(detail)}</p></div><div className="p-2.5"><p className="text-muted-foreground">未公开原因</p><p className="mt-1 font-semibold">{detail.publicStatus === 'published' ? '—' : publicReasonLabel(detail.publicPublicationReason)}</p></div></div>
           <div className="border bg-background p-3"><p className="text-[11px] font-medium text-muted-foreground">AI 洞察</p><p className="mt-1 text-sm leading-6">{detail.summary || detail.excerpt || '暂无 AI 洞察'}</p>{parseJsonArray(detail.keyPoints).length > 0 && <ul className="mt-2 space-y-1 text-xs leading-5 text-muted-foreground">{parseJsonArray(detail.keyPoints).slice(0, 5).map((point, index) => <li key={`${point}-${index}`}>{index + 1}. {point}</li>)}</ul>}</div>
+          {eventDetail && <div className="border bg-background p-3"><div className="flex flex-wrap items-center gap-2"><p className="text-xs font-medium">同事件来源 · {eventDetail.articleCount}</p>{eventDetail.pushedAt && <Badge variant="outline" className="h-5 rounded-sm px-1.5 text-[10px]">事件已推送</Badge>}<span className="ml-auto font-mono text-[10px] text-muted-foreground" title={eventDetail.id}>Event {eventDetail.id.slice(-8)}</span></div><div className="mt-2 space-y-1.5">{eventDetail.articles.map((article) => <div key={article.id} className="flex items-start gap-2 border-t pt-2 text-xs"><div className="min-w-0 flex-1"><a href={article.url} target="_blank" rel="noreferrer" className="line-clamp-2 font-medium hover:text-primary hover:underline">{article.title}</a><p className="mt-0.5 text-[10px] text-muted-foreground">{article.source.name} · {article.score} 分{eventDetail.representativeArticleId === article.id ? ' · 代表文章' : ''}</p></div>{eventDetail.representativeArticleId !== article.id && <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px]" disabled={eventAction !== null} onClick={() => void setRepresentative(article.id)}>设为代表</Button>}{eventDetail.articleCount > 1 && <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticle(article.id)}>拆分</Button>}</div>)}</div><div className="mt-3 flex gap-2 border-t pt-3"><Input value={mergeTargetId} onChange={(event) => setMergeTargetId(event.target.value)} placeholder="目标 Event ID" className="h-7 text-xs" /><Button size="sm" variant="outline" className="h-7 shrink-0 text-xs" disabled={!mergeTargetId.trim() || eventAction !== null} onClick={() => void mergeCurrentEvent()}>合并到目标事件</Button></div></div>}
           {editing && <div className="grid gap-3 border bg-background p-4 sm:grid-cols-2"><label className="space-y-1 text-xs">品牌<Input value={draft.brand} onChange={(event) => setDraft((value) => ({ ...value, brand: event.target.value }))} /></label><label className="space-y-1 text-xs">分类<Input value={draft.category} onChange={(event) => setDraft((value) => ({ ...value, category: event.target.value }))} /></label><label className="space-y-1 text-xs sm:col-span-2">标签（逗号分隔）<Input value={draft.tags} onChange={(event) => setDraft((value) => ({ ...value, tags: event.target.value }))} /></label><label className="space-y-1 text-xs sm:col-span-2">AI 洞察<Textarea value={draft.summary} onChange={(event) => setDraft((value) => ({ ...value, summary: event.target.value }))} className="min-h-28" /></label><label className="space-y-1 text-xs sm:col-span-2">核心要点（每行一条）<Textarea value={draft.keyPoints} onChange={(event) => setDraft((value) => ({ ...value, keyPoints: event.target.value }))} className="min-h-28" /></label><Button size="sm" className="sm:col-span-2" disabled={detailAction !== null} onClick={() => void saveEditorial()}>{detailAction === 'edit' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}保存人工修正</Button></div>}
           <div className="flex flex-wrap gap-2 text-xs text-muted-foreground"><a className="inline-flex items-center gap-1 text-primary hover:underline" href={detail.url} target="_blank" rel="noreferrer"><ExternalLink className="h-3 w-3" />查看原文</a><span>浏览 {detail.viewCount}</span><span>原文点击 {detail.originalClickCount}</span><span>点击率 {detail.viewCount > 0 ? Math.round(detail.originalClickCount / detail.viewCount * 100) : 0}%</span></div>
           <div className="border bg-background"><button type="button" className="flex w-full items-center justify-between px-4 py-2 text-left text-xs font-medium" onClick={() => setShowFullContent((value) => !value)}><span>正文核验</span><ChevronDown className={`h-4 w-4 transition-transform ${showFullContent ? 'rotate-180' : ''}`} /></button>{showFullContent && <div className="border-t px-4 py-3 text-sm leading-7 whitespace-pre-line">{stripHtml(detail.cleanContent).slice(0, 6000) || '正文尚未准备好'}</div>}</div>
-          {detail.duplicateStatus === 'duplicate' && <div className="flex items-start gap-2 border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><div className="min-w-0 space-y-1"><p>该文章被标记为重复。恢复分析不会自动归类、公开或置顶。</p>{dedupEvidence.matchedTitle && <p className="truncate">关联原文：{dedupEvidence.matchedTitle}</p>}{dedupEvidence.detail && <p>{dedupEvidence.detail}</p>}{dedupEvidence.matchedUrl && <a href={dedupEvidence.matchedUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline"><ExternalLink className="h-3 w-3" />查看关联原文</a>}<Button size="sm" variant="outline" className="mt-1 h-7 px-2 text-[11px]" disabled={detailAction !== null} onClick={() => void restoreDuplicate()}>{detailAction === 'duplicate' && <Loader2 className="h-3 w-3 animate-spin" />}取消重复并重新分析</Button></div></div>}
           <div className="sticky bottom-0 border bg-background/95 p-3 shadow-sm backdrop-blur"><div className="mb-2 text-xs font-medium">人工归类</div><div className="mb-3 flex flex-wrap gap-2">{REASONS.map(([value, label]) => <label key={value} className="inline-flex cursor-pointer items-center gap-1 text-xs text-muted-foreground"><input type="checkbox" checked={reasonTags.includes(value)} onChange={(event) => setReasonTags((prev) => event.target.checked ? [...prev, value] : prev.filter((item) => item !== value))} />{label}</label>)}</div><div className="flex flex-wrap gap-2"><Button size="sm" className="h-8 bg-emerald-600 text-xs hover:bg-emerald-700" disabled={detailAction !== null} onClick={() => void handleDetailReview('important')}>{detailAction === 'review' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}重要</Button><Button size="sm" variant="outline" className="h-8 text-xs" disabled={detailAction !== null} onClick={() => void handleDetailReview('general')}>一般</Button><Button size="sm" variant="outline" className="h-8 text-xs text-muted-foreground" disabled={detailAction !== null} onClick={() => void handleDetailReview('irrelevant')}>无关</Button></div></div>
         </div></ScrollArea> : <div className="flex h-full items-center justify-center text-sm text-muted-foreground">从左侧选择一篇文章</div>}
       </section>
@@ -429,7 +456,7 @@ function InboxRow({ index, item, selected, checked, saving, onCheckedChange, onC
     <button type="button" className="text-muted-foreground" aria-label={checked ? `取消选择 ${item.title}` : `选择 ${item.title}`} onClick={(event) => { event.stopPropagation(); onCheckedChange() }}>{checked ? <CheckSquare className="h-3.5 w-3.5 text-primary" /> : <Square className="h-3.5 w-3.5" />}</button>
     <span onClick={onClick} className="text-center tabular-nums text-muted-foreground">{index}</span><span onClick={onClick} className="truncate tabular-nums text-muted-foreground text-left">{timeLabel(item.publishedAt ?? item.createdAt)}</span><span onClick={onClick} className="truncate text-left text-muted-foreground" title={item.source.name}>{item.source.name}</span><span onClick={onClick} className="truncate text-left text-[11px] font-medium" title={item.title}>{item.title}</span>
     <span onClick={onClick} className={`truncate text-center ${verificationTone(item)}`} title={item.skipReason ?? undefined}>{processingLabel(item)}</span>
-    <select aria-label="人工内容判断" disabled={saving || item.duplicateStatus === 'duplicate'} value={item.isAd ? 'ad' : 'normal'} onClick={(event) => event.stopPropagation()} onChange={(event) => onUpdate(item.id, { isAd: event.target.value === 'ad' }, event.target.value === 'ad' ? '已人工标记软文' : '已人工标记正常内容')} className={`h-5 w-full border-0 bg-transparent px-0 text-center outline-none ${overrides.has('isAd') ? 'font-semibold text-violet-700' : 'text-muted-foreground'}`}><option value="normal">正常</option><option value="ad">软文</option></select>
+    <select aria-label="人工内容判断" disabled={saving} value={item.isAd ? 'ad' : 'normal'} onClick={(event) => event.stopPropagation()} onChange={(event) => onUpdate(item.id, { isAd: event.target.value === 'ad' }, event.target.value === 'ad' ? '已人工标记软文' : '已人工标记正常内容')} className={`h-5 w-full border-0 bg-transparent px-0 text-center outline-none ${overrides.has('isAd') ? 'font-semibold text-violet-700' : 'text-muted-foreground'}`}><option value="normal">正常</option><option value="ad">软文</option></select>
     <PublicCell item={item} saving={saving} onUpdate={onUpdate} />
     <select aria-label="人工归类" disabled={saving} value={item.reviewStatus} onClick={(event) => event.stopPropagation()} onChange={(event) => { if (event.target.value !== 'unreviewed') void onReview(item.id, event.target.value as 'important' | 'general' | 'irrelevant') }} className={`h-5 w-full border-0 bg-transparent px-0 text-center outline-none ${item.reviewStatus === 'unreviewed' ? 'font-semibold text-red-600' : 'font-medium'}`}><option value="unreviewed">未归类</option><option value="important">重要</option><option value="general">一般</option><option value="irrelevant">无关</option></select>
     <span className="text-center font-semibold tabular-nums" title="总分由事件分、内容分、广告概率和软文判断统一计算">{item.score}</span>

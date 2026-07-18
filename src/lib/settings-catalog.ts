@@ -8,7 +8,6 @@
 
 import { z } from 'zod';
 import { AI_PROVIDERS, providerSettingKey, type AIProviderId } from '@/contracts/ai-provider';
-import { DEDUP_SETTING_DEFINITIONS, DEDUP_SETTING_KEYS } from '@/contracts/dedup-settings';
 import { PUSH_MODES } from '@/contracts/push';
 import {
   DEFAULT_BLOCK_AD,
@@ -64,12 +63,6 @@ export const SETTING_KEYS = {
   AI_WEIGHT_CONTENT: 'ai_weight_content',
   AI_CONCURRENCY: 'ai_concurrency',
 
-  DEDUP_WINDOW_DAYS: DEDUP_SETTING_KEYS.windowDays,
-  DEDUP_NUMERIC_SHARED_MIN: DEDUP_SETTING_KEYS.numericSharedMin,
-  DEDUP_BODY_LCS_MIN: DEDUP_SETTING_KEYS.bodyLcsMin,
-  DEDUP_LCS_TOTAL_MIN: DEDUP_SETTING_KEYS.lcsTotalMin,
-  DEDUP_BRAND_GATE_ENABLED: DEDUP_SETTING_KEYS.brandGateEnabled,
-  DEDUP_SHORT_BODY_THRESHOLD: DEDUP_SETTING_KEYS.shortBodyThreshold,
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
@@ -168,13 +161,6 @@ const definitions: SettingDefinition[] = [
   { key: SETTING_KEYS.AI_WEIGHT_EVENT, defaultValue: String(SCORE_WEIGHT_META.event.defaultWeight), schema: intRange(0, 100, '事件权重'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_WEIGHT_CONTENT, defaultValue: String(SCORE_WEIGHT_META.content.defaultWeight), schema: intRange(0, 100, '内容权重'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_CONCURRENCY, defaultValue: '3', schema: intRange(1, 10, 'AI并发数'), sensitive: false, exportable: true, frontend: false, seed: false },
-
-  { key: SETTING_KEYS.DEDUP_WINDOW_DAYS, defaultValue: DEDUP_SETTING_DEFINITIONS.windowDays.defaultValue, schema: intRange(DEDUP_SETTING_DEFINITIONS.windowDays.min, DEDUP_SETTING_DEFINITIONS.windowDays.max, '去重时间窗口（天）'), sensitive: false, exportable: true, frontend: true, seed: false },
-  { key: SETTING_KEYS.DEDUP_NUMERIC_SHARED_MIN, defaultValue: DEDUP_SETTING_DEFINITIONS.numericSharedMin.defaultValue, schema: intRange(DEDUP_SETTING_DEFINITIONS.numericSharedMin.min, DEDUP_SETTING_DEFINITIONS.numericSharedMin.max, '特定数字最少重叠数'), sensitive: false, exportable: true, frontend: true, seed: false },
-  { key: SETTING_KEYS.DEDUP_BODY_LCS_MIN, defaultValue: DEDUP_SETTING_DEFINITIONS.bodyLcsMin.defaultValue, schema: intRange(DEDUP_SETTING_DEFINITIONS.bodyLcsMin.min, DEDUP_SETTING_DEFINITIONS.bodyLcsMin.max, '正文 LCS 单段阈值（字符）'), sensitive: false, exportable: true, frontend: true, seed: false },
-  { key: SETTING_KEYS.DEDUP_LCS_TOTAL_MIN, defaultValue: DEDUP_SETTING_DEFINITIONS.lcsTotalMin.defaultValue, schema: intRange(DEDUP_SETTING_DEFINITIONS.lcsTotalMin.min, DEDUP_SETTING_DEFINITIONS.lcsTotalMin.max, '正文 LCS 总长阈值（字符）'), sensitive: false, exportable: true, frontend: true, seed: false },
-  { key: SETTING_KEYS.DEDUP_BRAND_GATE_ENABLED, defaultValue: DEDUP_SETTING_DEFINITIONS.brandGateEnabled.defaultValue, schema: z.enum(['true', 'false']), sensitive: false, exportable: true, frontend: true, seed: false },
-  { key: SETTING_KEYS.DEDUP_SHORT_BODY_THRESHOLD, defaultValue: DEDUP_SETTING_DEFINITIONS.shortBodyThreshold.defaultValue, schema: intRange(DEDUP_SETTING_DEFINITIONS.shortBodyThreshold.min, DEDUP_SETTING_DEFINITIONS.shortBodyThreshold.max, '短文 LCS 兜底字数'), sensitive: false, exportable: true, frontend: true, seed: false },
 
   // Provider 专属配置由 AI_PROVIDERS 契约派生，避免 URL / 默认模型漂移。
   ...providerSettingDefinitions,

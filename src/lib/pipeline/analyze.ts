@@ -2,16 +2,13 @@
  * Pipeline / analyze 阶段应用服务。
  *
  * 单一职责：
- *   - pre-AI dedupBeforeAI（合并 pending↔pending + pending↔done）
  *   - 抓取 aiStatus ∈ {pending,failed} 且退避到期（nextAiRetryAt 已到或为空）
  *     → processWithAI 批处理
- *   - AI 完成后对 justDone 成对互查补漏（dedupAfterAiBatch）
  *
  * 历史：
  *   - 逻辑原先内联在 `crawler.ts.analyzeAllPending`；B13 抽离后保留：
  *     · MAX_BATCH_SIZE=500、CONCURRENCY=ai_concurrency(默认3)/DELAY_MS=300、timeout=90_000
  *     · 退避 where：OR[ nextAiRetryAt=null, nextAiRetryAt <= now ]
- *     · justDone 阈值 ≥ 2 才走 batch dedup
  *     · Promise.allSettled 把 rejected 计入 errors
  */
 import type { Article } from '@prisma/client';
@@ -24,7 +21,6 @@ import {
   advanceJobProgress,
   startJobStage,
 } from '@/lib/job-progress';
-import { dedupBeforeAI, dedupAfterAiBatch } from '@/lib/dedup';
 import { refreshPublicPublications } from '@/lib/public-publication-service';
 
 const AI_TIMEOUT_MS = 90_000;
@@ -42,13 +38,11 @@ const AI_DELAY_MS = 300;
 export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): Promise<{ total: number; processed: number; errors: number }> {
   assertNotAborted(signal);
 
-  // Pre-AI dedup: compare full article bodies before AI（合并 L3 pending↔pending + P0 pending↔done）
-  await dedupBeforeAI(signal);
-  assertNotAborted(signal);
-
   const pending = await db.article.findMany({
     where: {
       aiStatus: { in: ['pending', 'failed'] },
+      eventId: { not: null },
+      clusterStatus: { in: ['clustered', 'needs_review'] },
       // 退避过滤：nextAiRetryAt 未到期的 failed 文章跳过本轮，
       // 防止 provider 故障时每轮 cron 全量重试烧 token。
       OR: [
@@ -68,7 +62,6 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
       createdAt: true,
       aiStatus: true,
       aiRetryCount: true,
-      dedupOverride: true,
       relevance: true,
       summary: true,
       brand: true,
@@ -139,27 +132,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
     }
   }
 
-  // AI-batch 兜底去重：dedupAfterAI 查 DB done 候选，但同 batch 内并发完成
-  // 的文章可能互相看不到对方（落库时序）→ 这里对 justDone 成对互查补漏。
-  assertNotAborted(signal);
-  const justDone = await db.article.findMany({
-    where: { id: { in: pending.map(p => p.id) }, aiStatus: 'done', dedupOverride: false },
-    select: { id: true },
-  });
-  if (justDone.length >= 2) {
-    const batchResult = await dedupAfterAiBatch(
-      justDone.map(a => a.id),
-      signal,
-    );
-    if (batchResult.skipped > 0) {
-      console.log(
-        `[analyzeAllPending] AI batch dedup: checked ${batchResult.checked}, skipped ${batchResult.skipped}`
-      );
-    }
-  }
-
-  // 批量去重可能把刚完成的文章改为 skipped，统一把本批文章的
-  // 持久化公开状态与最终 aiStatus/score 对齐。
+  // 统一把本批文章的持久化公开状态与最终 aiStatus/score 对齐。
   await refreshPublicPublications(pending.map((article) => article.id), db);
 
   return { total: pending.length, processed, errors };

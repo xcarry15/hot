@@ -7,7 +7,6 @@ import {
   getFrontendSettingDefaults,
   getSettingDefaults,
 } from '@/lib/settings-catalog';
-import { DEDUP_SETTING_DEFINITIONS } from '@/contracts/dedup-settings';
 
 describe('settings catalog', () => {
   it('由描述表派生导出、前端和敏感 key 清单', () => {
@@ -42,13 +41,7 @@ describe('settings catalog', () => {
     expect(frontendDefaults.crawl_interval_min).toBe('120');
   });
 
-  it('Dedup 目录的 key、默认值和边界来自纯契约', () => {
-    for (const definition of Object.values(DEDUP_SETTING_DEFINITIONS)) {
-      const catalogDefinition = SETTING_DEFINITIONS.find((item) => item.key === definition.key);
-      expect(catalogDefinition?.defaultValue).toBe(definition.defaultValue);
-      if ('min' in definition && 'max' in definition) {
-        expect(definition.min).toBeLessThanOrEqual(definition.max);
-      }
-    }
+  it('旧文章去重阈值不再暴露为设置', () => {
+    expect(SETTING_DEFINITIONS.some((item) => item.key.startsWith('dedup_'))).toBe(false);
   });
 });

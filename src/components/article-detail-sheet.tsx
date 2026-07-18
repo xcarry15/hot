@@ -29,7 +29,6 @@ import { parseJsonArray, parseTags, stripHtml, splitBrands } from '@/lib/shared/
 import { getTagToneClass } from '@/features/article-tag-style'
 import { DISCARD_REASON_LABELS } from '@/components/crawl-log/helpers'
 import { ScoreBadge, ScoreBreakdown } from '@/components/ui/score-badge'
-import { parseDedupEvidence, type DedupEvidence } from '@/lib/dedup-evidence'
 import type { ArticleDetailDto } from '@/contracts/articles'
 import {
   fetchArticleDetail as fetchArticleDetailFromClient,
@@ -91,114 +90,6 @@ function StatusBadge({ status }: { status: string }) {
     default:
       return <Badge variant="secondary" className="text-xs rounded-full">{status}</Badge>
   }
-}
-
-/**
- * 统一去重证据面板 — article（dedupDetail）与 discarded（detail JSON）共用。
- * 目的：让用户复核"是否真的重复"。展示去重方式 / 重复文章+URL / 详情 / 共享数值
- * / 两篇文章里具体重复的片段（高亮，前后各约 20 字上下文）。
- */
-function HighlightedContext({ before, shared, after }: { before: string; shared: string; after: string }) {
-  return (
-    <span className="break-all">
-      {before ? <span className="text-muted-foreground/50">{before}</span> : null}
-      <mark className="bg-yellow-200 dark:bg-yellow-500/30 text-foreground rounded px-0.5 font-medium">{shared}</mark>
-      {after ? <span className="text-muted-foreground/50">{after}</span> : null}
-    </span>
-  )
-}
-
-function DedupEvidencePanel({
-  evidence,
-  onSelectArticle,
-}: {
-  evidence: DedupEvidence
-  onSelectArticle?: (id: string) => void
-}) {
-  const matchedId = evidence.matchedId
-  return (
-    <div className="text-xs bg-red-50/60 dark:bg-red-950/20 border border-red-200/70 dark:border-red-900/40 rounded-lg p-3 space-y-2">
-      <div className="flex items-center gap-1.5 text-red-700 dark:text-red-400 font-medium">
-        <AlertTriangle className="h-3.5 w-3.5" />
-        判定为重复文章
-      </div>
-      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 items-start">
-        <span className="text-muted-foreground">去重方式</span>
-        <span className="font-medium">{evidence.method}</span>
-
-        <span className="text-muted-foreground">重复文章</span>
-        <span className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium break-all">{evidence.matchedTitle}</span>
-          {matchedId && onSelectArticle && (
-            <button
-              type="button"
-              onClick={() => onSelectArticle(matchedId)}
-              className="text-blue-600 hover:underline shrink-0"
-              title="在详情面板中打开重复文章"
-            >
-              查看 ›
-            </button>
-          )}
-        </span>
-
-        <span className="text-muted-foreground">重复 URL</span>
-        {evidence.matchedUrl ? (
-          <a
-            href={evidence.matchedUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:underline font-mono break-all inline-flex items-center gap-1"
-            title="在新标签页打开重复文章原文"
-          >
-            <ExternalLink className="h-3 w-3 shrink-0" />
-            {evidence.matchedUrl}
-          </a>
-        ) : (
-          <span className="text-muted-foreground/50">—</span>
-        )}
-
-        {typeof evidence.similarity === 'number' && (
-          <>
-            <span className="text-muted-foreground">相似度</span>
-            <span className="font-medium tabular-nums">{evidence.similarity.toFixed(2)}</span>
-          </>
-        )}
-
-        <span className="text-muted-foreground">去重详情</span>
-        <span className="break-all">{evidence.detail}</span>
-
-        {evidence.sharedValues && evidence.sharedValues.length > 0 && (
-          <>
-            <span className="text-muted-foreground">共享数值</span>
-            <span className="flex flex-wrap gap-1">
-              {evidence.sharedValues.map((v, i) => (
-                <Badge key={i} variant="outline" className="text-xs rounded-full">{v}</Badge>
-              ))}
-            </span>
-          </>
-        )}
-      </div>
-
-      {evidence.snippets && evidence.snippets.length > 0 && (
-        <div className="space-y-2 pt-1">
-          <div className="text-muted-foreground font-medium">内容对比（高亮为重复片段，前后各约 20 字）</div>
-          {evidence.snippets.map((s, i) => (
-            <div key={i} className="space-y-1 rounded-md bg-background/70 p-2 border border-red-100 dark:border-red-900/30">
-              {s.label ? <div className="text-muted-foreground/70">{s.label}</div> : null}
-              <div className="leading-relaxed">
-                <span className="text-muted-foreground/60 mr-1 shrink-0">本篇</span>
-                <HighlightedContext before={s.currentBefore} shared={s.currentShared} after={s.currentAfter} />
-              </div>
-              <div className="leading-relaxed">
-                <span className="text-muted-foreground/60 mr-1 shrink-0">重复</span>
-                <HighlightedContext before={s.matchedBefore} shared={s.matchedShared} after={s.matchedAfter} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
 
 export default function ArticleDetailSheet({ articleId, open, onOpenChange, onArticleUpdated, onSelectArticle, kind = 'article', onStepAction, isJobRunning = false }: Props) {
@@ -397,9 +288,6 @@ export default function ArticleDetailSheet({ articleId, open, onOpenChange, onAr
                   {article.isAd && (
                     <Badge className="bg-red-100 text-red-700 hover:bg-red-100 text-xs rounded-full gap-1"><AlertTriangle className="h-3 w-3" />软文</Badge>
                   )}
-                  {article.skipReason?.startsWith('[重复]') && (
-                    <Badge className="bg-red-100 text-red-700 hover:bg-red-100 text-xs rounded-full gap-1"><AlertTriangle className="h-3 w-3" />重复</Badge>
-                  )}
                   {article.category && <Badge variant="outline" className="text-xs rounded-full">{article.category}</Badge>}
                   {article.brand && splitBrands(article.brand).map((b, i) => (
                     <Badge key={i} variant="outline" className="text-xs rounded-none bg-black text-white border-black">{b.trim()}</Badge>
@@ -459,14 +347,8 @@ export default function ArticleDetailSheet({ articleId, open, onOpenChange, onAr
                 );
               })()}
 
-              {/* Discarded 去重证据（canonical → 统一面板；旧/非去重 → 通用字段） */}
+              {/* 未入库条目的通用诊断字段。 */}
               {discarded && (() => {
-                const ev = parseDedupEvidence(discarded.detail)
-                if (ev) {
-                  const evidence = ev.matchedId ? ev : { ...ev, matchedId: discarded.winnerArticleId ?? undefined }
-                  return <DedupEvidencePanel evidence={evidence} onSelectArticle={onSelectArticle} />
-                }
-                // 非去重（filter:*）或旧格式 discarded：保留通用元数据展示
                 if (!discarded.parsedDetail) return null
                 return (
                   <div className="text-xs bg-muted/40 rounded-lg p-3 space-y-1">
@@ -498,24 +380,11 @@ export default function ArticleDetailSheet({ articleId, open, onOpenChange, onAr
                 )
               })()}
 
-              {/* Winner article ID — 仅在未走统一面板时单独展示（canonical 面板已含 matchedId） */}
-              {discarded && discarded.winnerArticleId && !parseDedupEvidence(discarded.detail) && (
+              {discarded && discarded.winnerArticleId && (
                 <div className="text-xs bg-muted/40 rounded-lg p-3 space-y-1">
                   <div><span className="text-muted-foreground">胜出文章 ID：</span><span className="font-mono">{discarded.winnerArticleId}</span></div>
                 </div>
               )}
-
-              {/* Article 去重证据（canonical → 统一面板；旧格式 → 回退到 skipReason 文本） */}
-              {article && article.skipReason?.startsWith('[重复]') && (() => {
-                const ev = parseDedupEvidence(article.dedupDetail)
-                if (ev) return <DedupEvidencePanel evidence={ev} onSelectArticle={onSelectArticle} />
-                return (
-                  <div className="text-xs bg-muted/40 rounded-lg p-3 space-y-1">
-                    <div className="text-muted-foreground font-medium mb-1">去重详情</div>
-                    <div><span className="text-red-600">{article.skipReason}</span></div>
-                  </div>
-                )
-              })()}
 
               <Separator />
 
@@ -668,7 +537,7 @@ export default function ArticleDetailSheet({ articleId, open, onOpenChange, onAr
                     <RefreshCw className={`h-4 w-4 ${reprocessing ? 'animate-spin' : ''}`} />
                     {reprocessing ? '处理中...' : '重新AI处理'}
                   </Button>
-                  {!article.pushedAt ? (
+                  {!article.event?.pushedAt ? (
                      <Button size="default" onClick={handlePush} disabled={pushing || isJobRunning} className="gap-1.5 flex-1 sm:flex-none">
                       <Send className="h-4 w-4" />
                       {pushing ? '推送中...' : '推送飞书'}

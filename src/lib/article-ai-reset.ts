@@ -1,28 +1,10 @@
 import type { Prisma } from '@prisma/client';
-import type { DedupEvidence } from '@/lib/dedup-evidence';
 import { MANUAL_OVERRIDE_FIELDS, parseManualOverrides } from '@/lib/shared/article-calibration';
 
-/** 统一生成重复文章状态，避免各去重阶段分别维护同一组字段。 */
-export function buildDuplicateArticleData(
-  reason: string,
-  evidence: DedupEvidence,
-): Prisma.ArticleUpdateInput {
-  return {
-    aiStatus: 'skipped',
-    score: 0,
-    skipReason: reason,
-    dedupDetail: JSON.stringify(evidence),
-    duplicateStatus: 'duplicate',
-    duplicateOfId: evidence.matchedId ?? null,
-  };
-}
-
 /**
- * AI 重新分析前清除旧结果、审计快照与重复状态，避免 pending 文章展示过期结论。
+ * AI 重新分析前清除旧结果与审计快照，避免 pending 文章展示过期结论。
  */
-export function buildAiResetData(
-  options: { dedupOverride?: boolean | 'preserve'; preserveManualOverrides?: boolean } = {},
-): Prisma.ArticleUpdateInput {
+export function buildAiResetData(options: { preserveManualOverrides?: boolean } = {}): Prisma.ArticleUpdateInput {
   return {
     aiStatus: 'pending',
     ...(options.preserveManualOverrides ? {} : {
@@ -52,12 +34,6 @@ export function buildAiResetData(
     aiRetryCount: 0,
     nextAiRetryAt: null,
     skipReason: null,
-    dedupDetail: null,
-    duplicateStatus: 'none',
-    duplicateOfId: null,
-    ...(options.dedupOverride === 'preserve'
-      ? {}
-      : { dedupOverride: options.dedupOverride ?? false }),
   };
 }
 
@@ -82,9 +58,8 @@ export function buildAiResetDataForArticle(
     adProbability: number | null;
     isAd: boolean;
   },
-  options: { dedupOverride?: boolean | 'preserve' } = {},
 ): Prisma.ArticleUpdateInput {
-  const data = buildAiResetData({ ...options, preserveManualOverrides: false });
+  const data = buildAiResetData({ preserveManualOverrides: false });
   const overrides = new Set(parseManualOverrides(article.manualOverrides));
   const preserved: Record<string, unknown> = {};
   for (const field of MANUAL_OVERRIDE_FIELDS) {
