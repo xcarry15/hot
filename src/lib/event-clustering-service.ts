@@ -81,7 +81,8 @@ async function createEventForArticle(
       firstSeenAt: seenAt,
       lastSeenAt: seenAt,
       articleCount: 1,
-      representativeArticleId: article.id,
+      // 聚类发生在 AI 之前；代表文章必须等待 AI 完成后由 event-service 统一选择。
+      representativeArticleId: null,
     },
     select: { id: true },
   });

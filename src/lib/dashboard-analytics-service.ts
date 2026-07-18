@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { captureInboxSnapshot, listInboxSnapshots } from '@/lib/inbox-snapshot-service';
+import { captureInboxSnapshotForDashboard, listInboxSnapshots } from '@/lib/inbox-snapshot-service';
 
 export type DashboardAnalyticsRange = 'today' | '3d' | '7d' | '30d';
 
@@ -47,6 +47,8 @@ export interface CrawlRecordFilters {
 }
 
 const CRAWL_PAGE_SIZE = 20;
+const DASHBOARD_CACHE_TTL_MS = 15_000;
+const DASHBOARD_CACHE_MAX_ENTRIES = 30;
 
 const RANGE_DAYS: Record<DashboardAnalyticsRange, number> = {
   today: 1,
@@ -186,7 +188,7 @@ function toQualityStats(stats: MutableStats) {
   };
 }
 
-export async function getDashboardAnalytics(
+async function buildDashboardAnalytics(
   range: DashboardAnalyticsRange = 'today',
   sourceId?: string,
   crawlFilters: CrawlRecordFilters = {},
@@ -196,7 +198,7 @@ export async function getDashboardAnalytics(
   const sourceFilter = sourceId ? { sourceId } : {};
 
   // 积压趋势是派生快照，不阻塞主统计；采集/归类任务完成后也会更新同一快照。
-  void captureInboxSnapshot().catch(() => undefined);
+  void captureInboxSnapshotForDashboard().catch(() => undefined);
 
   const [sources, articles, discardedItems, fetchLogs, inboxPending, inboxSnapshots] = await Promise.all([
     db.source.findMany({
@@ -240,6 +242,8 @@ export async function getDashboardAnalytics(
   const recentJobs = await db.job.findMany({
     where: { type: { in: ['full', 'collect'] } },
     orderBy: { createdAt: 'desc' },
+    // 运营页只显示近期历史；避免为了当前分页读取无限 Job。
+    take: 500,
     select: {
       id: true,
       type: true,
@@ -434,4 +438,42 @@ export async function getDashboardAnalytics(
       })),
     },
   };
+}
+
+type DashboardAnalyticsResult = Awaited<ReturnType<typeof buildDashboardAnalytics>>;
+const dashboardAnalyticsCache = new Map<string, {
+  expiresAt: number;
+  value: Promise<DashboardAnalyticsResult>;
+}>();
+
+export function invalidateDashboardAnalyticsCache(): void {
+  dashboardAnalyticsCache.clear();
+}
+
+export function getDashboardAnalytics(
+  range: DashboardAnalyticsRange = 'today',
+  sourceId?: string,
+  crawlFilters: CrawlRecordFilters = {},
+): Promise<DashboardAnalyticsResult> {
+  const key = JSON.stringify({
+    range,
+    sourceId: sourceId ?? '',
+    page: crawlFilters.page ?? 1,
+    trigger: crawlFilters.trigger ?? '',
+    status: crawlFilters.status ?? '',
+    type: crawlFilters.type ?? '',
+    crawlSourceId: crawlFilters.sourceId ?? '',
+  });
+  const cached = dashboardAnalyticsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached) dashboardAnalyticsCache.delete(key);
+  const value = buildDashboardAnalytics(range, sourceId, crawlFilters);
+  dashboardAnalyticsCache.set(key, { expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS, value });
+  while (dashboardAnalyticsCache.size > DASHBOARD_CACHE_MAX_ENTRIES) {
+    const oldestKey = dashboardAnalyticsCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    dashboardAnalyticsCache.delete(oldestKey);
+  }
+  void value.catch(() => dashboardAnalyticsCache.delete(key));
+  return value;
 }

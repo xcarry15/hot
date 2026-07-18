@@ -29,6 +29,7 @@ vi.mock('@/lib/db', () => ({
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn(),
+      groupBy: vi.fn(),
       count: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),

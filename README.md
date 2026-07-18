@@ -16,12 +16,17 @@ copy .env.example .env       # Windows；Linux/macOS 使用 cp
 npm run db:migrate:deploy
 npm run db:generate
 npm run db:seed
+npm run db:optimize
 npm run dev
 ```
 
 开发地址：`http://localhost:3011`。根路径 `/` 是公开新闻卡片页，文章详情使用 `/news/[id]`；后台位于 `/admin`，当前仅包含“情报收件箱”“抓取记录”“设置”三个页面。生产环境必须在 `.env` 设置 `API_TOKEN`，首次访问后台时输入该 token 建立临时 HttpOnly 会话；Cookie 保存由 Token 派生的会话值，不直接保存可调用 API 的原始 Token，旧版原始 Token Cookie 不再兼容。公开端保持匿名访问。生产部署还应将 `NEXT_PUBLIC_SITE_URL` 设置为正式访问地址，用于 canonical、Open Graph 和 sitemap。公开导航中的“工具”“数据”目前是占位入口，暂未提供实际页面。
 
-情报收件箱是全量文章人工校准工作台：左侧直接显示流程、聚类状态、来源数和代表文章，并提供待归类、聚类待复核、低置信度、多来源、代表文章和人工修正视图；右侧集中处理评分、内容、公开策略、聚类依据、成员移动、独立成新事件、事件合并和代表文章。`articleId + panel=cluster/content` 可精确定位文章和校准区。主动重新生成统一提交持久化单篇 Job。Article 保留 AI 与人工校准结果，Event 是公开和推送的唯一门禁。
+交互性能采用轻量策略：后台三个顶层页面与设置子页面按访问动态加载，导航及设置标签悬停、聚焦或触摸时预加载目标代码块，深链会直接加载目标页面，后台内部跨页面深链不触发整页刷新；导航待办计数按首次进入、低频切换和窗口重新聚焦刷新，不再每次切换重复请求。分享海报组件和二维码依赖只在用户点击分享后挂载。公开 Event 持久化 `publicDateKey/publicSortAt`，公开列表先读取有限日期键，再只查询这些日期的文章，每个日期保留 250 篇硬上限，不再以全库正文扫描支撑分页；文章详情的 metadata 与页面渲染复用同一次详情查询，上一篇/下一篇只读取当前日期组和相邻日期边界，公开列表短缓存限制为最多 50 个 key。收件箱与抓取记录会在用户停留 120ms 后预取详情，快速划过会取消，并在 15 秒内合并/复用请求结果，减少连续切换文章时的等待和无效网络请求。公开详情的浏览量只在页面真实挂载并停留片刻后记录，路由预取、metadata 读取和公开详情 API 查询不会误计为浏览。收件箱列表只查询当前分页和总数，不再为未使用的筛选项每次扫描全表。抓取记录按项目日处理量读取最近 250 篇 Article 和 250 条未入库记录；任务运行时每 3 秒只读取轻量 Job 进度，阶段变化或任务结束才刷新完整文章记录，空闲时每 15 秒刷新，页面不可见时暂停周期请求。技术工作队列使用 5 秒短缓存合并导航计数和抓取记录的重复扫描，Job 完成后立即失效，导航人工待办数由数据库直接唯一计数。数据看板统计使用 15 秒短缓存合并重复请求，隐藏时暂停 30 秒自动刷新，Job 历史查询限制为最近 500 条；Job 完成后统计缓存立即失效。采集阶段按数据源批量预取本轮 URL 对应的 Article 和 DiscardedItem，关键词候选一次批量预取并在短事务中写入，浏览量和原文点击统一聚合到单个短事务落库。
+
+后台顶层页在首次访问时动态挂载，此后切换会保留页面状态、滚动位置和已加载数据；隐藏的抓取记录和 Dashboard 暂停轮询，避免用保持状态换取后台空转。
+
+情报收件箱是全量文章人工校准工作台：左侧直接显示流程、聚类状态、来源数和代表文章，并提供待归类、聚类待复核、低置信度、多来源、代表文章和人工修正视图；右侧集中处理评分、内容、公开策略、聚类依据、成员移动、独立成新事件、事件合并和代表文章。`articleId + panel=cluster/content` 可精确定位文章和校准区；目标文章已删除时会自动清理失效定位并返回当前列表。主动重新生成统一提交持久化单篇 Job。Article 保留 AI 与人工校准结果，Event 是公开和推送的唯一门禁。
 
 抓取记录页按真实流水线展示 `采集 → 处理 → 聚类 → AI → 推送`，负责 Job 监控和技术恢复。当前任务区展示任务范围、目标文章或数据源、阶段队列、当前阶段、完成数、百分比和错误数；项目使用全局单 Job 模型，不伪造多任务等待队列。每篇文章只暴露当前失败步骤的原位恢复操作；单篇 Job 会在快照中携带目标 Article 和当前阶段，使对应步骤在任务整个运行期间持续显示加载状态。AI 分析完成的文章会在标题前显示最终有效评分，流程诊断会复用收件箱的内容字段展示 AI 洞察和最多 5 条核心要点，但不传输评分明细、软文、置信度或分类等其他内容质量字段；“去聚类复核”和“查看内容”分别深链到收件箱对应面板。推送失败只投影到 Event 当前代表 Article，非代表成员显示为不适用。
 
@@ -44,12 +49,12 @@ bat/                  Windows 启动、打包、部署和 Nginx 文档
 db/                   本地 SQLite 数据（不进入部署包）
 ```
 
-公开端以 active Event 为内容单位，每个 Event 只展示一张卡片，正文和评分取代表 Article 的最终人工校准结果，详情页同时列出其他报道来源。Article 公开规则仍负责判断代表文章是否合格，并同步 `Event.publicStatus`；`/news/[id]` 的 id 为 Event.id。浏览和原文点击仍累计到当前代表 Article，且不会污染公开内容更新时间。
+公开端以 active Event 为内容单位，每个 Event 只展示一张卡片，正文和评分取代表 Article 的最终人工校准结果，详情页同时列出其他报道来源。`Event.publicStatus` 是唯一公开事实源；Article 仅保存人工公开策略和当前代表文章的公开结果投影，非代表成员固定为未公开。代表文章切换时会同步清理旧代表投影；`/news/[id]` 的 id 为 Event.id。浏览和原文点击仍累计到当前代表 Article，且不会污染公开内容更新时间；两类计数均为单实例内存短聚合后落库的近似统计，进程异常终止时允许丢失极少量未刷新计数。
 
 ## 当前架构与数据事实
 
 - Next.js 16 App Router + React 19 + TypeScript；Prisma 6 + SQLite；单进程模块化单体，生产只运行一个 PM2 实例。
-- `src/lib/execution.ts` 是唯一批量 Job 编排入口，内存互斥保证同时只有一个批量任务。Job 表的阶段、进度、错误数和 heartbeat 是任务状态事实源；停止通过 `AbortSignal` 协作式取消。
+- `src/lib/execution.ts` 是唯一批量 Job 编排入口，内存互斥保证同时只有一个批量任务。process、cluster、AI 阶段会按固定大小分批消费本次符合条件的全部积压，不会因单批上限而把未处理完的任务标记为成功。Job 表的阶段、进度、错误数和 heartbeat 是任务状态事实源；停止通过 `AbortSignal` 协作式取消。
 - 调度器每分钟 tick；自动抓取默认关闭。普通批量任务使用 `/api/crawl` 的 `all` 阶段，分阶段入口 `collect / process / cluster / ai / push` 仅供管理员运维。
 
 | 阶段 | 入口代码 | 作用 |
@@ -70,7 +75,7 @@ db/                   本地 SQLite 数据（不进入部署包）
 
 AI 重置由 `src/lib/article-ai-reset.ts` 中的重置 helper 统一生成，重新分析继续保留人工覆盖。旧 Article duplicate 状态和“取消重复并分析”入口已经删除；内容指纹只作为 Event 聚类证据。
 
-公开端保持自动发布：只有代表 Article 已完成聚类（`clusterStatus=clustered`）、AI 完成、来源允许公开并满足评分/软文规则时才进入公开快照；`pending`、`failed`、`needs_review` 均不得公开或推送。后台可人工修正摘要、品牌、分类、标签、关键点和评分，并对单篇设置公开、隐藏或恢复自动规则。收件箱使用人工待处理视图，不把抓取、聚类、AI 或推送技术失败混入人工队列。
+公开端保持自动发布：只有代表 Article 已完成聚类（`clusterStatus=clustered`）、AI 完成、来源允许公开并满足评分/软文规则时才进入公开快照；`pending`、`failed`、`needs_review` 均不得成为代表文章、公开或推送。自动代表文章先要求聚类和 AI 完成、来源未删除，再比较人工重要、评分、相关度和正文质量；人工指定代表文章同样必须满足该基础资格。来源是否允许公开继续由公开门禁独立判断，避免一个关闭公开的来源让 Event 错选低质量代表文章。后台可人工修正摘要、品牌、分类、标签、关键点和评分，并对单篇设置公开、隐藏或恢复自动规则。收件箱使用人工待处理视图，不把抓取、聚类、AI 或推送技术失败混入人工队列。
 
 ## 数据库与生产部署
 
@@ -82,17 +87,18 @@ npm run db:migrate:deploy
 npm run db:migrate:status
 ```
 
-出现 drift 必须停止并人工检查，不要 reset 或覆盖数据库。生产更新顺序：停止 PM2 → 备份 SQLite → `npm run db:migrate:deploy` → `npm run db:generate` → `npm run build` → 重启 PM2。
+出现 drift 必须停止并人工检查，不要 reset 或覆盖数据库。SQLite 统一使用 WAL、`synchronous=NORMAL`、`busy_timeout=5000` 和外键检查；服务启动时会幂等初始化并输出状态，部署迁移后也应执行 `npm run db:optimize`。生产更新顺序：停止 PM2 → 备份 SQLite（同时考虑 `-wal`/`-shm`）→ `npm run db:migrate:deploy` → `npm run db:generate` → `npm run db:optimize` → `npm run build` → 重启 PM2。
 
 ```bash
 npm install
 npm run db:migrate:deploy
 npm run db:generate
+npm run db:optimize
 npm run build
 pm2 delete h2-hot2 && pm2 start npm --name h2-hot2 -- start
 ```
 
-日常运维：`npm run db:migrate:status`、`npm run db:cleanup-logs`、`npm run db:rebuild-public`、`pm2 status`、`pm2 logs h2-hot2`。日志保留周期由 `src/lib/log-retention.ts` 统一负责：FetchLog 30 天，PushLog 90 天但保留未完成全部投递的记录，已完成/失败 Job 30 天；不会删除 Article、Source、DiscardedItem 或 pending/running Job。`db:reset`、`db:push` 仅限明确的本地重建或应急场景。
+日常运维：`npm run db:migrate:status`、`npm run db:optimize`、`npm run db:cleanup-logs`、`npm run db:rebuild-public`、`pm2 status`、`pm2 logs h2-hot2`。日志保留周期由 `src/lib/log-retention.ts` 统一负责：FetchLog 30 天，PushLog 90 天但保留未完成全部投递的记录，已完成/失败 Job 30 天；不会删除 Article、Source、DiscardedItem 或 pending/running Job。`db:reset`、`db:push` 仅限明确的本地重建或应急场景。
 
 ## 开发、验证与防漂移规则
 

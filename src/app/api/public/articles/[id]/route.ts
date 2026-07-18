@@ -12,7 +12,7 @@ export async function GET(
     const limited = enforcePublicRateLimit(_request);
     if (limited) return limited;
     const { id } = await params;
-    const article = await getPublicArticleDetail(id, { recordView: true });
+    const article = await getPublicArticleDetail(id);
     if (!article) return NextResponse.json({ error: 'Article not found' }, { status: 404 });
     const response = NextResponse.json(article);
     // Detail eligibility is checked against the database on every request;

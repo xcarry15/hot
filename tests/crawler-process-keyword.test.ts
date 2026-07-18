@@ -26,8 +26,9 @@ const mocks = vi.hoisted(() => ({
   sourceFindUnique: vi.fn(),
   // db.keyword (matchKeyword)
   keywordFindMany: vi.fn(),
-  keywordCandidateFindUnique: vi.fn(),
+  keywordCandidateFindMany: vi.fn(),
   keywordCandidateUpsert: vi.fn(),
+  transaction: vi.fn(),
   inboxSnapshotUpsert: vi.fn(),
   inboxSnapshotDeleteMany: vi.fn(),
   // detail-fetcher
@@ -60,9 +61,10 @@ vi.mock('@/lib/db', () => ({
       findMany: mocks.keywordFindMany,
     },
     keywordCandidate: {
-      findUnique: mocks.keywordCandidateFindUnique,
+      findMany: mocks.keywordCandidateFindMany,
       upsert: mocks.keywordCandidateUpsert,
     },
+    $transaction: mocks.transaction,
     inboxSnapshot: {
       upsert: mocks.inboxSnapshotUpsert,
       deleteMany: mocks.inboxSnapshotDeleteMany,
@@ -110,8 +112,9 @@ beforeEach(() => {
   mocks.sourceFindUnique.mockResolvedValue(null);
   // 默认 keyword DB 空 → matchKeyword 返 true
   mocks.keywordFindMany.mockResolvedValue([]);
-  mocks.keywordCandidateFindUnique.mockResolvedValue(null);
+  mocks.keywordCandidateFindMany.mockResolvedValue([]);
   mocks.keywordCandidateUpsert.mockResolvedValue({});
+  mocks.transaction.mockImplementation(async (writes: Array<Promise<unknown>>) => Promise.all(writes));
   mocks.inboxSnapshotUpsert.mockResolvedValue({});
   mocks.inboxSnapshotDeleteMany.mockResolvedValue({ count: 0 });
 });

@@ -11,7 +11,7 @@
  *     · 退避 where：OR[ nextAiRetryAt=null, nextAiRetryAt <= now ]
  *     · Promise.allSettled 把 rejected 计入 errors
  */
-import type { Article } from '@prisma/client';
+import type { Article, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { processWithAI } from '@/lib/ai';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
@@ -38,19 +38,20 @@ const AI_DELAY_MS = 300;
 export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): Promise<{ total: number; processed: number; errors: number }> {
   assertNotAborted(signal);
 
-  const pending = await db.article.findMany({
-    where: {
-      aiStatus: { in: ['pending', 'failed'] },
-      eventId: { not: null },
-      clusterStatus: { in: ['clustered', 'needs_review'] },
-      // 退避过滤：nextAiRetryAt 未到期的 failed 文章跳过本轮，
-      // 防止 provider 故障时每轮 cron 全量重试烧 token。
-      OR: [
-        { nextAiRetryAt: null },
-        { nextAiRetryAt: { lte: new Date() } },
-      ],
-    },
-    select: {
+  const pendingWhere: Prisma.ArticleWhereInput = {
+    aiStatus: { in: ['pending', 'failed'] },
+    eventId: { not: null },
+    clusterStatus: { in: ['clustered', 'needs_review'] },
+    OR: [
+      { nextAiRetryAt: null },
+      { nextAiRetryAt: { lte: new Date() } },
+    ],
+  };
+  const pendingIds = await db.article.findMany({ where: pendingWhere, select: { id: true }, orderBy: { createdAt: 'asc' } });
+  const total = pendingIds.length;
+  if (jobId) await startJobStage(jobId, { stage: 'ai', total });
+
+  const articleSelect = {
       id: true,
       title: true,
       sourceId: true,
@@ -78,21 +79,11 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
       manualOverrides: true,
       aiSnapshot: true,
       manualCorrectedAt: true,
-    },
-    orderBy: { createdAt: 'asc' },
-    take: MAX_BATCH_SIZE,
-  });
-
-  if (pending.length >= MAX_BATCH_SIZE) {
-    console.log(`[analyzeAllPending] batch cap reached (${MAX_BATCH_SIZE}), remaining will be picked up next tick`);
-  }
-
-  if (jobId) {
-    await startJobStage(jobId, { stage: 'ai', total: pending.length });
-  }
+  } as const;
 
   let processed = 0;
   let errors = 0;
+  const refreshedArticleIds: string[] = [];
   // AI 并发可配置（设置项 ai_concurrency，默认 3，范围 1-10）。
   // 调高可缩短批处理时间但撞 429 风险增大；provider 故障时降低可减少无效请求。
   const rawConcurrency = parseInt(await getSetting(SETTING_KEYS.AI_CONCURRENCY) || String(DEFAULT_AI_CONCURRENCY), 10);
@@ -101,39 +92,44 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
     Math.min(MAX_AI_CONCURRENCY, Number.isFinite(rawConcurrency) ? rawConcurrency : DEFAULT_AI_CONCURRENCY),
   );
 
-  for (let i = 0; i < pending.length; i += concurrency) {
-    assertNotAborted(signal);
-    const batch = pending.slice(i, i + concurrency);
-    const results = await Promise.allSettled(
-      batch.map(a => withTimeout(
+  let globalFailure = false;
+  for (let pageStart = 0; pageStart < pendingIds.length && !globalFailure; pageStart += MAX_BATCH_SIZE) {
+    const pageIds = pendingIds.slice(pageStart, pageStart + MAX_BATCH_SIZE).map((article) => article.id);
+    const pending = await db.article.findMany({
+      where: { id: { in: pageIds } },
+      select: articleSelect,
+      orderBy: { createdAt: 'asc' },
+    });
+    refreshedArticleIds.push(...pending.map((article) => article.id));
+    for (let i = 0; i < pending.length; i += concurrency) {
+      assertNotAborted(signal);
+      const batch = pending.slice(i, i + concurrency);
+      const results = await Promise.allSettled(batch.map(a => withTimeout(
         timeoutSignal => processWithAI(a as Article, timeoutSignal),
         AI_TIMEOUT_MS,
         `AI分析超时 "${a.title}"`,
         signal,
-      ))
-    );
-    let globalFailure = false;
-    for (const r of results) {
-      if (r.status === 'rejected' || r.value.status === 'failed') errors++;
-      else processed++;
-      if (r.status === 'fulfilled' && r.value.globalError) globalFailure = true;
-    }
-    if (jobId) {
-      await advanceJobProgress(jobId, {
-        doneDelta: batch.length,
-        errorDelta: results.filter(r => r.status === 'rejected' || r.value.status === 'failed').length,
-        currentItemLabel: batch[batch.length - 1]?.title,
-      });
-    }
-    // 全局配置/Provider 故障：当前批次立即熔断，剩余文章保持原状态，避免逐篇烧重试次数。
-    if (globalFailure) break;
-    if (i + concurrency < pending.length) {
-      await abortableDelay(AI_DELAY_MS, signal);
+      )));
+      for (const r of results) {
+        if (r.status === 'rejected' || r.value.status === 'failed') errors++;
+        else processed++;
+        if (r.status === 'fulfilled' && r.value.globalError) globalFailure = true;
+      }
+      if (jobId) {
+        await advanceJobProgress(jobId, {
+          doneDelta: batch.length,
+          errorDelta: results.filter(r => r.status === 'rejected' || r.value.status === 'failed').length,
+          currentItemLabel: batch[batch.length - 1]?.title,
+        });
+      }
+      if (globalFailure) break;
+      if (i + concurrency < pending.length) await abortableDelay(AI_DELAY_MS, signal);
     }
   }
 
   // 统一把本批文章的持久化公开状态与最终 aiStatus/score 对齐。
-  await refreshPublicPublications(pending.map((article) => article.id), db);
+  await refreshPublicPublications(refreshedArticleIds, db);
+  if (globalFailure) throw new Error('AI Provider 或配置异常，剩余积压未处理');
 
-  return { total: pending.length, processed, errors };
+  return { total, processed, errors };
 }

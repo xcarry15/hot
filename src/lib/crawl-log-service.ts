@@ -24,6 +24,7 @@ import {
 import type { Job } from '@prisma/client';
 import type {
   ArticleProgress,
+  CrawlLogJobStatusSnapshot,
   CrawlLogSnapshot,
   JobSnapshot,
   SourceProgress,
@@ -83,6 +84,30 @@ export function clampCrawlLogLimit(rawLimit: number | null | undefined): number 
 
 export interface GetCrawlLogSnapshotParams {
   limit?: number;
+}
+
+export async function getCrawlLogJobStatus(): Promise<CrawlLogJobStatusSnapshot> {
+  const [activeJobs, latestJobs] = await Promise.all([
+    db.job.findMany({
+      where: { status: 'running' },
+      orderBy: { createdAt: 'desc' },
+      take: ACTIVE_JOBS_LIMIT,
+    }),
+    db.job.findMany({
+      where: { status: { in: ['completed', 'failed'] } },
+      orderBy: { completedAt: 'desc' },
+      take: 1,
+    }),
+  ]);
+  if (activeJobs.length > 1) {
+    console.error(`[crawl-log-service] invariant violation: ${activeJobs.length} running jobs`);
+  }
+  const activeJobRaw = activeJobs[0] ?? null;
+  return {
+    activeJob: activeJobRaw ? toJobSnapshot(activeJobRaw) : null,
+    latestJob: activeJobRaw ? null : latestJobs[0] ? toJobSnapshot(latestJobs[0]) : null,
+    fetchedAt: Date.now(),
+  };
 }
 
 /**

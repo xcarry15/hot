@@ -7,7 +7,7 @@
  *
  * 触发刷新的来源（按设计 12.8）：
  *   1. 组件首次 mount
- *   2. 每 3 秒兜底轮询
+ *   2. 任务运行时每 3 秒拉轻量 Job 快照、空闲时每 15 秒刷新完整快照
  *   3. 页面 visibilitychange + focus
  *   4. 手动调用 refreshSnapshot() 与写操作成功后
  *
@@ -20,15 +20,19 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CrawlLogSnapshot } from '@/contracts/crawl-log'
-import { fetchCrawlLogSnapshot } from '@/features/crawl-log-api.client'
+import { fetchCrawlLogJobStatus, fetchCrawlLogSnapshot } from '@/features/crawl-log-api.client'
 
 export type { CrawlLogSnapshot, JobSnapshot } from '@/contracts/crawl-log'
 
 interface UseCrawlLogSnapshotOptions {
+  /** 页面是否处于前台；隐藏但保留挂载时暂停请求。 */
+  enabled?: boolean
   /** snapshot 接口 limit，默认 500 */
   limit?: number
   /** 兜底轮询间隔（毫秒），默认 3000 */
   pollIntervalMs?: number
+  /** 空闲轮询间隔（毫秒），默认 15000 */
+  idlePollIntervalMs?: number
 }
 
 interface UseCrawlLogSnapshotReturn {
@@ -48,7 +52,7 @@ export { fetchCrawlLogSnapshot }
 export function useCrawlLogSnapshot(
   options: UseCrawlLogSnapshotOptions = {},
 ): UseCrawlLogSnapshotReturn {
-  const { limit = 500, pollIntervalMs = 3000 } = options
+  const { enabled = true, limit = 500, pollIntervalMs = 3000, idlePollIntervalMs = 15_000 } = options
 
   const [snapshot, setSnapshot] = useState<CrawlLogSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
@@ -61,6 +65,8 @@ export function useCrawlLogSnapshot(
   const unmountedRef = useRef<boolean>(false)
   const refreshSnapshotRef = useRef<(() => Promise<boolean>) | null>(null)
   const inFlightPromiseRef = useRef<Promise<boolean> | null>(null)
+  const snapshotRef = useRef<CrawlLogSnapshot | null>(null)
+  const refreshSnapshotRefForPolling = useRef<() => Promise<boolean>>(async () => false)
 
   const refreshSnapshot = useCallback(() => {
     if (unmountedRef.current) return Promise.resolve(false)
@@ -77,6 +83,7 @@ export function useCrawlLogSnapshot(
         // 慢响应不能覆盖快响应：只应用最后一次响应。
         if (myRequestId !== requestIdRef.current) return false
         setSnapshot(data)
+        snapshotRef.current = data
         setLastSyncedAt(Date.now())
         setError(null)
         return true
@@ -109,26 +116,59 @@ export function useCrawlLogSnapshot(
   // mutating a ref during render (React Compiler refs rule).
   useEffect(() => {
     refreshSnapshotRef.current = refreshSnapshot
+    refreshSnapshotRefForPolling.current = refreshSnapshot
     return () => {
       refreshSnapshotRef.current = null
+      refreshSnapshotRefForPolling.current = async () => false
     }
   }, [refreshSnapshot])
 
-  // 1) 首次 mount + 3 秒兜底轮询
+  // 1) 首次 mount + 自适应轮询。后台标签页 hidden 时不发周期请求。
   useEffect(() => {
+    if (!enabled) return
     unmountedRef.current = false
     void refreshSnapshot()
-    const interval = setInterval(() => {
-      void refreshSnapshot()
-    }, pollIntervalMs)
+    let timer: number | undefined
+    const schedule = () => {
+      const interval = snapshotRef.current?.activeJob ? pollIntervalMs : idlePollIntervalMs
+      timer = window.setTimeout(async () => {
+        if (document.visibilityState === 'visible') {
+          const current = snapshotRef.current
+          if (current?.activeJob) {
+            try {
+              const jobs = await fetchCrawlLogJobStatus()
+              if (!unmountedRef.current) {
+                const stageChanged = jobs.activeJob?.currentStage !== current.activeJob.currentStage
+                const jobFinished = !jobs.activeJob
+                if (stageChanged || jobFinished) {
+                  await refreshSnapshotRefForPolling.current()
+                } else {
+                  const next = { ...current, activeJob: jobs.activeJob, latestJob: jobs.latestJob, fetchedAt: jobs.fetchedAt }
+                  snapshotRef.current = next
+                  setSnapshot(next)
+                  setLastSyncedAt(Date.now())
+                }
+              }
+            } catch {
+              // 轻快照失败不清空已有页面，下一轮继续。
+            }
+          } else {
+            await refreshSnapshotRefForPolling.current()
+          }
+        }
+        if (!unmountedRef.current) schedule()
+      }, interval)
+    }
+    schedule()
     return () => {
       unmountedRef.current = true
-      clearInterval(interval)
+      if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [pollIntervalMs, refreshSnapshot])
+  }, [enabled, idlePollIntervalMs, pollIntervalMs, refreshSnapshot])
 
   // 2) visibilitychange + focus —— 重新可见/聚焦时拉一次
   useEffect(() => {
+    if (!enabled) return
     function onVisible() {
       if (document.visibilityState === 'visible') {
         void refreshSnapshot()
@@ -143,7 +183,7 @@ export function useCrawlLogSnapshot(
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onFocus)
     }
-  }, [refreshSnapshot])
+  }, [enabled, refreshSnapshot])
 
   return { snapshot, loading, error, lastSyncedAt, refreshSnapshot }
 }

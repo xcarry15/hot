@@ -39,9 +39,7 @@ export async function GET(request: Request) {
     };
     const page = parsePositiveInt(searchParams.get('page'), 1);
     const pageSize = parsePositiveInt(searchParams.get('pageSize'), 20, 100);
-    const all = searchParams.get('all') === 'true';
-
-    return NextResponse.json(await listArticles({ filter, page, pageSize, all }));
+    return NextResponse.json(await listArticles({ filter, page, pageSize }));
   } catch (error: unknown) {
     return apiError(error, 'Failed to fetch articles');
   }

@@ -18,7 +18,6 @@ import { assertNotAborted } from './worker-stop';
 import { advanceJobProgress, startJobStage } from './job-progress';
 import { z } from 'zod';
 import { applyScorePolicy } from './score-policy';
-import { refreshPublicPublication } from './public-publication-service';
 import { createHash } from 'node:crypto';
 import { buildAiResetDataForArticle } from './article-ai-reset';
 import {
@@ -175,7 +174,7 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         skipReason: `内容不足（< ${MIN_MEANINGFUL_CHARS} 字符）`,
       },
     });
-    await refreshPublicPublication(articleId, db);
+    await recalculateArticleEvent(articleId);
     return { status: 'skipped' };
   }
 
@@ -262,7 +261,6 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       },
     });
 
-    await refreshPublicPublication(articleId, db, { contentChanged: true });
     await recalculateArticleEvent(articleId);
     return { status: 'done' };
   } else {
@@ -295,7 +293,7 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         },
       });
     }
-    await refreshPublicPublication(articleId, db);
+    await recalculateArticleEvent(articleId);
     return { status: 'failed', errorKind: 'content' };
   }
 }
@@ -359,7 +357,7 @@ export async function reprocessWithAI(
   try {
     result = await processWithAI({ ...articleData, aiStatus: 'pending', aiRetryCount: 0 } as Article, signal);
   } catch (error) {
-    await refreshPublicPublication(articleId);
+    await recalculateArticleEvent(articleId);
     throw error;
   }
   if (jobId) {

@@ -39,6 +39,7 @@ Hot2 部署和更新方法（2026-07）
   npm run db:migrate:deploy
   npm run db:generate
   npm run db:seed
+  npm run db:optimize
   npm run build
 
 启动 PM2：
@@ -97,6 +98,7 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
   npm install                         # package-lock/package.json 有变化时必须执行
   npm run db:migrate:deploy            # 应用新增 migration；无新增时为空操作
   npm run db:generate
+  npm run db:optimize                   # 启用/校验 WAL、NORMAL、busy_timeout 并执行 PRAGMA optimize
   npm run build
   pm2 delete h2-hot2
   pm2 start npm --name h2-hot2 -- start
@@ -142,6 +144,7 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
   pm2 delete h2-hot2
 #####################################################################
   npm run db:migrate:status
+  npm run db:optimize
   npm run db:cleanup-logs
 
 七、Nginx
@@ -152,6 +155,7 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
 - 动态请求代理到 127.0.0.1:3011。
 - `/_next/static/` 由 Nginx 直接提供 immutable 静态资源。
 - 动态页面绕过 proxy_cache，避免重新构建后旧 HTML 引用已删除的 chunk。
+- 模板为 JS/CSS/JSON/SVG/HTML 响应启用 gzip，减少后台快照和前端资源传输体积。
 - 修改配置后执行 `nginx -t && nginx -s reload`。
 
 八、从零重建（破坏性操作）
@@ -161,10 +165,11 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
 
   pm2 stop h2-hot2
   cp db/custom.db db/custom.db.bak.$(date +%Y%m%d-%H%M%S)
-  rm -f db/custom.db db/custom.db-journal
+rm -f db/custom.db db/custom.db-journal db/custom.db-wal db/custom.db-shm
   npm run db:migrate:deploy
   npm run db:generate
   npm run db:seed
+  npm run db:optimize
   npm run build
   pm2 delete h2-hot2
   pm2 start npm --name h2-hot2 -- start
@@ -179,12 +184,13 @@ Windows 本地重建（会删除本地数据）：
 # 1. 结束当前服务（开发用 npm run dev 直接 Ctrl+C；PM2 用 pm2 stop h2-hot2）
 # 2. 备份并删除本地数据库
 Copy-Item .\db\custom.db .\db\custom.db.bak-$((Get-Date).ToString('yyyyMMdd-HHmmss')) -Force
-Remove-Item .\db\custom.db, .\db\custom.db-journal -Force -ErrorAction SilentlyContinue
+Remove-Item .\db\custom.db, .\db\custom.db-journal, .\db\custom.db-wal, .\db\custom.db-shm -Force -ErrorAction SilentlyContinue
 
 # 3. 应用全部 migration（空库）
 npm run db:generate
 npm run db:migrate:deploy
 npm run db:seed
+npm run db:optimize
 
 # 4. 构建并启动
 npm run build

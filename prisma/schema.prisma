@@ -134,6 +134,8 @@ model Event {
   publicStatus            String    @default("unpublished") // unpublished, published, revoked
   publicPublishedAt       DateTime?
   publicRevokedAt         DateTime?
+  publicDateKey           String    @default("")
+  publicSortAt            DateTime?
   pushedAt                DateTime?
   nextPushRetryAt         DateTime?
   createdAt               DateTime  @default(now())
@@ -149,6 +151,7 @@ model Event {
 
   @@index([status, lastSeenAt])
   @@index([publicStatus, firstSeenAt])
+  @@index([status, publicStatus, publicDateKey, publicSortAt])
   @@index([pushedAt, nextPushRetryAt])
   @@map("events")
 }

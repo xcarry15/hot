@@ -23,6 +23,7 @@
     "db:reset": "prisma migrate reset",
     "db:cleanup-legacy": "tsx scripts/cleanup-legacy-settings.ts",
     "db:cleanup-logs": "tsx scripts/cleanup-logs.ts",
+    "db:optimize": "tsx scripts/optimize-database.ts",
     "db:backfill-prompts": "tsx scripts/backfill-prompt-defaults.ts",
     "db:rebuild-public": "tsx scripts/rebuild-public-publication.ts"
   },

@@ -168,18 +168,8 @@ export interface ArticlePaginationDto {
   totalPages: number;
 }
 
-export interface ArticleFacetDto {
-  value: string;
-  count: number;
-}
-
 export interface ArticleListResponseDto extends ArticlePaginationDto {
   items: ArticleListItemDto[];
-  /** 全库筛选项，不受当前分页影响。 */
-  facets: {
-    categories: ArticleFacetDto[];
-    brands: ArticleFacetDto[];
-  };
 }
 
 type ListDates = {

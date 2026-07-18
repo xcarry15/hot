@@ -33,6 +33,8 @@ import { getFailedPushTargets, pushArticleToFeishu } from './push/delivery';
 import { pushAllPendingArticles } from './pipeline/push-bridge';
 import { shouldPushAtPipelineEnd } from './push/policy';
 import { db } from './db';
+import { invalidateTechnicalWorkQueueCache } from './technical-work-queue-service';
+import { invalidateDashboardAnalyticsCache } from './dashboard-analytics-service';
 import {
   getActiveJobType as getReservedJobType,
   tryReserveMutation,
@@ -144,6 +146,8 @@ async function runPipeline(
     console.error(`[execution] ${stopped ? 'stopped' : 'failed'} job ${jobId} (${type}):`, msg);
     await markJobFailed(jobId, stopped ? 'Stopped by user' : msg.slice(0, 2000));
   } finally {
+    invalidateTechnicalWorkQueueCache();
+    invalidateDashboardAnalyticsCache();
     stopJobHeartbeat(heartbeat);
     reservation.release();
     clearJobAbortController(jobId);
@@ -193,17 +197,6 @@ async function executeFullJob(
 
   assertNotAborted(signal);
   const processResult = await processAllPending(signal, jobId);
-  let mergedProcess = processResult;
-  if (processResult.capped) {
-    assertNotAborted(signal);
-    const processResult2 = await processAllPending(signal, jobId);
-    mergedProcess = {
-      total: processResult.total + processResult2.total,
-      processed: processResult.processed + processResult2.processed,
-      errors: processResult.errors + processResult2.errors,
-      capped: processResult2.capped,
-    };
-  }
 
   assertNotAborted(signal);
   const clusterResult = await clusterAllPending(signal, jobId);
@@ -214,7 +207,7 @@ async function executeFullJob(
   const result: Record<string, unknown> = {
     stages: {
       collect: summarizeCollectResult(collectResult),
-      process: mergedProcess,
+      process: processResult,
       cluster: clusterResult,
       ai: aiResult,
     },

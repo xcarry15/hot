@@ -1,4 +1,4 @@
-import type { CrawlLogSnapshot, SourceProgress } from '@/contracts/crawl-log'
+import type { CrawlLogJobStatusSnapshot, CrawlLogSnapshot, SourceProgress } from '@/contracts/crawl-log'
 import { requestJson } from '@/lib/request-json.client'
 
 export async function fetchCrawlLogSnapshot(limit = 500): Promise<CrawlLogSnapshot> {
@@ -10,4 +10,8 @@ export async function fetchCrawlLogSnapshot(limit = 500): Promise<CrawlLogSnapsh
     fetchedAt: typeof data.fetchedAt === 'number' ? data.fetchedAt : Date.now(),
     technicalTotal: typeof data.technicalTotal === 'number' ? data.technicalTotal : 0,
   }
+}
+
+export function fetchCrawlLogJobStatus(): Promise<CrawlLogJobStatusSnapshot> {
+  return requestJson<CrawlLogJobStatusSnapshot>('GET', '/api/crawl-log/status?mode=job')
 }

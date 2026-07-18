@@ -27,8 +27,8 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const isPublicArticleClickApi = /^\/api\/public\/articles\/[^/]+\/click$/.test(pathname);
-  if (isPublicArticleClickApi) {
+  const isPublicArticleInteractionApi = /^\/api\/public\/articles\/[^/]+\/(click|view)$/.test(pathname);
+  if (isPublicArticleInteractionApi) {
     if (request.method !== 'POST') {
       return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
     }

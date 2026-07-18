@@ -36,9 +36,11 @@ import { retrySource, retrySources } from '@/features/sources-api.client'
 
 // ========== Main Component ==========
 
-export default function CrawlLogTab() {
+export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const { snapshot, loading, error, lastSyncedAt, refreshSnapshot } = useCrawlLogSnapshot({
-    limit: 500,
+    // 项目日处理量低于 200；保留一定余量即可，避免每轮传输 1000 条明细。
+    limit: 250,
+    enabled: active,
   })
   const sources: SourceProgress[] = useMemo(() => snapshot?.sources ?? [], [snapshot?.sources])
 
@@ -88,6 +90,16 @@ export default function CrawlLogTab() {
     }
     window.history.replaceState(null, '', url.toString())
   }, [detailArticleId, detailKind])
+
+  useEffect(() => {
+    if (!active || typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (detailOpen && detailArticleId) {
+      url.searchParams.set(URL_PARAM_DETAIL, detailArticleId)
+      url.searchParams.set(URL_PARAM_DETAIL_KIND, detailKind)
+    }
+    window.history.replaceState(null, '', url.toString())
+  }, [active, detailArticleId, detailKind, detailOpen])
 
   // 局部请求级 loading：仅用于按钮点击瞬间——成功入队 / 失败都不持久化。
   const [stageRequestLoading, setStageRequestLoading] = useState<Record<string, boolean>>({})

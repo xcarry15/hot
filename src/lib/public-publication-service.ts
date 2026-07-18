@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { SETTING_KEYS } from '@/lib/settings-catalog'
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache'
+import { getPublicDateKey } from '@/lib/shared/public-date'
 
 const PUBLIC_MIN_SCORE_KEY = SETTING_KEYS.PUBLIC_MIN_SCORE
 const PUBLIC_HIDE_ADS_KEY = SETTING_KEYS.PUBLIC_HIDE_ADS
@@ -36,6 +37,7 @@ type PublicPublicationCandidate = {
   publicPublishedAt: Date | null
   publicRevokedAt: Date | null
   publicContentUpdatedAt: Date | null
+  publishedAt: Date | null
   source: {
     publicEnabled: boolean
     deletedAt: Date | null
@@ -91,31 +93,37 @@ async function syncCandidate(
       ? PUBLIC_PUBLICATION_STATUS.revoked
       : PUBLIC_PUBLICATION_STATUS.unpublished
 
+  const event = article.eventId ? await client.event.findUnique({
+    where: { id: article.eventId },
+    select: { representativeArticleId: true, publicStatus: true, publicPublishedAt: true, firstSeenAt: true },
+  }) : null
+  const isRepresentative = event?.representativeArticleId === article.id
+
   await client.article.update({
     where: { id: article.id },
     data: {
-      publicStatus: nextStatus,
-      publicPublishedAt: published
-        ? article.publicPublishedAt ?? now
-        : article.publicPublishedAt,
-      publicRevokedAt: published
+      publicStatus: isRepresentative ? nextStatus : PUBLIC_PUBLICATION_STATUS.unpublished,
+      publicPublishedAt: isRepresentative
+        ? published ? article.publicPublishedAt ?? now : article.publicPublishedAt
+        : null,
+      publicRevokedAt: isRepresentative && published
         ? null
-        : nextStatus === PUBLIC_PUBLICATION_STATUS.revoked
+        : isRepresentative && nextStatus === PUBLIC_PUBLICATION_STATUS.revoked
           ? wasPublished ? now : article.publicRevokedAt ?? now
           : null,
-      publicPublicationReason: published ? 'eligible' : getRevokeReason(article, config),
+      publicPublicationReason: !isRepresentative
+        ? 'not-event-representative'
+        : published ? 'eligible' : getRevokeReason(article, config),
       publicPublicationEvaluatedAt: now,
-      ...(published && (options.contentChanged || !wasPublished || article.publicContentUpdatedAt === null)
-        ? { publicContentUpdatedAt: now }
-        : {}),
+      publicContentUpdatedAt: !isRepresentative
+        ? null
+        : published && (options.contentChanged || !wasPublished || article.publicContentUpdatedAt === null)
+          ? now
+          : article.publicContentUpdatedAt,
     },
   })
-  if (article.eventId) {
-    const event = await client.event.findUnique({
-      where: { id: article.eventId },
-      select: { representativeArticleId: true, publicStatus: true, publicPublishedAt: true },
-    })
-    if (event?.representativeArticleId === article.id) {
+  if (article.eventId && event) {
+    if (isRepresentative) {
       const eventWasPublished = event.publicStatus === PUBLIC_PUBLICATION_STATUS.published
       await client.event.update({
         where: { id: article.eventId },
@@ -123,6 +131,8 @@ async function syncCandidate(
           publicStatus: nextStatus,
           publicPublishedAt: published ? event.publicPublishedAt ?? now : event.publicPublishedAt,
           publicRevokedAt: published ? null : eventWasPublished ? now : undefined,
+          publicDateKey: published ? getPublicDateKey(article.publishedAt ?? event.firstSeenAt) : '',
+          publicSortAt: published ? article.publishedAt ?? event.firstSeenAt : null,
         },
       })
     }
@@ -141,6 +151,7 @@ const publicationSelect = {
   publicPublishedAt: true,
   publicRevokedAt: true,
   publicContentUpdatedAt: true,
+  publishedAt: true,
   source: { select: { publicEnabled: true, deletedAt: true } },
 } as const
 
@@ -155,6 +166,41 @@ export async function refreshPublicPublication(
   await syncCandidate(article, config, client, options)
   if (client === db) invalidatePublicArticleCache()
   return true
+}
+
+export async function refreshEventPublicPublication(
+  eventId: string,
+  client: PublicPublicationDb = db,
+  options: { contentChanged?: boolean } = {},
+): Promise<boolean> {
+  const event = await client.event.findUnique({ where: { id: eventId }, select: { representativeArticleId: true } })
+  await client.article.updateMany({
+    where: { eventId, ...(event?.representativeArticleId ? { id: { not: event.representativeArticleId } } : {}) },
+    data: {
+      publicStatus: PUBLIC_PUBLICATION_STATUS.unpublished,
+      publicPublishedAt: null,
+      publicRevokedAt: null,
+      publicPublicationReason: 'not-event-representative',
+      publicPublicationEvaluatedAt: new Date(),
+      publicContentUpdatedAt: null,
+    },
+  })
+  if (!event?.representativeArticleId) {
+    const current = await client.event.findUnique({ where: { id: eventId }, select: { publicStatus: true } })
+    await client.event.update({
+      where: { id: eventId },
+      data: {
+        publicStatus: current?.publicStatus === PUBLIC_PUBLICATION_STATUS.published
+          ? PUBLIC_PUBLICATION_STATUS.revoked
+          : PUBLIC_PUBLICATION_STATUS.unpublished,
+        publicRevokedAt: current?.publicStatus === PUBLIC_PUBLICATION_STATUS.published ? new Date() : undefined,
+        publicDateKey: '',
+        publicSortAt: null,
+      },
+    })
+    return false
+  }
+  return refreshPublicPublication(event.representativeArticleId, client, options)
 }
 
 export async function refreshPublicPublications(

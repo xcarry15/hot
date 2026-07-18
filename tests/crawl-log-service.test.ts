@@ -32,6 +32,7 @@ vi.mock('@/lib/push/policy', () => ({
 }));
 vi.mock('@/lib/technical-work-queue-service', () => ({
   getTechnicalWorkQueue: mocks.technicalQueue,
+  invalidateTechnicalWorkQueueCache: vi.fn(),
 }));
 
 import {

@@ -16,10 +16,59 @@ import type {
 } from '@/contracts/articles';
 import type { ManualOverrideField } from '@/lib/shared/article-calibration';
 
+const DETAIL_CACHE_TTL_MS = 15_000;
+const MAX_DETAIL_CACHE_ENTRIES = 100;
+const PREFETCH_DELAY_MS = 120;
+const articleDetailPrefetchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const articleDetailCache = new Map<string, {
+  expiresAt: number;
+  value: Promise<ArticleDetailDto>;
+}>();
+
+function withAbort<T>(value: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return value;
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', abort, { once: true });
+    value.then(
+      (result) => {
+        signal.removeEventListener('abort', abort);
+        resolve(result);
+      },
+      (error) => {
+        signal.removeEventListener('abort', abort);
+        reject(error);
+      },
+    );
+  });
+}
+
+export function primeArticleDetailCache(article: ArticleDetailDto): void {
+  articleDetailCache.delete(article.id);
+  articleDetailCache.set(article.id, {
+    expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
+    value: Promise.resolve(article),
+  });
+  trimArticleDetailCache();
+}
+
+function trimArticleDetailCache(): void {
+  while (articleDetailCache.size > MAX_DETAIL_CACHE_ENTRIES) {
+    const oldestKey = articleDetailCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    articleDetailCache.delete(oldestKey);
+  }
+}
+
+export function invalidateArticleDetailCache(articleId?: string): void {
+  if (articleId) articleDetailCache.delete(articleId);
+  else articleDetailCache.clear();
+}
+
 export interface ArticleListFilter {
   page?: number;
   pageSize?: number;
-  all?: boolean;
   search?: string;
   category?: string;
   brand?: string;
@@ -42,7 +91,6 @@ export async function fetchArticleList(
   const params = new URLSearchParams();
   if (filter.page != null) params.set('page', String(filter.page));
   if (filter.pageSize != null) params.set('pageSize', String(filter.pageSize));
-  if (filter.all) params.set('all', 'true');
   if (filter.search) params.set('search', filter.search);
   if (filter.category) params.set('category', filter.category);
   if (filter.brand) params.set('brand', filter.brand);
@@ -65,7 +113,9 @@ export async function updateArticleEditorial(
   articleId: string,
   input: { summary?: string; brand?: string; category?: string; tags?: Array<{ name: string; tone?: string }>; keyPoints?: string[]; publicOverride?: 'auto' | 'public' | 'hidden'; relevance?: number; eventScore?: number; contentScore?: number; adProbability?: number; isAd?: boolean; restoreFields?: ManualOverrideField[] },
 ): Promise<ArticleDetailDto> {
-  return requestJson<ArticleDetailDto>('PATCH', `/api/articles/${articleId}`, { body: input });
+  const article = await requestJson<ArticleDetailDto>('PATCH', `/api/articles/${articleId}`, { body: input });
+  primeArticleDetailCache(article);
+  return article;
 }
 
 export async function reviewArticle(
@@ -73,7 +123,9 @@ export async function reviewArticle(
   status: string,
   reasonTags: string[] = [],
 ): Promise<unknown> {
-  return requestJson('POST', '/api/articles/review', { body: { articleId, status, reasonTags } });
+  const result = await requestJson('POST', '/api/articles/review', { body: { articleId, status, reasonTags } });
+  invalidateArticleDetailCache(articleId);
+  return result;
 }
 
 export async function reviewArticles(
@@ -81,23 +133,56 @@ export async function reviewArticles(
   status: string,
   reasonTags: string[] = [],
 ): Promise<{ updated: number }> {
-  return requestJson('POST', '/api/articles/review', { body: { articleIds, status, reasonTags } });
+  const result = await requestJson<{ updated: number }>('POST', '/api/articles/review', { body: { articleIds, status, reasonTags } });
+  for (const articleId of articleIds) invalidateArticleDetailCache(articleId);
+  return result;
 }
 
 export async function fetchArticleDetail(
   articleId: string,
   signal?: AbortSignal,
 ): Promise<ArticleDetailDto> {
-  return requestJson<ArticleDetailDto>('GET', `/api/articles/${articleId}`, { signal });
+  const cached = articleDetailCache.get(articleId);
+  if (cached && cached.expiresAt > Date.now()) return withAbort(cached.value, signal);
+  if (cached) articleDetailCache.delete(articleId);
+
+  const value = requestJson<ArticleDetailDto>('GET', `/api/articles/${articleId}`);
+  articleDetailCache.set(articleId, {
+    expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
+    value,
+  });
+  trimArticleDetailCache();
+  void value.catch(() => articleDetailCache.delete(articleId));
+  return withAbort(value, signal);
+}
+
+export function prefetchArticleDetail(articleId: string): void {
+  const cached = articleDetailCache.get(articleId);
+  if (cached && cached.expiresAt > Date.now()) return;
+  if (articleDetailPrefetchTimers.has(articleId)) return;
+  const timer = setTimeout(() => {
+    articleDetailPrefetchTimers.delete(articleId);
+    void fetchArticleDetail(articleId).catch(() => undefined);
+  }, PREFETCH_DELAY_MS);
+  articleDetailPrefetchTimers.set(articleId, timer);
+}
+
+export function cancelArticleDetailPrefetch(articleId: string): void {
+  const timer = articleDetailPrefetchTimers.get(articleId);
+  if (!timer) return;
+  clearTimeout(timer);
+  articleDetailPrefetchTimers.delete(articleId);
 }
 export async function triggerArticleWorkflow(
   articleId: string,
   startAt: 'process' | 'cluster' | 'ai' | 'push',
   intent: 'retry' | 'regenerate',
 ): Promise<{ queued: boolean; jobId?: string; reason?: string }> {
-  return requestJson('POST', `/api/articles/${encodeURIComponent(articleId)}/workflow`, {
+  const result = await requestJson<{ queued: boolean; jobId?: string; reason?: string }>('POST', `/api/articles/${encodeURIComponent(articleId)}/workflow`, {
     body: { startAt, intent },
   });
+  if (result.queued) invalidateArticleDetailCache(articleId);
+  return result;
 }
 
 export async function fetchRelatedByBrand(

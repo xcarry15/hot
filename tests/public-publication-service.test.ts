@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
-import { refreshPublicPublication } from '@/lib/public-publication-service';
+import { refreshEventPublicPublication, refreshPublicPublication } from '@/lib/public-publication-service';
 
 const mocks = db as unknown as {
   article: {
     findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
   };
   event: {
     findUnique: ReturnType<typeof vi.fn>;
@@ -18,10 +19,12 @@ describe('public-publication-service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.article.update.mockResolvedValue({});
+    mocks.article.updateMany.mockResolvedValue({ count: 0 });
     mocks.event.findUnique.mockResolvedValue({
       representativeArticleId: 'a1',
       publicStatus: 'unpublished',
       publicPublishedAt: null,
+      firstSeenAt: new Date('2026-07-15T00:00:00.000Z'),
     });
     mocks.event.update.mockResolvedValue({});
     mocks.setting.findUnique
@@ -42,6 +45,7 @@ describe('public-publication-service', () => {
       publicPublishedAt: null,
       publicRevokedAt: null,
       publicContentUpdatedAt: null,
+      publishedAt: new Date('2026-07-15T00:00:00.000Z'),
       source: { publicEnabled: true, deletedAt: null },
     });
 
@@ -70,6 +74,7 @@ describe('public-publication-service', () => {
       publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'),
       publicRevokedAt: null,
       publicContentUpdatedAt: new Date('2026-07-15T00:00:00.000Z'),
+      publishedAt: new Date('2026-07-15T00:00:00.000Z'),
       source: { publicEnabled: true, deletedAt: null },
     });
 
@@ -100,6 +105,7 @@ describe('public-publication-service', () => {
       publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'),
       publicRevokedAt: null,
       publicContentUpdatedAt: new Date('2026-07-15T00:00:00.000Z'),
+      publishedAt: new Date('2026-07-15T00:00:00.000Z'),
       source: { publicEnabled: true, deletedAt: null },
       ...overrides,
     });
@@ -131,6 +137,7 @@ describe('public-publication-service', () => {
       publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'),
       publicRevokedAt: new Date('2026-07-15T01:00:00.000Z'),
       publicContentUpdatedAt: new Date('2026-07-15T00:00:00.000Z'),
+      publishedAt: new Date('2026-07-15T00:00:00.000Z'),
       source: { publicEnabled: true, deletedAt: null },
     });
 
@@ -159,6 +166,7 @@ describe('public-publication-service', () => {
       publicPublishedAt: previous,
       publicRevokedAt: null,
       publicContentUpdatedAt: previous,
+      publishedAt: previous,
       source: { publicEnabled: true, deletedAt: null },
     });
 
@@ -167,5 +175,31 @@ describe('public-publication-service', () => {
     const data = mocks.article.update.mock.calls[0][0].data;
     expect(data.publicContentUpdatedAt).toBeInstanceOf(Date);
     expect(data.publicContentUpdatedAt.getTime()).toBeGreaterThan(previous.getTime());
+  });
+
+  it('刷新 Event 时会把非代表成员统一标记为未公开', async () => {
+    mocks.event.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({ representativeArticleId: 'a1' })
+      .mockResolvedValueOnce({
+        representativeArticleId: 'a1',
+        publicStatus: 'published',
+        publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'),
+        firstSeenAt: new Date('2026-07-15T00:00:00.000Z'),
+      });
+    mocks.article.findUnique.mockResolvedValue({
+      id: 'a1', eventId: 'e1', clusterStatus: 'clustered', aiStatus: 'done', score: 82,
+      isAd: false, publicOverride: 'auto', publicStatus: 'published',
+      publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'), publicRevokedAt: null,
+      publicContentUpdatedAt: new Date('2026-07-15T00:00:00.000Z'), publishedAt: new Date('2026-07-15T00:00:00.000Z'),
+      source: { publicEnabled: true, deletedAt: null },
+    });
+
+    await refreshEventPublicPublication('e1');
+
+    expect(mocks.article.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { eventId: 'e1', id: { not: 'a1' } },
+      data: expect.objectContaining({ publicStatus: 'unpublished', publicPublicationReason: 'not-event-representative' }),
+    }));
   });
 });

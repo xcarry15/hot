@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   articleFindMany: vi.fn(),
   articleCount: vi.fn(),
   articleUpdateMany: vi.fn(),
+  articleUpdate: vi.fn(),
   eventFindUnique: vi.fn(),
   eventCreate: vi.fn(),
   eventUpdate: vi.fn(),
@@ -23,6 +24,7 @@ function transactionClient() {
       findFirst: mocks.articleFindFirst,
       findMany: mocks.articleFindMany,
       count: mocks.articleCount,
+      update: mocks.articleUpdate,
       updateMany: mocks.articleUpdateMany,
     },
     event: {
@@ -44,9 +46,9 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-vi.mock('@/lib/public-publication-service', () => ({ refreshPublicPublication: mocks.refresh }));
+vi.mock('@/lib/public-publication-service', () => ({ refreshEventPublicPublication: mocks.refresh }));
 
-import { mergeEvents, reconcileEventAfterArticleDeletion, splitEventArticles } from '@/lib/event-service';
+import { mergeEvents, reconcileEventAfterArticleDeletion, selectRepresentativeCandidate, setEventRepresentative, splitEventArticles } from '@/lib/event-service';
 
 describe('Event 人工纠错', () => {
   beforeEach(() => {
@@ -56,6 +58,7 @@ describe('Event 人工纠错', () => {
     mocks.transaction.mockImplementation((operation: (client: ReturnType<typeof transactionClient>) => unknown) => operation(transactionClient()));
     mocks.auditCreate.mockResolvedValue({});
     mocks.articleUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.articleUpdate.mockResolvedValue({});
     mocks.eventUpdate.mockResolvedValue({});
     mocks.eventUpdateMany.mockResolvedValue({ count: 0 });
     mocks.eventDelete.mockResolvedValue({});
@@ -71,15 +74,25 @@ describe('Event 人工纠错', () => {
       .mockResolvedValueOnce({ id: 'target', status: 'active', pushedAt: null })
       .mockResolvedValueOnce({ representativeArticleId: null, representativeManual: false })
       .mockResolvedValueOnce({ firstSeenAt: pushedAt, lastSeenAt: pushedAt })
+      .mockResolvedValueOnce({ representativeArticleId: 'a1' })
       .mockResolvedValueOnce({ representativeArticleId: 'a1' });
     mocks.articleFindMany
       .mockResolvedValueOnce([{ id: 'a1', publishedAt: pushedAt, createdAt: pushedAt }])
-      .mockResolvedValueOnce([{ id: 'a1', reviewStatus: 'important', score: 90, relevance: 90, cleanContent: '正文', publishedAt: pushedAt, createdAt: pushedAt }]);
+      .mockResolvedValueOnce([{ id: 'a1', clusterStatus: 'clustered', aiStatus: 'done', reviewStatus: 'important', score: 90, relevance: 90, cleanContent: '正文', publishedAt: pushedAt, createdAt: pushedAt, source: { publicEnabled: true, deletedAt: null } }]);
     await expect(mergeEvents('source', 'target')).resolves.toBe(true);
     expect(mocks.eventUpdate).toHaveBeenCalledWith({ where: { id: 'target' }, data: { pushedAt } });
     expect(mocks.auditCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ actor: 'admin', action: 'merge', assignedEventId: 'target' }),
     }));
+  });
+
+  it('自动代表文章优先选择可发布成员而不是待复核高分成员', () => {
+    const now = new Date();
+    const selected = selectRepresentativeCandidate([
+      { id: 'review', clusterStatus: 'needs_review', aiStatus: 'done', reviewStatus: 'important', score: 100, relevance: 100, cleanContent: '更长正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
+      { id: 'ready', clusterStatus: 'clustered', aiStatus: 'done', reviewStatus: 'general', score: 60, relevance: 60, cleanContent: '正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
+    ]);
+    expect(selected).toBe('ready');
   });
 
   it('从已推送 Event 拆分时新 Event 保持未推送', async () => {
@@ -88,11 +101,14 @@ describe('Event 人工纠错', () => {
       .mockResolvedValueOnce({ status: 'active' })
       .mockResolvedValueOnce({ representativeArticleId: null, representativeManual: false })
       .mockResolvedValueOnce({ representativeArticleId: 'remaining' })
+      .mockResolvedValueOnce({ representativeArticleId: 'split' })
       .mockResolvedValueOnce({ representativeArticleId: 'split' });
     mocks.articleFindMany
       .mockResolvedValueOnce([{ id: 'split', publishedAt: articleDate, createdAt: articleDate }])
       .mockResolvedValueOnce([{ id: 'remaining', publishedAt: articleDate, createdAt: articleDate }])
-      .mockResolvedValueOnce([{ id: 'remaining', reviewStatus: 'general', score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate }]);
+      .mockResolvedValueOnce([{ id: 'remaining', clusterStatus: 'clustered', aiStatus: 'done', reviewStatus: 'general', score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }])
+      .mockResolvedValueOnce([{ id: 'split', publishedAt: articleDate, createdAt: articleDate }])
+      .mockResolvedValueOnce([{ id: 'split', clusterStatus: 'clustered', aiStatus: 'done', reviewStatus: 'general', score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }]);
     mocks.articleCount.mockResolvedValue(2);
     mocks.eventCreate.mockResolvedValue({ id: 'new-event' });
     await expect(splitEventArticles('source', ['split'])).resolves.toBe('new-event');
@@ -100,10 +116,10 @@ describe('Event 人工纠错', () => {
       data: expect.not.objectContaining({ pushedAt: expect.anything() }),
     }));
     expect(mocks.eventCreate).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ representativeArticleId: 'split' }),
+      data: expect.objectContaining({ representativeArticleId: null }),
     }));
-    expect(mocks.refresh).toHaveBeenCalledWith('remaining');
-    expect(mocks.refresh).toHaveBeenCalledWith('split');
+    expect(mocks.refresh).toHaveBeenCalledWith('source');
+    expect(mocks.refresh).toHaveBeenCalledWith('new-event');
   });
 
   it('删除最后一篇 Article 后清理空 Event 及关联记录', async () => {
@@ -120,5 +136,16 @@ describe('Event 人工纠错', () => {
     mocks.eventFindUnique.mockResolvedValueOnce({ status: 'merged', pushedAt: null });
     await expect(splitEventArticles('merged', ['a1'])).resolves.toBeNull();
     expect(mocks.eventCreate).not.toHaveBeenCalled();
+  });
+
+  it('待复核文章不能被人工设为代表文章', async () => {
+    mocks.eventFindUnique.mockResolvedValueOnce({ status: 'active' });
+    mocks.articleFindFirst.mockResolvedValueOnce({
+      id: 'a1', clusterStatus: 'needs_review', aiStatus: 'done', reviewStatus: 'important',
+      score: 100, relevance: 100, cleanContent: '正文', publishedAt: null, createdAt: new Date(),
+      source: { publicEnabled: true, deletedAt: null },
+    });
+    await expect(setEventRepresentative('e1', 'a1')).resolves.toBe(false);
+    expect(mocks.eventUpdate).not.toHaveBeenCalled();
   });
 });

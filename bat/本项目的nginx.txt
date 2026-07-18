@@ -11,6 +11,14 @@ server
     server_name hot.kfxz.cn;
     index index.php index.html index.htm default.php default.htm default.html;
     root /www/wwwroot/hot.kfxz.cn;
+
+    # 压缩动态 JSON/HTML 与静态 JS/CSS；若服务器全局已启用，重复配置值应保持一致。
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_types text/plain text/css text/javascript application/javascript application/json application/xml image/svg+xml;
     #CERT-APPLY-CHECK--START
     include /www/server/panel/vhost/nginx/well-known/hot.kfxz.cn.conf;
     #CERT-APPLY-CHECK--END

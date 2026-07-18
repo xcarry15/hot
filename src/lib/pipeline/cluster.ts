@@ -29,28 +29,33 @@ export function buildClusterPendingWhere(now = new Date()): Prisma.ArticleWhereI
 }
 
 export async function clusterAllPending(signal?: AbortSignal, jobId?: string): Promise<{ total: number; processed: number; errors: number }> {
-  const articles = await db.article.findMany({
-    where: buildClusterPendingWhere(),
-    select: { id: true, title: true },
-    orderBy: { createdAt: 'asc' },
-    take: MAX_CLUSTER_BATCH,
-  });
-  if (jobId) await startJobStage(jobId, { stage: 'cluster', total: articles.length });
+  const total = await db.article.count({ where: buildClusterPendingWhere() });
+  if (jobId) await startJobStage(jobId, { stage: 'cluster', total });
   let processed = 0;
   let errors = 0;
-  for (const article of articles) {
-    assertNotAborted(signal);
-    let failed = false;
-    try {
-      await clusterArticle(article.id, signal);
-      processed++;
-    } catch (error) {
-      failed = true;
-      errors++;
-      await markClusterFailure(article.id, error);
-      console.error(`[clusterAllPending] failed article=${article.id}:`, error);
+  while (true) {
+    const articles = await db.article.findMany({
+      where: buildClusterPendingWhere(),
+      select: { id: true, title: true },
+      orderBy: { createdAt: 'asc' },
+      take: MAX_CLUSTER_BATCH,
+    });
+    if (articles.length === 0) break;
+    for (const article of articles) {
+      assertNotAborted(signal);
+      let failed = false;
+      try {
+        await clusterArticle(article.id, signal);
+        processed++;
+      } catch (error) {
+        failed = true;
+        errors++;
+        await markClusterFailure(article.id, error);
+        console.error(`[clusterAllPending] failed article=${article.id}:`, error);
+      }
+      if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, errorDelta: failed ? 1 : 0, currentItemLabel: article.title });
     }
-    if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, errorDelta: failed ? 1 : 0, currentItemLabel: article.title });
+    if (articles.length < MAX_CLUSTER_BATCH) break;
   }
-  return { total: articles.length, processed, errors };
+  return { total, processed, errors };
 }

@@ -41,6 +41,9 @@ import type { SourceDto } from "@/contracts/sources";
 import {
   fetchArticleDetail,
   fetchArticleList,
+  cancelArticleDetailPrefetch,
+  invalidateArticleDetailCache,
+  prefetchArticleDetail,
   reviewArticle,
   reviewArticles,
   triggerArticleWorkflow,
@@ -51,7 +54,7 @@ import {
   getSnapshotValue,
   parseManualOverrides,
 } from "@/lib/shared/article-calibration";
-import { isRequestAborted } from "@/lib/request-json.client";
+import { isRequestAborted, isRequestJsonError } from "@/lib/request-json.client";
 import {
   parseJsonArray,
   parseTags,
@@ -304,7 +307,7 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-export default function IntelligenceInbox() {
+export default function IntelligenceInbox({ active = true }: { active?: boolean }) {
   const [data, setData] = useState<ArticleListResponseDto | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ArticleDetailDto | null>(null);
@@ -407,9 +410,9 @@ export default function IntelligenceInbox() {
   }, []);
 
   useEffect(() => {
-    if (!preferencesLoaded) return;
+    if (!active || !preferencesLoaded) return;
     updateDetailUrl(selectedId);
-  }, [preferencesLoaded, selectedId, updateDetailUrl]);
+  }, [active, preferencesLoaded, selectedId, updateDetailUrl]);
 
   useEffect(() => {
     fetchSources()
@@ -496,12 +499,7 @@ export default function IntelligenceInbox() {
         );
         setSelectedId((current) => {
           const wanted = preferredId === undefined ? current : preferredId;
-          if (wanted && !result.items.some((item) => item.id === wanted)) {
-            void fetchArticleDetail(wanted)
-              .then((linked) => setDetail(linked))
-              .catch(() => undefined);
-            return wanted;
-          }
+          if (wanted && !result.items.some((item) => item.id === wanted)) return wanted;
           return result.items.some((item) => item.id === wanted)
             ? wanted
             : (result.items[0]?.id ?? null);
@@ -548,14 +546,23 @@ export default function IntelligenceInbox() {
         });
       })
       .catch((error) => {
-        if (!isRequestAborted(error))
-          toast.error(errorMessage(error, "文章详情加载失败"));
+        if (isRequestAborted(error)) return;
+        if (isRequestJsonError(error, 404)) {
+          const fallbackId = data?.items[0]?.id ?? null;
+          invalidateArticleDetailCache(requestedId);
+          setSelectedId((current) => current === requestedId ? fallbackId : current);
+          setRequestedPanel(null);
+          updateDetailUrl(fallbackId, null);
+          toast.info("目标文章已不存在，已返回当前列表");
+          return;
+        }
+        toast.error(errorMessage(error, "文章详情加载失败"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setDetailLoading(false);
       });
     return () => controller.abort();
-  }, [selectedId]);
+  }, [data?.items, selectedId, updateDetailUrl]);
 
   useEffect(() => {
     if (!detail || detail.id !== selectedId || !requestedPanel) return;
@@ -585,6 +592,13 @@ export default function IntelligenceInbox() {
     [],
   );
 
+  const refreshArticleDetail = useCallback(async (articleId: string) => {
+    invalidateArticleDetailCache(articleId);
+    const updated = await fetchArticleDetail(articleId);
+    setDetail((current) => current?.id === articleId ? updated : current);
+    return updated;
+  }, []);
+
   useEffect(() => {
     void loadEventDetail(detail?.eventId);
   }, [detail?.eventId, loadEventDetail]);
@@ -606,7 +620,11 @@ export default function IntelligenceInbox() {
           ((await response.json().catch(() => ({}))) as { error?: string })
             .error || "指定代表文章失败",
         );
-      await Promise.all([loadEventDetail(detail.eventId), loadList(detail.id)]);
+      await Promise.all([
+        loadEventDetail(detail.eventId),
+        loadList(detail.id),
+        refreshArticleDetail(detail.id),
+      ]);
       toast.success("代表文章已更新");
     } catch (error) {
       toast.error(errorMessage(error, "指定代表文章失败"));
@@ -637,7 +655,7 @@ export default function IntelligenceInbox() {
           ((await response.json().catch(() => ({}))) as { error?: string })
             .error || "拆分事件失败",
         );
-      await loadList(articleId);
+      await Promise.all([loadList(articleId), refreshArticleDetail(articleId)]);
       toast.success("文章已拆分为新事件，默认不会补推");
     } catch (error) {
       toast.error(errorMessage(error, "拆分事件失败"));
@@ -664,7 +682,7 @@ export default function IntelligenceInbox() {
             .error || "合并事件失败",
         );
       setMergeTargetId("");
-      await loadList(detail.id);
+      await Promise.all([loadList(detail.id), refreshArticleDetail(detail.id)]);
       toast.success("事件已合并，不会补推或撤回历史消息");
     } catch (error) {
       toast.error(errorMessage(error, "合并事件失败"));
@@ -705,7 +723,7 @@ export default function IntelligenceInbox() {
         );
       setEventOptions([]);
       setEventSearch("");
-      await loadList(detail.id);
+      await Promise.all([loadList(detail.id), refreshArticleDetail(detail.id)]);
       toast.success("文章已移入目标事件");
     } catch (error) {
       toast.error(errorMessage(error, "移动文章失败"));
@@ -731,7 +749,7 @@ export default function IntelligenceInbox() {
           ((await response.json().catch(() => ({}))) as { error?: string })
             .error || "确认失败",
         );
-      await loadList(detail.id);
+      await Promise.all([loadList(detail.id), refreshArticleDetail(detail.id)]);
       toast.success("已确认这是独立事件");
     } catch (error) {
       toast.error(errorMessage(error, "确认失败"));
@@ -875,7 +893,7 @@ export default function IntelligenceInbox() {
       try {
         await reviewArticle(id, status, tags);
         await loadList(id);
-        if (selectedId === id) setDetail(await fetchArticleDetail(id));
+        if (selectedId === id) setDetail(await refreshArticleDetail(id));
         toast.success(`已归类为${reviewLabel(status)}`);
       } catch (error) {
         toast.error(errorMessage(error, "归类失败"));
@@ -883,7 +901,7 @@ export default function IntelligenceInbox() {
         setRowSavingId(null);
       }
     },
-    [loadList, selectedId],
+    [loadList, refreshArticleDetail, selectedId],
   );
 
   const handleDetailReview = useCallback(
@@ -1003,6 +1021,7 @@ export default function IntelligenceInbox() {
     });
 
   useEffect(() => {
+    if (!active) return;
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (
@@ -1033,7 +1052,7 @@ export default function IntelligenceInbox() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [data?.items, handleDetailReview, selectedId]);
+  }, [active, data?.items, handleDetailReview, selectedId]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1269,6 +1288,8 @@ export default function IntelligenceInbox() {
                   saving={rowSavingId === item.id}
                   onCheckedChange={() => toggleSelected(item.id)}
                   onClick={() => setSelectedId(item.id)}
+                  onPrefetch={() => prefetchArticleDetail(item.id)}
+                  onCancelPrefetch={() => cancelArticleDetailPrefetch(item.id)}
                   onUpdate={queueRowUpdate}
                   onReview={reviewOne}
                 />
@@ -1575,7 +1596,7 @@ export default function IntelligenceInbox() {
                               size="sm"
                               variant="ghost"
                               className="h-6 px-1.5 text-[10px]"
-                              disabled={eventAction !== null}
+                              disabled={eventAction !== null || article.clusterStatus !== "clustered"}
                               onClick={() => void setRepresentative(article.id)}
                             >
                               设为代表
@@ -2008,6 +2029,8 @@ function InboxRow({
   saving,
   onCheckedChange,
   onClick,
+  onPrefetch,
+  onCancelPrefetch,
   onUpdate,
   onReview,
 }: {
@@ -2018,6 +2041,8 @@ function InboxRow({
   saving: boolean;
   onCheckedChange: () => void;
   onClick: () => void;
+  onPrefetch: () => void;
+  onCancelPrefetch: () => void;
   onUpdate: QuickUpdate;
   onReview: (
     id: string,
@@ -2027,6 +2052,9 @@ function InboxRow({
   return (
     <div
       className={`grid h-7 w-full grid-cols-[18px_24px_64px_52px_minmax(120px,1fr)_58px_72px_58px_54px_36px_44px] items-center gap-1 border-b border-l-2 px-2 text-[10px] leading-none transition-colors hover:bg-muted/60 ${selected ? "border-l-primary bg-muted/60" : "border-l-transparent"}`}
+      onMouseEnter={onPrefetch}
+      onMouseLeave={onCancelPrefetch}
+      onFocusCapture={onPrefetch}
     >
       <button
         type="button"

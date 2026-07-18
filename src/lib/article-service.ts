@@ -24,7 +24,6 @@ import {
 } from '@/contracts/articles';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
-import { splitBrands } from '@/lib/shared/article-codecs';
 import { getAISettings } from '@/lib/ai-client';
 import {
   buildEffectiveScoreUpdate,
@@ -140,7 +139,6 @@ export interface ListArticlesParams {
   filter?: ArticleListFilter;
   page?: number;
   pageSize?: number;
-  all?: boolean;
 }
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -153,11 +151,11 @@ const MAX_PAGE_SIZE = 100;
 export async function listArticles(
   params: ListArticlesParams = {},
 ): Promise<ArticleListResponseDto> {
-  const page = params.all ? 1 : Math.max(1, params.page ?? 1);
-  const pageSize = params.all ? undefined : Math.min(MAX_PAGE_SIZE, Math.max(1, params.pageSize ?? DEFAULT_PAGE_SIZE));
+  const page = Math.max(1, params.page ?? 1);
+  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, params.pageSize ?? DEFAULT_PAGE_SIZE));
   const where = buildArticleListWhere(params.filter ?? {});
 
-  const [items, total, categoryRows, brandRows] = await Promise.all([
+  const [items, total] = await Promise.all([
     db.article.findMany({
       where,
       select: {
@@ -193,43 +191,18 @@ export async function listArticles(
                                 : params.filter?.inbox
                                   ? [{ createdAt: 'asc' }]
                                   : [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-      ...(pageSize === undefined ? {} : {
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     }),
     db.article.count({ where }),
-    db.article.groupBy({
-      by: ['category'],
-      where: { category: { not: '' } },
-      _count: { category: true },
-    }),
-    db.article.findMany({
-      where: { brand: { not: '' } },
-      select: { brand: true },
-    }),
   ]);
-
-  const brandCounts = new Map<string, number>();
-  for (const row of brandRows) {
-    for (const brand of new Set(splitBrands(row.brand))) {
-      brandCounts.set(brand, (brandCounts.get(brand) ?? 0) + 1);
-    }
-  }
 
   return {
     items: items.map(serializeArticleListItem),
     total,
     page,
-    pageSize: pageSize ?? total,
-    totalPages: pageSize === undefined ? (total === 0 ? 0 : 1) : Math.ceil(total / pageSize),
-    facets: {
-      categories: categoryRows
-        .map((row) => ({ value: row.category, count: row._count.category }))
-        .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, 'zh-CN')),
-      brands: Array.from(brandCounts, ([value, count]) => ({ value, count }))
-        .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, 'zh-CN')),
-    },
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
   };
 }
 

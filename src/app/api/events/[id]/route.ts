@@ -19,7 +19,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const body = await request.json().catch(() => ({}));
     const articleId = typeof body.representativeArticleId === 'string' ? body.representativeArticleId : '';
     const updated = await runExclusiveMutation('指定代表文章', () => setEventRepresentative(id, articleId));
-    return updated ? NextResponse.json({ ok: true }) : NextResponse.json({ error: '文章不属于该事件' }, { status: 400 });
+    return updated
+      ? NextResponse.json({ ok: true })
+      : NextResponse.json({ error: '只能选择已完成聚类、AI 分析且来源未删除的事件成员' }, { status: 400 });
   } catch (error) {
     return apiError(error, '指定代表文章失败');
   }

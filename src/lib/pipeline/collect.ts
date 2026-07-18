@@ -30,6 +30,7 @@ import { refreshPublicPublication } from '@/lib/public-publication-service';
 import { recalculateEventById } from '@/lib/event-service';
 import { recordFailure, restoreBreakerIfElapsed } from '@/lib/pipeline/source-health';
 import type { CrawlItem, CrawlResult } from '@/contracts/crawl';
+import type { Article } from '@prisma/client';
 
 const CRAWL_SOURCE_TIMEOUT_MS = 60_000;
 const COLLECT_CONCURRENCY = 4;
@@ -45,12 +46,16 @@ export async function collectItem(
   sourceId: string,
   sourceName: string,
   item: CrawlItem,
+  knownExisting?: Article | null,
+  knownDiscarded?: boolean,
 ): Promise<string | undefined> {
   // Normalize URL
   const normalizedUrl = normalizeUrl(item.url);
 
   // ---- Step 1: URL exact dedup ----
-  const existing = await db.article.findUnique({ where: { url: normalizedUrl } });
+  const existing = knownExisting === undefined
+    ? await db.article.findUnique({ where: { url: normalizedUrl } })
+    : knownExisting;
   if (existing) {
     // 同 URL 重新抓取 → 更新标题和日期
     // 如果标题变了，重置 fetchStatus 以触发详情重抓
@@ -88,7 +93,11 @@ export async function collectItem(
   // ---- Step 2: DiscardedItem blocking ----
   // 如果该 URL 在之前采集周期已被丢弃（去重/关键词未命中），本次直接跳过，
   // 避免反复抓取→丢弃的死循环。
-  const discarded = await db.discardedItem.findFirst({ where: { url: normalizedUrl } });
+  const discarded = knownDiscarded === undefined
+    ? await db.discardedItem.findFirst({ where: { url: normalizedUrl } })
+    : knownDiscarded
+      ? { reason: '已丢弃' }
+      : null;
   if (discarded) {
     console.log(`[collectItem] skipping previously discarded: "${item.title}" (reason: ${discarded.reason})`);
     return;
@@ -233,11 +242,32 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
     });
 
 
+    // 单批预取 URL 状态，把每条 2 次只读查询收敛为 2 次批量查询。
+    const normalizedUrls = [...new Set(result.items.map((item) => normalizeUrl(item.url)))];
+    const [existingArticles, discardedUrls] = await Promise.all([
+      db.article.findMany({ where: { url: { in: normalizedUrls } } }),
+      db.discardedItem.findMany({ where: { url: { in: normalizedUrls } }, select: { url: true } }),
+    ]);
+    const existingByUrl = new Map(existingArticles.map((article) => [article.url, article]));
+    const discardedUrlSet = new Set(discardedUrls.map((item) => item.url));
+    const processedUrls = new Set<string>();
+
     // Collect each item (no detail fetch, no AI — those are separate stages).
-    // 含同批次已入库的）。不再用 entity 互查（假阳性高，已废弃）。
     for (const item of result.items) {
       assertNotAborted(signal);
-      await collectItem(sourceId, source.name, item);
+      const normalizedUrl = normalizeUrl(item.url);
+      if (processedUrls.has(normalizedUrl)) {
+        console.log(`[collect] duplicate URL inside source response, skipped: ${normalizedUrl}`);
+        continue;
+      }
+      processedUrls.add(normalizedUrl);
+      await collectItem(
+        sourceId,
+        source.name,
+        item,
+        existingByUrl.get(normalizedUrl) ?? null,
+        discardedUrlSet.has(normalizedUrl),
+      );
     }
 
     return result;

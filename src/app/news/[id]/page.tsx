@@ -1,11 +1,13 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { cache } from 'react'
 import { Badge } from '@/components/ui/badge'
 import PublicErrorState from '@/components/public-error-state'
 import PublicFooter from '@/components/public-footer'
 import PublicHeader from '@/components/public-header'
 import PublicOriginalLink, { PublicShareButton } from '@/components/public-original-link'
+import PublicViewTracker from '@/components/public-view-tracker'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import { getTagToneClass } from '@/features/article-tag-style'
 import { getPublicArticleDetail } from '@/lib/public-article-service'
@@ -14,6 +16,11 @@ import { parseTags, splitBrands } from '@/lib/shared/article-codecs'
 import { formatPublicDateTime, formatPublicTime } from '@/lib/shared/public-date'
 
 export const dynamic = 'force-dynamic'
+
+// generateMetadata 与页面渲染共享同一次详情读取，避免一次跳转重复查询和组装。
+const getCachedPublicArticleDetail = cache((id: string) => (
+  getPublicArticleDetail(id)
+))
 
 function safeExternalUrl(value: string): string | null {
   try {
@@ -28,7 +35,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const { id } = await params
   let article
   try {
-    article = await getPublicArticleDetail(id)
+    article = await getCachedPublicArticleDetail(id)
   } catch {
     return { title: '文章暂时不可用 · 行业新闻聚合', robots: { index: false, follow: false } }
   }
@@ -56,12 +63,11 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
   const { id } = await params
   let article
   try {
-    article = await getPublicArticleDetail(id, { recordView: true })
+    article = await getCachedPublicArticleDetail(id)
   } catch {
     return <PublicErrorState detail />
   }
   if (!article) notFound()
-
   const tags = parseTags(article.tags)
   const brands = splitBrands(article.brand)
   const originalUrl = safeExternalUrl(article.url)
@@ -72,6 +78,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
   return (
     <div className="public-site flex min-h-[100dvh] flex-col bg-background text-foreground">
       <PublicHeader active="articles" />
+      <PublicViewTracker articleId={article.id} />
 
       <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-6 sm:py-8">
         <div className="mx-auto max-w-[840px]">

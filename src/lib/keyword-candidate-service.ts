@@ -41,11 +41,16 @@ export async function recordKeywordCandidates(title: string): Promise<void> {
   const phrases = extractPhrases(title);
   if (phrases.length === 0) return;
 
+  const existing = await db.keywordCandidate.findMany({
+    where: { phrase: { in: phrases } },
+  });
+  const existingByPhrase = new Map(existing.map((candidate) => [candidate.phrase, candidate]));
+  const writes = [];
   for (const phrase of phrases) {
-    const current = await db.keywordCandidate.findUnique({ where: { phrase } });
+    const current = existingByPhrase.get(phrase);
     const samples = current ? parseSampleTitles(current.sampleTitles) : [];
     if (!samples.includes(title) && samples.length < 5) samples.push(title);
-    await db.keywordCandidate.upsert({
+    writes.push(db.keywordCandidate.upsert({
       where: { phrase },
       update: {
         occurrences: { increment: 1 },
@@ -54,8 +59,9 @@ export async function recordKeywordCandidates(title: string): Promise<void> {
         status: current?.status ?? 'pending',
       },
       create: { phrase, occurrences: 1, sampleTitles: JSON.stringify([title]) },
-    });
+    }));
   }
+  await db.$transaction(writes);
 }
 
 export async function listKeywordCandidates() {

@@ -96,3 +96,9 @@ export interface CrawlLogSnapshot {
   fetchedAt: number;
   technicalTotal: number;
 }
+
+export interface CrawlLogJobStatusSnapshot {
+  activeJob: JobSnapshot | null;
+  latestJob: JobSnapshot | null;
+  fetchedAt: number;
+}

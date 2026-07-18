@@ -1,12 +1,52 @@
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
-import { refreshPublicPublication } from '@/lib/public-publication-service';
+import { refreshEventPublicPublication } from '@/lib/public-publication-service';
 
 type EventTransaction = Prisma.TransactionClient;
 
+export type RepresentativeCandidate = {
+  id: string;
+  clusterStatus: string;
+  aiStatus: string;
+  reviewStatus: string;
+  score: number;
+  relevance: number;
+  cleanContent: string;
+  publishedAt: Date | null;
+  createdAt: Date;
+  source: { publicEnabled: boolean; deletedAt: Date | null };
+};
+
 function eventDate(article: { publishedAt: Date | null; createdAt: Date }): Date {
   return article.publishedAt ?? article.createdAt;
+}
+
+function representativeReady(article: RepresentativeCandidate): boolean {
+  return article.clusterStatus === 'clustered'
+    && article.aiStatus === 'done'
+    && article.source.deletedAt === null;
+}
+
+export function isRepresentativeEligible(article: RepresentativeCandidate): boolean {
+  return representativeReady(article);
+}
+
+export function selectRepresentativeCandidate(articles: RepresentativeCandidate[]): string | null {
+  const ready = articles.filter(representativeReady);
+  ready.sort(compareRepresentative);
+  return ready[0]?.id ?? null;
+}
+
+function compareRepresentative(left: RepresentativeCandidate, right: RepresentativeCandidate): number {
+  const ready = Number(representativeReady(right)) - Number(representativeReady(left));
+  if (ready !== 0) return ready;
+  const important = Number(right.reviewStatus === 'important') - Number(left.reviewStatus === 'important');
+  if (important !== 0) return important;
+  if (right.score !== left.score) return right.score - left.score;
+  if (right.relevance !== left.relevance) return right.relevance - left.relevance;
+  if (right.cleanContent.length !== left.cleanContent.length) return right.cleanContent.length - left.cleanContent.length;
+  return eventDate(left).getTime() - eventDate(right).getTime();
 }
 
 async function chooseRepresentative(client: EventTransaction, eventId: string): Promise<{ id: string | null; manual: boolean }> {
@@ -16,30 +56,32 @@ async function chooseRepresentative(client: EventTransaction, eventId: string): 
   });
   if (!event) return { id: null, manual: false };
   if (event.representativeManual && event.representativeArticleId) {
-    const stillMember = await client.article.count({ where: { id: event.representativeArticleId, eventId } });
-    if (stillMember > 0) return { id: event.representativeArticleId, manual: true };
+    const manual = await client.article.findFirst({
+      where: { id: event.representativeArticleId, eventId },
+      select: {
+        id: true, clusterStatus: true, aiStatus: true, reviewStatus: true, score: true, relevance: true,
+        cleanContent: true, publishedAt: true, createdAt: true,
+        source: { select: { publicEnabled: true, deletedAt: true } },
+      },
+    });
+    if (manual && representativeReady(manual)) return { id: manual.id, manual: true };
   }
   const articles = await client.article.findMany({
     where: { eventId },
     select: {
       id: true,
+      clusterStatus: true,
+      aiStatus: true,
       reviewStatus: true,
       score: true,
       relevance: true,
       cleanContent: true,
       publishedAt: true,
       createdAt: true,
+      source: { select: { publicEnabled: true, deletedAt: true } },
     },
   });
-  articles.sort((left, right) => {
-    const important = Number(right.reviewStatus === 'important') - Number(left.reviewStatus === 'important');
-    if (important !== 0) return important;
-    if (right.score !== left.score) return right.score - left.score;
-    if (right.relevance !== left.relevance) return right.relevance - left.relevance;
-    if (right.cleanContent.length !== left.cleanContent.length) return right.cleanContent.length - left.cleanContent.length;
-    return eventDate(left).getTime() - eventDate(right).getTime();
-  });
-  return { id: articles[0]?.id ?? null, manual: false };
+  return { id: selectRepresentativeCandidate(articles), manual: false };
 }
 
 async function recalculateEvent(client: EventTransaction, eventId: string): Promise<void> {
@@ -50,7 +92,7 @@ async function recalculateEvent(client: EventTransaction, eventId: string): Prom
   if (articles.length === 0) {
     await client.event.update({
       where: { id: eventId },
-      data: { status: 'merged', representativeArticleId: null, representativeManual: false, articleCount: 0 },
+      data: { status: 'merged', representativeArticleId: null, representativeManual: false, articleCount: 0, publicStatus: 'revoked', publicDateKey: '', publicSortAt: null },
     });
     return;
   }
@@ -59,6 +101,7 @@ async function recalculateEvent(client: EventTransaction, eventId: string): Prom
   await client.event.update({
     where: { id: eventId },
     data: {
+      status: 'active',
       articleCount: articles.length,
       firstSeenAt: new Date(Math.min(...dates.map((date) => date.getTime()))),
       lastSeenAt: new Date(Math.max(...dates.map((date) => date.getTime()))),
@@ -72,15 +115,13 @@ export async function recalculateArticleEvent(articleId: string): Promise<void> 
   const article = await db.article.findUnique({ where: { id: articleId }, select: { eventId: true } });
   if (!article?.eventId) return;
   await db.$transaction((tx) => recalculateEvent(tx, article.eventId!));
-  const event = await db.event.findUnique({ where: { id: article.eventId }, select: { representativeArticleId: true } });
-  if (event?.representativeArticleId) await refreshPublicPublication(event.representativeArticleId);
+  await refreshEventPublicPublication(article.eventId);
   invalidatePublicArticleCache();
 }
 
 export async function recalculateEventById(eventId: string): Promise<void> {
   await db.$transaction((tx) => recalculateEvent(tx, eventId));
-  const event = await db.event.findUnique({ where: { id: eventId }, select: { representativeArticleId: true } });
-  if (event?.representativeArticleId) await refreshPublicPublication(event.representativeArticleId);
+  await refreshEventPublicPublication(eventId);
   invalidatePublicArticleCache();
 }
 
@@ -105,7 +146,7 @@ export async function reconcileEventAfterArticleDeletion(eventId: string): Promi
     const updated = await tx.event.findUnique({ where: { id: eventId }, select: { representativeArticleId: true } });
     return { pushLogsDeleted: 0, representativeArticleId: updated?.representativeArticleId ?? null };
   });
-  if (result.representativeArticleId) await refreshPublicPublication(result.representativeArticleId);
+  if (result.representativeArticleId) await refreshEventPublicPublication(eventId);
   invalidatePublicArticleCache();
   return { pushLogsDeleted: result.pushLogsDeleted };
 }
@@ -216,13 +257,7 @@ function parseAuditEvidence(value: string): Record<string, unknown> {
 }
 
 async function refreshEventRepresentatives(eventIds: string[]): Promise<void> {
-  const events = await db.event.findMany({
-    where: { id: { in: [...new Set(eventIds)] } },
-    select: { representativeArticleId: true },
-  });
-  for (const event of events) {
-    if (event.representativeArticleId) await refreshPublicPublication(event.representativeArticleId);
-  }
+  for (const eventId of [...new Set(eventIds)]) await refreshEventPublicPublication(eventId);
   invalidatePublicArticleCache();
 }
 
@@ -237,6 +272,7 @@ export async function confirmIndependentArticle(eventId: string, articleId: stri
       where: { id: articleId },
       data: { clusterStatus: 'clustered', clusteredAt: new Date(), clusterError: null },
     });
+    await recalculateEvent(tx, eventId);
     await tx.eventClusterAudit.create({
       data: {
         articleId,
@@ -324,8 +360,18 @@ export async function searchActiveEvents(query: string, excludeEventId?: string)
 }
 
 export async function setEventRepresentative(eventId: string, articleId: string): Promise<boolean> {
-  const member = await db.article.findFirst({ where: { id: articleId, eventId }, select: { id: true } });
-  if (!member) return false;
+  const [event, member] = await Promise.all([
+    db.event.findUnique({ where: { id: eventId }, select: { status: true } }),
+    db.article.findFirst({
+      where: { id: articleId, eventId },
+      select: {
+        id: true, clusterStatus: true, aiStatus: true, reviewStatus: true, score: true, relevance: true,
+        cleanContent: true, publishedAt: true, createdAt: true,
+        source: { select: { publicEnabled: true, deletedAt: true } },
+      },
+    }),
+  ]);
+  if (event?.status !== 'active' || !member || !representativeReady(member)) return false;
   await db.$transaction(async (tx) => {
     await tx.event.update({
       where: { id: eventId },
@@ -343,7 +389,7 @@ export async function setEventRepresentative(eventId: string, articleId: string)
       },
     });
   });
-  await refreshPublicPublication(articleId);
+  await refreshEventPublicPublication(eventId);
   invalidatePublicArticleCache();
   return true;
 }
@@ -381,6 +427,8 @@ export async function mergeEvents(sourceEventId: string, targetEventId: string):
         articleCount: 0,
         publicStatus: 'revoked',
         publicRevokedAt: new Date(),
+        publicDateKey: '',
+        publicSortAt: null,
       },
     });
     if (source.pushedAt && !target.pushedAt) {
@@ -390,8 +438,7 @@ export async function mergeEvents(sourceEventId: string, targetEventId: string):
     return true;
   });
   if (result) {
-    const target = await db.event.findUnique({ where: { id: targetEventId }, select: { representativeArticleId: true } });
-    if (target?.representativeArticleId) await refreshPublicPublication(target.representativeArticleId);
+    await refreshEventPublicPublication(targetEventId);
     invalidatePublicArticleCache();
   }
   return result;
@@ -410,12 +457,12 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
     const total = await tx.article.count({ where: { eventId } });
     if (articles.length !== ids.length || articles.length >= total) return null;
     const dates = articles.map(eventDate);
-    const created = await tx.event.create({
+  const created = await tx.event.create({
       data: {
         firstSeenAt: new Date(Math.min(...dates.map((date) => date.getTime()))),
         lastSeenAt: new Date(Math.max(...dates.map((date) => date.getTime()))),
         articleCount: articles.length,
-        representativeArticleId: articles[0].id,
+        representativeArticleId: null,
       },
       select: { id: true },
     });
@@ -423,6 +470,7 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
       where: { id: { in: ids }, eventId },
       data: { eventId: created.id, clusterStatus: 'clustered', clusteredAt: new Date() },
     });
+    await recalculateEvent(tx, created.id);
     for (const article of articles) {
       await tx.eventClusterAudit.create({
         data: {
@@ -441,15 +489,8 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
     return created.id;
   });
   if (newEventId) {
-    const [oldEvent, newEvent] = await Promise.all([
-      db.event.findUnique({ where: { id: eventId }, select: { representativeArticleId: true } }),
-      db.event.findUnique({ where: { id: newEventId }, select: { representativeArticleId: true } }),
-    ]);
-    const representativeIds = [...new Set([
-      oldEvent?.representativeArticleId,
-      newEvent?.representativeArticleId,
-    ].filter((value): value is string => Boolean(value)))];
-    for (const representativeId of representativeIds) await refreshPublicPublication(representativeId);
+    await refreshEventPublicPublication(eventId);
+    await refreshEventPublicPublication(newEventId);
     invalidatePublicArticleCache();
   }
   return newEventId;

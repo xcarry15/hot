@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Loader2, Info } from 'lucide-react'
@@ -20,17 +21,42 @@ import { AI_PROVIDERS, providerSettingKey as providerKey, type AIProviderId } fr
 import { getFrontendSettingDefaults, SETTING_KEYS } from '@/lib/settings-catalog'
 import { fetchSettings, revealSettings, saveSettings } from '@/features/settings-api.client'
 
-import AiModelTab from '@/components/settings/ai-model'
-import PromptsTab from '@/components/settings/prompts'
-import PushTab from '@/components/settings/push'
-import DataTab from '@/components/settings/data'
-import AccountTab from '@/components/settings/account'
-import KeywordsTab from '@/components/keywords-tab'
-import DashboardTab from '@/components/dashboard-tab'
-import { SourcesManagement } from '@/components/sources-tab'
-import PublicTab from '@/components/settings/public'
+const sectionLoading = () => <Skeleton className="mt-4 h-40 w-full" />
+const loadAiModel = () => import('@/components/settings/ai-model')
+const loadPrompts = () => import('@/components/settings/prompts')
+const loadPush = () => import('@/components/settings/push')
+const loadData = () => import('@/components/settings/data')
+const loadAccount = () => import('@/components/settings/account')
+const loadKeywords = () => import('@/components/keywords-tab')
+const loadDashboard = () => import('@/components/dashboard-tab')
+const loadSources = () => import('@/components/sources-tab')
+const loadPublic = () => import('@/components/settings/public')
+const AiModelTab = dynamic(loadAiModel, { loading: sectionLoading })
+const PromptsTab = dynamic(loadPrompts, { loading: sectionLoading })
+const PushTab = dynamic(loadPush, { loading: sectionLoading })
+const DataTab = dynamic(loadData, { loading: sectionLoading })
+const AccountTab = dynamic(loadAccount, { loading: sectionLoading })
+const KeywordsTab = dynamic(loadKeywords, { loading: sectionLoading })
+const DashboardTab = dynamic(loadDashboard, { loading: sectionLoading })
+const SourcesManagement = dynamic(
+  () => loadSources().then((module) => module.SourcesManagement),
+  { loading: sectionLoading },
+)
+const PublicTab = dynamic(loadPublic, { loading: sectionLoading })
 
-export default function SettingsTab() {
+const sectionLoaders: Record<string, () => Promise<unknown>> = {
+  dashboard: loadDashboard,
+  public: loadPublic,
+  sources: loadSources,
+  keywords: loadKeywords,
+  'ai-model': loadAiModel,
+  prompts: loadPrompts,
+  push: loadPush,
+  account: loadAccount,
+  data: loadData,
+}
+
+export default function SettingsTab({ active = true }: { active?: boolean }) {
   const [settings, setSettings] = useState<SettingsType>(() => (
     getFrontendSettingDefaults() as unknown as SettingsType
   ))
@@ -233,21 +259,31 @@ export default function SettingsTab() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
         {/* 移动端横向滚动；桌面端自然展示全部 tab */}
         <div className="overflow-x-auto mx-3 mt-3 sm:mx-4 sm:mt-4 shrink-0 [&::-webkit-scrollbar]:hidden">
-          <TabsList className="h-9 flex-nowrap">
-            <TabsTrigger value="dashboard" className="text-xs px-3 h-7 whitespace-nowrap">概览</TabsTrigger>
-            <TabsTrigger value="public" className="text-xs px-3 h-7 whitespace-nowrap">公开</TabsTrigger>
-            <TabsTrigger value="sources" className="text-xs px-3 h-7 whitespace-nowrap">源管理</TabsTrigger>
-            <TabsTrigger value="keywords" className="text-xs px-3 h-7 whitespace-nowrap">关键词</TabsTrigger>
-            <TabsTrigger value="ai-model" className="text-xs px-3 h-7 whitespace-nowrap">AI 模型</TabsTrigger>
-            <TabsTrigger value="prompts" className="text-xs px-3 h-7 whitespace-nowrap">提示词</TabsTrigger>
-            <TabsTrigger value="push" className="text-xs px-3 h-7 whitespace-nowrap">推送</TabsTrigger>
-            <TabsTrigger value="account" className="text-xs px-3 h-7 whitespace-nowrap">账户</TabsTrigger>
-            <TabsTrigger value="data" className="text-xs px-3 h-7 whitespace-nowrap">数据清理</TabsTrigger>
+          <TabsList
+            className="h-9 flex-nowrap"
+            onMouseOver={(event) => {
+              const value = (event.target as HTMLElement).closest<HTMLElement>('[data-value]')?.dataset.value
+              if (value) void sectionLoaders[value]?.()
+            }}
+            onFocusCapture={(event) => {
+              const value = (event.target as HTMLElement).closest<HTMLElement>('[data-value]')?.dataset.value
+              if (value) void sectionLoaders[value]?.()
+            }}
+          >
+            <TabsTrigger value="dashboard" data-value="dashboard" className="text-xs px-3 h-7 whitespace-nowrap">概览</TabsTrigger>
+            <TabsTrigger value="public" data-value="public" className="text-xs px-3 h-7 whitespace-nowrap">公开</TabsTrigger>
+            <TabsTrigger value="sources" data-value="sources" className="text-xs px-3 h-7 whitespace-nowrap">源管理</TabsTrigger>
+            <TabsTrigger value="keywords" data-value="keywords" className="text-xs px-3 h-7 whitespace-nowrap">关键词</TabsTrigger>
+            <TabsTrigger value="ai-model" data-value="ai-model" className="text-xs px-3 h-7 whitespace-nowrap">AI 模型</TabsTrigger>
+            <TabsTrigger value="prompts" data-value="prompts" className="text-xs px-3 h-7 whitespace-nowrap">提示词</TabsTrigger>
+            <TabsTrigger value="push" data-value="push" className="text-xs px-3 h-7 whitespace-nowrap">推送</TabsTrigger>
+            <TabsTrigger value="account" data-value="account" className="text-xs px-3 h-7 whitespace-nowrap">账户</TabsTrigger>
+            <TabsTrigger value="data" data-value="data" className="text-xs px-3 h-7 whitespace-nowrap">数据清理</TabsTrigger>
           </TabsList>
         </div>
 
         <TabsContent value="dashboard" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
-          <DashboardTab />
+          <DashboardTab active={active && activeTab === 'dashboard'} />
         </TabsContent>
 
         <TabsContent value="public" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">

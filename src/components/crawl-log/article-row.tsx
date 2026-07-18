@@ -1,5 +1,6 @@
 import { memo, useCallback } from 'react'
 import { ScoreBadge } from '@/components/ui/score-badge'
+import { cancelArticleDetailPrefetch, prefetchArticleDetail } from '@/features/articles-api.client'
 import { formatPubDate } from './helpers'
 import { StepIndicator, SkipBadge } from './step-indicator'
 import type { ArticleProgress } from './types'
@@ -86,6 +87,9 @@ export const ArticleRow = memo(function ArticleRow({
         className="truncate min-w-0 flex-1 text-muted-foreground group-hover:text-foreground text-left"
         title={article.title}
         onClick={handleOpen}
+        onMouseEnter={() => prefetchArticleDetail(article.id)}
+        onMouseLeave={() => cancelArticleDetailPrefetch(article.id)}
+        onFocus={() => prefetchArticleDetail(article.id)}
       >
         {article.title}
       </button>
@@ -129,8 +133,8 @@ export const ArticleRow = memo(function ArticleRow({
           title={pushWaiting ? `推送将在 ${new Date(article.pushRetryAt!).toLocaleString('zh-CN')} 后自动重试` : article.push === 'failed' ? '点击重试投递' : undefined}
         />
       </div>
-      {article.clusterStatus === 'needs_review' && <a href={`/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=cluster`} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted">去聚类复核</a>}
-      <a href={`/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=content`} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted">查看内容</a>
+      {article.clusterStatus === 'needs_review' && <button type="button" onClick={() => navigateWithinAdmin(`/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=cluster`)} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted">去聚类复核</button>}
+      <button type="button" onClick={() => navigateWithinAdmin(`/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=content`)} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted">查看内容</button>
       <span className="text-[11px] text-muted-foreground/50 shrink-0 tabular-nums w-14 text-right" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
         {article.lastTime ? (() => {
           const d = new Date(article.lastTime)
@@ -143,3 +147,8 @@ export const ArticleRow = memo(function ArticleRow({
     </div>
   )
 })
+
+function navigateWithinAdmin(href: string): void {
+  window.history.pushState(null, '', href)
+  window.dispatchEvent(new Event('hot2:urlchange'))
+}

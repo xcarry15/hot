@@ -62,26 +62,18 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
     where: { fetchStatus: 'pending' },
     select: { id: true, title: true, url: true, sourceId: true, publishedAt: true },
     orderBy: { createdAt: 'desc' },
-    take: MAX_BATCH_SIZE,
   });
-
-  if (pending.length >= MAX_BATCH_SIZE) {
-    console.log(`[processAllPending] batch cap reached (${MAX_BATCH_SIZE}), remaining will be picked up next tick`);
-  }
-
-  if (jobId) {
-    await startJobStage(jobId, { stage: 'process', total: pending.length });
-  }
-
+  const total = pending.length;
+  if (jobId) await startJobStage(jobId, { stage: 'process', total });
   let processed = 0;
   let errors = 0;
-
-  for (let i = 0; i < pending.length; i += PROCESS_CONCURRENCY) {
-    assertNotAborted(signal);
-    const batch = pending.slice(i, i + PROCESS_CONCURRENCY);
-    const errorsBeforeBatch = errors;
-    await Promise.all(
-      batch.map(async (article) => {
+  for (let pageStart = 0; pageStart < pending.length; pageStart += MAX_BATCH_SIZE) {
+    const page = pending.slice(pageStart, pageStart + MAX_BATCH_SIZE);
+    for (let i = 0; i < page.length; i += PROCESS_CONCURRENCY) {
+      assertNotAborted(signal);
+      const batch = page.slice(i, i + PROCESS_CONCURRENCY);
+      const errorsBeforeBatch = errors;
+      await Promise.all(batch.map(async (article) => {
         try {
           const content = await withTimeout(
             timeoutSignal => fetchArticleDetail(article.id, 2, timeoutSignal),
@@ -136,17 +128,15 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
           const errMsg = err instanceof Error ? err.message : String(err);
           console.error(`[processAllPending] fetch failed for article=${article.id} title="${article.title}":`, errMsg);
         }
-      })
-    );
-    if (jobId) {
-      await advanceJobProgress(jobId, {
-        doneDelta: batch.length,
-        errorDelta: errors - errorsBeforeBatch,
-        currentItemLabel: batch[batch.length - 1]?.title,
-      });
-    }
-    if (i + PROCESS_CONCURRENCY < pending.length) {
-      await abortableDelay(PROCESS_DELAY_MS, signal);
+      }));
+      if (jobId) {
+        await advanceJobProgress(jobId, {
+          doneDelta: batch.length,
+          errorDelta: errors - errorsBeforeBatch,
+          currentItemLabel: batch[batch.length - 1]?.title,
+        });
+      }
+      if (i + PROCESS_CONCURRENCY < page.length) await abortableDelay(PROCESS_DELAY_MS, signal);
     }
   }
 
@@ -154,7 +144,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
   await repairPublishedDates(signal);
   await captureInboxSnapshot().catch((error) => console.error('[processAllPending] inbox snapshot failed:', error));
 
-  return { total: pending.length, processed, errors, capped: pending.length >= MAX_BATCH_SIZE };
+  return { total, processed, errors, capped: false };
 }
 
 /**

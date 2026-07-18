@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   articleFindUnique: vi.fn(),
   articleUpdate: vi.fn(),
+  articleUpdateMany: vi.fn(),
   eventFindUnique: vi.fn(),
   eventUpdate: vi.fn(),
   settingFindUnique: vi.fn(),
@@ -10,7 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({
   db: {
-    article: { findUnique: mocks.articleFindUnique, update: mocks.articleUpdate },
+    article: { findUnique: mocks.articleFindUnique, update: mocks.articleUpdate, updateMany: mocks.articleUpdateMany },
     event: { findUnique: mocks.eventFindUnique, update: mocks.eventUpdate },
     setting: { findUnique: mocks.settingFindUnique },
   },
@@ -29,7 +30,7 @@ describe('公开状态 Event 门禁', () => {
     mocks.articleFindUnique.mockResolvedValue({
       id: 'a1', eventId: null, clusterStatus: 'pending', aiStatus: 'done', score: 100,
       isAd: false, publicOverride: 'public', publicStatus: 'unpublished',
-      publicPublishedAt: null, publicRevokedAt: null, publicContentUpdatedAt: null,
+      publicPublishedAt: null, publicRevokedAt: null, publicContentUpdatedAt: null, publishedAt: null,
       source: { publicEnabled: true, deletedAt: null },
     });
     await refreshPublicPublication('a1');

@@ -17,7 +17,26 @@ const articleFailureWhere: Prisma.ArticleWhereInput = { OR: [
   { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
 ] };
 
+const TECHNICAL_QUEUE_TTL_MS = 5_000;
+let technicalQueueCache: { expiresAt: number; value: Promise<TechnicalWorkItem[]> } | null = null;
+
+export function invalidateTechnicalWorkQueueCache(): void {
+  technicalQueueCache = null;
+}
+
 export async function getTechnicalWorkQueue(): Promise<TechnicalWorkItem[]> {
+  if (technicalQueueCache && technicalQueueCache.expiresAt > Date.now()) {
+    return technicalQueueCache.value;
+  }
+  const value = buildTechnicalWorkQueue();
+  technicalQueueCache = { expiresAt: Date.now() + TECHNICAL_QUEUE_TTL_MS, value };
+  void value.catch(() => {
+    if (technicalQueueCache?.value === value) technicalQueueCache = null;
+  });
+  return value;
+}
+
+async function buildTechnicalWorkQueue(): Promise<TechnicalWorkItem[]> {
   const [articles, events] = await Promise.all([
     db.article.findMany({
       where: articleFailureWhere,

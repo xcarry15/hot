@@ -474,7 +474,7 @@ function statusConfig(status: string, enabled: boolean) {
   return { label: '未抓取', variant: 'secondary' as const }
 }
 
-export default function DashboardTab() {
+export default function DashboardTab({ active = true }: { active?: boolean }) {
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
   const [range, setRange] = useState<DashboardAnalyticsRange>('today')
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
@@ -491,7 +491,7 @@ export default function DashboardTab() {
   const [crawlSourceId, setCrawlSourceId] = useState('all')
   const [tooltipInfo, setTooltipInfo] = useState<{ field: string; x: number; y: number } | null>(null)
   const [suggestions, setSuggestions] = useState<FeedbackSuggestion[]>([])
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const intervalRef = useRef<number | null>(null)
 
   const fetchData = useCallback(async () => {
     try {
@@ -527,16 +527,26 @@ export default function DashboardTab() {
   }
 
   useEffect(() => {
+    if (!active) return
     const handle = setTimeout(fetchData, 0)
     return () => clearTimeout(handle)
-  }, [fetchData])
+  }, [active, fetchData])
 
   useEffect(() => {
-    if (autoRefresh) intervalRef.current = setInterval(fetchData, 30000)
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
+    if (!active || !autoRefresh) return
+    const tick = () => {
+      if (document.visibilityState === 'visible') void fetchData()
     }
-  }, [autoRefresh, fetchData])
+    intervalRef.current = window.setInterval(tick, 30_000)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void fetchData()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      if (intervalRef.current) window.clearInterval(intervalRef.current)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [active, autoRefresh, fetchData])
 
   useEffect(() => {
     if (!tooltipInfo) return
@@ -546,7 +556,7 @@ export default function DashboardTab() {
   }, [tooltipInfo])
 
   useEffect(() => {
-    if (!selectedSourceId) {
+    if (!active || !selectedSourceId) {
       setSourceDetail(null)
       return
     }
@@ -565,7 +575,7 @@ export default function DashboardTab() {
     return () => {
       cancelled = true
     }
-  }, [range, selectedSourceId])
+  }, [active, range, selectedSourceId])
 
   const sortedSources = useMemo(() => {
     if (!analytics) return []
@@ -863,7 +873,7 @@ export default function DashboardTab() {
             onPageChange={setCrawlPage}
           />
 
-          <PushLogPanel refreshToken={refreshToken} />
+          <PushLogPanel active={active} refreshToken={refreshToken} />
 
           <TrendCard title={`${RANGE_OPTIONS.find((option) => option.value === range)?.label ?? ''}文章处理结果趋势`} points={analytics.trend} />
 

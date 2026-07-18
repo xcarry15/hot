@@ -53,7 +53,7 @@ function pushStatusLabel(status: string): string {
   return status === 'success' ? '成功' : '失败'
 }
 
-export default function PushLogPanel({ refreshToken = 0 }: { refreshToken?: number }) {
+export default function PushLogPanel({ active = true, refreshToken = 0 }: { active?: boolean; refreshToken?: number }) {
   const [data, setData] = useState<PushLogResponse | null>(null)
   const [stats, setStats] = useState<PushLogStats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -82,24 +82,26 @@ export default function PushLogPanel({ refreshToken = 0 }: { refreshToken?: numb
   }, [page, sourceFilter, statusFilter, webhookFilter])
 
   useEffect(() => {
+    if (!active || stats) return
     void fetchPushLogStats()
       .then((result) => setStats(result as unknown as PushLogStats))
       .catch(() => undefined)
-  }, [])
+  }, [active, stats])
 
   useEffect(() => {
+    if (!active) return
     const handle = setTimeout(() => { void fetchLogs() }, 0)
     const interval = setInterval(() => { void fetchLogs() }, 30000)
     return () => {
       clearTimeout(handle)
       clearInterval(interval)
     }
-  }, [fetchLogs])
+  }, [active, fetchLogs])
 
   useEffect(() => {
-    if (refreshToken === 0) return
+    if (!active || refreshToken === 0) return
     void fetchLogs()
-  }, [fetchLogs, refreshToken])
+  }, [active, fetchLogs, refreshToken])
 
   const updateFilter = (setter: (value: string) => void, value: string) => {
     setter(value)

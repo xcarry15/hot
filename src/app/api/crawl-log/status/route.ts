@@ -17,12 +17,17 @@
  */
 import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
-import { clampCrawlLogLimit, getCrawlLogSnapshot } from '@/lib/crawl-log-service';
+import { clampCrawlLogLimit, getCrawlLogJobStatus, getCrawlLogSnapshot } from '@/lib/crawl-log-service';
 import { parsePositiveInt } from '@/lib/pagination';
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
+    if (searchParams.get('mode') === 'job') {
+      return NextResponse.json(await getCrawlLogJobStatus(), {
+        headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
+      });
+    }
     const limit = clampCrawlLogLimit(parsePositiveInt(searchParams.get('limit'), 500, 500));
 
     const snapshot = await getCrawlLogSnapshot({ limit });

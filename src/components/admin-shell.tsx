@@ -1,17 +1,39 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { useTheme } from '@/components/theme-provider'
 import { Activity, ExternalLink, Inbox, LogOut, Settings, Sun, Moon } from 'lucide-react'
-import IntelligenceInbox from '@/components/intelligence-inbox'
-import CrawlLogTab from '@/components/crawl-log-tab'
-import SettingsTab from '@/components/settings-tab'
 import { URL_PARAM_DETAIL, URL_PARAM_TAB } from '@/components/crawl-log/constants'
 import { logoutAdminSession } from '@/features/admin-auth.client'
 
 type TabKey = 'articles' | 'crawl-log' | 'settings'
+
+function AdminPageLoading() {
+  return <div className="h-full animate-pulse bg-muted/20" aria-label="页面加载中" />
+}
+
+const loadIntelligenceInbox = () => import('@/components/intelligence-inbox')
+const loadCrawlLog = () => import('@/components/crawl-log-tab')
+const loadSettings = () => import('@/components/settings-tab')
+
+const IntelligenceInbox = dynamic(loadIntelligenceInbox, {
+  loading: AdminPageLoading,
+})
+const CrawlLogTab = dynamic(loadCrawlLog, {
+  loading: AdminPageLoading,
+})
+const SettingsTab = dynamic(loadSettings, {
+  loading: AdminPageLoading,
+})
+
+const tabLoaders: Record<TabKey, () => Promise<unknown>> = {
+  articles: loadIntelligenceInbox,
+  'crawl-log': loadCrawlLog,
+  settings: loadSettings,
+}
 
 interface NavItem {
   key: TabKey
@@ -33,17 +55,22 @@ function readInitialTab(): TabKey {
   return params.has(URL_PARAM_DETAIL) ? 'crawl-log' : 'articles'
 }
 
-function AdminContent() {
-  const [activeTab, setActiveTab] = useState<TabKey>('articles')
+function AdminContent({ initialTab }: { initialTab: TabKey }) {
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab)
+  const [visitedTabs, setVisitedTabs] = useState<Set<TabKey>>(() => new Set([initialTab]))
   const { resolvedTheme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
   const [queueCounts, setQueueCounts] = useState({ articles: 0, crawl: 0 })
+  const lastQueueFetchAt = useRef(0)
 
   useEffect(() => {
     setMounted(true)
-    setActiveTab(readInitialTab())
-    const syncFromUrl = () => setActiveTab(readInitialTab())
+    const syncFromUrl = () => {
+      const tab = readInitialTab()
+      setVisitedTabs((current) => current.has(tab) ? current : new Set(current).add(tab))
+      setActiveTab(tab)
+    }
     window.addEventListener('popstate', syncFromUrl)
     window.addEventListener('hot2:urlchange', syncFromUrl)
     return () => {
@@ -52,12 +79,21 @@ function AdminContent() {
     }
   }, [])
 
-  useEffect(() => {
+  const refreshQueueCounts = useCallback((force = false) => {
+    if (!force && Date.now() - lastQueueFetchAt.current < 10_000) return
+    lastQueueFetchAt.current = Date.now()
     fetch('/api/admin/work-queue-summary')
       .then((response) => response.ok ? response.json() : null)
       .then((data) => data && setQueueCounts({ articles: data.human.total, crawl: data.technical.total }))
       .catch(() => undefined)
-  }, [activeTab])
+  }, [])
+
+  useEffect(() => {
+    refreshQueueCounts()
+    const handleFocus = () => refreshQueueCounts(true)
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [refreshQueueCounts])
 
   const toggleTheme = () => {
     setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')
@@ -69,7 +105,9 @@ function AdminContent() {
   }
 
   const handleTabChange = (tab: TabKey) => {
+    setVisitedTabs((current) => current.has(tab) ? current : new Set(current).add(tab))
     setActiveTab(tab)
+    refreshQueueCounts()
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
     if (tab === 'articles') url.searchParams.delete(URL_PARAM_TAB)
@@ -83,18 +121,16 @@ function AdminContent() {
       url.searchParams.delete('detailKind')
     }
     window.history.replaceState(null, '', url.toString())
-    window.dispatchEvent(new Event('hot2:urlchange'))
   }
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'articles':
-        return <IntelligenceInbox />
-      case 'crawl-log':
-        return <CrawlLogTab />
-      case 'settings':
-        return <SettingsTab />
-    }
+  const preloadTab = (tab: TabKey) => {
+    void tabLoaders[tab]().then(() => {
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        window.requestIdleCallback(() => {
+          setVisitedTabs((current) => current.has(tab) ? current : new Set(current).add(tab))
+        }, { timeout: 1_000 })
+      }
+    })
   }
 
   return (
@@ -119,6 +155,8 @@ function AdminContent() {
                   <button
                     key={item.key}
                     onClick={() => handleTabChange(item.key)}
+                    onMouseEnter={() => preloadTab(item.key)}
+                    onFocus={() => preloadTab(item.key)}
                     aria-current={isActive ? 'page' : undefined}
                     className={`relative w-full flex h-10 items-center gap-2.5 rounded-md px-2.5 text-sm font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${isActive ? 'bg-muted text-foreground before:absolute before:left-0 before:top-2 before:h-6 before:w-0.5 before:rounded-full before:bg-foreground' : 'text-muted-foreground hover:bg-muted/70 hover:text-foreground'}`}
                   >
@@ -161,7 +199,23 @@ function AdminContent() {
         </aside>
 
         <main className="flex-1 flex flex-col overflow-hidden min-h-0 bg-background">
-          <div className="flex-1 overflow-hidden min-h-0 pb-16 sm:pb-0">{renderContent()}</div>
+          <div className="flex-1 overflow-hidden min-h-0 pb-16 sm:pb-0">
+            {visitedTabs.has('articles') && (
+              <section className={activeTab === 'articles' ? 'h-full' : 'hidden'} aria-hidden={activeTab !== 'articles'}>
+                <IntelligenceInbox active={activeTab === 'articles'} />
+              </section>
+            )}
+            {visitedTabs.has('crawl-log') && (
+              <section className={activeTab === 'crawl-log' ? 'h-full' : 'hidden'} aria-hidden={activeTab !== 'crawl-log'}>
+                <CrawlLogTab active={activeTab === 'crawl-log'} />
+              </section>
+            )}
+            {visitedTabs.has('settings') && (
+              <section className={activeTab === 'settings' ? 'h-full' : 'hidden'} aria-hidden={activeTab !== 'settings'}>
+                <SettingsTab active={activeTab === 'settings'} />
+              </section>
+            )}
+          </div>
         </main>
       </div>
 
@@ -172,6 +226,7 @@ function AdminContent() {
             <button
               key={item.key}
               onClick={() => handleTabChange(item.key)}
+              onTouchStart={() => preloadTab(item.key)}
               aria-current={isActive ? 'page' : undefined}
               className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-colors ${isActive ? 'text-primary' : 'text-muted-foreground'}`}
             >
@@ -185,6 +240,6 @@ function AdminContent() {
   )
 }
 
-export default function AdminShell() {
-  return <AdminContent />
+export default function AdminShell({ initialTab = 'articles' }: { initialTab?: TabKey }) {
+  return <AdminContent initialTab={initialTab} />
 }

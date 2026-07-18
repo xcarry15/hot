@@ -64,6 +64,8 @@ test-run.*
 
 # Development database
 db/custom.db
+db/custom.db-wal
+db/custom.db-shm
 
 # Windows reserved device name accidentally created by cmd redirection
 /nul
