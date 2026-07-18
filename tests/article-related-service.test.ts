@@ -111,4 +111,23 @@ describe('getRelatedArticles', () => {
       ...olderArticles.slice(0, 4).map(({ id }) => id),
     ]);
   });
+
+  it('推送场景按 Event 的推送状态筛选关联文章', async () => {
+    mocks.articleFindUnique.mockResolvedValue(currentArticle);
+    mocks.articleFindMany.mockResolvedValue([relatedArticle]);
+
+    await getRelatedArticles(currentArticle.id, 3, { onlyPushed: true });
+
+    expect(mocks.articleFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        aiStatus: 'done',
+        representedEvent: {
+          is: {
+            status: 'active',
+            pushedAt: { not: null },
+          },
+        },
+      }),
+    }));
+  });
 });

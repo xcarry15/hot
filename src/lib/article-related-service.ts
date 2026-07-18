@@ -76,7 +76,16 @@ export async function getRelatedArticles(
     where: {
       id: { not: id },
       aiStatus: options.onlyPushed ? 'done' : { in: ['done', 'failed'] },
-      ...(options.onlyPushed ? { pushedAt: { not: null } } : {}),
+      ...(options.onlyPushed
+        ? {
+            representedEvent: {
+              is: {
+                status: 'active',
+                pushedAt: { not: null },
+              },
+            },
+          }
+        : {}),
       AND: [
         {
           OR: [

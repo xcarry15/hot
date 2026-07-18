@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/select'
 import { toast } from 'sonner'
 import {
-  Loader2, Activity, Play, Download, FileText, Network, Bot, Send, RefreshCcw, XCircle,
+  Loader2, Activity, Play, Download, FileText, Network, Bot, Send, RefreshCcw, XCircle, Check,
 } from 'lucide-react'
 
 // ── New sub-modules ──
@@ -43,6 +43,8 @@ export default function CrawlLogTab() {
   const sources: SourceProgress[] = useMemo(() => snapshot?.sources ?? [], [snapshot?.sources])
 
   const [autoCrawl, setAutoCrawl] = useState<boolean | null>(null)
+  const [autoCrawlSaving, setAutoCrawlSaving] = useState(false)
+  const autoCrawlSavingRef = useRef(false)
   // P2-3: 使用惰性初始化读 URL，避免 mount effect 与后续 effect 竞态清空深链。
   const [filterState, setFilterState] = useState<FilterState>(() => readFilterFromCurrentUrl())
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -89,6 +91,9 @@ export default function CrawlLogTab() {
 
   // 局部请求级 loading：仅用于按钮点击瞬间——成功入队 / 失败都不持久化。
   const [stageRequestLoading, setStageRequestLoading] = useState<Record<string, boolean>>({})
+  const [sourceRetryLoading, setSourceRetryLoading] = useState(false)
+  const [stepActionLoading, setStepActionLoading] = useState<Record<string, boolean>>({})
+  const operationRequestLockRef = useRef(false)
 
   useEffect(() => {
     writeFilterToUrl(filterState)
@@ -150,6 +155,9 @@ export default function CrawlLogTab() {
   // ── 派生状态 ────────────────────────────────────────────
   // isAnyRunning 仅依赖 snapshot.activeJob——DB 是唯一事实源。
   const isAnyRunning = snapshot?.activeJob != null
+  const isStageRequestPending = Object.values(stageRequestLoading).some(Boolean)
+  const isStepActionPending = Object.values(stepActionLoading).some(Boolean)
+  const isOperationBusy = isAnyRunning || isStageRequestPending || sourceRetryLoading || isStepActionPending
   const activeJob: JobSnapshot | null = snapshot?.activeJob ?? null
   const latestJob: JobSnapshot | null = snapshot?.latestJob ?? null
 
@@ -227,6 +235,55 @@ export default function CrawlLogTab() {
     return null
   }, [activeJob, latestJob])
 
+  const activeTaskView = useMemo(() => {
+    if (!activeJob) return null
+    type Stage = 'collect' | 'process' | 'cluster' | 'ai' | 'push'
+    const labels: Record<Stage, string> = {
+      collect: '采集',
+      process: '处理',
+      cluster: '聚类',
+      ai: 'AI 分析',
+      push: '推送',
+    }
+    const singleStages: Record<Stage, Stage[]> = {
+      collect: ['collect'],
+      process: ['process', 'cluster', 'ai'],
+      cluster: ['cluster', 'ai'],
+      ai: ['ai'],
+      push: ['push'],
+    }
+    const startStage = activeJob.workflowStartAt ?? activeJob.currentStage
+    const stages: Stage[] = activeJob.activeArticleId && startStage
+      ? singleStages[startStage]
+      : activeJob.type === 'full'
+        ? ['collect', 'process', 'cluster', 'ai', 'push']
+        : activeJob.type === 'fastProcess'
+          ? ['process']
+          : activeJob.type === 'collect' || activeJob.type === 'process' || activeJob.type === 'cluster' || activeJob.type === 'ai' || activeJob.type === 'push'
+            ? [activeJob.type]
+            : []
+    const currentStage = activeJob.currentStage ?? startStage
+    const currentIndex = currentStage ? stages.indexOf(currentStage) : -1
+    const targetArticle = activeJob.activeArticleId
+      ? sources.flatMap(source => source.articles).find(article => article.id === activeJob.activeArticleId)
+      : null
+    const taskLabel = activeJob.activeArticleId
+      ? '单篇恢复'
+      : activeJob.type === 'full'
+        ? '全流程'
+        : `${currentStage ? labels[currentStage] : '批量'}任务`
+    return {
+      taskLabel,
+      targetLabel: targetArticle?.title || activeJob.currentItemLabel || null,
+      stages: stages.map((stage, index) => ({
+        key: stage,
+        label: labels[stage],
+        state: index < currentIndex ? 'done' as const : index === currentIndex ? 'running' as const : 'pending' as const,
+      })),
+      currentPosition: currentIndex >= 0 ? currentIndex + 1 : 0,
+    }
+  }, [activeJob, sources])
+
   // ── 任务头部徽标：activeJob 优先；否则根据 latestJob 显示结果；都没有显示"空闲"。
   const headerBadge = useMemo(() => {
     if (activeJob) {
@@ -246,47 +303,66 @@ export default function CrawlLogTab() {
   // ── Button Handlers ──
 
   const handleToggleAutoCrawl = async (next: boolean) => {
+    if (autoCrawlSavingRef.current) return
     const prev = autoCrawl
+    autoCrawlSavingRef.current = true
     setAutoCrawl(next)
+    setAutoCrawlSaving(true)
     try {
       await saveSettings({ auto_crawl_enabled: next ? 'true' : 'false' })
       toast.success(next ? '已启用自动抓取' : '已停用自动抓取', { duration: 2000 })
     } catch {
       setAutoCrawl(prev ?? true)
       toast.error('设置保存失败')
+    } finally {
+      autoCrawlSavingRef.current = false
+      setAutoCrawlSaving(false)
     }
   }
 
   const handleRetrySource = async (sourceId: string) => {
-    if (isAnyRunning) {
+    if (isOperationBusy || operationRequestLockRef.current) {
       toast.warning('当前已有任务运行，请等待完成后再重试数据源')
       return
     }
+    operationRequestLockRef.current = true
+    setSourceRetryLoading(true)
     try {
-      await retrySource(sourceId)
+      const result = await retrySource(sourceId) as { queued?: boolean; error?: string }
+      if (!result.queued) throw new Error(result.error || '数据源重试未能启动')
       toast.info('已触发该数据源重试')
-      void refreshSnapshot()
-    } catch {
-      toast.error('数据源重试触发失败')
+      await refreshSnapshot()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '数据源重试触发失败')
+    } finally {
+      operationRequestLockRef.current = false
+      setSourceRetryLoading(false)
     }
   }
 
   const handleRetryFailedSources = async () => {
-    if (isAnyRunning || failedSources.length === 0) return
+    if (isOperationBusy || operationRequestLockRef.current || failedSources.length === 0) return
+    operationRequestLockRef.current = true
+    setSourceRetryLoading(true)
     try {
-      await retrySources(failedSources.map(source => source.id))
+      const result = await retrySources(failedSources.map(source => source.id)) as { queued?: boolean; error?: string }
+      if (!result.queued) throw new Error(result.error || '批量重试未能启动')
       toast.info(`已将 ${failedSources.length} 个异常源加入重试任务`)
-      void refreshSnapshot()
-    } catch {
-      toast.error('批量重试失败，请确认当前没有其他任务运行')
+      await refreshSnapshot()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '批量重试失败')
+    } finally {
+      operationRequestLockRef.current = false
+      setSourceRetryLoading(false)
     }
   }
 
   const runStage = async (stage: 'all' | 'collect' | 'process' | 'cluster' | 'ai' | 'push') => {
-    if (isAnyRunning) return
-    if (stage === 'all' && typeof window !== 'undefined' && !window.confirm('运行全流程将依次执行采集、处理、AI 分析，并可能推送文章。确认继续吗？')) {
+    if (isOperationBusy || operationRequestLockRef.current) return
+    if (stage === 'all' && typeof window !== 'undefined' && !window.confirm('运行全流程将依次执行采集、处理、事件聚类、AI 分析，并可能推送文章。确认继续吗？')) {
       return
     }
+    operationRequestLockRef.current = true
     setStageRequestLoading(prev => ({ ...prev, [stage]: true }))
     try {
       const res = (await triggerCrawlStage(stage)) as {
@@ -298,13 +374,14 @@ export default function CrawlLogTab() {
       if (res.queued) {
         toast.info('任务已入队，等待调度', { duration: 1500 })
         // 服务端会 emit snapshot:changed；前端无需构造乐观状态
-        void refreshSnapshot()
+        await refreshSnapshot()
       } else {
         toast.info(res.reason || res.error || '已有相同任务在执行')
       }
     } catch {
       toast.error('触发失败')
     } finally {
+      operationRequestLockRef.current = false
       setStageRequestLoading(prev => ({ ...prev, [stage]: false }))
     }
   }
@@ -325,11 +402,13 @@ export default function CrawlLogTab() {
 
   // ── Per-article step actions（局部 loading，不持久化） ──
 
-  const [stepActionLoading, setStepActionLoading] = useState<Record<string, boolean>>({})
   const isStepActionLoading = useCallback(
-    (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') =>
-      stepActionLoading[`${articleId}:${step}`] === true,
-    [stepActionLoading],
+    (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => {
+      if (stepActionLoading[`${articleId}:${step}`] === true) return true
+      if (activeJob?.activeArticleId !== articleId) return false
+      return (activeJob.currentStage ?? activeJob.workflowStartAt) === step
+    },
+    [activeJob, stepActionLoading],
   )
 
   const handleStepAction = useCallback(async (
@@ -337,21 +416,23 @@ export default function CrawlLogTab() {
     step: 'process' | 'cluster' | 'ai' | 'push',
   ): Promise<boolean> => {
     const key = `${articleId}:${step}`
-    if (stepActionLoading[key]) return false
+    if (isOperationBusy || operationRequestLockRef.current || stepActionLoading[key]) return false
+    operationRequestLockRef.current = true
     setStepActionLoading(prev => ({ ...prev, [key]: true }))
     try {
       const result = await triggerArticleWorkflow(articleId, step, 'retry')
       if (!result.queued) throw new Error(result.reason || '任务未能启动')
       toast.success('恢复任务已启动，可持续查看 Job 进度', { duration: 1800 })
-      void refreshSnapshot()
+      await refreshSnapshot()
       return true
     } catch {
       toast.error('操作失败')
       return false
     } finally {
+      operationRequestLockRef.current = false
       setStepActionLoading(prev => { const next = { ...prev }; delete next[key]; return next })
     }
-  }, [refreshSnapshot, stepActionLoading])
+  }, [isOperationBusy, refreshSnapshot, stepActionLoading])
 
   const handleOpenArticle = useCallback((articleId: string) => {
     setDetailKind('article')
@@ -491,6 +572,7 @@ export default function CrawlLogTab() {
               <Switch
                 checked={autoCrawl}
                 onCheckedChange={handleToggleAutoCrawl}
+                disabled={autoCrawlSaving}
               />
             )}
           </label>
@@ -498,7 +580,7 @@ export default function CrawlLogTab() {
           <Button
             size="sm"
             onClick={() => runStage('all')}
-            disabled={isAnyRunning || stageRequestLoading['all']}
+            disabled={isOperationBusy}
             className="h-8 gap-1.5 text-xs px-3 whitespace-nowrap"
           >
             {stageButtonLoading('all') ? (
@@ -523,7 +605,7 @@ export default function CrawlLogTab() {
               ) : (
                 <XCircle className="h-3.5 w-3.5" />
               )}
-              {stopLoading ? '停止中...' : '停止抓取'}
+              {stopLoading ? '停止中...' : '停止任务'}
             </Button>
           )}
 
@@ -554,35 +636,35 @@ export default function CrawlLogTab() {
             label="采集"
             icon={Download}
             loading={stageButtonLoading('collect')}
-            disabled={isAnyRunning || stageRequestLoading['collect']}
+            disabled={isOperationBusy}
             onClick={() => runStage('collect')}
           />
           <StageButton
             label="处理"
             icon={FileText}
             loading={stageButtonLoading('process')}
-            disabled={isAnyRunning || stageRequestLoading['process']}
+            disabled={isOperationBusy}
             onClick={() => runStage('process')}
           />
           <StageButton
             label="事件聚类"
             icon={Network}
             loading={stageButtonLoading('cluster')}
-            disabled={isAnyRunning || stageRequestLoading['cluster']}
+            disabled={isOperationBusy}
             onClick={() => runStage('cluster')}
           />
           <StageButton
             label="AI分析"
             icon={Bot}
             loading={stageButtonLoading('ai')}
-            disabled={isAnyRunning || stageRequestLoading['ai']}
+            disabled={isOperationBusy}
             onClick={() => runStage('ai')}
           />
           <StageButton
             label="推送"
             icon={Send}
             loading={stageButtonLoading('push')}
-            disabled={isAnyRunning || stageRequestLoading['push']}
+            disabled={isOperationBusy}
             onClick={() => runStage('push')}
           />
           </div>
@@ -647,13 +729,61 @@ export default function CrawlLogTab() {
             )}
           </div>
 
-        {progressView && (
+        {activeTaskView && progressView?.isRunning && (
+          <div className="space-y-2 border bg-background px-3 py-2" aria-label="当前任务进度">
+            <div className="flex min-w-0 items-center gap-2 text-xs">
+              <span className="font-medium">当前任务</span>
+              <Badge variant="outline" className="h-5 rounded-none px-1.5 text-[10px]">{activeTaskView.taskLabel}</Badge>
+              {activeTaskView.targetLabel && <span className="min-w-0 flex-1 truncate text-muted-foreground" title={activeTaskView.targetLabel}>{activeTaskView.targetLabel}</span>}
+              {activeTaskView.currentPosition > 0 && <span className="shrink-0 tabular-nums text-muted-foreground">阶段 {activeTaskView.currentPosition}/{activeTaskView.stages.length}</span>}
+            </div>
+            <div className="flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden">
+              {activeTaskView.stages.map((stage, index) => (
+                <div key={stage.key} className="flex shrink-0 items-center gap-1">
+                  {index > 0 && <span className="h-px w-3 bg-border" />}
+                  <span
+                    className={`inline-flex h-6 items-center gap-1 border px-2 text-[11px] ${
+                      stage.state === 'done'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : stage.state === 'running'
+                          ? 'border-blue-300 bg-blue-50 font-medium text-blue-700'
+                          : 'border-border bg-muted/30 text-muted-foreground'
+                    }`}
+                    aria-current={stage.state === 'running' ? 'step' : undefined}
+                  >
+                    {stage.state === 'done' ? <Check className="h-3 w-3" /> : stage.state === 'running' ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className="h-1.5 w-1.5 rounded-full bg-current opacity-40" />}
+                    {stage.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full bg-primary transition-[width] duration-300 ease-out ${progressView.pct == null ? 'w-1/3 animate-pulse' : ''}`}
+                  style={progressView.pct == null ? undefined : { width: `${progressView.pct}%` }}
+                  role="progressbar"
+                  aria-valuenow={progressView.pct ?? undefined}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="当前阶段进度"
+                />
+              </div>
+              <div className="flex shrink-0 items-center gap-2 text-xs">
+                <span className="font-medium text-blue-700">{progressView.stageLabel || '准备中'}</span>
+                {progressView.total > 0 && <span className="tabular-nums text-muted-foreground">{progressView.done}/{progressView.total}</span>}
+                {progressView.pct != null && <span className="w-9 text-right tabular-nums text-muted-foreground">{progressView.pct}%</span>}
+                {progressView.errors > 0 && <span className="font-medium text-destructive">✕{progressView.errors}</span>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {progressView && !progressView.isRunning && (
           <div className="flex items-center gap-3">
             <div className="flex-1 h-1.5 bg-background rounded-full overflow-hidden">
               <div
-                className={`h-full rounded-full transition-[width,background-color] duration-300 ease-out ${
-                  progressView.isRunning ? 'bg-primary' : 'bg-emerald-500'
-                } ${progressView.pct == null ? 'w-1/3 animate-pulse' : ''}`}
+                className={`h-full rounded-full bg-emerald-500 transition-[width] duration-300 ease-out ${progressView.pct == null ? 'w-1/3' : ''}`}
                 style={progressView.pct == null ? undefined : { width: `${progressView.pct}%` }}
                 role="progressbar"
                 aria-valuenow={progressView.pct ?? undefined}
@@ -663,11 +793,8 @@ export default function CrawlLogTab() {
               />
             </div>
             <div className="flex items-center gap-3 text-xs shrink-0">
-              {progressView.itemLabel && progressView.isRunning && (
-                <span className="text-muted-foreground">{progressView.itemLabel}</span>
-              )}
               {progressView.stageLabel && (
-                <span className="text-blue-600 font-medium">{progressView.stageLabel}</span>
+                <span className="text-emerald-700 font-medium">{progressView.stageLabel}</span>
               )}
               {progressView.total > 0 && (
                 <span className="text-muted-foreground">
@@ -691,7 +818,7 @@ export default function CrawlLogTab() {
             <span className="font-medium">异常摘要</span>
             {failedSources.length > 0 && <span>{failedSources.length} 个数据源失败</span>}
             {failedArticles > 0 && <span>全局技术待办 {failedArticles} 篇；当前列表显示最近 {sources.reduce((count, source) => count + source.articles.length, 0)} 篇</span>}
-            <Button size="sm" variant="outline" className="ml-auto h-7 border-amber-300 px-2 text-xs text-amber-900" disabled={isAnyRunning} onClick={() => void handleRetryFailedSources()}>一键重试异常源</Button>
+            {failedSources.length > 0 && <Button size="sm" variant="outline" className="ml-auto h-7 border-amber-300 px-2 text-xs text-amber-900" disabled={isOperationBusy} onClick={() => void handleRetryFailedSources()}>一键重试异常源</Button>}
           </div>
         )}
       </div>
@@ -710,7 +837,7 @@ export default function CrawlLogTab() {
               onOpenDiscarded={handleOpenDiscarded}
               onDiscardedRetried={() => { void refreshSnapshot() }}
               onRetrySource={handleRetrySource}
-              isJobRunning={isAnyRunning}
+              isJobRunning={isOperationBusy}
             />
           ))}
 
@@ -755,7 +882,7 @@ export default function CrawlLogTab() {
         onArticleUpdated={handleRefresh}
         onSelectArticle={handleSelectArticle}
         onStepAction={handleStepAction}
-        isJobRunning={isAnyRunning}
+        isJobRunning={isOperationBusy}
       />
     </div>
   )

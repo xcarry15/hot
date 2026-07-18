@@ -68,7 +68,8 @@ export function StepIndicator({
     || status === 'filtered'
     || status === 'done'
   const isClickable = actionable && !!onClick
-  const displayLabel = forceLabel && isClickable ? forceLabel : label
+  // 失败后的操作仍占用原阶段位置；即使因其他任务被禁用，也不应退回成普通状态文案。
+  const displayLabel = forceLabel && status !== 'running' ? forceLabel : label
   const isPushAction = label === '推送'
   const columnWidth = isPushAction ? 'w-[62px]' : label === 'AI分析' ? 'w-[58px]' : 'w-[48px]'
   const isForcePush = isPushAction && !!forceLabel && isClickable

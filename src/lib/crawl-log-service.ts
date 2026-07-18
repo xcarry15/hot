@@ -45,6 +45,17 @@ function safeJsonParse<T = Record<string, unknown>>(raw: string | null | undefin
 }
 
 function toJobSnapshot(job: Job): JobSnapshot {
+  const payload = safeJsonParse<Record<string, unknown>>(job.payload);
+  const payloadArticleId = typeof payload?.articleId === 'string' ? payload.articleId : null;
+  const payloadStartAt = typeof payload?.startAt === 'string' ? payload.startAt : null;
+  const isSingleArticleWorkflow = payload?.scope === 'single'
+    && payload.workflow === true
+    && payloadArticleId !== null;
+  const workflowStartAt = isSingleArticleWorkflow
+    && payloadStartAt !== null
+    && ['process', 'cluster', 'ai', 'push'].includes(payloadStartAt)
+      ? payloadStartAt as JobSnapshot['workflowStartAt']
+      : null;
   return {
     id: job.id,
     type: job.type,
@@ -59,6 +70,8 @@ function toJobSnapshot(job: Job): JobSnapshot {
     completedAt: job.completedAt ? job.completedAt.toISOString() : null,
     error: job.error,
     result: safeJsonParse<Record<string, unknown>>(job.result),
+    activeArticleId: isSingleArticleWorkflow ? payloadArticleId : null,
+    workflowStartAt,
   };
 }
 
@@ -267,6 +280,7 @@ export async function getCrawlLogSnapshot(
       process: projection.process,
       cluster: projection.cluster,
       ai: projection.ai,
+      score: projection.ai === 'done' ? a.score : null,
       push: projection.push,
       skipReason: deriveSkipReason({
         aiStatus: a.aiStatus,

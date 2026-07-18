@@ -21,6 +21,8 @@ export interface ArticleProgress {
   process: StepStatus;
   cluster: StepStatus;
   ai: StepStatus;
+  /** AI 完成后的最终有效评分；未完成时为 null。 */
+  score: number | null;
   push: StepStatus;
   skipReason?: string;
   lastTime: number;
@@ -81,6 +83,10 @@ export interface JobSnapshot {
   completedAt: string | null;
   error: string;
   result: Record<string, unknown> | null;
+  /** 单篇文章工作流的目标文章；批量 Job 为 null。 */
+  activeArticleId: string | null;
+  /** Job 刚入队、currentStage 尚未写入时的起始阶段。 */
+  workflowStartAt: JobStage | null;
 }
 
 export interface CrawlLogSnapshot {
