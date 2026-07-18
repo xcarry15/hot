@@ -45,6 +45,8 @@ $ExcludePatterns = @(
     "worklog.md",
     "CHANGELOG.md",
     "README.md",
+    "AGENTS.md",
+    "DESIGN.md",
     "CLAUDE.md",
     # bat/ 部署文档保留
     "docs",
@@ -165,6 +167,10 @@ Write-Host ""
 Write-Host "  写入 .env(首次部署时执行,以后保留 .env 不动):" -ForegroundColor Yellow
 Write-Host "     echo 'DATABASE_URL=file:../db/custom.db' > .env" -ForegroundColor Yellow
 Write-Host '     echo "API_TOKEN=$(openssl rand -hex 32)" >> .env' -ForegroundColor Yellow
+Write-Host "     echo 'NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn' >> .env" -ForegroundColor Yellow
+Write-Host "  NEXT_PUBLIC_SITE_URL 必须在 npm run build 前设置为正式域名。" -ForegroundColor Yellow
+Write-Host "  部署后访问 /admin/login 输入 API_TOKEN，浏览器将使用 HttpOnly Cookie。" -ForegroundColor Yellow
+Write-Host "  PM2 必须保持单实例，禁止 -i max / cluster / 多个 h2-hot2 实例。" -ForegroundColor Red
 Write-Host ""
 Write-Host "  --- 分支 A:新服务器(无 db/custom.db) ---" -ForegroundColor Green
 Write-Host "  1A. mkdir -p db" -ForegroundColor Green

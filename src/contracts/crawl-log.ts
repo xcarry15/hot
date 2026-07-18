@@ -22,15 +22,6 @@ export interface ArticleProgress {
   cluster: StepStatus;
   ai: StepStatus;
   push: StepStatus;
-  aiScore?: number;
-  aiCategory?: string;
-  /** 评分明细（仅 AI 完成后有值；hover 展开 tooltip） */
-  eventScore?: number;
-  contentScore?: number;
-  rawScore?: number;
-  adProbability?: number;
-  aiConfidence?: number;
-  isAd?: boolean;
   skipReason?: string;
   lastTime: number;
   /** P1-6: 推送失败后的重试时间 */
@@ -39,6 +30,8 @@ export interface ArticleProgress {
   aiRetryAt?: string | null;
   clusterStatus: 'pending' | 'clustered' | 'failed' | 'needs_review';
   clusterRetryAt?: string | null;
+  technicalIssues: Array<'process_failed' | 'cluster_failed' | 'ai_failed' | 'push_failed'>;
+  isEventRepresentative: boolean;
 }
 
 export interface DiscardedRow {
@@ -95,4 +88,5 @@ export interface CrawlLogSnapshot {
   latestJob: JobSnapshot | null;
   sources: SourceProgress[];
   fetchedAt: number;
+  technicalTotal: number;
 }

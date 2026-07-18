@@ -13,7 +13,7 @@ Hot2 部署和更新方法（2026-07）
 - .env 和 db/（服务器配置、SQLite 数据必须保留在服务器）
 - node_modules、.next、tests、docs、构建缓存
 - 一次性开发脚本 cleanup-legacy-settings.ts、backfill-prompt-defaults.ts
-- 根目录开发说明：README.md、CLAUDE.md、项目当前架构基线.md；`bat/` 部署/Nginx 文档保留
+- 根目录开发说明：README.md、AGENTS.md、DESIGN.md、CLAUDE.md；`bat/` 部署/Nginx 文档保留
 
 部署包保留 prisma/migrations、prisma/seed.ts、scripts/db-baseline.ts 和 scripts/cleanup-logs.ts，供服务器初始化、迁移和日志维护使用。
 
@@ -29,6 +29,9 @@ Hot2 部署和更新方法（2026-07）
 
   echo 'DATABASE_URL=file:../db/custom.db' > .env
   echo "API_TOKEN=$(openssl rand -hex 32)" >> .env
+  echo 'NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn' >> .env
+
+`NEXT_PUBLIC_SITE_URL` 必须在 `npm run build` 前设置为正式域名，用于 canonical、Open Graph 和 sitemap。
 
 初始化空 SQLite：
 
@@ -44,7 +47,11 @@ Hot2 部署和更新方法（2026-07）
   pm2 save
   pm2 startup
 
-然后打开网站「设置 → 账户」，填入与服务器 .env 相同的 API_TOKEN。生产环境所有 POST/PUT/PATCH/DELETE 请求都需要 Bearer Token；`/api/progress` SSE 为公开路径。
+然后访问 `https://hot.kfxz.cn/admin/login`，输入服务器 `.env` 中的 `API_TOKEN`。验证成功后浏览器使用 HttpOnly Cookie 访问后台，不需要在设置页或 localStorage 再保存 Token。
+
+生产环境除明确开放的公开文章 API 外，后台页面和后台 API（包括 GET）均受保护；脚本直接调用后台 API 时仍需发送 `Authorization: Bearer <API_TOKEN>`。
+
+PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js 进程内，禁止使用 `pm2 -i max`、cluster 模式或同时启动多个 `h2-hot2` 实例。
 
 三、存量 db push 数据库首次切换
 --------------------------------
@@ -70,7 +77,7 @@ Hot2 部署和更新方法（2026-07）
   npm run db:migrate:status
   pm2 start h2-hot2
 
-迁移清单的权威描述以根目录 `项目当前架构基线.md` 为准；本文件不再复制清单，避免源码新增 migration 后出现文档漂移。部署命令会自动按序应用 `prisma/migrations/`：
+架构和数据库说明以根目录 `README.md` 为准，实际迁移顺序以 `prisma/migrations/` 为准。本文件不复制迁移清单，避免源码新增 migration 后出现文档漂移。
 
 切换完成后禁止再次执行 baseline；日常更新只执行 migrate deploy。
 
@@ -99,7 +106,9 @@ Hot2 部署和更新方法（2026-07）
 
 - 不要执行 db:seed、db:migrate:baseline 或 db:reset。
 - 不要删除 .env 或 db/custom.db。
+- 确认 `.env` 中的 `NEXT_PUBLIC_SITE_URL` 为当前正式域名，并在 build 前完成修改。
 - 修改 .env 后用 delete + start 让 PM2 重新读取环境变量；普通 restart 可能保留旧环境。
+- 保持 PM2 单实例运行，禁止 `-i max` 或 cluster 模式。
 - 每次 build 后清理 Nginx 反代缓存并 reload，避免旧 HTML 引用旧 chunk：
 
   rm -rf /www/server/nginx/proxy_cache_dir/*
@@ -116,7 +125,7 @@ Hot2 部署和更新方法（2026-07）
 清理边界：
 
 - FetchLog：30 天。
-- PushLog：90 天，但未完成全部 Webhook 投递的 Article 日志会保留，避免重复推送。
+- PushLog：90 天，但所属 Event 尚未完成全部 Webhook 投递时保留，避免丢失目标级事实和重复推送。
 - Job：只清理超过 30 天的 completed/failed；pending/running 不会被删除。
 - 不删除 Article、Source、DiscardedItem，也不自动执行 VACUUM。
 
@@ -142,7 +151,7 @@ Hot2 部署和更新方法（2026-07）
 
 - 动态请求代理到 127.0.0.1:3011。
 - `/_next/static/` 由 Nginx 直接提供 immutable 静态资源。
-- 动态页面绕过 proxy_cache，SSE `/api/progress` 关闭 buffering 并延长读取超时。
+- 动态页面绕过 proxy_cache，避免重新构建后旧 HTML 引用已删除的 chunk。
 - 修改配置后执行 `nginx -t && nginx -s reload`。
 
 八、从零重建（破坏性操作）

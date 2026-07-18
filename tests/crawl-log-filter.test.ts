@@ -34,6 +34,8 @@ function article(partial: Partial<ArticleProgress>): ArticleProgress {
     ai: 'pending',
     push: 'pending',
     lastTime: 0,
+    technicalIssues: [],
+    isEventRepresentative: true,
     ...partial,
   }
 }
@@ -83,12 +85,6 @@ describe('matchStepChip 单谓词命中', () => {
     expect(matchStepChip(article({
       crawl: 'done', process: 'done', cluster: 'done', ai: 'done', push: 'done',
     }), 'has-fail')).toBe(false)
-  })
-
-  it('is-ad 仅当 isAd === true', () => {
-    expect(matchStepChip(article({ isAd: true }), 'is-ad')).toBe(true)
-    expect(matchStepChip(article({ isAd: undefined }), 'is-ad')).toBe(false)
-    expect(matchStepChip(article({}), 'is-ad')).toBe(false)
   })
 
   it('ai-done 与 ai-pending 互斥', () => {

@@ -102,6 +102,15 @@ describe('article-pipeline-status — push', () => {
     const proj = projectArticleSteps(article({ eventPushedAt: new Date() }), push());
     expect(proj.push).toBe('done');
   });
+  it('最新推送失败不会被历史 pushedAt 掩盖', () => {
+    const retryAt = new Date(now.getTime() - 1000);
+    const proj = projectArticleSteps(article({ eventPushedAt: new Date(), eventNextRetryAt: retryAt, pushFailed: true }), push());
+    expect(proj.push).toBe('failed');
+  });
+  it('非代表 Article 不承担 Event 推送状态', () => {
+    const proj = projectArticleSteps(article({ eventPushedAt: new Date(), pushApplicable: false }), push());
+    expect(proj.push).toBe('not_applicable');
+  });
   it('process 未完成 → blocked', () => {
     const proj = projectArticleSteps(article({ fetchStatus: 'pending' }), push());
     expect(proj.push).toBe('blocked');
@@ -143,7 +152,7 @@ describe('article-pipeline-status — push', () => {
     expect(proj.push).toBe('failed');
     expect(proj.pushRetryAt).toBe(retryAt.toISOString());
   });
-  it('Event.nextPushRetryAt 已过期 → pending', () => {
+  it('没有失败事实时 Event.nextPushRetryAt 已过期 → pending', () => {
     const retryAt = new Date(now.getTime() - 3600_000);
     const proj = projectArticleSteps(article({ eventNextRetryAt: retryAt }), push());
     expect(proj.push).toBe('pending');

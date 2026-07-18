@@ -30,12 +30,11 @@ export type StepFilterKey =
   | 'ai-pending'     // 待 AI 分析
   | 'push-pending'   // 待推送
   | 'has-fail'       // 任意步骤失败
-  | 'is-ad'          // 软文标记
 
 export const ALL_STEP_FILTER_KEYS: readonly StepFilterKey[] = [
   'ai-done', 'pushed',
   'process-pending', 'cluster-pending', 'cluster-failed', 'cluster-review', 'ai-pending', 'push-pending',
-  'has-fail', 'is-ad',
+  'has-fail',
 ] as const
 
 /**

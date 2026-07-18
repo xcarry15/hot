@@ -26,7 +26,7 @@ export async function pushAllUnpushed(
   for (let i = 0; i < events.length; i += concurrency) {
     assertNotAborted(signal)
     const batch = events.slice(i, i + concurrency)
-    const outcomes = await Promise.allSettled(batch.map(event => pushEventToFeishu(event.id, false, signal)))
+    const outcomes = await Promise.allSettled(batch.map(event => pushEventToFeishu(event.id, 'normal', signal)))
     assertNotAborted(signal)
     for (const result of outcomes) {
       if (result.status === 'fulfilled' && result.value.status === 'completed') success++

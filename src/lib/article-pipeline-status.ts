@@ -46,6 +46,8 @@ export interface ArticleStepInput {
   relevance: number;
   eventPushedAt: Date | null;
   eventNextRetryAt: Date | null;
+  pushFailed?: boolean;
+  pushApplicable?: boolean;
 }
 
 export interface ArticleStepProjection {
@@ -117,7 +119,12 @@ export function projectArticleSteps(
   let pushStatus: StepStatus = 'pending';
   let pushRetryAt: string | null = null;
 
-  if (article.eventPushedAt) {
+  if (article.pushApplicable === false) {
+    pushStatus = 'not_applicable';
+  } else if (article.pushFailed) {
+    pushStatus = 'failed';
+    pushRetryAt = article.eventNextRetryAt?.toISOString() ?? null;
+  } else if (article.eventPushedAt) {
     pushStatus = 'done';
   } else if (article.clusterStatus === 'needs_review') {
     pushStatus = 'blocked';

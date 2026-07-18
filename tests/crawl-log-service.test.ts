@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
   readPushSettings: vi.fn(),
   consoleError: vi.fn(),
+  technicalQueue: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -28,6 +29,9 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/push/policy', () => ({
   readPushSettings: mocks.readPushSettings,
+}));
+vi.mock('@/lib/technical-work-queue-service', () => ({
+  getTechnicalWorkQueue: mocks.technicalQueue,
 }));
 
 import {
@@ -46,6 +50,7 @@ describe('crawl-log-service', () => {
       minScore: 50,
       minRelevance: 5,
     });
+    mocks.technicalQueue.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -203,17 +208,18 @@ describe('crawl-log-service', () => {
         publishedAt: new Date(),
         sourceId: a.sourceId,
         fetchStatus: 'fetched',
+        clusterStatus: 'clustered',
         aiStatus: 'pending',
         score: 0,
-        category: '',
-        pushedAt: null,
-        nextRetryAt: null,
+        eventId: null,
+        event: null,
+        nextClusterRetryAt: null,
+        nextAiRetryAt: null,
         relevance: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
         summary: '',
         skipReason: null,
-        isAd: false,
         source: { name: a.name ?? `源 ${a.sourceId}` },
       }));
       mocks.transaction.mockImplementation(async () => [[], [], records, []]);
@@ -245,17 +251,18 @@ describe('crawl-log-service', () => {
           publishedAt: new Date(t1),
           sourceId: 's1',
           fetchStatus: 'fetched',
+          clusterStatus: 'clustered',
           aiStatus: 'pending',
           score: 0,
-          category: '',
-          pushedAt: null,
-          nextRetryAt: null,
+          eventId: null,
+          event: null,
+          nextClusterRetryAt: null,
+          nextAiRetryAt: null,
           relevance: 0,
           createdAt: new Date(),
           updatedAt: new Date(),
           summary: '',
           skipReason: null,
-          isAd: false,
           source: { name: 'S' },
         },
         {
@@ -264,17 +271,18 @@ describe('crawl-log-service', () => {
           publishedAt: new Date(t2),
           sourceId: 's1',
           fetchStatus: 'fetched',
+          clusterStatus: 'clustered',
           aiStatus: 'pending',
           score: 0,
-          category: '',
-          pushedAt: null,
-          nextRetryAt: null,
+          eventId: null,
+          event: null,
+          nextClusterRetryAt: null,
+          nextAiRetryAt: null,
           relevance: 0,
           createdAt: new Date(),
           updatedAt: new Date(),
           summary: '',
           skipReason: null,
-          isAd: false,
           source: { name: 'S' },
         },
       ];

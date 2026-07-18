@@ -25,7 +25,6 @@ export const STEP_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'ai-pending', label: '待AI', description: '详情已处理，等待 AI 分析' },
   { key: 'push-pending', label: '待推', description: 'AI 已完成且满足推送条件' },
   { key: 'has-fail', label: '含失败', description: '任意步骤出现失败标记' },
-  { key: 'is-ad', label: '软文', description: '被识别为软广的文章' },
 ] as const
 
 /** 用于 URL 深链的 chip 集合名（短名减小 URL 长度） */

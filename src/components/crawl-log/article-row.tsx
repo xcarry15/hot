@@ -27,20 +27,14 @@ export const ArticleRow = memo(function ArticleRow({
     ? { step: 'process' as const, label: '重试处理' }
     : article.cluster === 'failed'
       ? { step: 'cluster' as const, label: '重试聚类' }
-      : article.clusterStatus === 'needs_review'
-        ? { step: 'review' as const, label: '去复核' }
-        : article.ai === 'failed' || (article.ai === 'skipped' && article.skipReason?.startsWith('AI 连续失败'))
+      : article.ai === 'failed' || (article.ai === 'skipped' && article.skipReason?.startsWith('AI 连续失败'))
           ? { step: 'ai' as const, label: '重试 AI' }
           : article.push === 'failed'
-            ? { step: 'push' as const, label: '重试投递' }
+            ? { step: 'push' as const, label: article.pushRetryAt && new Date(article.pushRetryAt) > new Date() ? '等待重试' : '重试投递' }
             : null
 
   const handleNextAction = useCallback(() => {
     if (!nextAction) return
-    if (nextAction.step === 'review') {
-      window.location.href = `/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=cluster`
-      return
-    }
     onStepAction?.(article.id, nextAction.step)
   }, [article.id, nextAction, onStepAction])
 
@@ -93,7 +87,9 @@ export const ArticleRow = memo(function ArticleRow({
         <StepIndicator label="AI分析" status={aiLoading ? 'running' : article.ai} title={article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined} />
         <StepIndicator label="推送" status={pushLoading ? 'running' : article.push} title={article.pushRetryAt ? `推送将在 ${new Date(article.pushRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined} />
       </div>
-      {nextAction && <button type="button" disabled={isJobRunning || processLoading || aiLoading || pushLoading} onClick={handleNextAction} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted disabled:opacity-50">{nextAction.label}</button>}
+      {nextAction && <button type="button" disabled={isJobRunning || processLoading || aiLoading || pushLoading || (nextAction.step === 'push' && Boolean(article.pushRetryAt && new Date(article.pushRetryAt) > new Date()))} onClick={handleNextAction} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted disabled:opacity-50">{nextAction.label}</button>}
+      {article.clusterStatus === 'needs_review' && <a href={`/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=cluster`} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted">去聚类复核</a>}
+      <a href={`/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=content`} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted">查看内容</a>
       <span className="text-[11px] text-muted-foreground/50 shrink-0 tabular-nums w-14 text-right" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
         {article.lastTime ? (() => {
           const d = new Date(article.lastTime)

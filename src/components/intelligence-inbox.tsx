@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { readInboxDeepLink, shouldExpandContentPanel, writeInboxDeepLink, type InboxDetailPanel } from "@/components/inbox-deep-link";
 import type {
   ArticleDetailDto,
   ArticleListItemDto,
@@ -89,7 +90,7 @@ type SortField =
   "date" | "score" | "relevance" | "event" | "content" | "ad" | "confidence";
 type NumericField =
   "relevance" | "eventScore" | "contentScore" | "adProbability";
-type DetailPanel = "cluster" | "content";
+type DetailPanel = InboxDetailPanel;
 type EventDetail = {
   id: string;
   representativeArticleId: string | null;
@@ -358,11 +359,9 @@ export default function IntelligenceInbox() {
 
   useEffect(() => {
     const syncDetailFromUrl = () => {
-      const params = new URLSearchParams(window.location.search);
-      const articleId = params.get("articleId");
-      const panel = params.get("panel");
-      if (articleId) setSelectedId(articleId);
-      setRequestedPanel(panel === "cluster" || panel === "content" ? panel : null);
+      const link = readInboxDeepLink(window.location.search);
+      setSelectedId(link.articleId);
+      setRequestedPanel(link.panel);
     };
     try {
       const params = new URLSearchParams(window.location.search);
@@ -404,12 +403,7 @@ export default function IntelligenceInbox() {
   }, []);
 
   const updateDetailUrl = useCallback((articleId: string | null, panel?: DetailPanel | null) => {
-    const url = new URL(window.location.href);
-    if (articleId) url.searchParams.set("articleId", articleId);
-    else url.searchParams.delete("articleId");
-    if (panel) url.searchParams.set("panel", panel);
-    else if (panel === null) url.searchParams.delete("panel");
-    window.history.replaceState(null, "", url.toString());
+    window.history.replaceState(null, "", writeInboxDeepLink(window.location.href, articleId, panel));
   }, []);
 
   useEffect(() => {
@@ -566,6 +560,7 @@ export default function IntelligenceInbox() {
   useEffect(() => {
     if (!detail || detail.id !== selectedId || !requestedPanel) return;
     if (requestedPanel === "cluster") setClusterAuditOpen(true);
+    if (shouldExpandContentPanel(requestedPanel)) setShowFullContent(true);
     const target = requestedPanel === "cluster" ? clusterPanelRef.current : contentPanelRef.current;
     requestAnimationFrame(() => target?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }, [detail, eventDetail, requestedPanel, selectedId]);
@@ -1535,8 +1530,9 @@ export default function IntelligenceInbox() {
                                   ruleEvidence?: { titleOverlap?: number; eventKeyMatch?: boolean };
                                   aiDecision?: { sameEvent?: boolean; confidence?: number; reason?: string };
                                 };
+                                const selected = audit.evidence.selectedCandidateEventId === item.candidateEventId;
                                 return <p key={`${audit.id}-candidate-${index}`} className="mt-1 text-muted-foreground">
-                                  候选事件：{item.candidateTitle || item.candidateEventId?.slice(-8) || "—"} · 标题重叠 {Math.round((item.ruleEvidence?.titleOverlap ?? 0) * 100)}% · 事件键一致 {item.ruleEvidence?.eventKeyMatch ? "是" : "否"} · AI {item.aiDecision?.sameEvent ? "同一事件" : "不同事件"}{item.aiDecision?.confidence == null ? "" : ` ${item.aiDecision.confidence}%`} · {item.aiDecision?.reason || "无理由"}
+                                  候选事件：{item.candidateTitle || item.candidateEventId?.slice(-8) || "—"} · 标题重叠 {Math.round((item.ruleEvidence?.titleOverlap ?? 0) * 100)}% · 事件键一致 {item.ruleEvidence?.eventKeyMatch ? "是" : "否"} · AI {item.aiDecision?.sameEvent ? "同一事件" : "不同事件"}{item.aiDecision?.confidence == null ? "" : ` ${item.aiDecision.confidence}%`}{selected ? " · 已采用" : ""} · {item.aiDecision?.reason || "无理由"}
                                 </p>;
                               })}
                             </div>

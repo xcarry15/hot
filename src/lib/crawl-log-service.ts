@@ -28,6 +28,7 @@ import type {
   JobSnapshot,
   SourceProgress,
 } from '@/contracts/crawl-log';
+import { getTechnicalWorkQueue } from '@/lib/technical-work-queue-service';
 
 const DEFAULT_LIMIT = 500;
 const MAX_LIMIT = 500;
@@ -83,6 +84,8 @@ export async function getCrawlLogSnapshot(
   // Articles + DiscardedItems + Job 用单次 $transaction，
   // 把跨查询的不一致窗口降到最小。
   const pushSettings = await readPushSettings();
+  const technicalItems = await getTechnicalWorkQueue();
+  const technicalByArticleId = new Map(technicalItems.map((item) => [item.articleId, item]));
 
   const [activeJobs, latestJobs, articles, discarded, configuredSources = []] = await db.$transaction([
     db.job.findMany({
@@ -108,20 +111,14 @@ export async function getCrawlLogSnapshot(
         nextClusterRetryAt: true,
         aiStatus: true,
         score: true,
-        eventScore: true,
-        contentScore: true,
-        rawScore: true,
-        adProbability: true,
-        aiConfidence: true,
-        category: true,
-         event: { select: { pushedAt: true, nextPushRetryAt: true } },
+        eventId: true,
+        event: { select: { pushedAt: true, nextPushRetryAt: true, representativeArticleId: true } },
          nextAiRetryAt: true,
         relevance: true,
         createdAt: true,
         updatedAt: true,
         summary: true,
         skipReason: true,
-        isAd: true,
         source: { select: { name: true } },
       },
     }),
@@ -247,19 +244,21 @@ export async function getCrawlLogSnapshot(
   for (const a of articles) {
     const group = ensureSourceGroup(a.sourceId, a.source?.name);
 
+    const technicalItem = technicalByArticleId.get(a.id);
+    const isRepresentative = a.event?.representativeArticleId === a.id;
     const stepInput: ArticleStepInput = {
       fetchStatus: a.fetchStatus,
       clusterStatus: a.clusterStatus,
       aiStatus: a.aiStatus,
       score: a.score,
       relevance: a.relevance,
-      eventPushedAt: a.event?.pushedAt ?? null,
-      eventNextRetryAt: a.event?.nextPushRetryAt ?? null,
+      eventPushedAt: isRepresentative ? (a.event?.pushedAt ?? null) : null,
+      eventNextRetryAt: isRepresentative ? (a.event?.nextPushRetryAt ?? null) : null,
+      pushFailed: technicalItem?.issues.includes('push_failed') ?? false,
+      pushApplicable: isRepresentative,
     };
     const projection = projectArticleSteps(stepInput, push);
     // P0-4: 不再应用全局阶段 overlay——没有 currentItemId 时伪造转圈会失真
-    const hasScore = a.score > 0;
-
     const articleProgress: ArticleProgress = {
       id: a.id,
       title: a.title,
@@ -269,25 +268,19 @@ export async function getCrawlLogSnapshot(
       cluster: projection.cluster,
       ai: projection.ai,
       push: projection.push,
-      aiScore: a.score || undefined,
-      aiCategory: a.category || undefined,
-      eventScore: hasScore ? (a.eventScore ?? undefined) : undefined,
-      contentScore: hasScore ? (a.contentScore ?? undefined) : undefined,
-      rawScore: hasScore ? (a.rawScore ?? undefined) : undefined,
-      adProbability: hasScore ? (a.adProbability ?? undefined) : undefined,
-      aiConfidence: hasScore ? (a.aiConfidence ?? undefined) : undefined,
       skipReason: deriveSkipReason({
         aiStatus: a.aiStatus,
         skipReason: a.skipReason,
         summary: a.summary,
       }),
-      isAd: a.isAd,
       lastTime: a.updatedAt.getTime(),
       // P1-6: 推送/AI 重试时间，方便管理员判断"何时自动重试"
       pushRetryAt: projection.pushRetryAt ?? (a.event?.nextPushRetryAt ? a.event.nextPushRetryAt.toISOString() : null),
       aiRetryAt: a.aiStatus === 'failed' && a.nextAiRetryAt ? a.nextAiRetryAt.toISOString() : null,
       clusterStatus: a.clusterStatus as ArticleProgress['clusterStatus'],
       clusterRetryAt: a.clusterStatus === 'failed' && a.nextClusterRetryAt ? a.nextClusterRetryAt.toISOString() : null,
+      technicalIssues: technicalItem?.issues ?? [],
+      isEventRepresentative: isRepresentative,
     };
     group.articles.push(articleProgress);
   }
@@ -344,5 +337,6 @@ export async function getCrawlLogSnapshot(
     latestJob,
     sources,
     fetchedAt: Date.now(),
+    technicalTotal: technicalItems.length,
   };
 }

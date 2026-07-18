@@ -371,7 +371,7 @@ export async function validateSingleArticleWorkflow(
 ): Promise<{ ok: true } | { ok: false; status: 404 | 409; reason: string }> {
   const article = await db.article.findUnique({
     where: { id: articleId },
-    select: { fetchStatus: true, clusterStatus: true, aiStatus: true, skipReason: true, eventId: true },
+    select: { fetchStatus: true, clusterStatus: true, aiStatus: true, skipReason: true, eventId: true, event: { select: { nextPushRetryAt: true } } },
   });
   if (!article) return { ok: false, status: 404, reason: '文章不存在' };
   if (intent === 'regenerate') {
@@ -391,6 +391,9 @@ export async function validateSingleArticleWorkflow(
     if (!article.eventId) return { ok: false, status: 409, reason: '文章尚未归属 Event，不能重试推送' };
     if ((await getFailedPushTargets(article.eventId)).length === 0) {
       return { ok: false, status: 409, reason: '当前没有失败的推送目标' };
+    }
+    if (article.event?.nextPushRetryAt && article.event.nextPushRetryAt > new Date()) {
+      return { ok: false, status: 409, reason: `推送重试等待中，可重试时间: ${article.event.nextPushRetryAt.toISOString()}` };
     }
   }
   return { ok: true };
@@ -454,7 +457,7 @@ async function executeSingleArticleWorkflow(
     await refreshPublicPublication(articleId);
   } else {
     if (jobId) await startJobStage(jobId, { stage: 'push', total: 1, currentItemLabel: article.title });
-    result.push = await pushArticleToFeishu(articleId, false, signal);
+    result.push = await pushArticleToFeishu(articleId, 'retry_failed', signal);
     stages.push('push');
     if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
   }

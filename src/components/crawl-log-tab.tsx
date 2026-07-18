@@ -55,13 +55,20 @@ export default function CrawlLogTab() {
   // P2-1: 从 URL 恢复详情状态
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const params = new URLSearchParams(window.location.search)
-    const detailId = params.get(URL_PARAM_DETAIL)
-    const detailKindParam = params.get(URL_PARAM_DETAIL_KIND) as 'article' | 'discarded' | null
-    if (detailId) {
+    const syncDetailFromUrl = () => {
+      const params = new URLSearchParams(window.location.search)
+      const detailId = params.get(URL_PARAM_DETAIL)
+      const detailKindParam = params.get(URL_PARAM_DETAIL_KIND) as 'article' | 'discarded' | null
       setDetailArticleId(detailId)
       setDetailKind(detailKindParam === 'discarded' ? 'discarded' : 'article')
-      setDetailOpen(true)
+      setDetailOpen(Boolean(detailId))
+    }
+    syncDetailFromUrl()
+    window.addEventListener('popstate', syncDetailFromUrl)
+    window.addEventListener('hot2:urlchange', syncDetailFromUrl)
+    return () => {
+      window.removeEventListener('popstate', syncDetailFromUrl)
+      window.removeEventListener('hot2:urlchange', syncDetailFromUrl)
     }
   }, [])
 
@@ -107,7 +114,7 @@ export default function CrawlLogTab() {
 
   const allSources = useMemo(() => sources.map(s => ({ id: s.id, name: s.name })), [sources])
   const failedSources = useMemo(() => sources.filter(source => source.lastRunStatus === 'failed' || source.status === 'error'), [sources])
-  const failedArticles = useMemo(() => sources.reduce((count, source) => count + source.articles.filter(article => article.cluster === 'failed' || article.ai === 'failed' || article.process === 'failed' || article.push === 'failed').length, 0), [sources])
+  const failedArticles = snapshot?.technicalTotal ?? 0
 
   // 展开/折叠偏好是纯 UI 状态：从 snapshot 派生的 expanded 字段是默认值，
   // 本地 overrides 覆盖之。
@@ -683,7 +690,7 @@ export default function CrawlLogTab() {
           <div className="flex flex-wrap items-center gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <span className="font-medium">异常摘要</span>
             {failedSources.length > 0 && <span>{failedSources.length} 个数据源失败</span>}
-            {failedArticles > 0 && <span>{failedArticles} 篇文章步骤失败</span>}
+            {failedArticles > 0 && <span>全局技术待办 {failedArticles} 篇；当前列表显示最近 {sources.reduce((count, source) => count + source.articles.length, 0)} 篇</span>}
             <Button size="sm" variant="outline" className="ml-auto h-7 border-amber-300 px-2 text-xs text-amber-900" disabled={isAnyRunning} onClick={() => void handleRetryFailedSources()}>一键重试异常源</Button>
           </div>
         )}

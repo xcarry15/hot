@@ -9,9 +9,13 @@ import type { Job, Article } from '@prisma/client';
 import { db } from '@/lib/db';
 
 const readPushSettingsMock = vi.fn();
+const technicalQueueMock = vi.fn();
 
 vi.mock('@/lib/push/policy', () => ({
   readPushSettings: () => readPushSettingsMock(),
+}));
+vi.mock('@/lib/technical-work-queue-service', () => ({
+  getTechnicalWorkQueue: () => technicalQueueMock(),
 }));
 
 vi.mock('@/lib/api-helpers', () => ({
@@ -66,6 +70,7 @@ describe('GET /api/crawl-log/status', () => {
   beforeEach(() => {
     readPushSettingsMock.mockReset();
     readPushSettingsMock.mockResolvedValue({ pushMode: 'realtime', minScore: 50, minRelevance: 5 });
+    technicalQueueMock.mockResolvedValue([]);
   });
 
   it('无 Job → activeJob/latestJob=null, sources 非空', async () => {

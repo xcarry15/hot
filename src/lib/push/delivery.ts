@@ -19,31 +19,64 @@ import { sendFeishuWebhook } from '@/lib/push/feishu-transport';
 /** 同 eventId 并发防重；同一时刻只允许一次推送尝试。 */
 const inFlightPushes = new Map<string, Promise<PushArticleResult>>();
 
+export type PushDeliveryMode = 'normal' | 'retry_failed' | 'repush_all';
+
+export interface PushTargetState {
+  webhookUrl: string;
+  webhookRemark: string;
+  latestStatus: 'success' | 'failure' | 'never_attempted';
+  latestCreatedAt: Date | null;
+}
+
 /** 推送结果：区分全部成功/部分成功/全部失败/无 Webhook */
 export interface PushArticleResult {
   status: 'completed' | 'partial' | 'failed' | 'no_webhooks';
+  mode: PushDeliveryMode;
+  attempted: number;
   succeeded: number;
   failed: number;
+  skipped: number;
   message: string;
 }
 
-/** 当前启用目标中，最近一次投递仍失败的目标；历史失败后已成功的不再算失败。 */
-export async function getFailedPushTargets(eventId: string): Promise<Array<{ webhookUrl: string; webhookRemark: string }>> {
-  const enabled = (await getWebhookConfigs()).filter((config) => config.enabled && config.url.trim());
-  if (enabled.length === 0) return [];
+export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<Map<string, PushTargetState[]>> {
+  const uniqueEventIds = [...new Set(eventIds.filter(Boolean))];
+  const result = new Map(uniqueEventIds.map((eventId) => [eventId, [] as PushTargetState[]]));
+  if (uniqueEventIds.length === 0) return result;
+  const enabled = Array.from(new Map((await getWebhookConfigs())
+    .filter((config) => config.enabled && config.url.trim())
+    .map((config) => [config.url.trim(), { ...config, url: config.url.trim() }])).values());
+  if (enabled.length === 0) return result;
   const logs = await db.pushLog.findMany({
-    where: { eventId, webhookUrl: { in: enabled.map((config) => config.url) } },
+    where: { eventId: { in: uniqueEventIds }, webhookUrl: { in: enabled.map((config) => config.url) } },
     orderBy: { createdAt: 'desc' },
-    select: { webhookUrl: true, webhookRemark: true, status: true },
+    select: { eventId: true, webhookUrl: true, webhookRemark: true, status: true, createdAt: true },
   });
-  const seen = new Set<string>();
-  const failed: Array<{ webhookUrl: string; webhookRemark: string }> = [];
+  const latest = new Map<string, typeof logs[number]>();
   for (const log of logs) {
-    if (seen.has(log.webhookUrl)) continue;
-    seen.add(log.webhookUrl);
-    if (log.status === 'failure') failed.push({ webhookUrl: log.webhookUrl, webhookRemark: log.webhookRemark });
+    const key = `${log.eventId}\u0000${log.webhookUrl}`;
+    if (!latest.has(key)) latest.set(key, log);
   }
-  return failed;
+  for (const eventId of uniqueEventIds) {
+    result.set(eventId, enabled.map((config) => {
+      const log = latest.get(`${eventId}\u0000${config.url}`);
+      return {
+        webhookUrl: config.url,
+        webhookRemark: config.remark || log?.webhookRemark || '',
+        latestStatus: log?.status === 'success' ? 'success' : log?.status === 'failure' ? 'failure' : 'never_attempted',
+        latestCreatedAt: log?.createdAt ?? null,
+      };
+    }));
+  }
+  return result;
+}
+
+export async function getPushTargetStates(eventId: string): Promise<PushTargetState[]> {
+  return (await getPushTargetStatesForEvents([eventId])).get(eventId) ?? [];
+}
+
+export async function getFailedPushTargets(eventId: string): Promise<PushTargetState[]> {
+  return (await getPushTargetStates(eventId)).filter((target) => target.latestStatus === 'failure');
 }
 
 /** Push a single article to all enabled Feishu webhooks.
@@ -52,24 +85,24 @@ export async function getFailedPushTargets(eventId: string): Promise<Array<{ web
  */
 export function pushArticleToFeishu(
   articleId: string,
-  force = false,
+  mode: PushDeliveryMode = 'normal',
   signal?: AbortSignal,
 ): Promise<PushArticleResult> {
   return db.article.findUnique({ where: { id: articleId }, select: { eventId: true } }).then((article) => {
-    if (!article?.eventId) return { status: 'failed', succeeded: 0, failed: 0, message: '文章尚未完成事件聚类' };
-    return pushEventToFeishu(article.eventId, force, signal);
+    if (!article?.eventId) return emptyPushResult(mode, 'failed', '文章尚未完成事件聚类');
+    return pushEventToFeishu(article.eventId, mode, signal);
   });
 }
 
 export function pushEventToFeishu(
   eventId: string,
-  force = false,
+  mode: PushDeliveryMode = 'normal',
   signal?: AbortSignal,
 ): Promise<PushArticleResult> {
   const existing = inFlightPushes.get(eventId);
   if (existing) return existing;
 
-  const task = pushEventToFeishuInternal(eventId, force, signal).finally(() => {
+  const task = pushEventToFeishuInternal(eventId, mode, signal).finally(() => {
     if (inFlightPushes.get(eventId) === task) inFlightPushes.delete(eventId);
   });
   inFlightPushes.set(eventId, task);
@@ -83,7 +116,7 @@ export function getInFlightPushes(): ReadonlyMap<string, Promise<PushArticleResu
 
 async function pushEventToFeishuInternal(
   eventId: string,
-  force = false,
+  mode: PushDeliveryMode,
   signal?: AbortSignal,
 ): Promise<PushArticleResult> {
   assertNotAborted(signal);
@@ -91,29 +124,26 @@ async function pushEventToFeishuInternal(
     where: { id: eventId },
     include: { representativeArticle: { include: { source: { select: { name: true } } } } },
   });
-  if (!event || event.status !== 'active' || !event.representativeArticle) return { status: 'failed', succeeded: 0, failed: 0, message: '事件或代表文章不存在' };
+  if (!event || event.status !== 'active' || !event.representativeArticle) return emptyPushResult(mode, 'failed', '事件或代表文章不存在');
   const article = event.representativeArticle;
   if (article.clusterStatus !== 'clustered') {
-    return { status: 'failed', succeeded: 0, failed: 0, message: '文章尚未完成事件聚类，不能推送' };
+    return emptyPushResult(mode, 'failed', '文章尚未完成事件聚类，不能推送');
   }
   if (article.aiStatus !== 'done') {
-    return { status: 'failed', succeeded: 0, failed: 0, message: '代表文章尚未完成 AI 分析，不能推送' };
+    return emptyPushResult(mode, 'failed', '代表文章尚未完成 AI 分析，不能推送');
   }
 
-  // Already pushed (skip unless force)
-  if (event.pushedAt && !force) return { status: 'completed', succeeded: 0, failed: 0, message: '该事件已推送过' };
-  // 事件级重试时间未到（最近失败过）— 跳过避免重投重复卡片
-  if (event.nextPushRetryAt && event.nextPushRetryAt > new Date() && !force) {
-    return { status: 'failed', succeeded: 0, failed: 0, message: `推送重试等待中，可重试时间: ${event.nextPushRetryAt.toISOString()}` };
+  if (mode === 'retry_failed' && event.nextPushRetryAt && event.nextPushRetryAt > new Date()) {
+    return emptyPushResult(mode, 'failed', `推送重试等待中，可重试时间: ${event.nextPushRetryAt.toISOString()}`);
   }
 
-  if (!force) {
+  if (mode !== 'repush_all') {
     const settings = await readPushSettings();
     if (settings.pushMode === 'off') {
-      return { status: 'failed', succeeded: 0, failed: 0, message: '当前推送模式已关闭' };
+      return emptyPushResult(mode, 'failed', '当前推送模式已关闭');
     }
     if (article.score < settings.minScore || article.relevance < settings.minRelevance) {
-      return { status: 'failed', succeeded: 0, failed: 0, message: '文章未达到推送阈值，请使用“强制推送”' };
+      return emptyPushResult(mode, 'failed', '文章未达到推送阈值');
     }
   }
 
@@ -130,7 +160,17 @@ async function pushEventToFeishuInternal(
     ).values(),
   );
   if (enabled.length === 0) {
-    return { status: 'no_webhooks', succeeded: 0, failed: 0, message: '没有配置启用的 Feishu Webhook URL' };
+    return emptyPushResult(mode, 'no_webhooks', '没有配置启用的 Feishu Webhook URL');
+  }
+
+  const targetStates = await getPushTargetStates(eventId);
+  const selectedUrls = new Set(targetStates.filter((target) => mode === 'repush_all'
+    || (mode === 'retry_failed' ? target.latestStatus === 'failure' : target.latestStatus !== 'success')).map((target) => target.webhookUrl));
+  if (mode === 'retry_failed' && selectedUrls.size === 0) {
+    return emptyPushResult(mode, 'failed', '当前没有失败的推送目标', enabled.length);
+  }
+  if (mode === 'normal' && event.pushedAt && selectedUrls.size === 0) {
+    return emptyPushResult(mode, 'completed', '该事件已完整推送', enabled.length);
   }
 
   // Determine push urgency
@@ -141,30 +181,18 @@ async function pushEventToFeishuInternal(
   const relatedArticles = (await getRelatedArticles(article.id, 3, { onlyPushed: true })) ?? [];
   const card = buildFeishuCard(article, urgency, { relatedArticles });
 
-  // A successful destination is durable in PushLog. On a partial retry, only
-    // send to destinations that have never succeeded for this event.
-  const previousSuccesses = force
-    ? []
-    : await db.pushLog.findMany({
-        where: {
-          eventId,
-          status: 'success',
-          webhookUrl: { in: enabled.map((c) => c.url) },
-        },
-        select: { webhookUrl: true },
-      });
-  const succeededUrls = new Set(previousSuccesses.map((row) => row.webhookUrl));
-
+  let attemptSucceeded = 0;
   for (const config of enabled) {
     assertNotAborted(signal);
-    if (!force && succeededUrls.has(config.url)) continue;
+    if (!selectedUrls.has(config.url)) continue;
     const ok = await pushToSingleWebhook(eventId, article.id, config, card, signal);
-    if (ok) succeededUrls.add(config.url);
+    if (ok) attemptSucceeded++;
   }
 
-  const allSucceeded = enabled.every((config) => succeededUrls.has(config.url));
-  const succeeded = succeededUrls.size;
-  const failedCount = enabled.length - succeeded;
+  const finalStates = await getPushTargetStates(eventId);
+  const allSucceeded = finalStates.length > 0 && finalStates.every((target) => target.latestStatus === 'success');
+  const failedCount = selectedUrls.size - attemptSucceeded;
+  const skipped = enabled.length - selectedUrls.size;
 
   if (allSucceeded) {
     // 全部成功：标记已推送
@@ -172,7 +200,7 @@ async function pushEventToFeishuInternal(
       where: { id: eventId },
       data: { pushedAt: new Date(), nextPushRetryAt: null },
     });
-    return { status: 'completed', succeeded, failed: 0, message: `已推送到 ${succeeded} 个 Webhook` };
+    return { status: 'completed', mode, attempted: selectedUrls.size, succeeded: attemptSucceeded, failed: 0, skipped, message: `已完成 ${selectedUrls.size} 个目标投递` };
   }
 
   // 部分或全部失败：设置重试延迟
@@ -181,10 +209,14 @@ async function pushEventToFeishuInternal(
     data: { nextPushRetryAt: new Date(Date.now() + PUSH_RETRY_DELAY_MS) },
   });
 
-  if (succeeded > 0) {
-    return { status: 'partial', succeeded, failed: failedCount, message: `${succeeded} 成功, ${failedCount} 失败` };
+  if (attemptSucceeded > 0) {
+    return { status: 'partial', mode, attempted: selectedUrls.size, succeeded: attemptSucceeded, failed: failedCount, skipped, message: `${attemptSucceeded} 成功, ${failedCount} 失败` };
   }
-  return { status: 'failed', succeeded: 0, failed: failedCount, message: `全部 ${failedCount} 个 Webhook 推送失败` };
+  return { status: 'failed', mode, attempted: selectedUrls.size, succeeded: 0, failed: failedCount, skipped, message: `全部 ${failedCount} 个 Webhook 推送失败` };
+}
+
+function emptyPushResult(mode: PushDeliveryMode, status: PushArticleResult['status'], message: string, skipped = 0): PushArticleResult {
+  return { status, mode, attempted: 0, succeeded: 0, failed: 0, skipped, message };
 }
 
 /**

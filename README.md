@@ -23,7 +23,7 @@ npm run dev
 
 情报收件箱是全量文章人工校准工作台：左侧直接显示流程、聚类状态、来源数和代表文章，并提供待归类、聚类待复核、低置信度、多来源、代表文章和人工修正视图；右侧集中处理评分、内容、公开策略、聚类依据、成员移动、独立成新事件、事件合并和代表文章。`articleId + panel=cluster/content` 可精确定位文章和校准区。主动重新生成统一提交持久化单篇 Job。Article 保留 AI 与人工校准结果，Event 是公开和推送的唯一门禁。
 
-抓取记录页按真实流水线展示 `采集 → 处理 → 聚类 → AI → 推送`，负责 Job 监控和技术恢复。步骤图标只读，每篇文章只暴露当前失败步骤的恢复操作，只显示简单 AI 完成提示，不重复展示评分和软文判断；`needs_review` 直接跳转情报收件箱，不在抓取记录执行内容审核、强制推送或已完成步骤重跑。聚类未完成时 AI 与推送明确显示为阻塞。
+抓取记录页按真实流水线展示 `采集 → 处理 → 聚类 → AI → 推送`，负责 Job 监控和技术恢复。步骤图标只读，每篇文章只暴露当前失败步骤的恢复操作，只显示简单 AI 完成提示，不传输或展示评分、软文、分类等内容质量字段；“去聚类复核”和“查看内容”分别深链到收件箱对应面板。推送失败只投影到 Event 当前代表 Article，非代表成员显示为不适用。
 
 ## 项目结构
 
@@ -60,7 +60,7 @@ db/                   本地 SQLite 数据（不进入部署包）
 | ai | `src/lib/pipeline/analyze.ts` | 写入摘要、标签、评分和审计字段 |
 | push | `src/lib/pipeline/push-bridge.ts` | 按统一条件投递未推送文章 |
 
-关键 API 约束：`POST /api/crawl` 是批量任务主入口；`POST /api/articles/[id]/workflow` 是单篇处理、聚类、AI 和普通推送恢复/重跑的唯一入口，其中 `retry` 只允许当前可恢复失败步骤，`regenerate` 会按起点重置并重算，且不能用于完整重推；`GET /api/crawl-log/status` 是抓取记录唯一任务快照；`GET /api/admin/work-queue-summary` 返回按唯一 Article 计数的技术与人工队列总数及分项，推送失败按启用目标的最近投递事实判断；`GET /api/events/search` 和 Event 下的确认、移动、拆分、合并、代表文章接口支撑收件箱校准。旧 `/api/articles/refetch`、`/api/articles/reprocess` 和 Article 级 `/api/push` 已删除。Route Handler 只做适配，事务和业务规则由 Service 负责。
+关键 API 约束：`POST /api/crawl` 是批量任务主入口；`POST /api/articles/[id]/workflow` 是单篇处理、聚类、AI 和普通推送恢复/重跑的唯一入口，其中 `retry` 只允许当前可恢复失败步骤，`regenerate` 会按起点重置并重算，且不能用于完整重推。推送服务使用 `normal`、`retry_failed`、`repush_all` 三种明确模式：流水线普通推送、最新失败目标恢复、Event 级完整重推。`GET /api/crawl-log/status` 与 `GET /api/admin/work-queue-summary` 共同复用唯一技术待办事实源；推送失败只映射到代表 Article，并按当前启用目标的最新 PushLog 判断。旧 `/api/articles/refetch`、`/api/articles/reprocess` 和 Article 级 `/api/push` 已删除。Route Handler 只做适配，事务和业务规则由 Service 负责。
 
 `InboxSnapshot` 保存近 90 天的待归类积压快照，概览以此展示积压趋势；快照是派生指标，不改变文章流水线事实。
 

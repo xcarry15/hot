@@ -6,14 +6,12 @@ describe('article-service filters', () => {
     expect(buildArticleListWhere({})).toEqual({});
   });
 
-  it('需要关注包含聚类失败和待复核', () => {
+  it('需要关注只包含人工待办，不混入技术异常', () => {
     expect(buildArticleListWhere({ anomaly: 'needs_attention' })).toEqual({
       AND: [{ OR: [
-        { fetchStatus: 'failed' },
-        { aiStatus: { in: ['failed', 'skipped'] } },
-        { clusterStatus: { in: ['failed', 'needs_review'] } },
-        { aiConfidence: { lt: 70 } },
-        { publicStatus: 'published', reviewStatus: 'unreviewed' },
+        { clusterStatus: 'needs_review' },
+        { aiStatus: 'done', aiConfidence: { lt: 70 } },
+        { reviewStatus: 'unreviewed' },
       ] }],
     });
   });

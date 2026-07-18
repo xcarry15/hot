@@ -63,6 +63,7 @@ vi.mock('@/lib/db', () => ({
     },
     pushLog: {
       create: vi.fn(),
+      findMany: vi.fn(),
       deleteMany: vi.fn(),
     },
     fetchLog: {

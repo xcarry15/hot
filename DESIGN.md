@@ -6,7 +6,7 @@ description: A warm-canvas editorial interface for Anthropic's Claude product. T
 # Scope notice
 # This file is an external visual-style reference only. It does not describe Hot2 product behavior,
 # admin workflow, API contracts, architecture, or implementation status. Use README.md and
-# 聚类可视化与人工校准改造方案.md as the authoritative project documents.
+# AGENTS.md as the authoritative project documents.
 
 colors:
   primary: "#cc785c"

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildRuleEventKey, normalizeEventText, overlapCoefficient } from '@/contracts/event-clustering';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
+import { buildAiClusterAuditEvidence, type AiCandidateAudit } from '@/lib/event-clustering-service';
 
 describe('轻量事件聚类规则', () => {
   it('统一标题中的空白、标点和大小写', () => {
@@ -37,5 +38,20 @@ describe('轻量事件聚类规则', () => {
         ] },
       ],
     });
+  });
+});
+
+describe('聚类 AI 候选审计', () => {
+  const candidates: AiCandidateAudit[] = [
+    { candidateEventId: 'A', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, titleOverlap: 0.5 }, aiDecision: { sameEvent: false, confidence: 58, reason: '周期不同', eventKey: '拒绝键' } },
+    { candidateEventId: 'B', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, titleOverlap: 0.7 }, aiDecision: { sameEvent: true, confidence: 82, reason: '事项一致', eventKey: '采用键' } },
+  ];
+
+  it('先拒绝 A、再接受 B 时保存全部候选并标记 B', () => {
+    expect(buildAiClusterAuditEvidence(candidates, 'B')).toEqual({ selectedCandidateEventId: 'B', candidates });
+  });
+
+  it('全部拒绝时 fallback evidence 保留全部候选且无采用项', () => {
+    expect(buildAiClusterAuditEvidence(candidates.slice(0, 1), null)).toEqual({ selectedCandidateEventId: null, candidates: candidates.slice(0, 1) });
   });
 });

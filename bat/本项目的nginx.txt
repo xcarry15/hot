@@ -1,6 +1,6 @@
 # Hot2 Next.js 生产反向代理模板
 # 应用：127.0.0.1:3011
-# 动态页面绕过全局 proxy_cache；SSE 必须关闭 buffering。
+# 动态页面绕过全局 proxy_cache，避免旧 HTML 引用已删除的构建资源。
 server
 {
     listen 80;
@@ -40,22 +40,6 @@ server
     error_page 497  https://$host$request_uri;
 
     #SSL-END
-
-    # SSE：/api/progress 只发送 snapshot:changed 失效通知。
-    # 关闭缓存和响应缓冲，避免浏览器长时间收不到状态变化。
-    location = /api/progress {
-        proxy_pass http://127.0.0.1:3011;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Connection "";
-        proxy_cache off;
-        proxy_buffering off;
-        proxy_read_timeout 3600s;
-        add_header X-Accel-Buffering no;
-    }
 
     # Next.js 静态文件直接由 Nginx 提供服务（绕过 Node.js）
     location ^~ /_next/static/ {
@@ -109,7 +93,7 @@ server
     }
 
     # 禁止访问的敏感文件
-    location ~* (\.user.ini|\.htaccess|\.htpasswd|\.env.*|\.project|\.bashrc|\.bash_profile|\.bash_logout|\.DS_Store|\.gitignore|\.gitattributes|LICENSE|README\.md|CLAUDE\.md|CHANGELOG\.md|CONTRIBUTING\.md|TODO\.md|FAQ\.md|composer\.json|composer\.lock|package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|\.\w+~|\.swp|\.swo|\.bak(up)?|\.old|\.tmp|\.temp|\.log|\.sql(\.gz)?|docker-compose\.yml|docker\.env|Dockerfile|\.csproj|\.sln|Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|phpunit\.xml|pom\.xml|build\.gradl|pyproject\.toml|requirements\.txt|application(-\w+)?\.(ya?ml|properties))$
+    location ~* (\.user.ini|\.htaccess|\.htpasswd|\.env.*|\.project|\.bashrc|\.bash_profile|\.bash_logout|\.DS_Store|\.gitignore|\.gitattributes|LICENSE|README\.md|AGENTS\.md|DESIGN\.md|CLAUDE\.md|CHANGELOG\.md|CONTRIBUTING\.md|TODO\.md|FAQ\.md|composer\.json|composer\.lock|package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|\.\w+~|\.swp|\.swo|\.bak(up)?|\.old|\.tmp|\.temp|\.log|\.sql(\.gz)?|docker-compose\.yml|docker\.env|Dockerfile|\.csproj|\.sln|Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|phpunit\.xml|pom\.xml|build\.gradl|pyproject\.toml|requirements\.txt|application(-\w+)?\.(ya?ml|properties))$
     {
         return 404;
     }

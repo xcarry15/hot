@@ -13,7 +13,7 @@ import { URL_PARAM_CHIPS, URL_PARAM_SRC, URL_PARAM_DISC, URL_PARAM_TODAY } from 
  * 单个 chip 对一篇文章的命中判断。
  *
  * 这是 filter 的最小判定单元，每个 key 都应是"互不蕴含"的可观察谓词。
- * 例如 'has-fail' 和 'is-ad' 在某些文章上可同时为真，但 'ai-done' 和 'ai-pending' 互斥。
+ * 例如一篇文章可同时命中聚类失败和总失败，但 'ai-done' 和 'ai-pending' 互斥。
  */
 export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boolean {
   switch (key) {
@@ -37,8 +37,6 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
       return article.push === 'pending'
     case 'has-fail':
       return isArticleFailed(article)
-    case 'is-ad':
-      return article.isAd === true
   }
 }
 
