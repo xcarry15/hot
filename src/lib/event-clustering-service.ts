@@ -58,7 +58,7 @@ function candidateEvidence(
 async function createEventForArticle(
   client: ClusterClient,
   article: { id: string; title: string; publishedAt: Date | null; createdAt: Date; eventKey: string },
-  input: { action: 'create' | 'fallback_create'; decisionSource: 'rule' | 'ai'; confidence?: number; evidence: object; needsReview?: boolean },
+  input: { action: 'create' | 'fallback_create'; decisionSource: 'rule' | 'ai'; confidence?: number; evidence: object; needsReview?: boolean; candidateEventId?: string },
 ): Promise<string> {
   const seenAt = articleDate(article);
   const event = await client.event.create({
@@ -85,6 +85,7 @@ async function createEventForArticle(
     data: {
       articleId: article.id,
       assignedEventId: event.id,
+      candidateEventId: input.candidateEventId,
       actor: 'system',
       action: input.action,
       decisionSource: input.decisionSource,
@@ -227,13 +228,29 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     return { eventId, action: 'attach' };
   }
   const ambiguous = ranked.filter(({ evidence }) => evidence.eventKeyMatch || evidence.titleOverlap >= 0.42).slice(0, 2);
+  const aiCandidates: Array<{
+    candidateEventId: string;
+    ruleEvidence: ReturnType<typeof candidateEvidence>;
+    aiDecision: { sameEvent: boolean; confidence: number; reason: string; eventKey: string };
+  }> = [];
   for (const item of ambiguous) {
     const decision = await askAiSameEvent(article, item.candidate, signal);
+    const auditDecision = {
+      candidateEventId: item.candidate.id,
+      ruleEvidence: item.evidence,
+      aiDecision: {
+        sameEvent: decision.same_event,
+        confidence: decision.confidence,
+        reason: decision.reason,
+        eventKey: decision.event_key,
+      },
+    };
+    aiCandidates.push(auditDecision);
     if (decision.event_key && decision.event_key !== eventKey) {
       await db.article.update({ where: { id: article.id }, data: { eventKey: decision.event_key } });
     }
     if (decision.same_event && decision.confidence >= 70) {
-      const eventId = await db.$transaction((tx) => attachArticle(tx, article, item.candidate, 'ai', decision.confidence, { ...item.evidence, reason: decision.reason }));
+      const eventId = await db.$transaction((tx) => attachArticle(tx, article, item.candidate, 'ai', decision.confidence, auditDecision));
       return { eventId, action: 'attach' };
     }
   }
@@ -242,8 +259,9 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     action: needsReview ? 'fallback_create' : 'create',
     decisionSource: needsReview ? 'ai' : 'rule',
     confidence: needsReview ? 50 : 90,
-    evidence: { eventKey, candidates: ambiguous.map((item) => ({ eventId: item.candidate.id, ...item.evidence })) },
+    evidence: { eventKey, candidates: aiCandidates },
     needsReview,
+    candidateEventId: aiCandidates[0]?.candidateEventId,
   }));
   return { eventId, action: needsReview ? 'fallback_create' : 'create' };
 }

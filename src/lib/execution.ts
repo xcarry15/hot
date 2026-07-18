@@ -25,6 +25,11 @@ import { processAllPending } from './pipeline/process';
 import { clusterAllPending } from './pipeline/cluster';
 import { analyzeAllPending } from './pipeline/analyze';
 import { reprocessWithAI } from './ai';
+import { refetchArticle } from './article-refetch-service';
+import { clusterArticle } from './event-clustering-service';
+import { recalculateEventById } from './event-service';
+import { refreshPublicPublication } from './public-publication-service';
+import { getFailedPushTargets, pushArticleToFeishu } from './push/delivery';
 import { pushAllPendingArticles } from './pipeline/push-bridge';
 import { shouldPushAtPipelineEnd } from './push/policy';
 import { db } from './db';
@@ -290,18 +295,20 @@ async function executeCollectJob(
 }
 
 async function executeClusterJob(
-  _payload: Record<string, unknown>,
+  payload: Record<string, unknown>,
   signal?: AbortSignal,
   jobId?: string,
 ): Promise<Record<string, unknown>> {
+  if (isSingleWorkflow(payload)) return executeSingleArticleWorkflow(payload, signal, jobId);
   return { result: await clusterAllPending(signal, jobId) };
 }
 
 async function executeProcessJob(
-  _payload: Record<string, unknown>,
+  payload: Record<string, unknown>,
   signal?: AbortSignal,
   jobId?: string,
 ): Promise<Record<string, unknown>> {
+  if (isSingleWorkflow(payload)) return executeSingleArticleWorkflow(payload, signal, jobId);
   const result = await processAllPending(signal, jobId);
   return { result };
 }
@@ -311,6 +318,7 @@ async function executeAiJob(
   signal?: AbortSignal,
   jobId?: string,
 ): Promise<Record<string, unknown>> {
+  if (isSingleWorkflow(payload)) return executeSingleArticleWorkflow(payload, signal, jobId);
   const articleId = typeof payload.articleId === 'string' ? payload.articleId : undefined;
   const articleIds = Array.isArray(payload.articleIds)
     ? [...new Set(payload.articleIds.filter((id): id is string => typeof id === 'string' && id.length > 0))]
@@ -344,12 +352,113 @@ async function executeAiJob(
 }
 
 async function executePushJob(
-  _payload: Record<string, unknown>,
+  payload: Record<string, unknown>,
   signal?: AbortSignal,
   jobId?: string,
 ): Promise<Record<string, unknown>> {
+  if (isSingleWorkflow(payload)) return executeSingleArticleWorkflow(payload, signal, jobId);
   const result = await pushAllPendingArticles(signal, jobId);
   return { result };
+}
+
+type SingleWorkflowStart = 'process' | 'cluster' | 'ai' | 'push';
+type SingleWorkflowIntent = 'retry' | 'regenerate';
+
+export async function validateSingleArticleWorkflow(
+  articleId: string,
+  startAt: SingleWorkflowStart,
+  intent: SingleWorkflowIntent,
+): Promise<{ ok: true } | { ok: false; status: 404 | 409; reason: string }> {
+  const article = await db.article.findUnique({
+    where: { id: articleId },
+    select: { fetchStatus: true, clusterStatus: true, aiStatus: true, skipReason: true, eventId: true },
+  });
+  if (!article) return { ok: false, status: 404, reason: '文章不存在' };
+  if (intent === 'regenerate') {
+    if (startAt === 'push') return { ok: false, status: 409, reason: '完整重新推送请使用 Event 人工推送' };
+    return { ok: true };
+  }
+  if (startAt === 'process' && article.fetchStatus !== 'failed') {
+    return { ok: false, status: 409, reason: '正文处理未失败，不能执行技术重试' };
+  }
+  if (startAt === 'cluster' && article.clusterStatus !== 'failed') {
+    return { ok: false, status: 409, reason: '聚类未失败，不能执行技术重试' };
+  }
+  if (startAt === 'ai' && article.aiStatus !== 'failed' && !(article.aiStatus === 'skipped' && article.skipReason?.startsWith('AI 连续失败'))) {
+    return { ok: false, status: 409, reason: 'AI 当前不是可恢复失败，不能执行技术重试' };
+  }
+  if (startAt === 'push') {
+    if (!article.eventId) return { ok: false, status: 409, reason: '文章尚未归属 Event，不能重试推送' };
+    if ((await getFailedPushTargets(article.eventId)).length === 0) {
+      return { ok: false, status: 409, reason: '当前没有失败的推送目标' };
+    }
+  }
+  return { ok: true };
+}
+
+function isSingleWorkflow(payload: Record<string, unknown>): boolean {
+  return payload.scope === 'single' && payload.workflow === true && typeof payload.articleId === 'string';
+}
+
+async function executeSingleArticleWorkflow(
+  payload: Record<string, unknown>,
+  signal?: AbortSignal,
+  jobId?: string,
+): Promise<Record<string, unknown>> {
+  const articleId = payload.articleId as string;
+  const startAt = payload.startAt as SingleWorkflowStart;
+  const intent = payload.intent as SingleWorkflowIntent;
+  const valid: readonly SingleWorkflowStart[] = ['process', 'cluster', 'ai', 'push'];
+  if (!valid.includes(startAt)) throw new Error('Invalid single article workflow start stage');
+  const article = await db.article.findUnique({ where: { id: articleId }, select: { id: true, title: true, eventId: true } });
+  if (!article) throw new Error('Article not found');
+  if (intent !== 'retry' && intent !== 'regenerate') throw new Error('Invalid single article workflow intent');
+  const result: Record<string, unknown> = { articleId, startAt, intent, stages: [] as string[] };
+  const stages = result.stages as string[];
+
+  if (startAt === 'process') {
+    if (jobId) await startJobStage(jobId, { stage: 'process', total: 1, currentItemLabel: article.title });
+    result.process = await refetchArticle(articleId);
+    stages.push('process');
+    if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
+  }
+
+  if (startAt === 'cluster' && intent === 'regenerate') {
+    await db.article.update({
+      where: { id: articleId },
+      data: {
+        eventId: null,
+        clusterStatus: 'pending',
+        clusteredAt: null,
+        clusterError: null,
+        clusterRetryCount: 0,
+        nextClusterRetryAt: null,
+        eventKey: '',
+      },
+    });
+    if (article.eventId) await recalculateEventById(article.eventId);
+  }
+
+  if (startAt === 'process' || startAt === 'cluster') {
+    assertNotAborted(signal);
+    if (jobId) await startJobStage(jobId, { stage: 'cluster', total: 1, currentItemLabel: article.title });
+    result.cluster = { eventId: await clusterArticle(articleId, signal) };
+    stages.push('cluster');
+    if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
+  }
+
+  if (startAt !== 'push') {
+    assertNotAborted(signal);
+    result.ai = await reprocessWithAI(articleId, signal, jobId);
+    stages.push('ai');
+    await refreshPublicPublication(articleId);
+  } else {
+    if (jobId) await startJobStage(jobId, { stage: 'push', total: 1, currentItemLabel: article.title });
+    result.push = await pushArticleToFeishu(articleId, false, signal);
+    stages.push('push');
+    if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
+  }
+  return result;
 }
 
 /**

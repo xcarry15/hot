@@ -27,7 +27,7 @@ export async function previewScorePolicy(weightEvent: number, weightContent: num
 export async function previewPublicPublication(minScore: number, hideAds: boolean) {
   const representativeBase = {
     aiStatus: 'done' as const,
-    clusterStatus: { in: ['clustered', 'needs_review'] as string[] },
+    clusterStatus: 'clustered',
     source: { publicEnabled: true, deletedAt: null },
   } as const;
   const eventBase = {
@@ -59,7 +59,7 @@ export async function previewPushDelivery(minScore: number, minRelevance: number
     where: {
       pushedAt: null,
       status: 'active',
-      representativeArticle: { is: { aiStatus: 'done', clusterStatus: { in: ['clustered', 'needs_review'] }, score: { gte: minScore }, relevance: { gte: minRelevance } } },
+      representativeArticle: { is: { aiStatus: 'done', clusterStatus: 'clustered', score: { gte: minScore }, relevance: { gte: minRelevance } } },
       OR: [{ nextPushRetryAt: null }, { nextPushRetryAt: { lte: new Date() } }],
     },
   });

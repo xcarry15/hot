@@ -52,23 +52,6 @@ export const PRESET_SOURCES: PresetSource[] = [
   },
 
   {
-    id: 'winshang',
-    name: '赢商网-项目页',
-    type: 'html',
-    url: 'https://news.winshang.com/list-11.html',
-    parserConfig: JSON.stringify({
-      listItem: '.winew-list li',
-      link: 'h3 a',
-      title: 'h3 a',
-      summary: '.win-new-info',
-      date: '.win-new-tab',
-      fetchDetailPublishedAt: true,
-    }),
-    category: '零售',
-    description: '赢商网项目/购物中心资讯',
-  },
-
-  {
     id: 'winshang-brand',
     name: '赢商网-品牌页',
     type: 'html',
@@ -85,22 +68,6 @@ export const PRESET_SOURCES: PresetSource[] = [
     description: '赢商网品牌动态与行业资讯',
   },
 
-  {
-    id: 'winshang-data',
-    name: '赢商网-数据页',
-    type: 'html',
-    url: 'https://news.winshang.com/list-70.html',
-    parserConfig: JSON.stringify({
-      listItem: '.winew-list li',
-      link: 'h3 a',
-      title: 'h3 a',
-      summary: '.win-new-info',
-      date: '.win-new-tab',
-      fetchDetailPublishedAt: true,
-    }),
-    category: '零售',
-    description: '赢商网商业数据与行业报告',
-  },
 ];
 
 /**

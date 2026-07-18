@@ -46,12 +46,14 @@ export interface ArticleListFilter {
   category?: string;
   minScore?: number;
   minRelevance?: number;
+  maxConfidence?: number;
   sourceId?: string;
   search?: string;
   reviewStatus?: string;
   fetchStatus?: string;
   inbox?: boolean;
-  anomaly?: 'needs_attention';
+  anomaly?: 'needs_attention' | 'technical';
+  clusterView?: 'needs_review' | 'multi_source' | 'representative';
   manualOnly?: boolean;
   sort?: 'newest' | 'oldest' | 'score_desc' | 'score_asc' | 'relevance_desc' | 'relevance_asc' | 'event_desc' | 'event_asc' | 'content_desc' | 'content_asc' | 'ad_desc' | 'ad_asc' | 'confidence_desc' | 'confidence_asc';
 }
@@ -63,6 +65,7 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
   if (filter.category) where.category = filter.category;
   if (Number.isFinite(filter.minScore)) where.score = { gte: filter.minScore };
   if (Number.isFinite(filter.minRelevance)) where.relevance = { gte: filter.minRelevance };
+  if (Number.isFinite(filter.maxConfidence)) where.aiConfidence = { lt: filter.maxConfidence };
   if (filter.sourceId) where.sourceId = filter.sourceId;
   if (filter.reviewStatus) where.reviewStatus = filter.reviewStatus;
   if (filter.fetchStatus) where.fetchStatus = filter.fetchStatus as 'pending' | 'fetched' | 'failed';
@@ -72,20 +75,29 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
   }
   if (filter.anomaly === 'needs_attention') {
     where.OR = [
-      { fetchStatus: 'failed' },
-      { aiStatus: { in: ['failed', 'skipped'] } },
-      { clusterStatus: { in: ['failed', 'needs_review'] } },
-      { aiConfidence: { lt: 70 } },
-      { publicStatus: 'published', reviewStatus: 'unreviewed' },
+      { clusterStatus: 'needs_review' },
+      { aiStatus: 'done', aiConfidence: { lt: 70 } },
+      { reviewStatus: 'unreviewed' },
     ];
   }
+  if (filter.anomaly === 'technical') {
+    where.OR = [
+      { fetchStatus: 'failed' },
+      { aiStatus: 'failed' },
+      { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
+      { clusterStatus: 'failed' },
+    ];
+  }
+  if (filter.clusterView === 'needs_review') where.clusterStatus = 'needs_review';
+  if (filter.clusterView === 'multi_source') where.event = { is: { status: 'active', articleCount: { gt: 1 } } };
+  if (filter.clusterView === 'representative') where.representedEvent = { is: { status: 'active' } };
   if (filter.manualOnly) {
     where.AND = [
       ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
       { NOT: { manualOverrides: '[]' } },
     ];
   }
-  if (filter.anomaly === 'needs_attention') {
+  if (filter.anomaly) {
     const attention = where.OR ?? [];
     where.AND = [
       ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
@@ -344,7 +356,7 @@ export async function getArticleDetail(id: string): Promise<ArticleDetailDto | n
   const pushLogs = article.eventId ? await db.pushLog.findMany({
     where: { eventId: article.eventId },
     orderBy: { createdAt: 'desc' },
-    take: 5,
+    take: 50,
     select: {
       id: true,
       representativeArticleId: true,

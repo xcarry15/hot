@@ -21,9 +21,9 @@ npm run dev
 
 开发地址：`http://localhost:3011`。根路径 `/` 是公开新闻卡片页，文章详情使用 `/news/[id]`；后台位于 `/admin`，当前仅包含“情报收件箱”“抓取记录”“设置”三个页面。生产环境必须在 `.env` 设置 `API_TOKEN`，首次访问后台时输入该 token 建立临时 HttpOnly 会话；Cookie 保存由 Token 派生的会话值，不直接保存可调用 API 的原始 Token，旧版原始 Token Cookie 不再兼容。公开端保持匿名访问。生产部署还应将 `NEXT_PUBLIC_SITE_URL` 设置为正式访问地址，用于 canonical、Open Graph 和 sitemap。公开导航中的“工具”“数据”目前是占位入口，暂未提供实际页面。
 
-情报收件箱是全量文章人工校准工作台：保持左侧紧凑表格与右侧详情布局，默认展示全部文章，支持人工评分、内容判断、归类、公开策略、恢复 AI 原值、重新分析和重新抓取。Article 保留 AI 与人工校准结果；每篇文章必须先归入轻量 Event，右侧可查看同事件全部来源，并支持合并事件、拆分文章和人工指定代表文章。Event 是重复公开和重复推送的唯一门禁，同一事件新增来源不会再次推送。
+情报收件箱是全量文章人工校准工作台：左侧直接显示流程、聚类状态、来源数和代表文章，并提供待归类、聚类待复核、低置信度、多来源、代表文章和人工修正视图；右侧集中处理评分、内容、公开策略、聚类依据、成员移动、独立成新事件、事件合并和代表文章。`articleId + panel=cluster/content` 可精确定位文章和校准区。主动重新生成统一提交持久化单篇 Job。Article 保留 AI 与人工校准结果，Event 是公开和推送的唯一门禁。
 
-抓取记录页按真实流水线展示 `采集 → 处理 → 聚类 → AI → 推送`，支持筛选待聚类、聚类失败和待复核文章，并可单独运行事件聚类阶段。聚类未完成时 AI 与推送明确显示为阻塞；URL 完全相同造成的未入库记录统一标记为“链接已存在”，不再沿用旧内容去重语义。
+抓取记录页按真实流水线展示 `采集 → 处理 → 聚类 → AI → 推送`，负责 Job 监控和技术恢复。步骤图标只读，每篇文章只暴露当前失败步骤的恢复操作，只显示简单 AI 完成提示，不重复展示评分和软文判断；`needs_review` 直接跳转情报收件箱，不在抓取记录执行内容审核、强制推送或已完成步骤重跑。聚类未完成时 AI 与推送明确显示为阻塞。
 
 ## 项目结构
 
@@ -60,17 +60,17 @@ db/                   本地 SQLite 数据（不进入部署包）
 | ai | `src/lib/pipeline/analyze.ts` | 写入摘要、标签、评分和审计字段 |
 | push | `src/lib/pipeline/push-bridge.ts` | 按统一条件投递未推送文章 |
 
-关键 API 约束：`POST /api/crawl` 是批量任务的主入口；`GET /api/dashboard/analytics` 提供按周期和数据源聚合的内容质量分析；`POST /api/sources/retry` 只重试数据源采集；`POST /api/push` 只推送单篇文章；`GET /api/crawl-log/status` 是抓取记录页唯一任务快照来源；`POST /api/worker/stop` 停止当前任务；`POST /api/articles/review` 处理收件箱归类；`GET/POST /api/feedback` 处理调优建议。Route Handler 只做适配，事务和业务规则由 Service 负责。不要新增并行的批量编排入口、独立队列或绕过 `src/lib/execution.ts` 的后台任务；历史兼容目录即使存在，也不应作为新功能入口。
+关键 API 约束：`POST /api/crawl` 是批量任务主入口；`POST /api/articles/[id]/workflow` 是单篇处理、聚类、AI 和普通推送恢复/重跑的唯一入口，其中 `retry` 只允许当前可恢复失败步骤，`regenerate` 会按起点重置并重算，且不能用于完整重推；`GET /api/crawl-log/status` 是抓取记录唯一任务快照；`GET /api/admin/work-queue-summary` 返回按唯一 Article 计数的技术与人工队列总数及分项，推送失败按启用目标的最近投递事实判断；`GET /api/events/search` 和 Event 下的确认、移动、拆分、合并、代表文章接口支撑收件箱校准。旧 `/api/articles/refetch`、`/api/articles/reprocess` 和 Article 级 `/api/push` 已删除。Route Handler 只做适配，事务和业务规则由 Service 负责。
 
 `InboxSnapshot` 保存近 90 天的待归类积压快照，概览以此展示积压趋势；快照是派生指标，不改变文章流水线事实。
 
 `Job`、`FetchLog`、`PushLog`、`DiscardedItem` 和 `EventClusterAudit` 分别记录任务、采集、事件目标级推送、未入库条目和聚类/人工纠错事实。`Article` 记录全文、AI 与人工校准、归类和事件归属；`Event` 记录代表文章、来源数量、公开状态和唯一推送状态。PushLog 关联 Event，并保存投递时的代表 Article；历史展示与来源统计使用该发送时快照，不跟随当前代表文章变化。未配置可用 Webhook 时，批量推送直接跳过，不为每个 Event 重复写失败日志。
 
-设置默认值、校验、敏感性和导出策略集中在 `src/lib/settings-catalog.ts`；AI Provider 定义在 `src/contracts/ai-provider.ts`。事件聚类规则集中在 `src/contracts/event-clustering.ts`：只比较最近 7 天 active Event，内容指纹或标准化标题完全一致时直接归入，规则证据不足时调用 AI，仍不确定则保守新建并标记复核。第一版不引入 Embedding。
+设置默认值、校验、敏感性和导出策略集中在 `src/lib/settings-catalog.ts`；AI Provider 定义在 `src/contracts/ai-provider.ts`。事件聚类规则集中在 `src/contracts/event-clustering.ts`：只比较最近 7 天 active Event，内容指纹或标准化标题完全一致时直接归入，规则证据不足时调用 AI，仍不确定则保守新建并标记复核。`needs_review` 允许继续 AI，但禁止公开和推送，必须人工确认独立或移动到正确 Event。第一版不引入 Embedding。
 
 AI 重置由 `src/lib/article-ai-reset.ts` 中的重置 helper 统一生成，重新分析继续保留人工覆盖。旧 Article duplicate 状态和“取消重复并分析”入口已经删除；内容指纹只作为 Event 聚类证据。
 
-公开端保持自动发布：AI 完成、来源允许公开并满足评分/软文规则后进入公开快照；后台可人工修正摘要、品牌、分类、标签和关键点，并对单篇立即公开、隐藏或恢复自动规则。收件箱支持组合筛选与“需要人工介入”视图；采用未命中候选词时最多恢复 50 条对应记录并交回现有处理流水线。
+公开端保持自动发布：只有代表 Article 已完成聚类（`clusterStatus=clustered`）、AI 完成、来源允许公开并满足评分/软文规则时才进入公开快照；`pending`、`failed`、`needs_review` 均不得公开或推送。后台可人工修正摘要、品牌、分类、标签、关键点和评分，并对单篇设置公开、隐藏或恢复自动规则。收件箱使用人工待处理视图，不把抓取、聚类、AI 或推送技术失败混入人工队列。
 
 ## 数据库与生产部署
 
@@ -106,7 +106,7 @@ npm run test:all
 npm run build
 ```
 
-新增业务入口前先检查是否可归入现有 Route/Service；默认值只维护在对应目录；数据库字段变更必须同时提交 schema、migration、存量库 baseline 兼容处理和发布说明；API 新字段必须同步 DTO、序列化函数和消费者，不得直接把 Prisma model 返回浏览器。修改设置、Provider 或去重规则时同步契约、校验、UI 和测试。逻辑变更应补充对应 Vitest 回归测试。
+新增业务入口前先检查是否可归入现有 Route/Service；默认值只维护在对应目录；数据库字段变更必须同时提交 schema、migration 和发布说明。当前业务数据按重新采集处理，不为旧 Article/Event 数据增加双读、回填或兼容分支。API 新字段必须同步 DTO、序列化函数和消费者，不得直接把 Prisma model 返回浏览器。修改设置、Provider、聚类或去重规则时同步契约、校验、UI、README 和相关实施文档。逻辑变更应补充对应 Vitest 回归测试。
 
 ## 安全与发布文件
 

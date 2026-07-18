@@ -12,7 +12,9 @@ Hot2 is a Next.js 16 App Router application with React 19, TypeScript, Prisma, a
 
 The admin navigation is intentionally limited to `情报收件箱`, `抓取记录`, and `设置`. The public `工具` and `数据` links are placeholders until their routes are implemented.
 
-Use the architecture and database sections in `README.md` as the repository reference; keep them synchronized with the source code and migrations.
+Admin responsibility boundaries are fixed: `抓取记录` owns Job monitoring and technical recovery; `情报收件箱` owns Article content calibration, human review, Event correction, publication decisions, and Event-level manual push. Single-article retries/regeneration must use `POST /api/articles/[id]/workflow`: `retry` is restricted to a recoverable failed stage, while `regenerate` resets and recomputes from the requested stage and cannot be used for full repush. Do not recreate browser-memory queues or the removed refetch/reprocess/Article-push routes. Work-queue navigation counts must use unique Article totals, and `needs_review` may continue AI analysis but must never be public or pushed.
+
+Use the architecture and database sections in `README.md` as the repository reference. `聚类可视化与人工校准改造方案.md` records only the remaining admin workflow and Event-calibration work; remove completed items as implementation progresses and keep the final contracts synchronized with `README.md` and source code. `DESIGN.md` is visual reference only and must not be treated as product or architecture truth.
 
 ## Build, Test, and Development Commands
 

@@ -119,7 +119,10 @@ export async function getEventArticles(eventId: string) {
       representativeArticleId: true,
       representativeManual: true,
       articleCount: true,
+      publicStatus: true,
       pushedAt: true,
+      firstSeenAt: true,
+      lastSeenAt: true,
       articles: {
         orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
         select: {
@@ -135,18 +138,189 @@ export async function getEventArticles(eventId: string) {
           source: { select: { name: true, type: true } },
         },
       },
+      assignedAudits: {
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          articleId: true,
+          candidateEventId: true,
+          actor: true,
+          action: true,
+          decisionSource: true,
+          confidence: true,
+          evidence: true,
+          createdAt: true,
+          candidateEvent: {
+            select: {
+              id: true,
+              status: true,
+              representativeArticle: { select: { title: true } },
+            },
+          },
+        },
+      },
     },
   });
   if (!event) return null;
+  const parsedAudits = event.assignedAudits.map((audit) => ({ ...audit, evidence: parseAuditEvidence(audit.evidence) }));
+  const candidateIds = [...new Set(parsedAudits.flatMap((audit) => {
+    const candidates = audit.evidence.candidates;
+    if (!Array.isArray(candidates)) return [];
+    return candidates.flatMap((candidate) => {
+      if (!candidate || typeof candidate !== 'object') return [];
+      const id = (candidate as { candidateEventId?: unknown }).candidateEventId;
+      return typeof id === 'string' ? [id] : [];
+    });
+  }))];
+  const candidateEvents = candidateIds.length === 0 ? [] : await db.event.findMany({
+    where: { id: { in: candidateIds } },
+    select: { id: true, representativeArticle: { select: { title: true } } },
+  });
+  const candidateTitles = new Map(candidateEvents.map((candidate) => [candidate.id, candidate.representativeArticle?.title ?? '']));
   return {
     ...event,
     pushedAt: event.pushedAt?.toISOString() ?? null,
+    firstSeenAt: event.firstSeenAt.toISOString(),
+    lastSeenAt: event.lastSeenAt.toISOString(),
+    audits: parsedAudits.map((audit) => ({
+      ...audit,
+      evidence: {
+        ...audit.evidence,
+        ...(Array.isArray(audit.evidence.candidates) ? {
+          candidates: audit.evidence.candidates.map((candidate) => {
+            if (!candidate || typeof candidate !== 'object') return candidate;
+            const value = candidate as Record<string, unknown>;
+            const id = typeof value.candidateEventId === 'string' ? value.candidateEventId : '';
+            return { ...value, candidateTitle: candidateTitles.get(id) || '' };
+          }),
+        } : {}),
+      },
+      createdAt: audit.createdAt.toISOString(),
+    })),
     articles: event.articles.map((article) => ({
       ...article,
       publishedAt: article.publishedAt?.toISOString() ?? null,
       createdAt: article.createdAt.toISOString(),
     })),
   };
+}
+
+function parseAuditEvidence(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+async function refreshEventRepresentatives(eventIds: string[]): Promise<void> {
+  const events = await db.event.findMany({
+    where: { id: { in: [...new Set(eventIds)] } },
+    select: { representativeArticleId: true },
+  });
+  for (const event of events) {
+    if (event.representativeArticleId) await refreshPublicPublication(event.representativeArticleId);
+  }
+  invalidatePublicArticleCache();
+}
+
+export async function confirmIndependentArticle(eventId: string, articleId: string): Promise<boolean> {
+  const updated = await db.$transaction(async (tx) => {
+    const article = await tx.article.findFirst({
+      where: { id: articleId, eventId, clusterStatus: 'needs_review' },
+      select: { id: true },
+    });
+    if (!article) return false;
+    await tx.article.update({
+      where: { id: articleId },
+      data: { clusterStatus: 'clustered', clusteredAt: new Date(), clusterError: null },
+    });
+    await tx.eventClusterAudit.create({
+      data: {
+        articleId,
+        assignedEventId: eventId,
+        actor: 'admin',
+        action: 'confirm_independent',
+        decisionSource: 'admin',
+        confidence: 100,
+        evidence: JSON.stringify({ eventId }),
+      },
+    });
+    return true;
+  });
+  if (updated) await refreshEventRepresentatives([eventId]);
+  return updated;
+}
+
+export async function moveArticleToEvent(articleId: string, targetEventId: string): Promise<boolean> {
+  const result = await db.$transaction(async (tx) => {
+    const [article, target] = await Promise.all([
+      tx.article.findUnique({ where: { id: articleId }, select: { id: true, eventId: true } }),
+      tx.event.findUnique({ where: { id: targetEventId }, select: { id: true, status: true } }),
+    ]);
+    if (!article?.eventId || article.eventId === targetEventId || target?.status !== 'active') return null;
+    const sourceEventId = article.eventId;
+    await tx.article.update({
+      where: { id: articleId },
+      data: { eventId: targetEventId, clusterStatus: 'clustered', clusteredAt: new Date(), clusterError: null },
+    });
+    await recalculateEvent(tx, sourceEventId);
+    await recalculateEvent(tx, targetEventId);
+    await tx.eventClusterAudit.create({
+      data: {
+        articleId,
+        assignedEventId: targetEventId,
+        candidateEventId: sourceEventId,
+        actor: 'admin',
+        action: 'move',
+        decisionSource: 'admin',
+        confidence: 100,
+        evidence: JSON.stringify({ sourceEventId, targetEventId }),
+      },
+    });
+    return { sourceEventId };
+  });
+  if (!result) return false;
+  await refreshEventRepresentatives([result.sourceEventId, targetEventId]);
+  return true;
+}
+
+export async function searchActiveEvents(query: string, excludeEventId?: string) {
+  const term = query.trim();
+  const events = await db.event.findMany({
+    where: {
+      status: 'active',
+      ...(excludeEventId ? { id: { not: excludeEventId } } : {}),
+      ...(term ? {
+        OR: [
+          { id: { contains: term } },
+          { representativeArticle: { is: { title: { contains: term } } } },
+          { articles: { some: { OR: [
+            { title: { contains: term } },
+            { brand: { contains: term } },
+            { eventKey: { contains: term } },
+          ] } } },
+        ],
+      } : { lastSeenAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } }),
+    },
+    orderBy: { lastSeenAt: 'desc' },
+    take: 20,
+    select: {
+      id: true,
+      articleCount: true,
+      lastSeenAt: true,
+      publicStatus: true,
+      pushedAt: true,
+      representativeArticle: { select: { title: true, source: { select: { name: true } } } },
+    },
+  });
+  return events.map((event) => ({
+    ...event,
+    lastSeenAt: event.lastSeenAt.toISOString(),
+    pushedAt: event.pushedAt?.toISOString() ?? null,
+  }));
 }
 
 export async function setEventRepresentative(eventId: string, articleId: string): Promise<boolean> {
@@ -256,7 +430,7 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
           assignedEventId: created.id,
           candidateEventId: eventId,
           actor: 'admin',
-          action: 'split',
+          action: 'manual_create',
           decisionSource: 'admin',
           confidence: 100,
           evidence: JSON.stringify({ sourceEventId: eventId, newEventId: created.id }),

@@ -25,15 +25,16 @@ export interface ArticleListFilter {
   brand?: string;
   minScore?: number;
   minRelevance?: number;
+  maxConfidence?: number;
   reviewStatus?: string;
   fetchStatus?: string;
   inbox?: boolean;
   sourceId?: string;
-  anomaly?: 'needs_attention';
+  anomaly?: 'needs_attention' | 'technical';
+  clusterView?: 'needs_review' | 'multi_source' | 'representative';
   manualOnly?: boolean;
   sort?: 'newest' | 'oldest' | 'score_desc' | 'score_asc' | 'relevance_desc' | 'relevance_asc' | 'event_desc' | 'event_asc' | 'content_desc' | 'content_asc' | 'ad_desc' | 'ad_asc' | 'confidence_desc' | 'confidence_asc';
 }
-
 export async function fetchArticleList(
   filter: ArticleListFilter,
   signal?: AbortSignal,
@@ -47,11 +48,13 @@ export async function fetchArticleList(
   if (filter.brand) params.set('brand', filter.brand);
   if (typeof filter.minScore === 'number') params.set('minScore', String(filter.minScore));
   if (typeof filter.minRelevance === 'number') params.set('minRelevance', String(filter.minRelevance));
+  if (typeof filter.maxConfidence === 'number') params.set('maxConfidence', String(filter.maxConfidence));
   if (filter.reviewStatus) params.set('reviewStatus', filter.reviewStatus);
   if (filter.fetchStatus) params.set('fetchStatus', filter.fetchStatus);
   if (filter.inbox) params.set('inbox', 'true');
   if (filter.sourceId) params.set('sourceId', filter.sourceId);
   if (filter.anomaly) params.set('anomaly', filter.anomaly);
+  if (filter.clusterView) params.set('clusterView', filter.clusterView);
   if (filter.manualOnly) params.set('manualOnly', 'true');
   if (filter.sort) params.set('sort', filter.sort);
 
@@ -87,6 +90,15 @@ export async function fetchArticleDetail(
 ): Promise<ArticleDetailDto> {
   return requestJson<ArticleDetailDto>('GET', `/api/articles/${articleId}`, { signal });
 }
+export async function triggerArticleWorkflow(
+  articleId: string,
+  startAt: 'process' | 'cluster' | 'ai' | 'push',
+  intent: 'retry' | 'regenerate',
+): Promise<{ queued: boolean; jobId?: string; reason?: string }> {
+  return requestJson('POST', `/api/articles/${encodeURIComponent(articleId)}/workflow`, {
+    body: { startAt, intent },
+  });
+}
 
 export async function fetchRelatedByBrand(
   articleId: string,
@@ -100,41 +112,4 @@ export async function fetchRelatedByBrand(
     if (isRequestJsonError(error, 404)) return { items: [] };
     throw error;
   }
-}
-
-export async function triggerArticleReprocess(
-  articleId: string,
-  signal?: AbortSignal,
-): Promise<unknown> {
-  return requestJson('POST', '/api/articles/reprocess', {
-    body: { articleId },
-    signal,
-    // AI 已由服务端 Job 接管；切换页面时仍确保这个短请求能够提交出去。
-    keepalive: true,
-  });
-}
-
-export async function triggerArticleRefetch(
-  articleId: string,
-  signal?: AbortSignal,
-): Promise<unknown> {
-  return requestJson('POST', '/api/articles/refetch', { body: { articleId }, signal });
-}
-
-export async function triggerArticlesRefetch(articleIds: string[]): Promise<{ processed: number; failed: number }> {
-  return requestJson('POST', '/api/articles/refetch', { body: { articleIds } });
-}
-
-export async function triggerArticlesReprocess(articleIds: string[]): Promise<{ success: boolean; queued: boolean; jobId?: string }> {
-  return requestJson('POST', '/api/articles/reprocess', { body: { articleIds } });
-}
-
-export async function triggerPushArticle(
-  articleId: string,
-  options: { force?: boolean; signal?: AbortSignal } = {},
-): Promise<unknown> {
-  return requestJson('POST', '/api/push', {
-    body: { articleId, force: !!options.force },
-    signal: options.signal,
-  });
 }

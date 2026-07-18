@@ -30,13 +30,8 @@ import { useCrawlLogSnapshot } from './crawl-log/use-crawl-log-snapshot'
 import { EmptyState } from '@/components/ui/empty-state'
 import ArticleDetailSheet from './article-detail-sheet'
 import { fetchSettings, saveSettings } from '@/features/settings-api.client'
-import {
-  refetchArticle,
-  reprocessArticle,
-  stopWorker,
-  triggerCrawlStage,
-} from '@/features/jobs-api.client'
-import { triggerPushArticle } from '@/features/articles-api.client'
+import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
+import { triggerArticleWorkflow } from '@/features/articles-api.client'
 import { retrySource, retrySources } from '@/features/sources-api.client'
 
 // ========== Main Component ==========
@@ -324,114 +319,32 @@ export default function CrawlLogTab() {
   // ── Per-article step actions（局部 loading，不持久化） ──
 
   const [stepActionLoading, setStepActionLoading] = useState<Record<string, boolean>>({})
-  type StepAction = { articleId: string; step: 'process' | 'ai' | 'push'; force?: boolean; resolve: (ok: boolean) => void }
-  const stepQueueRef = useRef<StepAction[]>([])
-  const stepQueueRunningRef = useRef(false)
-  const [stepQueueVersion, setStepQueueVersion] = useState(0)
-
   const isStepActionLoading = useCallback(
-    (articleId: string, step: 'process' | 'ai' | 'push') =>
+    (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') =>
       stepActionLoading[`${articleId}:${step}`] === true,
     [stepActionLoading],
   )
 
-  const executeStepAction = useCallback(async (task: Omit<StepAction, 'resolve'>): Promise<boolean> => {
-    const { articleId, step, force } = task
-    try {
-      if (step === 'process') {
-        await refetchArticle(articleId)
-      } else if (step === 'ai') {
-        await reprocessArticle(articleId)
-      } else {
-        const res = await triggerPushArticle(articleId, { force }) as { status: string; succeeded?: number; failed?: number; message?: string; success?: boolean }
-        // P0-2: 区分推送结果状态，不再无条件提示成功
-        const status: string = res?.status ?? (res?.success ? 'completed' : 'failed')
-        if (status === 'completed') {
-          toast.success('推送成功', { duration: 1500 })
-        } else if (status === 'partial') {
-          toast.warning(`部分推送成功（${res.succeeded ?? 0}/${(res.succeeded ?? 0) + (res.failed ?? 0)}）`, { duration: 3000 })
-        } else if (status === 'no_webhooks') {
-          toast.error(res?.message ?? '没有配置启用的 Webhook', { duration: 3000 })
-        } else {
-          toast.error(res?.message ?? '推送失败', { duration: 3000 })
-        }
-        void refreshSnapshot()
-        return status === 'completed' || status === 'partial'
-      }
-      const toastLabel = step === 'process' ? '详情抓取已触发'
-        : step === 'ai' ? 'AI 分析已触发'
-        : '推送已触发'
-      toast.success(toastLabel, { duration: 1500 })
-      void refreshSnapshot()
-      return true
-    } catch (error) {
-      const status = error && typeof error === 'object' && 'status' in error
-        ? Number((error as { status?: unknown }).status)
-        : 0
-      if (status === 499) {
-        toast.info('当前请求已取消，队列继续处理下一项', { duration: 1800 })
-      } else {
-        toast.error('操作失败')
-      }
-      return false
-    }
-  }, [refreshSnapshot])
-
-  useEffect(() => {
-    if (isAnyRunning || stepQueueRunningRef.current || stepQueueRef.current.length === 0) return
-    stepQueueRunningRef.current = true
-    const task = stepQueueRef.current.shift()!
-    const key = `${task.articleId}:${task.step}`
-    void executeStepAction(task).then(task.resolve, () => task.resolve(false)).finally(() => {
-      setStepActionLoading(prev => {
-        const next = { ...prev }
-        delete next[key]
-        return next
-      })
-      stepQueueRunningRef.current = false
-      setStepQueueVersion(value => value + 1)
-    })
-  }, [executeStepAction, isAnyRunning, stepQueueVersion])
-
   const handleStepAction = useCallback(async (
     articleId: string,
-    step: 'process' | 'ai' | 'push',
-    options: { force?: boolean } = {},
+    step: 'process' | 'cluster' | 'ai' | 'push',
   ): Promise<boolean> => {
     const key = `${articleId}:${step}`
     if (stepActionLoading[key]) return false
-    const snapshotArticle = sources.flatMap(source => source.articles).find(article => article.id === articleId)
-    const force = options.force ?? snapshotArticle?.push === 'filtered'
-    if (step === 'push' && force && typeof window !== 'undefined'
-      && !window.confirm('该操作将绕过推送阈值或重复推送保护，确认继续吗？')) return false
-
     setStepActionLoading(prev => ({ ...prev, [key]: true }))
-
-    // AI 重处理现在由服务端 Job 后台执行。没有正在运行的任务或排队操作时，
-    // 直接在点击事件中提交请求，避免先放入组件内存队列后因切页而丢失。
-    const canSubmitAiImmediately = step === 'ai'
-      && !isAnyRunning
-      && !stepQueueRunningRef.current
-      && stepQueueRef.current.length === 0
-    if (canSubmitAiImmediately) {
-      try {
-        return await executeStepAction({ articleId, step, force })
-      } finally {
-        setStepActionLoading(prev => {
-          const next = { ...prev }
-          delete next[key]
-          return next
-        })
-      }
+    try {
+      const result = await triggerArticleWorkflow(articleId, step, 'retry')
+      if (!result.queued) throw new Error(result.reason || '任务未能启动')
+      toast.success('恢复任务已启动，可持续查看 Job 进度', { duration: 1800 })
+      void refreshSnapshot()
+      return true
+    } catch {
+      toast.error('操作失败')
+      return false
+    } finally {
+      setStepActionLoading(prev => { const next = { ...prev }; delete next[key]; return next })
     }
-
-    const queuedAhead = stepQueueRef.current.length + (stepQueueRunningRef.current || isAnyRunning ? 1 : 0)
-    if (queuedAhead > 0) toast.info(`已加入操作队列，前方 ${queuedAhead} 项`, { duration: 1500 })
-    return new Promise<boolean>(resolve => {
-      stepQueueRef.current.push({ articleId, step, force, resolve })
-      setStepQueueVersion(value => value + 1)
-    })
-  }, [executeStepAction, isAnyRunning, sources, stepActionLoading])
+  }, [refreshSnapshot, stepActionLoading])
 
   const handleOpenArticle = useCallback((articleId: string) => {
     setDetailKind('article')

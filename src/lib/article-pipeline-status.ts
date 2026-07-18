@@ -119,6 +119,8 @@ export function projectArticleSteps(
 
   if (article.eventPushedAt) {
     pushStatus = 'done';
+  } else if (article.clusterStatus === 'needs_review') {
+    pushStatus = 'blocked';
   } else if (cluster !== 'done' || (ai !== 'done' && ai !== 'failed' && ai !== 'skipped')) {
     // process 未完成，或 ai 尚未 ready（含 pending / blocked）
     pushStatus = 'blocked';

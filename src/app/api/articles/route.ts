@@ -24,12 +24,16 @@ export async function GET(request: Request) {
       category: searchParams.get('category') ?? undefined,
       minScore: parseOptionalInt(searchParams.get('minScore')),
       minRelevance: parseOptionalInt(searchParams.get('minRelevance')),
+      maxConfidence: parseOptionalInt(searchParams.get('maxConfidence')),
       sourceId: searchParams.get('sourceId') ?? undefined,
       search: searchParams.get('search') ?? undefined,
       reviewStatus: searchParams.get('reviewStatus') ?? undefined,
       fetchStatus: searchParams.get('fetchStatus') ?? undefined,
       inbox: searchParams.get('inbox') === 'true',
-      anomaly: searchParams.get('anomaly') === 'needs_attention' ? 'needs_attention' as const : undefined,
+      anomaly: searchParams.get('anomaly') === 'needs_attention' || searchParams.get('anomaly') === 'technical'
+        ? searchParams.get('anomaly') as 'needs_attention' | 'technical'
+        : undefined,
+      clusterView: parseClusterView(searchParams.get('clusterView')),
       manualOnly: searchParams.get('manualOnly') === 'true',
       sort: parseSort(searchParams.get('sort')),
     };
@@ -41,6 +45,10 @@ export async function GET(request: Request) {
   } catch (error: unknown) {
     return apiError(error, 'Failed to fetch articles');
   }
+}
+
+function parseClusterView(raw: string | null): 'needs_review' | 'multi_source' | 'representative' | undefined {
+  return raw === 'needs_review' || raw === 'multi_source' || raw === 'representative' ? raw : undefined;
 }
 
 function parseSort(raw: string | null): 'newest' | 'oldest' | 'score_desc' | 'score_asc' | 'relevance_desc' | 'relevance_asc' | 'event_desc' | 'event_asc' | 'content_desc' | 'content_asc' | 'ad_desc' | 'ad_asc' | 'confidence_desc' | 'confidence_asc' | undefined {

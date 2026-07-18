@@ -1,7 +1,6 @@
 import { memo, useCallback } from 'react'
 import { formatPubDate } from './helpers'
 import { StepIndicator, SkipBadge } from './step-indicator'
-import { ScoreBadge } from '@/components/ui/score-badge'
 import type { ArticleProgress } from './types'
 
 // ========== Article Row ==========
@@ -14,8 +13,8 @@ export const ArticleRow = memo(function ArticleRow({
   isJobRunning,
 }: {
   article: ArticleProgress
-  onStepAction?: (articleId: string, step: 'process' | 'ai' | 'push', options?: { force?: boolean }) => void
-  onStepActionLoading?: (articleId: string, step: 'process' | 'ai' | 'push') => boolean
+  onStepAction?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => void
+  onStepActionLoading?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => boolean
   onOpenArticle?: (articleId: string) => void
   /** P1-1: 批量 Job 运行时，单篇动作禁用，避免并发冲突 */
   isJobRunning?: boolean
@@ -24,17 +23,26 @@ export const ArticleRow = memo(function ArticleRow({
   const pubDate = formatPubDate(article.publishedAt)
 
 
-  const handleProcess = useCallback(() => {
-    onStepAction?.(article.id, 'process')
-  }, [onStepAction, article.id])
+  const nextAction = article.process === 'failed'
+    ? { step: 'process' as const, label: '重试处理' }
+    : article.cluster === 'failed'
+      ? { step: 'cluster' as const, label: '重试聚类' }
+      : article.clusterStatus === 'needs_review'
+        ? { step: 'review' as const, label: '去复核' }
+        : article.ai === 'failed' || (article.ai === 'skipped' && article.skipReason?.startsWith('AI 连续失败'))
+          ? { step: 'ai' as const, label: '重试 AI' }
+          : article.push === 'failed'
+            ? { step: 'push' as const, label: '重试投递' }
+            : null
 
-  const handleAi = useCallback(() => {
-    onStepAction?.(article.id, 'ai')
-  }, [onStepAction, article.id])
-
-  const handlePush = useCallback(() => {
-    onStepAction?.(article.id, 'push', { force: article.push === 'filtered' || article.push === 'done' })
-  }, [onStepAction, article.id, article.push])
+  const handleNextAction = useCallback(() => {
+    if (!nextAction) return
+    if (nextAction.step === 'review') {
+      window.location.href = `/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=cluster`
+      return
+    }
+    onStepAction?.(article.id, nextAction.step)
+  }, [article.id, nextAction, onStepAction])
 
   const handleOpen = useCallback(() => {
     onOpenArticle?.(article.id)
@@ -56,22 +64,7 @@ export const ArticleRow = memo(function ArticleRow({
           {pubDate}
         </span>
       )}
-      {typeof article.aiScore === 'number' && article.aiScore > 0 && (
-        <ScoreBadge
-          score={article.aiScore}
-          variant="compact"
-          details={{
-            eventScore: article.eventScore,
-            contentScore: article.contentScore,
-            rawScore: article.rawScore,
-            adProbability: article.adProbability,
-            aiConfidence: article.aiConfidence,
-          }}
-        />
-      )}
-      {article.isAd && (
-        <span className="text-[10px] px-1 py-0 rounded-full bg-red-100 text-red-700 shrink-0 leading-5">软文</span>
-      )}
+      {article.ai === 'done' && <span className="shrink-0 text-[10px] text-muted-foreground">AI完成</span>}
       {article.clusterStatus === 'needs_review' && (
         <span className="shrink-0 bg-amber-100 px-1 text-[10px] leading-5 text-amber-800">待复核</span>
       )}
@@ -87,11 +80,7 @@ export const ArticleRow = memo(function ArticleRow({
       )}
       <div className="flex items-center gap-0.5 shrink-0 group-hover:ring-1 group-hover:ring-blue-300 group-hover:ring-offset-1">
         <StepIndicator label="采集" status={article.crawl} />
-        <StepIndicator
-          label="处理"
-          status={processLoading ? 'running' : article.process}
-          onClick={!isJobRunning && !processLoading && (article.process === 'pending' || article.process === 'failed' || article.process === 'done') ? handleProcess : undefined}
-        />
+        <StepIndicator label="处理" status={processLoading ? 'running' : article.process} />
         <StepIndicator
           label="聚类"
           status={article.cluster}
@@ -101,20 +90,10 @@ export const ArticleRow = memo(function ArticleRow({
               ? `聚类将于 ${new Date(article.clusterRetryAt).toLocaleString('zh-CN')} 后自动重试`
               : undefined}
         />
-        <StepIndicator
-          label="AI分析"
-          status={aiLoading ? 'running' : article.ai}
-          onClick={!isJobRunning && !aiLoading && (article.ai === 'pending' || article.ai === 'failed' || article.ai === 'skipped' || article.ai === 'done') ? handleAi : undefined}
-          title={article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined}
-        />
-        <StepIndicator
-          label="推送"
-          status={pushLoading ? 'running' : article.push}
-          onClick={!isJobRunning && !pushLoading && (article.push === 'pending' || article.push === 'failed' || article.push === 'filtered' || article.push === 'done') ? handlePush : undefined}
-          forceLabel={article.push === 'filtered' ? '强制推送' : article.push === 'done' ? '重新推送' : undefined}
-          title={article.pushRetryAt ? `推送将在 ${new Date(article.pushRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined}
-        />
+        <StepIndicator label="AI分析" status={aiLoading ? 'running' : article.ai} title={article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined} />
+        <StepIndicator label="推送" status={pushLoading ? 'running' : article.push} title={article.pushRetryAt ? `推送将在 ${new Date(article.pushRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined} />
       </div>
+      {nextAction && <button type="button" disabled={isJobRunning || processLoading || aiLoading || pushLoading} onClick={handleNextAction} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted disabled:opacity-50">{nextAction.label}</button>}
       <span className="text-[11px] text-muted-foreground/50 shrink-0 tabular-nums w-14 text-right" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
         {article.lastTime ? (() => {
           const d = new Date(article.lastTime)

@@ -38,11 +38,26 @@ function AdminContent() {
   const { resolvedTheme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
+  const [queueCounts, setQueueCounts] = useState({ articles: 0, crawl: 0 })
 
   useEffect(() => {
     setMounted(true)
     setActiveTab(readInitialTab())
+    const syncFromUrl = () => setActiveTab(readInitialTab())
+    window.addEventListener('popstate', syncFromUrl)
+    window.addEventListener('hot2:urlchange', syncFromUrl)
+    return () => {
+      window.removeEventListener('popstate', syncFromUrl)
+      window.removeEventListener('hot2:urlchange', syncFromUrl)
+    }
   }, [])
+
+  useEffect(() => {
+    fetch('/api/admin/work-queue-summary')
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => data && setQueueCounts({ articles: data.human.total, crawl: data.technical.total }))
+      .catch(() => undefined)
+  }, [activeTab])
 
   const toggleTheme = () => {
     setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')
@@ -59,7 +74,16 @@ function AdminContent() {
     const url = new URL(window.location.href)
     if (tab === 'articles') url.searchParams.delete(URL_PARAM_TAB)
     else url.searchParams.set(URL_PARAM_TAB, tab)
+    if (tab !== 'articles') {
+      url.searchParams.delete('articleId')
+      url.searchParams.delete('panel')
+    }
+    if (tab !== 'crawl-log') {
+      url.searchParams.delete(URL_PARAM_DETAIL)
+      url.searchParams.delete('detailKind')
+    }
     window.history.replaceState(null, '', url.toString())
+    window.dispatchEvent(new Event('hot2:urlchange'))
   }
 
   const renderContent = () => {
@@ -100,6 +124,7 @@ function AdminContent() {
                   >
                     <item.icon className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
                     <span>{item.label}</span>
+                    {(item.key === 'articles' ? queueCounts.articles : item.key === 'crawl-log' ? queueCounts.crawl : 0) > 0 && <span className="ml-auto text-[10px] tabular-nums text-amber-700">{item.key === 'articles' ? queueCounts.articles : queueCounts.crawl}</span>}
                   </button>
                 )
               })}

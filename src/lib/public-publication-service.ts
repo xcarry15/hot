@@ -55,7 +55,7 @@ async function getPublicPublicationConfig(client: PublicPublicationDb = db): Pro
 }
 
 function getRevokeReason(article: PublicPublicationCandidate, config: PublicPublicationConfig): string {
-  if (!article.eventId || !['clustered', 'needs_review'].includes(article.clusterStatus)) return 'event-not-ready'
+  if (!article.eventId || article.clusterStatus !== 'clustered') return 'event-not-ready'
   if (article.aiStatus !== 'done') return 'ai-not-done'
   if (article.source.deletedAt || !article.source.publicEnabled) return 'source-disabled'
   if (article.publicOverride === 'hidden') return 'manual-hidden'
@@ -65,7 +65,7 @@ function getRevokeReason(article: PublicPublicationCandidate, config: PublicPubl
 }
 
 function isPubliclyEligible(article: PublicPublicationCandidate, config: PublicPublicationConfig): boolean {
-  if (!article.eventId || !['clustered', 'needs_review'].includes(article.clusterStatus)) return false
+  if (!article.eventId || article.clusterStatus !== 'clustered') return false
   if (article.aiStatus !== 'done') return false
   if (article.source.deletedAt || !article.source.publicEnabled) return false
   if (article.publicOverride !== 'public' && article.publicOverride !== 'auto') return false

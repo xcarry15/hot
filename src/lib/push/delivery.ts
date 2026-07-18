@@ -6,7 +6,7 @@
  *   - 在 PushLog 中按目标级记录成功/失败事实；部分成功重试只补未成功 URL
  *   - 推送结束后根据全部目标结果更新 Event.pushedAt / nextPushRetryAt
  *
- * 不依赖 Next.js / Route，调用方为 pushAllUnpushed 与 /api/push。
+ * 不依赖 Next.js / Route，调用方为批量推送、单篇工作流与 Event 级人工推送。
  */
 import { db } from '@/lib/db';
 import { assertNotAborted } from '@/lib/worker-stop';
@@ -25,6 +25,25 @@ export interface PushArticleResult {
   succeeded: number;
   failed: number;
   message: string;
+}
+
+/** 当前启用目标中，最近一次投递仍失败的目标；历史失败后已成功的不再算失败。 */
+export async function getFailedPushTargets(eventId: string): Promise<Array<{ webhookUrl: string; webhookRemark: string }>> {
+  const enabled = (await getWebhookConfigs()).filter((config) => config.enabled && config.url.trim());
+  if (enabled.length === 0) return [];
+  const logs = await db.pushLog.findMany({
+    where: { eventId, webhookUrl: { in: enabled.map((config) => config.url) } },
+    orderBy: { createdAt: 'desc' },
+    select: { webhookUrl: true, webhookRemark: true, status: true },
+  });
+  const seen = new Set<string>();
+  const failed: Array<{ webhookUrl: string; webhookRemark: string }> = [];
+  for (const log of logs) {
+    if (seen.has(log.webhookUrl)) continue;
+    seen.add(log.webhookUrl);
+    if (log.status === 'failure') failed.push({ webhookUrl: log.webhookUrl, webhookRemark: log.webhookRemark });
+  }
+  return failed;
 }
 
 /** Push a single article to all enabled Feishu webhooks.
@@ -74,8 +93,11 @@ async function pushEventToFeishuInternal(
   });
   if (!event || event.status !== 'active' || !event.representativeArticle) return { status: 'failed', succeeded: 0, failed: 0, message: '事件或代表文章不存在' };
   const article = event.representativeArticle;
-  if (!['clustered', 'needs_review'].includes(article.clusterStatus)) {
+  if (article.clusterStatus !== 'clustered') {
     return { status: 'failed', succeeded: 0, failed: 0, message: '文章尚未完成事件聚类，不能推送' };
+  }
+  if (article.aiStatus !== 'done') {
+    return { status: 'failed', succeeded: 0, failed: 0, message: '代表文章尚未完成 AI 分析，不能推送' };
   }
 
   // Already pushed (skip unless force)
@@ -89,9 +111,6 @@ async function pushEventToFeishuInternal(
     const settings = await readPushSettings();
     if (settings.pushMode === 'off') {
       return { status: 'failed', succeeded: 0, failed: 0, message: '当前推送模式已关闭' };
-    }
-    if (article.aiStatus !== 'done') {
-      return { status: 'failed', succeeded: 0, failed: 0, message: '文章尚未完成 AI 分析，不能普通推送' };
     }
     if (article.score < settings.minScore || article.relevance < settings.minRelevance) {
       return { status: 'failed', succeeded: 0, failed: 0, message: '文章未达到推送阈值，请使用“强制推送”' };

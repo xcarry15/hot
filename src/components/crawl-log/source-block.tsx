@@ -31,8 +31,8 @@ export const SourceBlock = memo(function SourceBlock({
 }: {
   source: SourceProgress
   onToggle: () => void
-  onStepAction?: (articleId: string, step: 'process' | 'ai' | 'push', options?: { force?: boolean }) => void
-  onStepActionLoading?: (articleId: string, step: 'process' | 'ai' | 'push') => boolean
+  onStepAction?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => void
+  onStepActionLoading?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => boolean
   onOpenArticle?: (articleId: string) => void
   onOpenDiscarded?: (id: string) => void
   onDiscardedRetried?: () => void
