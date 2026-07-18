@@ -21,7 +21,7 @@ export type StepStatus =
   | 'filtered'
   | 'not_applicable';
 
-export type ArticleStepKey = 'crawl' | 'process' | 'ai' | 'push';
+export type ArticleStepKey = 'crawl' | 'process' | 'cluster' | 'ai' | 'push';
 
 /** 与前端 types.ts 兼容：'running' 仅用于 UI 动画层，DB 投影不带此状态。 */
 export type DisplayStepStatus = StepStatus | 'running';
@@ -40,6 +40,7 @@ export interface PushThresholds {
  */
 export interface ArticleStepInput {
   fetchStatus: FetchStatus;
+  clusterStatus: string;
   aiStatus: string;
   score: number;
   relevance: number;
@@ -50,6 +51,7 @@ export interface ArticleStepInput {
 export interface ArticleStepProjection {
   crawl: StepStatus;
   process: StepStatus;
+  cluster: StepStatus;
   ai: StepStatus;
   push: StepStatus;
   /** push='failed' 时附带 retryAt，方便前端显示。其它情况为 null。 */
@@ -88,8 +90,19 @@ export function projectArticleSteps(
     : article.fetchStatus === 'failed' ? 'failed'
     : 'pending';
 
-  let ai: StepStatus;
+  let cluster: StepStatus;
   if (process !== 'done') {
+    cluster = 'blocked';
+  } else if (article.clusterStatus === 'clustered' || article.clusterStatus === 'needs_review') {
+    cluster = 'done';
+  } else if (article.clusterStatus === 'failed') {
+    cluster = 'failed';
+  } else {
+    cluster = 'pending';
+  }
+
+  let ai: StepStatus;
+  if (cluster !== 'done') {
     ai = 'blocked';
   } else if (article.aiStatus === 'done') {
     ai = 'done';
@@ -106,7 +119,7 @@ export function projectArticleSteps(
 
   if (article.eventPushedAt) {
     pushStatus = 'done';
-  } else if (process !== 'done' || (ai !== 'done' && ai !== 'failed' && ai !== 'skipped')) {
+  } else if (cluster !== 'done' || (ai !== 'done' && ai !== 'failed' && ai !== 'skipped')) {
     // process 未完成，或 ai 尚未 ready（含 pending / blocked）
     pushStatus = 'blocked';
   } else if (ai === 'skipped' || ai === 'failed') {
@@ -125,10 +138,10 @@ export function projectArticleSteps(
   const isInProgress = (() => {
     const stepHasOpen = (s: StepStatus) =>
       s === 'pending' || s === 'blocked';
-    return stepHasOpen(process) || stepHasOpen(ai) || stepHasOpen(pushStatus);
+    return stepHasOpen(process) || stepHasOpen(cluster) || stepHasOpen(ai) || stepHasOpen(pushStatus);
   })();
 
-  return { crawl, process, ai, push: pushStatus, pushRetryAt, isInProgress };
+  return { crawl, process, cluster, ai, push: pushStatus, pushRetryAt, isInProgress };
 }
 
 /**
@@ -144,6 +157,7 @@ export function withRunningOverlay(
 ): {
   crawl: DisplayStepStatus;
   process: DisplayStepStatus;
+  cluster: DisplayStepStatus;
   ai: DisplayStepStatus;
   push: DisplayStepStatus;
 } {
@@ -154,6 +168,7 @@ export function withRunningOverlay(
   return {
     crawl: overlay('crawl', projection.crawl),
     process: overlay('process', projection.process),
+    cluster: overlay('cluster', projection.cluster),
     ai: overlay('ai', projection.ai),
     push: overlay('push', projection.push),
   };

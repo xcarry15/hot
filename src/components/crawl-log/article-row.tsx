@@ -72,6 +72,9 @@ export const ArticleRow = memo(function ArticleRow({
       {article.isAd && (
         <span className="text-[10px] px-1 py-0 rounded-full bg-red-100 text-red-700 shrink-0 leading-5">软文</span>
       )}
+      {article.clusterStatus === 'needs_review' && (
+        <span className="shrink-0 bg-amber-100 px-1 text-[10px] leading-5 text-amber-800">待复核</span>
+      )}
       <button
         className="truncate min-w-0 flex-1 text-muted-foreground group-hover:text-foreground text-left"
         title={article.title}
@@ -88,6 +91,15 @@ export const ArticleRow = memo(function ArticleRow({
           label="处理"
           status={processLoading ? 'running' : article.process}
           onClick={!isJobRunning && !processLoading && (article.process === 'pending' || article.process === 'failed' || article.process === 'done') ? handleProcess : undefined}
+        />
+        <StepIndicator
+          label="聚类"
+          status={article.cluster}
+          title={article.clusterStatus === 'needs_review'
+            ? '聚类结果存在歧义，请到情报收件箱人工复核'
+            : article.clusterRetryAt
+              ? `聚类将于 ${new Date(article.clusterRetryAt).toLocaleString('zh-CN')} 后自动重试`
+              : undefined}
         />
         <StepIndicator
           label="AI分析"

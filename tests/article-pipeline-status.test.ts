@@ -29,6 +29,7 @@ function push(overrides: Partial<PushThresholds> = {}): PushThresholds {
 function article(overrides: Partial<ArticleStepInput> = {}): ArticleStepInput {
   return {
     fetchStatus: 'fetched',
+    clusterStatus: 'clustered',
     aiStatus: 'done',
     score: 70,
     relevance: 7,
@@ -78,6 +79,22 @@ describe('article-pipeline-status — ai', () => {
     const proj = projectArticleSteps(article({ aiStatus: 'pending' }), push());
     expect(proj.ai).toBe('pending');
   });
+  it('聚类未完成或失败 → AI blocked', () => {
+    expect(projectArticleSteps(article({ clusterStatus: 'pending' }), push()).ai).toBe('blocked');
+    expect(projectArticleSteps(article({ clusterStatus: 'failed' }), push()).ai).toBe('blocked');
+  });
+});
+
+describe('article-pipeline-status — cluster', () => {
+  it('处理未完成 → blocked', () => {
+    expect(projectArticleSteps(article({ fetchStatus: 'pending', clusterStatus: 'pending' }), push()).cluster).toBe('blocked');
+  });
+  it('pending / failed / clustered / needs_review 正确投影', () => {
+    expect(projectArticleSteps(article({ clusterStatus: 'pending' }), push()).cluster).toBe('pending');
+    expect(projectArticleSteps(article({ clusterStatus: 'failed' }), push()).cluster).toBe('failed');
+    expect(projectArticleSteps(article({ clusterStatus: 'clustered' }), push()).cluster).toBe('done');
+    expect(projectArticleSteps(article({ clusterStatus: 'needs_review' }), push()).cluster).toBe('done');
+  });
 });
 
 describe('article-pipeline-status — push', () => {
@@ -88,6 +105,9 @@ describe('article-pipeline-status — push', () => {
   it('process 未完成 → blocked', () => {
     const proj = projectArticleSteps(article({ fetchStatus: 'pending' }), push());
     expect(proj.push).toBe('blocked');
+  });
+  it('聚类未完成 → blocked', () => {
+    expect(projectArticleSteps(article({ clusterStatus: 'pending' }), push()).push).toBe('blocked');
   });
   it('AI 为 skipped → not_applicable', () => {
     const proj = projectArticleSteps(article({ aiStatus: 'skipped' }), push());

@@ -23,6 +23,12 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
       return article.push === 'done'
     case 'process-pending':
       return article.process === 'pending' || article.process === 'blocked'
+    case 'cluster-pending':
+      return article.process === 'done' && article.cluster === 'pending'
+    case 'cluster-failed':
+      return article.cluster === 'failed'
+    case 'cluster-review':
+      return article.clusterStatus === 'needs_review'
     case 'ai-pending':
       // 只有详情处理完成后，文章才真正进入 AI 待处理队列。
       return article.process === 'done' && article.ai === 'pending'

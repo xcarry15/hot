@@ -1,7 +1,7 @@
 import { db } from '@/lib/db';
 import { randomUUID } from 'node:crypto';
 
-const ALLOWED_REASONS = ['filter:keyword', 'dedup:near', 'dedup:content', 'dedup:entity'];
+const ALLOWED_REASONS = ['filter:keyword'];
 
 export type RetryDiscardedResult =
   | { kind: 'not_found' }

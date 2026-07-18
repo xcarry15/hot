@@ -19,6 +19,7 @@ export interface ArticleProgress {
   publishedAt?: string | null;
   crawl: StepStatus;
   process: StepStatus;
+  cluster: StepStatus;
   ai: StepStatus;
   push: StepStatus;
   aiScore?: number;
@@ -36,6 +37,8 @@ export interface ArticleProgress {
   pushRetryAt?: string | null;
   /** P1-6: AI 失败后的下次重试时间 */
   aiRetryAt?: string | null;
+  clusterStatus: 'pending' | 'clustered' | 'failed' | 'needs_review';
+  clusterRetryAt?: string | null;
 }
 
 export interface DiscardedRow {

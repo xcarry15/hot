@@ -29,6 +29,8 @@ function article(partial: Partial<ArticleProgress>): ArticleProgress {
     title: 't',
     crawl: 'done',
     process: 'done',
+    cluster: 'done',
+    clusterStatus: 'clustered',
     ai: 'pending',
     push: 'pending',
     lastTime: 0,
@@ -65,13 +67,21 @@ describe('matchStepChip 单谓词命中', () => {
     expect(matchStepChip(article({ ai: 'done', push: 'filtered' }), 'push-pending')).toBe(false)
   })
 
+  it('聚类筛选区分待聚类、失败和待复核', () => {
+    expect(matchStepChip(article({ cluster: 'pending', clusterStatus: 'pending' }), 'cluster-pending')).toBe(true)
+    expect(matchStepChip(article({ cluster: 'failed', clusterStatus: 'failed' }), 'cluster-failed')).toBe(true)
+    expect(matchStepChip(article({ cluster: 'done', clusterStatus: 'needs_review' }), 'cluster-review')).toBe(true)
+    expect(matchStepChip(article({ cluster: 'done', clusterStatus: 'clustered' }), 'cluster-review')).toBe(false)
+  })
+
   it('has-fail：任一步骤为 fail 即命中', () => {
     expect(matchStepChip(article({ crawl: 'failed' }), 'has-fail')).toBe(true)
     expect(matchStepChip(article({ process: 'failed' }), 'has-fail')).toBe(true)
+    expect(matchStepChip(article({ cluster: 'failed', clusterStatus: 'failed' }), 'has-fail')).toBe(true)
     expect(matchStepChip(article({ ai: 'failed' }), 'has-fail')).toBe(true)
     expect(matchStepChip(article({ push: 'failed' }), 'has-fail')).toBe(true)
     expect(matchStepChip(article({
-      crawl: 'done', process: 'done', ai: 'done', push: 'done',
+      crawl: 'done', process: 'done', cluster: 'done', ai: 'done', push: 'done',
     }), 'has-fail')).toBe(false)
   })
 

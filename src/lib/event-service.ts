@@ -227,7 +227,7 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
   const ids = [...new Set(articleIds.filter(Boolean))];
   if (ids.length === 0) return null;
   const newEventId = await db.$transaction(async (tx) => {
-    const sourceEvent = await tx.event.findUnique({ where: { id: eventId }, select: { status: true, pushedAt: true } });
+    const sourceEvent = await tx.event.findUnique({ where: { id: eventId }, select: { status: true } });
     if (!sourceEvent || sourceEvent.status !== 'active') return null;
     const articles = await tx.article.findMany({
       where: { id: { in: ids }, eventId },
@@ -242,7 +242,6 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
         lastSeenAt: new Date(Math.max(...dates.map((date) => date.getTime()))),
         articleCount: articles.length,
         representativeArticleId: articles[0].id,
-        pushedAt: sourceEvent.pushedAt,
       },
       select: { id: true },
     });

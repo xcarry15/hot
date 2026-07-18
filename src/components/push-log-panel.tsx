@@ -28,7 +28,7 @@ interface PushLog {
     title: string
     score: number
     source: { name: string }
-  }
+  } | null
 }
 
 interface PushLogResponse {
@@ -167,14 +167,18 @@ export default function PushLogPanel({ refreshToken = 0 }: { refreshToken?: numb
                       <div className="max-w-[180px] truncate font-medium" title={log.webhookTarget || undefined}>{log.webhookRemark || '飞书 Webhook'} <span className="font-normal text-muted-foreground">· {log.webhookTarget || '未记录目标'}</span></div>
                     </td>
                     <td className="max-w-[320px] px-1.5 py-1.5">
-                      <div className="max-w-[320px] truncate font-medium" title={log.article.title}><span className="font-normal text-muted-foreground">{log.article.source.name} · </span>{log.article.title}</div>
+                      {log.article
+                        ? <div className="max-w-[320px] truncate font-medium" title={log.article.title}><span className="font-normal text-muted-foreground">{log.article.source.name} · </span>{log.article.title}</div>
+                        : <span className="text-muted-foreground">发送时文章已删除</span>}
                     </td>
                     <td className="px-1.5 py-1.5">
                       <Badge variant={log.status === 'success' ? 'secondary' : 'destructive'} className="px-1.5 py-0 text-[10px]">{pushStatusLabel(log.status)}</Badge>
                     </td>
                     <td className="px-1.5 py-1.5 tabular-nums">{log.retryCount > 0 ? <span className="text-amber-600">{log.retryCount} 次</span> : '—'}</td>
                     <td className="max-w-[200px] px-1.5 py-1.5">
-                      {log.status === 'success' ? <span className="tabular-nums">{log.article.score} 分</span> : <span className="truncate text-destructive" title={log.errorMessage}>{log.errorMessage || '推送失败'}</span>}
+                      {log.status === 'success'
+                        ? <span className="tabular-nums">{log.article ? `${log.article.score} 分` : '—'}</span>
+                        : <span className="truncate text-destructive" title={log.errorMessage}>{log.errorMessage || '推送失败'}</span>}
                     </td>
                   </tr>
                 ))}

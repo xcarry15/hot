@@ -3,17 +3,17 @@
 import type { ArticleProgress } from '@/contracts/crawl-log'
 
 export function isArticleSkipped(a: ArticleProgress): boolean {
-  return [a.crawl, a.process, a.ai, a.push].some(s =>
+  return [a.crawl, a.process, a.cluster, a.ai, a.push].some(s =>
     s === 'skipped' || s === 'filtered' || s === 'not_applicable'
   )
 }
 
 export function isArticleFullyDone(a: ArticleProgress): boolean {
-  return a.crawl === 'done' && a.process === 'done' && a.ai === 'done' && a.push === 'done'
+  return a.crawl === 'done' && a.process === 'done' && a.cluster === 'done' && a.ai === 'done' && a.push === 'done'
 }
 
 export function isArticleFailed(a: ArticleProgress): boolean {
-  return [a.crawl, a.process, a.ai, a.push].some(s => s === 'failed')
+  return [a.crawl, a.process, a.cluster, a.ai, a.push].some(s => s === 'failed')
 }
 
 // ========== Filter predicates ==========
@@ -24,6 +24,9 @@ export type StepFilterKey =
   | 'ai-done'        // AI 分析完成
   | 'pushed'         // 已推送（push === 'done'）
   | 'process-pending' // 待详情抓取
+  | 'cluster-pending' // 待事件聚类
+  | 'cluster-failed' // 聚类技术失败
+  | 'cluster-review' // 聚类结果待人工复核
   | 'ai-pending'     // 待 AI 分析
   | 'push-pending'   // 待推送
   | 'has-fail'       // 任意步骤失败
@@ -31,7 +34,7 @@ export type StepFilterKey =
 
 export const ALL_STEP_FILTER_KEYS: readonly StepFilterKey[] = [
   'ai-done', 'pushed',
-  'process-pending', 'ai-pending', 'push-pending',
+  'process-pending', 'cluster-pending', 'cluster-failed', 'cluster-review', 'ai-pending', 'push-pending',
   'has-fail', 'is-ad',
 ] as const
 
@@ -83,13 +86,14 @@ export interface SessionStats {
   stageLabel?: string
 }
 
-export type StageKey = 'collect' | 'process' | 'ai' | 'push' | 'all'
+export type StageKey = 'collect' | 'process' | 'cluster' | 'ai' | 'push' | 'all'
 
 export type StageLoading = Record<StageKey, boolean>
 
 export const EMPTY_STAGE_LOADING: StageLoading = {
   collect: false,
   process: false,
+  cluster: false,
   ai: false,
   push: false,
   all: false,

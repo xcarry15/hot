@@ -82,11 +82,10 @@ describe('Event 人工纠错', () => {
     }));
   });
 
-  it('从已推送 Event 拆分时新 Event 继承 pushedAt', async () => {
-    const pushedAt = new Date('2026-07-18T00:00:00Z');
+  it('从已推送 Event 拆分时新 Event 保持未推送', async () => {
     const articleDate = new Date('2026-07-17T00:00:00Z');
     mocks.eventFindUnique
-      .mockResolvedValueOnce({ status: 'active', pushedAt })
+      .mockResolvedValueOnce({ status: 'active' })
       .mockResolvedValueOnce({ representativeArticleId: null, representativeManual: false })
       .mockResolvedValueOnce({ representativeArticleId: 'remaining' })
       .mockResolvedValueOnce({ representativeArticleId: 'split' });
@@ -98,7 +97,10 @@ describe('Event 人工纠错', () => {
     mocks.eventCreate.mockResolvedValue({ id: 'new-event' });
     await expect(splitEventArticles('source', ['split'])).resolves.toBe('new-event');
     expect(mocks.eventCreate).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ pushedAt, representativeArticleId: 'split' }),
+      data: expect.not.objectContaining({ pushedAt: expect.anything() }),
+    }));
+    expect(mocks.eventCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ representativeArticleId: 'split' }),
     }));
     expect(mocks.refresh).toHaveBeenCalledWith('remaining');
     expect(mocks.refresh).toHaveBeenCalledWith('split');

@@ -104,6 +104,8 @@ export async function getCrawlLogSnapshot(
         publishedAt: true,
         sourceId: true,
         fetchStatus: true,
+        clusterStatus: true,
+        nextClusterRetryAt: true,
         aiStatus: true,
         score: true,
         eventScore: true,
@@ -247,6 +249,7 @@ export async function getCrawlLogSnapshot(
 
     const stepInput: ArticleStepInput = {
       fetchStatus: a.fetchStatus,
+      clusterStatus: a.clusterStatus,
       aiStatus: a.aiStatus,
       score: a.score,
       relevance: a.relevance,
@@ -263,6 +266,7 @@ export async function getCrawlLogSnapshot(
       publishedAt: a.publishedAt ? a.publishedAt.toISOString() : null,
       crawl: projection.crawl,
       process: projection.process,
+      cluster: projection.cluster,
       ai: projection.ai,
       push: projection.push,
       aiScore: a.score || undefined,
@@ -282,6 +286,8 @@ export async function getCrawlLogSnapshot(
       // P1-6: 推送/AI 重试时间，方便管理员判断"何时自动重试"
       pushRetryAt: projection.pushRetryAt ?? (a.event?.nextPushRetryAt ? a.event.nextPushRetryAt.toISOString() : null),
       aiRetryAt: a.aiStatus === 'failed' && a.nextAiRetryAt ? a.nextAiRetryAt.toISOString() : null,
+      clusterStatus: a.clusterStatus as ArticleProgress['clusterStatus'],
+      clusterRetryAt: a.clusterStatus === 'failed' && a.nextClusterRetryAt ? a.nextClusterRetryAt.toISOString() : null,
     };
     group.articles.push(articleProgress);
   }

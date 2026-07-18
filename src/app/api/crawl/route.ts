@@ -3,12 +3,13 @@ import { apiError } from '@/lib/api-helpers';
 import { runJob } from '@/lib/execution';
 import { readPushSettings } from '@/lib/push/policy';
 
-type CrawlStage = 'collect' | 'process' | 'ai' | 'push' | 'all';
+type CrawlStage = 'collect' | 'process' | 'cluster' | 'ai' | 'push' | 'all';
 
 // POST /api/crawl - Trigger a single source or a pipeline stage
 //   { sourceId }                          → collect that source only (async)
 //   { stage: 'collect' }                  → run collect job (async)
 //   { stage: 'process' }                  → run process job (async)
+//   { stage: 'cluster' }                  → run event clustering job (async)
 //   { stage: 'ai' }                       → run ai job (async)
 //   { stage: 'push' }                     → run push job (async)
 //   { stage: 'all' } (default)            → run full pipeline job (async)
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const sourceId = typeof body.sourceId === 'string' ? body.sourceId.trim() : undefined;
     const stage = typeof body.stage === 'string' ? body.stage : 'all';
-    const validStages: readonly CrawlStage[] = ['all', 'collect', 'process', 'ai', 'push'];
+    const validStages: readonly CrawlStage[] = ['all', 'collect', 'process', 'cluster', 'ai', 'push'];
 
     if ('sourceId' in body && !sourceId) {
       return NextResponse.json({ error: 'sourceId 必须是非空字符串' }, { status: 400 });
@@ -29,10 +30,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '当前推送模式已关闭，请先在设置中启用推送' }, { status: 409 });
     }
 
-    const stageJobType: Record<CrawlStage, 'full' | 'collect' | 'process' | 'ai' | 'push'> = {
+    const stageJobType: Record<CrawlStage, 'full' | 'collect' | 'process' | 'cluster' | 'ai' | 'push'> = {
       all: 'full',
       collect: 'collect',
       process: 'process',
+      cluster: 'cluster',
       ai: 'ai',
       push: 'push',
     };

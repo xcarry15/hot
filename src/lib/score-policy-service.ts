@@ -25,20 +25,32 @@ export async function previewScorePolicy(weightEvent: number, weightContent: num
 }
 
 export async function previewPublicPublication(minScore: number, hideAds: boolean) {
-  const base = {
-    aiStatus: 'done',
+  const representativeBase = {
+    aiStatus: 'done' as const,
+    clusterStatus: { in: ['clustered', 'needs_review'] as string[] },
     source: { publicEnabled: true, deletedAt: null },
   } as const;
-  const eligible = await db.article.count({
+  const eventBase = {
+    status: 'active' as const,
+    representativeArticleId: { not: null },
+  } as const;
+  const eligible = await db.event.count({
     where: {
-      ...base,
-      OR: [
-        { publicOverride: 'public' },
-        { publicOverride: 'auto', score: { gte: minScore }, ...(hideAds ? { isAd: false } : {}) },
-      ],
+      ...eventBase,
+      representativeArticle: {
+        is: {
+          ...representativeBase,
+          OR: [
+            { publicOverride: 'public' },
+            { publicOverride: 'auto', score: { gte: minScore }, ...(hideAds ? { isAd: false } : {}) },
+          ],
+        },
+      },
     },
   });
-  const candidates = await db.article.count({ where: base });
+  const candidates = await db.event.count({
+    where: { ...eventBase, representativeArticle: { is: representativeBase } },
+  });
   return { candidates, eligible, wouldPublish: eligible, wouldHide: Math.max(0, candidates - eligible), minScore, hideAds };
 }
 
@@ -47,7 +59,7 @@ export async function previewPushDelivery(minScore: number, minRelevance: number
     where: {
       pushedAt: null,
       status: 'active',
-      representativeArticle: { is: { aiStatus: 'done', score: { gte: minScore }, relevance: { gte: minRelevance } } },
+      representativeArticle: { is: { aiStatus: 'done', clusterStatus: { in: ['clustered', 'needs_review'] }, score: { gte: minScore }, relevance: { gte: minRelevance } } },
       OR: [{ nextPushRetryAt: null }, { nextPushRetryAt: { lte: new Date() } }],
     },
   });

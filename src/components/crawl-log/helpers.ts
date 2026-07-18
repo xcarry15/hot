@@ -16,10 +16,7 @@ export function formatPubDate(input?: string | null): string {
 }
 
 export const DISCARD_REASON_LABELS: Record<string, string> = {
-  'dedup:url': 'URL 重复',
-  'dedup:content': '内容重复',
-  'dedup:near': '内容相似',
-  'dedup:entity': '实体重叠',
+  'dedup:url': '链接已存在',
   'filter:keyword': '未命中关键词',
   'filter:short': '内容过短',
 }

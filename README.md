@@ -23,6 +23,8 @@ npm run dev
 
 情报收件箱是全量文章人工校准工作台：保持左侧紧凑表格与右侧详情布局，默认展示全部文章，支持人工评分、内容判断、归类、公开策略、恢复 AI 原值、重新分析和重新抓取。Article 保留 AI 与人工校准结果；每篇文章必须先归入轻量 Event，右侧可查看同事件全部来源，并支持合并事件、拆分文章和人工指定代表文章。Event 是重复公开和重复推送的唯一门禁，同一事件新增来源不会再次推送。
 
+抓取记录页按真实流水线展示 `采集 → 处理 → 聚类 → AI → 推送`，支持筛选待聚类、聚类失败和待复核文章，并可单独运行事件聚类阶段。聚类未完成时 AI 与推送明确显示为阻塞；URL 完全相同造成的未入库记录统一标记为“链接已存在”，不再沿用旧内容去重语义。
+
 ## 项目结构
 
 ```text
@@ -48,12 +50,13 @@ db/                   本地 SQLite 数据（不进入部署包）
 
 - Next.js 16 App Router + React 19 + TypeScript；Prisma 6 + SQLite；单进程模块化单体，生产只运行一个 PM2 实例。
 - `src/lib/execution.ts` 是唯一批量 Job 编排入口，内存互斥保证同时只有一个批量任务。Job 表的阶段、进度、错误数和 heartbeat 是任务状态事实源；停止通过 `AbortSignal` 协作式取消。
-- 调度器每分钟 tick；自动抓取默认关闭。普通批量任务使用 `/api/crawl` 的 `all` 阶段，分阶段入口 `collect / process / ai / push` 仅供管理员运维。
+- 调度器每分钟 tick；自动抓取默认关闭。普通批量任务使用 `/api/crawl` 的 `all` 阶段，分阶段入口 `collect / process / cluster / ai / push` 仅供管理员运维。
 
 | 阶段 | 入口代码 | 作用 |
 |---|---|---|
 | collect | `src/lib/pipeline/collect.ts` | 采集数据源并写入/更新文章 |
 | process | `src/lib/pipeline/process.ts` | 抓取详情、提取正文、关键词过滤；不同 URL 的重复文章保留并标记 |
+| cluster | `src/lib/pipeline/cluster.ts` | 将已处理 Article 归入 Event，记录失败重试与待复核状态 |
 | ai | `src/lib/pipeline/analyze.ts` | 写入摘要、标签、评分和审计字段 |
 | push | `src/lib/pipeline/push-bridge.ts` | 按统一条件投递未推送文章 |
 
@@ -61,7 +64,7 @@ db/                   本地 SQLite 数据（不进入部署包）
 
 `InboxSnapshot` 保存近 90 天的待归类积压快照，概览以此展示积压趋势；快照是派生指标，不改变文章流水线事实。
 
-`Job`、`FetchLog`、`PushLog`、`DiscardedItem` 和 `EventClusterAudit` 分别记录任务、采集、事件目标级推送、未入库条目和聚类/人工纠错事实。`Article` 记录全文、AI 与人工校准、归类和事件归属；`Event` 记录代表文章、来源数量、公开状态和唯一推送状态。PushLog 关联 Event，并保存投递时的代表 Article。
+`Job`、`FetchLog`、`PushLog`、`DiscardedItem` 和 `EventClusterAudit` 分别记录任务、采集、事件目标级推送、未入库条目和聚类/人工纠错事实。`Article` 记录全文、AI 与人工校准、归类和事件归属；`Event` 记录代表文章、来源数量、公开状态和唯一推送状态。PushLog 关联 Event，并保存投递时的代表 Article；历史展示与来源统计使用该发送时快照，不跟随当前代表文章变化。未配置可用 Webhook 时，批量推送直接跳过，不为每个 Event 重复写失败日志。
 
 设置默认值、校验、敏感性和导出策略集中在 `src/lib/settings-catalog.ts`；AI Provider 定义在 `src/contracts/ai-provider.ts`。事件聚类规则集中在 `src/contracts/event-clustering.ts`：只比较最近 7 天 active Event，内容指纹或标准化标题完全一致时直接归入，规则证据不足时调用 AI，仍不确定则保守新建并标记复核。第一版不引入 Embedding。
 

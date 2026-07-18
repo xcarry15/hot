@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/select'
 import { toast } from 'sonner'
 import {
-  Loader2, Activity, Play, Download, FileText, Bot, Send, RefreshCcw, XCircle,
+  Loader2, Activity, Play, Download, FileText, Network, Bot, Send, RefreshCcw, XCircle,
 } from 'lucide-react'
 
 // ── New sub-modules ──
@@ -112,7 +112,7 @@ export default function CrawlLogTab() {
 
   const allSources = useMemo(() => sources.map(s => ({ id: s.id, name: s.name })), [sources])
   const failedSources = useMemo(() => sources.filter(source => source.lastRunStatus === 'failed' || source.status === 'error'), [sources])
-  const failedArticles = useMemo(() => sources.reduce((count, source) => count + source.articles.filter(article => article.ai === 'failed' || article.process === 'failed' || article.push === 'failed').length, 0), [sources])
+  const failedArticles = useMemo(() => sources.reduce((count, source) => count + source.articles.filter(article => article.cluster === 'failed' || article.ai === 'failed' || article.process === 'failed' || article.push === 'failed').length, 0), [sources])
 
   // 展开/折叠偏好是纯 UI 状态：从 snapshot 派生的 expanded 字段是默认值，
   // 本地 overrides 覆盖之。
@@ -280,7 +280,7 @@ export default function CrawlLogTab() {
     }
   }
 
-  const runStage = async (stage: 'all' | 'collect' | 'process' | 'ai' | 'push') => {
+  const runStage = async (stage: 'all' | 'collect' | 'process' | 'cluster' | 'ai' | 'push') => {
     if (isAnyRunning) return
     if (stage === 'all' && typeof window !== 'undefined' && !window.confirm('运行全流程将依次执行采集、处理、AI 分析，并可能推送文章。确认继续吗？')) {
       return
@@ -491,7 +491,7 @@ export default function CrawlLogTab() {
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
   }
 
-  const stageButtonLoading = (stage: 'all' | 'collect' | 'process' | 'ai' | 'push') =>
+  const stageButtonLoading = (stage: 'all' | 'collect' | 'process' | 'cluster' | 'ai' | 'push') =>
     stageRequestLoading[stage] || stageLoading[stage]
 
   return (
@@ -643,6 +643,13 @@ export default function CrawlLogTab() {
             loading={stageButtonLoading('process')}
             disabled={isAnyRunning || stageRequestLoading['process']}
             onClick={() => runStage('process')}
+          />
+          <StageButton
+            label="事件聚类"
+            icon={Network}
+            loading={stageButtonLoading('cluster')}
+            disabled={isAnyRunning || stageRequestLoading['cluster']}
+            onClick={() => runStage('cluster')}
           />
           <StageButton
             label="AI分析"

@@ -33,4 +33,12 @@ describe('POST /api/crawl input boundary', () => {
     expect(unknownStage.status).toBe(400);
     expect(runJob).not.toHaveBeenCalled();
   });
+
+  it('支持单独运行事件聚类阶段', async () => {
+    const res = await POST(new Request('http://localhost/api/crawl', {
+      method: 'POST', body: JSON.stringify({ stage: 'cluster' }),
+    }));
+    expect(res.status).toBe(200);
+    expect(runJob).toHaveBeenCalledWith('cluster', { trigger: 'manual' });
+  });
 });

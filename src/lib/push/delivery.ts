@@ -111,14 +111,6 @@ async function pushEventToFeishuInternal(
     ).values(),
   );
   if (enabled.length === 0) {
-    await db.pushLog.create({
-      data: {
-        eventId,
-        representativeArticleId: article.id,
-        status: 'failure',
-        errorMessage: '没有配置启用的 Feishu Webhook URL',
-      },
-    });
     return { status: 'no_webhooks', succeeded: 0, failed: 0, message: '没有配置启用的 Feishu Webhook URL' };
   }
 

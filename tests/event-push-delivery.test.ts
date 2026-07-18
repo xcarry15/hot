@@ -79,4 +79,13 @@ describe('Event 推送门禁', () => {
     await expect(pushEventToFeishu('e1', true)).resolves.toMatchObject({ status: 'failed' });
     expect(mocks.pushLogCreate).not.toHaveBeenCalled();
   });
+
+  it('未配置 Webhook 时不为每个 Event 重复制造失败日志', async () => {
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', pushedAt: null, nextPushRetryAt: null,
+      representativeArticle: representative(),
+    });
+    await expect(pushEventToFeishu('e1')).resolves.toMatchObject({ status: 'no_webhooks' });
+    expect(mocks.pushLogCreate).not.toHaveBeenCalled();
+  });
 });

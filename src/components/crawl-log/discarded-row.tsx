@@ -20,26 +20,10 @@ export function DiscardedRow({
   const pubDate = formatPubDate(item.publishedAt || item.createdAt)
   const [retrying, setRetrying] = useState(false)
   const isKeywordFiltered = item.reason === 'filter:keyword'
-  const isDedupSimilar = item.reason === 'dedup:near' || item.reason === 'dedup:content' || item.reason === 'dedup:entity'
-  const canRetry = isKeywordFiltered || isDedupSimilar
-  const matchedTitle = isDedupSimilar && item.detail
-    ? (item.detail as Record<string, unknown>).matchedTitle as string | undefined
-    : undefined
+  const canRetry = isKeywordFiltered
 
   const handleRetry = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    // P1-5: 去重类重试需要二次确认——这是绕过判定的有副作用操作
-    if (isDedupSimilar) {
-      const reasonLabel = DISCARD_REASON_LABELS[item.reason] || item.reason
-      const matchedInfo = matchedTitle ? `\n匹配文章: ${matchedTitle}` : ''
-      const confirmed = window.confirm(
-        `确认将该文章从「未入库」转为待处理？\n\n` +
-        `去重原因: ${reasonLabel}${matchedInfo}\n` +
-        `URL: ${item.url}\n\n` +
-        `操作后将删除当前未入库记录并创建新文章。此操作不可撤销。`
-      )
-      if (!confirmed) return
-    }
     setRetrying(true)
     try {
       const data = (await retryDiscarded(item.id)) as { title?: string; error?: string; existed?: boolean }
@@ -73,11 +57,6 @@ export function DiscardedRow({
         >
           {item.title}
         </button>
-        {matchedTitle && (
-          <span className="text-xs text-red-500 shrink-0 truncate max-w-[200px]" title={`匹配: ${matchedTitle}`}>
-            ←{matchedTitle}
-          </span>
-        )}
         <span className="shrink-0 px-1 py-0 rounded-full text-[10px] leading-5 bg-amber-100 text-amber-700">
           {label}
         </span>
@@ -85,7 +64,7 @@ export function DiscardedRow({
           <button
             onClick={handleRetry}
             disabled={retrying}
-            title={isKeywordFiltered ? '手动采集此文章' : '手动入库（确认非重复）'}
+            title="手动采集此文章"
             className="shrink-0 inline-flex items-center justify-center h-6 w-6 rounded-full text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition-colors"
           >
             {retrying ? (

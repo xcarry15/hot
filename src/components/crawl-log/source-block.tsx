@@ -127,8 +127,8 @@ export const SourceBlock = memo(function SourceBlock({
             </Badge>
           )}
           {source.deduped > 0 && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 rounded-full text-muted-foreground">
-              ↺{source.deduped}
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 rounded-full text-muted-foreground" title="URL 完全相同，未重复入库">
+              链接重复:{source.deduped}
             </Badge>
           )}
           {source.filtered > 0 && (
