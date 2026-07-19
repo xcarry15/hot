@@ -111,34 +111,31 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
   return (
     <Card className="py-0">
       <CardContent className="p-2.5">
-        <div className="mb-1.5">
-          <div>
+        <div className="mb-1 flex flex-wrap items-center gap-1">
+          <div className="mr-2 shrink-0">
             <h3 className="text-sm font-medium">推送记录</h3>
             <p className="text-[10px] text-muted-foreground">
               {stats ? `全量 ${stats.status.all} 条 · 成功 ${stats.status.success} · 失败 ${stats.status.failure}` : '全量记录每次 Webhook 目标投递结果'}
             </p>
           </div>
-        </div>
-
-        <div className="mb-1.5 flex flex-wrap items-center gap-1">
           <Select value={statusFilter} onValueChange={(value) => updateFilter(setStatusFilter, value)}>
-            <SelectTrigger className="h-7 w-[90px] text-[11px]"><SelectValue placeholder="结果" /></SelectTrigger>
-            <SelectContent>
+            <SelectTrigger className="h-7 w-[90px] rounded-none border-border bg-transparent text-[11px] shadow-none focus:ring-1"><SelectValue placeholder="结果" /></SelectTrigger>
+            <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部</SelectItem>
               <SelectItem value="success">成功</SelectItem>
               <SelectItem value="failure">失败</SelectItem>
             </SelectContent>
           </Select>
           <Select value={sourceFilter} onValueChange={(value) => updateFilter(setSourceFilter, value)}>
-            <SelectTrigger className="h-7 w-[130px] text-[11px]"><SelectValue placeholder="数据源" /></SelectTrigger>
-            <SelectContent>
+            <SelectTrigger className="h-7 w-[130px] rounded-none border-border bg-transparent text-[11px] shadow-none focus:ring-1"><SelectValue placeholder="数据源" /></SelectTrigger>
+            <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部数据源</SelectItem>
               {stats?.sources.map((source) => <SelectItem key={source.name} value={source.name}>{source.name} ({source.count})</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={webhookFilter} onValueChange={(value) => updateFilter(setWebhookFilter, value)}>
-            <SelectTrigger className="h-7 w-[130px] text-[11px]"><SelectValue placeholder="推送方式" /></SelectTrigger>
-            <SelectContent>
+            <SelectTrigger className="h-7 w-[130px] rounded-none border-border bg-transparent text-[11px] shadow-none focus:ring-1"><SelectValue placeholder="推送方式" /></SelectTrigger>
+            <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部方式</SelectItem>
               {stats?.webhooks.map((webhook) => <SelectItem key={webhook.remark} value={webhook.remark}>{webhook.remark} ({webhook.count})</SelectItem>)}
             </SelectContent>
@@ -164,20 +161,20 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
               <tbody>
                 {data.items.map((log) => (
                   <tr key={log.id} className="border-b last:border-0" title={log.errorMessage || undefined}>
-                    <td className="px-1.5 py-1.5 tabular-nums">{formatPushTime(log.createdAt)}</td>
-                    <td className="max-w-[180px] px-1.5 py-1.5">
+                    <td className="px-1.5 py-1 tabular-nums">{formatPushTime(log.createdAt)}</td>
+                    <td className="max-w-[180px] px-1.5 py-1">
                       <div className="max-w-[180px] truncate font-medium" title={log.webhookTarget || undefined}>{log.webhookRemark || '飞书 Webhook'} <span className="font-normal text-muted-foreground">· {log.webhookTarget || '未记录目标'}</span></div>
                     </td>
-                    <td className="max-w-[320px] px-1.5 py-1.5">
+                    <td className="max-w-[320px] px-1.5 py-1">
                       {log.article
                         ? <div className="max-w-[320px] truncate font-medium" title={log.article.title}><span className="font-normal text-muted-foreground">{log.article.source.name} · </span>{log.article.title}</div>
                         : <span className="text-muted-foreground">发送时文章已删除</span>}
                     </td>
-                    <td className="px-1.5 py-1.5">
+                    <td className="px-1.5 py-1">
                       <Badge variant={log.status === 'success' ? 'secondary' : 'destructive'} className="px-1.5 py-0 text-[10px]">{pushStatusLabel(log.status)}</Badge>
                     </td>
-                    <td className="px-1.5 py-1.5 tabular-nums">{log.retryCount > 0 ? <span className="text-amber-600">{log.retryCount} 次</span> : '—'}</td>
-                    <td className="max-w-[200px] px-1.5 py-1.5">
+                    <td className="px-1.5 py-1 tabular-nums">{log.retryCount > 0 ? <span className="text-amber-600">{log.retryCount} 次</span> : '—'}</td>
+                    <td className="max-w-[200px] px-1.5 py-1">
                       {log.status === 'success'
                         ? <span className="tabular-nums">{log.article ? `${log.article.score} 分` : '—'}</span>
                         : <span className="truncate text-destructive" title={log.errorMessage}>{log.errorMessage || '推送失败'}</span>}

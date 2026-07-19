@@ -3,7 +3,11 @@ import type { Prisma } from '@prisma/client';
 import { parseJsonArray, splitBrands, stripHtml } from '@/lib/shared/article-codecs';
 import { getPublicDateKey } from '@/lib/shared/public-date';
 import { enqueuePublicArticleOriginalClick, enqueuePublicArticleView } from '@/lib/public-view-service';
-import { publicArticleListCache } from '@/lib/public-article-cache';
+import {
+  publicArticleCountCache,
+  publicArticleDetailCache,
+  publicArticleListCache,
+} from '@/lib/public-article-cache';
 import type {
   PublicArticleDateGroupDto,
   PublicArticleDetailDto,
@@ -17,6 +21,7 @@ const PUBLIC_INITIAL_DATE_LIMIT = 3;
 const PUBLIC_SEARCH_DATE_LIMIT = 10;
 const PUBLIC_LOAD_MORE_DATE_LIMIT = 3;
 const PUBLIC_CACHE_TTL_MS = 60_000;
+const PUBLIC_DETAIL_CACHE_TTL_MS = 30_000;
 const PUBLIC_MAX_ROWS_PER_DATE = 250;
 
 type PublicArticleListParams = { search?: string; before?: string; dateLimit?: number };
@@ -124,11 +129,8 @@ function dateLimit(params: PublicArticleListParams, hasSearch: boolean): number 
   return Math.max(1, Math.min(PUBLIC_SEARCH_DATE_LIMIT, Math.floor(params.dateLimit ?? fallback)));
 }
 
-async function buildList(params: PublicArticleListParams): Promise<PublicArticleListResponseDto> {
-  const search = normalizeText(params.search, 100);
-  const before = params.before && /^\d{4}-\d{2}-\d{2}$/.test(params.before) ? params.before : '';
-  const limit = dateLimit(params, Boolean(search));
-  const searchWhere = search ? {
+function buildSearchWhere(search: string) {
+  return search ? {
     representativeArticle: {
       is: {
         aiStatus: 'done',
@@ -141,6 +143,28 @@ async function buildList(params: PublicArticleListParams): Promise<PublicArticle
       },
     },
   } : {};
+}
+
+async function countPublicArticles(search: string): Promise<number> {
+  const key = search;
+  const existing = publicArticleCountCache.get(key);
+  if (existing) return existing.value;
+  const value = db.event.count({
+    where: {
+      ...publicEventWhere,
+      ...buildSearchWhere(search),
+    },
+  });
+  publicArticleCountCache.set(key, { value, expiresAt: Date.now() + PUBLIC_CACHE_TTL_MS });
+  void value.catch(() => publicArticleCountCache.delete(key));
+  return value;
+}
+
+async function buildList(params: PublicArticleListParams): Promise<PublicArticleListResponseDto> {
+  const search = normalizeText(params.search, 100);
+  const before = params.before && /^\d{4}-\d{2}-\d{2}$/.test(params.before) ? params.before : '';
+  const limit = dateLimit(params, Boolean(search));
+  const searchWhere = buildSearchWhere(search);
   const feedWhere = {
     ...publicEventWhere,
     ...(before ? { publicDateKey: { lt: before } } : {}),
@@ -179,22 +203,7 @@ async function buildList(params: PublicArticleListParams): Promise<PublicArticle
     return { date, count: rows.length, items: rows.map(serializeEvent) };
   });
   const items = groups.flatMap((group) => group.items);
-  const total = await db.event.count({
-    where: search ? {
-      ...publicEventWhere,
-      representativeArticle: {
-        is: {
-          aiStatus: 'done',
-          clusterStatus: 'clustered',
-          OR: [
-            { title: { contains: search } },
-            { summary: { contains: search } },
-            { brand: { contains: search } },
-          ],
-        },
-      },
-    } : publicEventWhere,
-  });
+  const total = await countPublicArticles(search);
   return {
     total,
     items,
@@ -208,25 +217,7 @@ async function buildList(params: PublicArticleListParams): Promise<PublicArticle
 
 export async function getPublicArticleFeedRevision(params: Pick<PublicArticleListParams, 'search'> = {}): Promise<PublicArticleFeedRevisionDto> {
   const search = normalizeText(params.search, 100);
-  if (!search) return { total: await db.event.count({ where: publicEventWhere }) };
-  return {
-    total: await db.event.count({
-      where: {
-        ...publicEventWhere,
-        representativeArticle: {
-          is: {
-            aiStatus: 'done',
-            clusterStatus: 'clustered',
-            OR: [
-              { title: { contains: search } },
-              { summary: { contains: search } },
-              { brand: { contains: search } },
-            ],
-          },
-        },
-      },
-    }),
-  };
+  return { total: await countPublicArticles(search) };
 }
 
 export async function listPublicArticles(params: PublicArticleListParams = {}): Promise<PublicArticleListResponseDto> {
@@ -239,7 +230,7 @@ export async function listPublicArticles(params: PublicArticleListParams = {}): 
   return value;
 }
 
-export async function getPublicArticleDetail(id: string): Promise<PublicArticleDetailDto | null> {
+async function buildPublicArticleDetail(id: string): Promise<PublicArticleDetailDto | null> {
   const [row] = await db.event.findMany({
     where: { ...publicEventWhere, id },
     select: {
@@ -355,6 +346,15 @@ export async function getPublicArticleDetail(id: string): Promise<PublicArticleD
           : null,
     },
   };
+}
+
+export async function getPublicArticleDetail(id: string): Promise<PublicArticleDetailDto | null> {
+  const existing = publicArticleDetailCache.get(id);
+  if (existing) return existing.value;
+  const value = buildPublicArticleDetail(id);
+  publicArticleDetailCache.set(id, { value, expiresAt: Date.now() + PUBLIC_DETAIL_CACHE_TTL_MS });
+  void value.catch(() => publicArticleDetailCache.delete(id));
+  return value;
 }
 
 export async function recordPublicArticleView(id: string): Promise<void> {

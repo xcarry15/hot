@@ -8,7 +8,7 @@
  * 历史：
  *   - 逻辑原先内联在 `crawler.ts` 中；B13 抽离后保留：
  *     · MAX_BATCH_SIZE=500、CONCURRENCY=5、DELAY_MS=150、FETCH_TIMEOUT_MS=30_000
- *     · 2 小时退避后的 fetchStatus='failed' → 'pending' 重置
+ *     · 正文处理失败最多自动重试 5 次，每次间隔 2 小时
  *     · 关键字 DB 异常仅 console.error 不阻塞主流程
  *     · repair 只处理近 7 天 fetched 且有 rawContent 的文章
  */
@@ -32,6 +32,7 @@ const MAX_BATCH_SIZE = 500;
 const PROCESS_CONCURRENCY = 5;
 const PROCESS_DELAY_MS = 150;
 const REPAIR_WINDOW_DAYS = 7;
+const PROCESS_MAX_RETRIES = 5;
 
 /**
  * Stage 2: Fetch detail pages for all articles with fetchStatus='pending'.
@@ -42,24 +43,24 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
 
   // 重置"已抓取但正文为空"的文章，让它们重新进详情页流程。
   await db.article.updateMany({
-    where: { cleanContent: '', fetchStatus: 'fetched' },
+    where: { cleanContent: '', fetchStatus: 'fetched', technicalIgnoredAt: null },
     data: { fetchStatus: 'pending' },
   });
 
-  // 重置早期失败的详情抓取（至少 2 小时前），允许退避重试。
-  // 网络波动、源站临时维护等可能导致暂时失败，不应永久放弃。
-  // 2h 窗口匹配 scheduler 默认 crawl_interval_min（120 分钟），
-  // 确保下次 process 周期才能重试，形成自然退避。
+  // 只恢复仍在自动重试额度内、且退避已到期的失败文章。
+  // 达到上限的文章保留 failed 终态，等待人工重试或忽略。
   await db.article.updateMany({
     where: {
       fetchStatus: 'failed',
-      updatedAt: { lte: new Date(Date.now() - 2 * 60 * 60 * 1000) },
+      fetchRetryCount: { lt: PROCESS_MAX_RETRIES },
+      nextFetchRetryAt: { lte: new Date() },
+      technicalIgnoredAt: null,
     },
     data: { fetchStatus: 'pending' },
   });
 
   const pending = await db.article.findMany({
-    where: { fetchStatus: 'pending' },
+    where: { fetchStatus: 'pending', technicalIgnoredAt: null },
     select: { id: true, title: true, url: true, sourceId: true, publishedAt: true },
     orderBy: { createdAt: 'desc' },
   });

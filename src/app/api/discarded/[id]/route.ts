@@ -5,7 +5,7 @@ import { getDiscardedItem } from '@/lib/discarded-service';
 /**
  * GET /api/discarded/[id]
  *
- * 返回未入库条目（DiscardedItem）的详情，供抓取记录页面的详情面板使用。
+ * 返回未入库条目（DiscardedItem）的详情，供任务中心的详情面板使用。
  * discarded 表只保留元数据（标题/URL/原因），无正文/AI 字段。
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {

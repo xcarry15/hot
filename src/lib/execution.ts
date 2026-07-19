@@ -364,7 +364,7 @@ export async function validateSingleArticleWorkflow(
 ): Promise<{ ok: true } | { ok: false; status: 404 | 409; reason: string }> {
   const article = await db.article.findUnique({
     where: { id: articleId },
-    select: { fetchStatus: true, clusterStatus: true, aiStatus: true, skipReason: true, eventId: true, event: { select: { nextPushRetryAt: true } } },
+    select: { fetchStatus: true, clusterStatus: true, aiStatus: true, skipReason: true, eventId: true, event: { select: { nextPushRetryAt: true, pushRetryCount: true } } },
   });
   if (!article) return { ok: false, status: 404, reason: '文章不存在' };
   if (intent === 'regenerate') {
@@ -411,6 +411,7 @@ async function executeSingleArticleWorkflow(
   if (intent !== 'retry' && intent !== 'regenerate') throw new Error('Invalid single article workflow intent');
   const result: Record<string, unknown> = { articleId, startAt, intent, stages: [] as string[] };
   const stages = result.stages as string[];
+  await db.article.update({ where: { id: articleId }, data: { technicalIgnoredAt: null } });
 
   if (startAt === 'process') {
     if (jobId) await startJobStage(jobId, { stage: 'process', total: 1, currentItemLabel: article.title });
@@ -419,11 +420,11 @@ async function executeSingleArticleWorkflow(
     if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
   }
 
-  if (startAt === 'cluster' && intent === 'regenerate') {
+  if (startAt === 'cluster') {
     await db.article.update({
       where: { id: articleId },
       data: {
-        eventId: null,
+        ...(intent === 'regenerate' ? { eventId: null } : {}),
         clusterStatus: 'pending',
         clusteredAt: null,
         clusterError: null,
@@ -432,7 +433,7 @@ async function executeSingleArticleWorkflow(
         eventKey: '',
       },
     });
-    if (article.eventId) await recalculateEventById(article.eventId);
+    if (intent === 'regenerate' && article.eventId) await recalculateEventById(article.eventId);
   }
 
   if (startAt === 'process' || startAt === 'cluster') {
@@ -450,6 +451,9 @@ async function executeSingleArticleWorkflow(
     await refreshPublicPublication(articleId);
   } else {
     if (jobId) await startJobStage(jobId, { stage: 'push', total: 1, currentItemLabel: article.title });
+    if (article.eventId) {
+      await db.event.update({ where: { id: article.eventId }, data: { pushRetryCount: 0, nextPushRetryAt: null } });
+    }
     result.push = await pushArticleToFeishu(articleId, 'retry_failed', signal);
     stages.push('push');
     if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });

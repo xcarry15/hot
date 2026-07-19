@@ -351,6 +351,7 @@ export async function reprocessWithAI(
     data: {
       ...buildAiResetDataForArticle(articleData),
       fetchStatus: articleData.fetchStatus === 'failed' ? 'pending' : undefined,
+      technicalIgnoredAt: null,
     },
   });
   let result: AIProcessResult;

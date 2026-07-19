@@ -12,7 +12,7 @@ import { db } from '@/lib/db';
 import { assertNotAborted } from '@/lib/worker-stop';
 import { getRelatedArticles } from '@/lib/article-related-service';
 import { getWebhookConfigs, type WebhookConfig } from '@/lib/settings';
-import { PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/push/policy';
+import { PUSH_MAX_RETRIES, PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/push/policy';
 import { getPushUrgency, buildFeishuCard } from '@/lib/push/feishu-card';
 import { sendFeishuWebhook } from '@/lib/push/feishu-transport';
 
@@ -198,15 +198,19 @@ async function pushEventToFeishuInternal(
     // 全部成功：标记已推送
     await db.event.update({
       where: { id: eventId },
-      data: { pushedAt: new Date(), nextPushRetryAt: null },
+      data: { pushedAt: new Date(), nextPushRetryAt: null, pushRetryCount: 0 },
     });
     return { status: 'completed', mode, attempted: selectedUrls.size, succeeded: attemptSucceeded, failed: 0, skipped, message: `已完成 ${selectedUrls.size} 个目标投递` };
   }
 
-  // 部分或全部失败：设置重试延迟
+  // 部分或全部失败：有限次数自动重试，耗尽后转人工处理。
+  const nextRetryCount = event.pushRetryCount + 1;
   await db.event.update({
     where: { id: eventId },
-    data: { nextPushRetryAt: new Date(Date.now() + PUSH_RETRY_DELAY_MS) },
+    data: {
+      pushRetryCount: nextRetryCount,
+      nextPushRetryAt: nextRetryCount >= PUSH_MAX_RETRIES ? null : new Date(Date.now() + PUSH_RETRY_DELAY_MS),
+    },
   });
 
   if (attemptSucceeded > 0) {

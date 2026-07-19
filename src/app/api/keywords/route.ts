@@ -36,7 +36,7 @@ export async function GET(request: Request) {
 // POST /api/keywords - Add keyword(s)
 //   { word }              → 单个添加
 //   { text }              → 批量添加（每行一个词，category=default）
-//   { action: 'import-csv', csv: '类型,关键词\\n正面,xxx' }  → CSV 导入
+//   { action: 'import-csv', csv: '类型,关键词\\n提取,xxx' }  → CSV 导入
 export async function POST(request: Request) {
   try {
     const result = await runExclusiveMutation('更新关键词', async () => {

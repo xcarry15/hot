@@ -981,7 +981,7 @@ export default function IntelligenceInbox({ active = true }: { active?: boolean 
         "regenerate",
       );
       if (!result.queued) throw new Error(result.reason || "任务未能启动");
-      toast.success(`${label}任务已启动，可在抓取记录查看进度`);
+      toast.success(`${label}任务已启动，可在任务中心查看进度`);
     } catch (error) {
       toast.error(errorMessage(error, `${label}失败`));
     } finally {
@@ -1059,7 +1059,7 @@ export default function IntelligenceInbox({ active = true }: { active?: boolean 
       <div className="shrink-0 border-b bg-background px-3 py-2 sm:px-4">
         <div className="flex flex-wrap items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" />
-          <span className="text-sm font-semibold">情报收件箱</span>
+          <span className="text-sm font-semibold">内容管理</span>
           <span className="text-xs text-muted-foreground">全量人工校准台</span>
           {data && (
             <>
@@ -1173,13 +1173,13 @@ export default function IntelligenceInbox({ active = true }: { active?: boolean 
         {pageTechnicalCount > 0 && (
           <div className="mt-2 flex items-center gap-2 border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-800">
             <span>
-              本页技术异常 {pageTechnicalCount} 篇，请到抓取记录诊断处理
+                本页技术异常 {pageTechnicalCount} 篇，请到任务中心诊断处理
             </span>
             <a
-              href={selectedId ? `/admin?tab=crawl-log&detail=${encodeURIComponent(selectedId)}&detailKind=article` : "/admin?tab=crawl-log"}
+              href="/admin?tab=crawl-log"
               className="ml-auto font-medium underline"
             >
-              去抓取记录
+                去任务中心
             </a>
           </div>
         )}

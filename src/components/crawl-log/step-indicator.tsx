@@ -146,7 +146,7 @@ function shortSkipLabel(reason: string): string {
 export function SkipBadge({ reason }: { reason: string }) {
   return (
     <span
-      className="text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 shrink-0 max-w-[120px] truncate"
+      className="max-w-[120px] shrink-0 truncate bg-red-600 px-1.5 py-0.5 text-xs font-medium text-white"
       title={reason}
     >
       {shortSkipLabel(reason)}

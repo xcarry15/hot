@@ -1,9 +1,13 @@
 import { db } from '@/lib/db';
 import { retryDiscardedItem } from '@/lib/discarded-retry-service';
+import { invalidateKeywordCache } from '@/lib/filter';
 
 const MAX_CANDIDATE_RESTORE = 50;
+const MAX_PHRASES_PER_TITLE = 12;
+const EXTRACTED_KEYWORD_CATEGORY = '提取';
 
 const STOP_WORDS = new Set(['我们', '公司', '行业', '市场', '相关', '表示', '发布', '消息', '最新', '多个', '进行', '以及']);
+const titleSegmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' });
 
 function parseSampleTitles(value: string): string[] {
   try {
@@ -15,25 +19,28 @@ function parseSampleTitles(value: string): string[] {
 }
 
 function extractPhrases(title: string): string[] {
-  const normalized = title.replace(/[^\p{Script=Han}A-Za-z0-9]+/gu, ' ').trim();
-  const chunks = normalized.split(/\s+/).filter(Boolean);
-  const phrases = new Set<string>();
-
-  for (const chunk of chunks) {
-    if (/^[A-Za-z0-9]+$/.test(chunk)) {
-      if (chunk.length >= 2) phrases.add(chunk.toLowerCase());
-      continue;
-    }
-    const chars = Array.from(chunk);
-    for (let length = 2; length <= Math.min(6, chars.length); length += 1) {
-      for (let start = 0; start + length <= chars.length; start += 1) {
-        const phrase = chars.slice(start, start + length).join('');
-        if (!STOP_WORDS.has(phrase)) phrases.add(phrase);
-      }
-    }
+  const phrases = [...titleSegmenter.segment(title)]
+    .filter((part) => part.isWordLike)
+    .map((part) => part.segment.trim().toLowerCase())
+    .filter((phrase) => {
+      const length = Array.from(phrase).length;
+      return length >= 2
+        && length <= 8
+        && !STOP_WORDS.has(phrase)
+        && !/\d/.test(phrase)
+        && /[\p{Script=Han}A-Za-z]/u.test(phrase);
+    });
+  const ordered = [...new Set(phrases)].sort((left, right) => (
+    Array.from(right).length - Array.from(left).length || left.localeCompare(right)
+  ));
+  const selected: string[] = [];
+  for (const phrase of ordered) {
+    // 同一标题优先保留完整长词，去掉已被长词覆盖的短片段。
+    if (selected.some((existing) => existing.includes(phrase))) continue;
+    selected.push(phrase);
+    if (selected.length >= MAX_PHRASES_PER_TITLE) break;
   }
-
-  return [...phrases].slice(0, 24);
+  return selected;
 }
 
 /** 从未命中标题提取本地候选词；只记录候选，不改变正式关键词。 */
@@ -65,14 +72,16 @@ export async function recordKeywordCandidates(title: string): Promise<void> {
 }
 
 export async function listKeywordCandidates() {
-  const rows = await db.keywordCandidate.findMany({
-    where: { status: 'pending', occurrences: { gte: 2 } },
-    orderBy: [{ occurrences: 'desc' }, { updatedAt: 'desc' }],
-    take: 100,
-  });
   const discarded = await db.discardedItem.findMany({
     where: { reason: 'filter:keyword' },
     select: { id: true, title: true, sourceId: true },
+  });
+  if (discarded.length > 0 && await db.keywordCandidate.count() === 0) {
+    for (const item of discarded) await recordKeywordCandidates(item.title);
+  }
+  const rows = await db.keywordCandidate.findMany({
+    where: { status: 'pending', occurrences: { gte: 2 } },
+    orderBy: [{ updatedAt: 'desc' }],
   });
   return rows.map((row) => {
     const matches = discarded.filter((item) => item.title.toLocaleLowerCase().includes(row.phrase.toLocaleLowerCase()));
@@ -82,7 +91,11 @@ export async function listKeywordCandidates() {
       sourceCount: new Set(matches.map((item) => item.sourceId)).size,
       recallCount: matches.length,
     };
-  });
+  }).sort((left, right) => (
+    right.occurrences - left.occurrences
+    || right.sourceCount - left.sourceCount
+    || right.updatedAt.getTime() - left.updatedAt.getTime()
+  )).slice(0, 100);
 }
 
 export async function updateKeywordCandidate(id: string, action: 'approve' | 'dismiss') {
@@ -91,12 +104,13 @@ export async function updateKeywordCandidate(id: string, action: 'approve' | 'di
   if (action === 'approve') {
     await db.$transaction([
       db.keyword.upsert({
-        where: { category_word: { category: '正面', word: candidate.phrase } },
+        where: { category_word: { category: EXTRACTED_KEYWORD_CATEGORY, word: candidate.phrase } },
         update: {},
-        create: { category: '正面', word: candidate.phrase },
+        create: { category: EXTRACTED_KEYWORD_CATEGORY, word: candidate.phrase },
       }),
       db.keywordCandidate.update({ where: { id }, data: { status: 'approved' } }),
     ]);
+    invalidateKeywordCache();
     const discarded = await db.discardedItem.findMany({
       where: { reason: 'filter:keyword', title: { contains: candidate.phrase } },
       select: { id: true },
@@ -117,4 +131,16 @@ export async function updateKeywordCandidate(id: string, action: 'approve' | 'di
     await db.keywordCandidate.update({ where: { id }, data: { status: 'dismissed' } });
   }
   return { id, action, restored: 0, articleIds: [] as string[], restoreLimit: MAX_CANDIDATE_RESTORE };
+}
+
+/** 清空旧候选，并从现有关键词未命中记录重新生成。 */
+export async function rebuildKeywordCandidatesFromDiscardedItems(): Promise<{ titles: number; candidates: number }> {
+  const discarded = await db.discardedItem.findMany({
+    where: { reason: 'filter:keyword' },
+    select: { title: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  await db.keywordCandidate.deleteMany({});
+  for (const item of discarded) await recordKeywordCandidates(item.title);
+  return { titles: discarded.length, candidates: await db.keywordCandidate.count() };
 }

@@ -1,14 +1,20 @@
-import type { PublicArticleListResponseDto } from '@/contracts/public-articles';
+import type { PublicArticleDetailDto, PublicArticleListResponseDto } from '@/contracts/public-articles';
 
-export type PublicArticleCacheEntry = {
+export type PublicArticleCacheEntry<T> = {
   expiresAt: number;
-  value: Promise<PublicArticleListResponseDto>;
+  value: Promise<T>;
 };
 
 const MAX_PUBLIC_ARTICLE_CACHE_ENTRIES = 50;
+const MAX_PUBLIC_ARTICLE_DETAIL_CACHE_ENTRIES = 100;
+const MAX_PUBLIC_ARTICLE_COUNT_CACHE_ENTRIES = 20;
 
-class BoundedPublicArticleCache extends Map<string, PublicArticleCacheEntry> {
-  override get(key: string): PublicArticleCacheEntry | undefined {
+class BoundedPublicArticleCache<T> extends Map<string, PublicArticleCacheEntry<T>> {
+  constructor(private readonly maxEntries: number) {
+    super();
+  }
+
+  override get(key: string): PublicArticleCacheEntry<T> | undefined {
     const entry = super.get(key);
     if (!entry) return undefined;
     if (entry.expiresAt <= Date.now()) {
@@ -21,10 +27,10 @@ class BoundedPublicArticleCache extends Map<string, PublicArticleCacheEntry> {
     return entry;
   }
 
-  override set(key: string, value: PublicArticleCacheEntry): this {
+  override set(key: string, value: PublicArticleCacheEntry<T>): this {
     super.delete(key);
     super.set(key, value);
-    while (this.size > MAX_PUBLIC_ARTICLE_CACHE_ENTRIES) {
+    while (this.size > this.maxEntries) {
       const oldestKey = this.keys().next().value as string | undefined;
       if (!oldestKey) break;
       super.delete(oldestKey);
@@ -33,8 +39,12 @@ class BoundedPublicArticleCache extends Map<string, PublicArticleCacheEntry> {
   }
 }
 
-export const publicArticleListCache = new BoundedPublicArticleCache();
+export const publicArticleListCache = new BoundedPublicArticleCache<PublicArticleListResponseDto>(MAX_PUBLIC_ARTICLE_CACHE_ENTRIES);
+export const publicArticleDetailCache = new BoundedPublicArticleCache<PublicArticleDetailDto | null>(MAX_PUBLIC_ARTICLE_DETAIL_CACHE_ENTRIES);
+export const publicArticleCountCache = new BoundedPublicArticleCache<number>(MAX_PUBLIC_ARTICLE_COUNT_CACHE_ENTRIES);
 
 export function invalidatePublicArticleCache(): void {
   publicArticleListCache.clear();
+  publicArticleDetailCache.clear();
+  publicArticleCountCache.clear();
 }

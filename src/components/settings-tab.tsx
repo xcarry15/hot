@@ -258,9 +258,9 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     <div className="flex flex-col h-full min-h-0">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
         {/* 移动端横向滚动；桌面端自然展示全部 tab */}
-        <div className="overflow-x-auto mx-3 mt-3 sm:mx-4 sm:mt-4 shrink-0 [&::-webkit-scrollbar]:hidden">
+        <div className="overflow-x-auto mx-2 mt-2 shrink-0 [&::-webkit-scrollbar]:hidden">
           <TabsList
-            className="h-9 flex-nowrap"
+            className="h-8 flex-nowrap rounded-none bg-transparent p-0"
             onMouseOver={(event) => {
               const value = (event.target as HTMLElement).closest<HTMLElement>('[data-value]')?.dataset.value
               if (value) void sectionLoaders[value]?.()
@@ -270,19 +270,19 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
               if (value) void sectionLoaders[value]?.()
             }}
           >
-            <TabsTrigger value="dashboard" data-value="dashboard" className="text-xs px-3 h-7 whitespace-nowrap">概览</TabsTrigger>
-            <TabsTrigger value="public" data-value="public" className="text-xs px-3 h-7 whitespace-nowrap">公开</TabsTrigger>
-            <TabsTrigger value="sources" data-value="sources" className="text-xs px-3 h-7 whitespace-nowrap">源管理</TabsTrigger>
-            <TabsTrigger value="keywords" data-value="keywords" className="text-xs px-3 h-7 whitespace-nowrap">关键词</TabsTrigger>
-            <TabsTrigger value="ai-model" data-value="ai-model" className="text-xs px-3 h-7 whitespace-nowrap">AI 模型</TabsTrigger>
-            <TabsTrigger value="prompts" data-value="prompts" className="text-xs px-3 h-7 whitespace-nowrap">提示词</TabsTrigger>
-            <TabsTrigger value="push" data-value="push" className="text-xs px-3 h-7 whitespace-nowrap">推送</TabsTrigger>
-            <TabsTrigger value="account" data-value="account" className="text-xs px-3 h-7 whitespace-nowrap">账户</TabsTrigger>
-            <TabsTrigger value="data" data-value="data" className="text-xs px-3 h-7 whitespace-nowrap">数据清理</TabsTrigger>
+            <TabsTrigger value="dashboard" data-value="dashboard" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">概览</TabsTrigger>
+            <TabsTrigger value="public" data-value="public" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">公开</TabsTrigger>
+            <TabsTrigger value="sources" data-value="sources" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">源管理</TabsTrigger>
+            <TabsTrigger value="keywords" data-value="keywords" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">关键词</TabsTrigger>
+            <TabsTrigger value="ai-model" data-value="ai-model" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">AI 模型</TabsTrigger>
+            <TabsTrigger value="prompts" data-value="prompts" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">提示词</TabsTrigger>
+            <TabsTrigger value="push" data-value="push" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">推送</TabsTrigger>
+            <TabsTrigger value="account" data-value="account" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">账户</TabsTrigger>
+            <TabsTrigger value="data" data-value="data" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">数据清理</TabsTrigger>
           </TabsList>
         </div>
 
-        <TabsContent value="dashboard" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="dashboard" className="flex-1 m-0 min-h-0 overflow-auto px-2 pb-2">
           <DashboardTab active={active && activeTab === 'dashboard'} />
         </TabsContent>
 

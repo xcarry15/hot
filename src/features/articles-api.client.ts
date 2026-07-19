@@ -185,6 +185,14 @@ export async function triggerArticleWorkflow(
   return result;
 }
 
+export async function updateArticleTechnicalStatus(
+  articleId: string,
+  action: 'ignore' | 'restore',
+): Promise<void> {
+  await requestJson('POST', `/api/articles/${encodeURIComponent(articleId)}/technical-status`, { body: { action } });
+  invalidateArticleDetailCache(articleId);
+}
+
 export async function fetchRelatedByBrand(
   articleId: string,
   take = 5,

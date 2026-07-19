@@ -12,6 +12,8 @@ import { assertNotAborted } from './worker-stop';
 
 const PAGE_READER_TIMEOUT_MS = 30000;
 const DIRECT_FETCH_TIMEOUT_MS = 20000;
+const FETCH_MAX_RETRIES = 5;
+const FETCH_RETRY_DELAY_MS = 2 * 60 * 60 * 1000;
 
 function extractLinkshopOriginalSource(html: string): string | null {
   const $ = cheerio.load(html);
@@ -120,6 +122,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
             // 内容指纹是事件聚类的强证据；详情正文变化时必须同步更新。
             contentHash: computeContentFingerprint(article.title, cleaned),
             fetchStatus: meaningful ? 'fetched' : 'failed',
+            ...(meaningful ? { fetchRetryCount: 0, nextFetchRetryAt: null, technicalIgnoredAt: null } : {}),
             ...(detailPublishedAt ? { publishedAt: detailPublishedAt } : {}),
             ...originalSourceData,
           },
@@ -137,9 +140,15 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
 
   console.error(`[fetchArticleDetail] article=${articleId} all ${maxRetries + 1} attempts failed:`, lastError?.message);
   assertNotAborted(signal);
+  const latest = await db.article.findUnique({ where: { id: articleId }, select: { fetchRetryCount: true } });
+  const retryCount = (latest?.fetchRetryCount ?? 0) + 1;
   await db.article.update({
     where: { id: articleId },
-    data: { fetchStatus: 'failed' },
+    data: {
+      fetchStatus: 'failed',
+      fetchRetryCount: retryCount,
+      nextFetchRetryAt: retryCount >= FETCH_MAX_RETRIES ? null : new Date(Date.now() + FETCH_RETRY_DELAY_MS),
+    },
   });
 
 	return article.cleanContent || '';

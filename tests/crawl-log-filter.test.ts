@@ -5,9 +5,9 @@
  *
  * 不 mount 组件、不依赖数据库，直接断言：
  * - 每个 chip key 对 ArticleProgress 的命中逻辑
- * - 多选 chip 的 OR 联合语义 + 空集 = 不过滤
+ * - 单选状态语义 + 空集 = 不过滤
  * - countMatches 在边界条件下的行为
- * - applyFilterState：source scope / chip 联合 / includeDiscarded 切换
+ * - applyFilterState：source scope / 状态筛选 / includeDiscarded 切换
  * - URL 编解码：往返不变 + 防御性（未知 key / 空字符串）
  * - writeFilterToUrl 在 SSR 下安全（typeof window 判断）
  */
@@ -32,6 +32,8 @@ function article(partial: Partial<ArticleProgress>): ArticleProgress {
     cluster: 'done',
     clusterStatus: 'clustered',
     ai: 'pending',
+    score: null,
+    anomalyLabels: [],
     push: 'pending',
     lastTime: 0,
     technicalIssues: [],
@@ -94,9 +96,9 @@ describe('matchStepChip 单谓词命中', () => {
   })
 })
 
-// ── 2. 多选 OR 联合 ──
+// ── 2. 单选状态 ──
 
-describe('articleMatchesChips OR 联合', () => {
+describe('articleMatchesChips 单选兼容形状', () => {
   it('空 chips 集合 = 不过滤（命中所有）', () => {
     const a = article({ ai: 'done' })
     expect(articleMatchesChips(a, new Set())).toBe(true)
@@ -113,25 +115,19 @@ describe('articleMatchesChips OR 联合', () => {
     expect(articleMatchesChips(a, new Set(['ai-done']))).toBe(false)
   })
 
-  it('多 chip 任一命中 → true（OR）', () => {
-    const a = article({ push: 'done' })  // pushed 命中，ai-done 不命中
-    expect(articleMatchesChips(a, new Set(['ai-done', 'pushed']))).toBe(true)
+  it('兼容旧多值集合时只读取第一个状态', () => {
+    const a = article({ push: 'done', ai: 'pending' })
+    expect(articleMatchesChips(a, new Set(['ai-done', 'pushed']))).toBe(false)
   })
 
-  it('多 chip 全部不命中 → false', () => {
-    const a = article({ push: 'pending', ai: 'pending' })
-    expect(articleMatchesChips(a, new Set(['pushed', 'ai-done']))).toBe(false)
-  })
-
-  it('迭代器在第一个命中后短路', () => {
-    // 反向验证：传入一个会报错的迭代器在命中之后没人调用
-    const a = article({ ai: 'done' })
-    const iter = (function* () {
-      yield 'has-fail' as const  // 第一个 yield 不命中
-      yield 'ai-done' as const   // 第二个 yield 命中 — 此后迭代器不应再被调用
-      throw new Error('迭代器在命中后不应继续')
-    })()
-    expect(articleMatchesChips(a, iter)).toBe(true)
+  it('anomaly：命中业务标签、待复核、跳过和技术异常', () => {
+    expect(matchStepChip(article({ anomalyLabels: ['ad'] }), 'anomaly')).toBe(true)
+    expect(matchStepChip(article({ anomalyLabels: ['duplicate'] }), 'anomaly')).toBe(true)
+    expect(matchStepChip(article({ clusterStatus: 'needs_review' }), 'anomaly')).toBe(true)
+    expect(matchStepChip(article({ ai: 'skipped', skipReason: '内容不足' }), 'anomaly')).toBe(true)
+    expect(matchStepChip(article({ technicalIssues: ['push_failed'] }), 'anomaly')).toBe(true)
+    expect(matchStepChip(article({ technicalState: 'manual' }), 'anomaly')).toBe(true)
+    expect(matchStepChip(article({}), 'anomaly')).toBe(false)
   })
 })
 
@@ -177,13 +173,13 @@ describe('applyFilterState', () => {
     expect(out.map(s => s.id)).toEqual(['s1'])
   })
 
-  it('chip OR 联合过滤 articles', () => {
+  it('状态筛选只使用一个值', () => {
     const out = applyFilterState(allSources, {
       ...EMPTY_FILTER_STATE,
-      chips: new Set(['ai-done', 'pushed']),
+      chips: new Set(['ai-done']),
     })
     const allArticles = out.flatMap(s => s.articles.map(a => a.id)).sort()
-    expect(allArticles).toEqual(['1', '2'])  // s1 的两条 hits，s2 都不命中
+    expect(allArticles).toEqual(['1'])
   })
 
   it('sourceId scope 与 chip 联合', () => {
@@ -259,11 +255,11 @@ describe('encodeFilterToSearch ↔ decodeFilterFromSearch 往返', () => {
     expect(encodeFilterToSearch(off).toString()).toBe('disc=0')
   })
 
-  it('chips → chips=key1,key2', () => {
+  it('状态参数只编码一个值', () => {
     const state: FilterState = {
       ...EMPTY_FILTER_STATE, chips: new Set(['ai-done', 'pushed']),
     }
-    expect(encodeFilterToSearch(state).get('chips')).toBe('ai-done,pushed')
+    expect(encodeFilterToSearch(state).get('chips')).toBe('ai-done')
   })
 
   it('完整 state（含 chips + 源，includeDiscarded=默认）→ 不写 disc', () => {
@@ -276,9 +272,9 @@ describe('encodeFilterToSearch ↔ decodeFilterFromSearch 往返', () => {
     expect(encodeFilterToSearch(state).toString()).toBe('chips=has-fail&src=src-xyz')
   })
 
-  it('解码未知 chip key → 丢弃，保留有效', () => {
+  it('解码旧多值参数时保留第一个有效状态', () => {
     const s = decodeFilterFromSearch('chips=ai-done,__bogus__,has-fail')
-    expect(Array.from(s.chips).sort()).toEqual(['ai-done', 'has-fail'])
+    expect(Array.from(s.chips)).toEqual(['ai-done'])
   })
 
   it('解码空 / 缺失的 src → 默认为 all', () => {
@@ -303,14 +299,14 @@ describe('encodeFilterToSearch ↔ decodeFilterFromSearch 往返', () => {
 
   it('encode → decode 往返：状态可重建', () => {
     const state: FilterState = {
-      chips: new Set(['has-fail', 'ai-pending']),
+      chips: new Set(['has-fail']),
       sourceId: 'abc',
       includeDiscarded: true,
       publishedToday: false,
     }
     const params = encodeFilterToSearch(state).toString()
     const decoded = decodeFilterFromSearch(params)
-    expect(Array.from(decoded.chips).sort()).toEqual(['ai-pending', 'has-fail'])
+    expect(Array.from(decoded.chips)).toEqual(['has-fail'])
     expect(decoded.sourceId).toBe('abc')
     expect(decoded.includeDiscarded).toBe(true)
   })

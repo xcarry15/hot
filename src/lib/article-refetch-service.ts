@@ -29,6 +29,9 @@ export async function refetchArticle(articleId: string) {
   const resetData: Prisma.ArticleUpdateInput = {
     ...buildAiResetDataForArticle(article),
     fetchStatus: 'pending',
+    fetchRetryCount: 0,
+    nextFetchRetryAt: null,
+    technicalIgnoredAt: null,
     event: { disconnect: true },
     clusterStatus: 'pending',
     clusteredAt: null,

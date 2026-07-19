@@ -4,6 +4,7 @@ import { CheckCircle2, XCircle, Loader2, Clock3 } from 'lucide-react'
 import { ArticleRow } from './article-row'
 import { DiscardedRow } from './discarded-row'
 import { DISCARD_REASON_LABELS } from './helpers'
+import { hasArticleAnomaly } from './filter'
 import type { SourceProgress, DiscardedRow as DiscardedRowType } from './types'
 
 function humanizeSourceError(value?: string): string {
@@ -20,9 +21,11 @@ function humanizeSourceError(value?: string): string {
 
 export const SourceBlock = memo(function SourceBlock({
   source,
+  summarySource,
   onToggle,
   onStepAction,
   onStepActionLoading,
+  onTechnicalStatus,
   onOpenArticle,
   onOpenDiscarded,
   onDiscardedRetried,
@@ -30,9 +33,12 @@ export const SourceBlock = memo(function SourceBlock({
   isJobRunning,
 }: {
   source: SourceProgress
+  /** 筛选只影响列表；标题统计始终读取该数据源的完整快照。 */
+  summarySource?: SourceProgress
   onToggle: () => void
   onStepAction?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => void
   onStepActionLoading?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => boolean
+  onTechnicalStatus?: (articleId: string, action: 'ignore' | 'restore') => void
   onOpenArticle?: (articleId: string) => void
   onOpenDiscarded?: (id: string) => void
   onDiscardedRetried?: () => void
@@ -53,20 +59,23 @@ export const SourceBlock = memo(function SourceBlock({
                    'bg-red-50/80 border-red-200/50'
 
   const lastRunLabel = source.lastRunStatus === 'success'
-    ? `本次 +${source.lastRunItemsFound ?? 0}`
+    ? `本次发现 ${source.lastRunItemsFound ?? 0}`
     : source.lastRunStatus === 'failed'
       ? '本次失败'
       : source.lastRunStatus === 'warning'
-        ? '本次警告'
+        ? '本次有警告'
         : '未运行'
 
   // 稳定引用：source.articles 缺失时 `|| []` 会返回新数组，破坏下游 useMemo 的依赖判断
   const articles = useMemo(() => source.articles ?? [], [source.articles])
-  const [normalExpanded, setNormalExpanded] = useState(true)
   const [collapsedDiscardGroups, setCollapsedDiscardGroups] = useState<Set<string>>(() => new Set())
-  const savedCount = articles.filter(a => a.crawl === 'done' || a.crawl === 'running').length
-  const aiDoneCount = articles.filter(a => a.ai === 'done').length
-  const totalCount = articles.length
+  const summaryArticles = summarySource?.articles ?? articles
+  const totalCount = summaryArticles.length
+  const manualCount = summaryArticles.filter(a => a.technicalState === 'manual').length
+  const autoRetryCount = summaryArticles.filter(a => a.technicalState === 'auto_retry').length
+  const pushedCount = summaryArticles.filter(a => a.push === 'done').length
+  const anomalyCount = summaryArticles.filter(hasArticleAnomaly).length
+  const discardedCount = summarySource?.discarded?.length ?? source.discarded?.length ?? 0
 
   // 按 reason 分组，组内按 publishedAt desc 排序
   const discardedGroups = useMemo(() => {
@@ -108,7 +117,7 @@ export const SourceBlock = memo(function SourceBlock({
       >
         {statusIcon}
         <span className="font-semibold truncate">{source.name}</span>
-        <div className="flex items-center gap-1.5 ml-auto">
+        <div className="flex min-w-0 items-center gap-1.5">
           <Badge
             variant="secondary"
             className={`text-[10px] px-1.5 py-0 rounded-full ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
@@ -116,59 +125,30 @@ export const SourceBlock = memo(function SourceBlock({
           >
             {lastRunLabel}
           </Badge>
-          {savedCount > 0 && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 rounded-full bg-emerald-100 text-emerald-700">
-              +{savedCount}
-            </Badge>
-          )}
-          {aiDoneCount > 0 && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 rounded-full bg-amber-100 text-amber-700">
-              AI:{aiDoneCount}
-            </Badge>
-          )}
-          {source.deduped > 0 && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 rounded-full text-muted-foreground" title="URL 完全相同，未重复入库">
-              链接重复:{source.deduped}
-            </Badge>
-          )}
-          {source.filtered > 0 && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 rounded-full text-muted-foreground">
-              ⊘{source.filtered}
-            </Badge>
-          )}
-          <span className="text-muted-foreground text-xs">{totalCount}篇</span>
+          <span className="text-muted-foreground text-xs">文章 {totalCount}</span>
+          <span className="text-xs text-emerald-700">推送 {pushedCount}</span>
+          <span className={`text-xs ${anomalyCount > 0 ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>异常 {anomalyCount}</span>
+          {manualCount > 0 && <span className="text-xs font-medium text-red-700">需处理 {manualCount}</span>}
+          {autoRetryCount > 0 && <span className="text-xs font-medium text-blue-700">自动恢复 {autoRetryCount}</span>}
+          {discardedCount > 0 && <span className="text-xs text-muted-foreground">未入库 {discardedCount}</span>}
         </div>
       </button>
 
       {source.expanded && articles.length > 0 && (
         <div className="bg-background/50">
-          {/* 已入库文章默认展开；事件归属在情报收件箱中统一校准。 */}
-          {articles.length > 0 && (
-            <div>
-                  <button
-                    className="flex items-center gap-1 text-xs text-muted-foreground px-2 py-1 hover:text-foreground w-full"
-                    onClick={() => setNormalExpanded(!normalExpanded)}
-                  >
-                    <span>{normalExpanded ? '▾' : '▸'}</span>
-                    <span>已入库文章</span>
-                    <span className="text-muted-foreground/60">({articles.length})</span>
-                  </button>
-                  {normalExpanded && (
-                    <div className="ml-2 overflow-y-auto max-h-[50vh] sm:max-h-none divide-y divide-border/20">
-                      {articles.map(article => (
-                        <ArticleRow
-                          key={article.id}
-                          article={article}
-                          onStepAction={onStepAction}
-                          onStepActionLoading={onStepActionLoading}
-                          onOpenArticle={onOpenArticle}
-                          isJobRunning={isJobRunning}
-                        />
-                      ))}
-                    </div>
-                  )}
-            </div>
-          )}
+          <div className="overflow-y-auto max-h-[50vh] sm:max-h-none divide-y divide-border/20">
+            {articles.map(article => (
+              <ArticleRow
+                key={article.id}
+                article={article}
+                onStepAction={onStepAction}
+                onStepActionLoading={onStepActionLoading}
+                onTechnicalStatus={onTechnicalStatus}
+                onOpenArticle={onOpenArticle}
+                isJobRunning={isJobRunning}
+              />
+            ))}
+          </div>
         </div>
       )}
 

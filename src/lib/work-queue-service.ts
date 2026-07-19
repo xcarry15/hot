@@ -17,14 +17,16 @@ export async function getWorkQueueSummary() {
     db.article.count({ where: { aiStatus: 'done', aiConfidence: { lt: 70 } } }),
   ]);
   const humanTotal = Number(humanTotalRows[0]?.total ?? 0);
+  const manualTechnicalItems = technicalItems.filter((item) => item.state === 'manual');
   return {
     technical: {
-      total: technicalItems.length,
+      total: manualTechnicalItems.length,
       sources: failedSources,
-      processFailed: technicalItems.filter((item) => item.issues.includes('process_failed')).length,
-      clusterFailed: technicalItems.filter((item) => item.issues.includes('cluster_failed')).length,
-      aiFailed: technicalItems.filter((item) => item.issues.includes('ai_failed')).length,
-      pushFailed: technicalItems.filter((item) => item.issues.includes('push_failed')).length,
+      processFailed: manualTechnicalItems.filter((item) => item.issues.includes('process_failed')).length,
+      clusterFailed: manualTechnicalItems.filter((item) => item.issues.includes('cluster_failed')).length,
+      aiFailed: manualTechnicalItems.filter((item) => item.issues.includes('ai_failed')).length,
+      pushFailed: manualTechnicalItems.filter((item) => item.issues.includes('push_failed')).length,
+      autoRetry: technicalItems.filter((item) => item.state === 'auto_retry').length,
     },
     human: { total: humanTotal, clusterReview, unreviewed, lowConfidence },
   };

@@ -80,6 +80,7 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
     ];
   }
   if (filter.anomaly === 'technical') {
+    where.technicalIgnoredAt = null;
     where.OR = [
       { fetchStatus: 'failed' },
       { aiStatus: 'failed' },

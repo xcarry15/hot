@@ -5,9 +5,41 @@ import type {
   ArticleProgress, FilterState, SourceProgress, StepFilterKey,
 } from './types'
 import {
-  ALL_STEP_FILTER_KEYS, EMPTY_FILTER_STATE, isArticleFailed,
+  ALL_STEP_FILTER_KEYS, DEPRECATED_STEP_FILTER_KEYS, EMPTY_FILTER_STATE, isArticleFailed,
 } from './types'
 import { URL_PARAM_CHIPS, URL_PARAM_SRC, URL_PARAM_DISC, URL_PARAM_TODAY } from './constants'
+
+export type ArticleFilterBucket =
+  | 'normal-processing'
+  | 'normal-ai'
+  | 'normal-push'
+  | 'normal-pushed'
+  | 'anomaly-manual'
+  | 'anomaly-review'
+  | 'anomaly-business'
+  | 'anomaly-failure'
+  | 'ignored'
+
+export function getArticleFilterBucket(article: ArticleProgress): ArticleFilterBucket {
+  if (article.technicalState === 'ignored') return 'ignored'
+  if (article.technicalState === 'manual') return 'anomaly-manual'
+  if (article.clusterStatus === 'needs_review') return 'anomaly-review'
+  if (
+    article.technicalState === 'auto_retry'
+    || (article.technicalIssues?.length ?? 0) > 0
+    || isArticleFailed(article)
+    || Boolean(article.skipReason && (article.crawl === 'skipped' || article.ai === 'skipped'))
+  ) return 'anomaly-failure'
+  if ((article.anomalyLabels?.length ?? 0) > 0) return 'anomaly-business'
+  if (article.push === 'done') return 'normal-pushed'
+  if (article.ai === 'done' && article.push === 'pending') return 'normal-push'
+  if (article.process === 'done' && article.cluster === 'done' && article.ai === 'pending') return 'normal-ai'
+  return 'normal-processing'
+}
+
+export function hasArticleAnomaly(article: ArticleProgress): boolean {
+  return getArticleFilterBucket(article).startsWith('anomaly-')
+}
 
 /**
  * 单个 chip 对一篇文章的命中判断。
@@ -16,7 +48,18 @@ import { URL_PARAM_CHIPS, URL_PARAM_SRC, URL_PARAM_DISC, URL_PARAM_TODAY } from 
  * 例如一篇文章可同时命中聚类失败和总失败，但 'ai-done' 和 'ai-pending' 互斥。
  */
 export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boolean {
+  const bucket = getArticleFilterBucket(article)
   switch (key) {
+    case 'normal-all':
+      return bucket.startsWith('normal-')
+    case 'anomaly-all':
+      return bucket.startsWith('anomaly-')
+    case 'anomaly-ad':
+      return article.anomalyLabels?.includes('ad') ?? false
+    case 'anomaly-duplicate':
+      return article.anomalyLabels?.includes('duplicate') ?? false
+    case 'ignored':
+      return bucket === 'ignored'
     case 'ai-done':
       return article.ai === 'done'
     case 'pushed':
@@ -30,18 +73,24 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
     case 'cluster-review':
       return article.clusterStatus === 'needs_review'
     case 'ai-pending':
-      // 只有详情处理完成后，文章才真正进入 AI 待处理队列。
       return article.process === 'done' && article.ai === 'pending'
     case 'push-pending':
-      // push=pending 已由统一状态投影保证：详情、AI、分数和相关度均满足推送条件。
       return article.push === 'pending'
+    case 'anomaly':
+      return hasArticleAnomaly(article)
     case 'has-fail':
       return isArticleFailed(article)
+    case 'manual-fail':
+      return article.technicalState === 'manual'
+    case 'auto-retry':
+      return article.technicalState === 'auto_retry'
+    default:
+      return bucket === key
   }
 }
 
 /**
- * 多选 OR 联合。空集 = 不过滤，命中所有。
+ * 兼容内部调用的集合形状；状态筛选只读取第一个有效值。
  *
  * 实现要点：先看 chips 是否为空（热路径短路），避免无谓遍历。
  */
@@ -49,12 +98,10 @@ export function articleMatchesChips(
   article: ArticleProgress,
   chips: Iterable<StepFilterKey>,
 ): boolean {
-  let matched = false
   for (const k of chips) {
-    matched = true
-    if (matchStepChip(article, k)) return true
+    return matchStepChip(article, k)
   }
-  return !matched
+  return true
 }
 
 /** 一组文章在该 chip 下命中数 */
@@ -69,7 +116,7 @@ export function countMatches(articles: readonly ArticleProgress[], key: StepFilt
  *
  * 规则：
  * - sourceId !== 'all' → 只保留该 source
- * - chips 非空 → 文章按 OR 联合过滤
+ * - 选中状态 → 文章只按该状态过滤
  * - publishedToday = true → 只保留 publishedAt 为今天的文章
  * - includeDiscarded = false → 清空 discarded 字段（隐藏"未入库"段，不渲染）
  * - 末尾过滤掉无 articles 且无 discarded 的 source
@@ -78,12 +125,15 @@ export function applyFilterState(
   sources: readonly SourceProgress[],
   state: FilterState,
 ): SourceProgress[] {
-  const chipArr = state.chips.size > 0 ? Array.from(state.chips) : null
+  const selectedChip = state.chips.values().next().value as StepFilterKey | undefined
   const today = new Date().toDateString()
   return sources
     .filter(s => state.sourceId === 'all' || s.id === state.sourceId)
     .map(s => {
-      let articles = !chipArr ? s.articles : s.articles.filter(a => articleMatchesChips(a, chipArr))
+      // 已忽略项默认隐藏，只在用户主动选择“已忽略”筛选时展示，避免长期挂在任务列表。
+      let articles = !selectedChip
+        ? s.articles.filter(a => a.technicalState !== 'ignored')
+        : s.articles.filter(a => matchStepChip(a, selectedChip))
       if (state.publishedToday) {
         articles = articles.filter(a => {
           if (!a.publishedAt) return false
@@ -94,7 +144,7 @@ export function applyFilterState(
       // chip 激活 → 隐藏未入库区（状态 chip 只对已入库文章有意义）
       // publishedToday → 也按日期过滤未入库条目
       let discarded = s.discarded
-      if (chipArr) {
+      if (selectedChip) {
         // 选择了具体状态 → 隐藏未入库（状态 chip 不适用于未入库条目）
         discarded = []
       } else if (state.includeDiscarded) {
@@ -114,11 +164,11 @@ export function applyFilterState(
       if (s.articles.length > 0 || s.discarded.length > 0) return true
       // 0 结果的 source（SSE 添加、DB 无 article）只在无 chip/today 筛选 + includeDiscarded=true 时保留。
       // includeDiscarded=false 时无法区分"原本有 discarded 被隐藏"和"真正 0 结果"，保守不保留。
-      if (!chipArr && !state.publishedToday && state.includeDiscarded && s.itemsFound === 0) {
+      if (!selectedChip && !state.publishedToday && state.includeDiscarded && s.itemsFound === 0) {
         return true
       }
       // P0-3: 有运行结果的源（即使 0 条文章/未入库）也保留，让管理员看到失败/0 条源
-      if (!chipArr && s.lastRunStatus != null && s.lastRunStatus !== 'not-run') {
+      if (!selectedChip && s.lastRunStatus != null && s.lastRunStatus !== 'not-run') {
         return true
       }
       return false
@@ -140,8 +190,8 @@ export function encodeFilterToSearch(state: FilterState): URLSearchParams {
   if (state.chips.size > 0) {
     // 防御：忽略未知 key，免得污染 URL
     const valid = new Set<string>(ALL_STEP_FILTER_KEYS as readonly string[])
-    const raw = Array.from(state.chips).filter(k => valid.has(k))
-    if (raw.length > 0) params.set(URL_PARAM_CHIPS, raw.join(','))
+    const selected = Array.from(state.chips).find(k => valid.has(k))
+    if (selected) params.set(URL_PARAM_CHIPS, selected)
   }
   if (state.sourceId !== EMPTY_FILTER_STATE.sourceId) params.set(URL_PARAM_SRC, state.sourceId)
   if (state.includeDiscarded !== EMPTY_FILTER_STATE.includeDiscarded) {
@@ -166,10 +216,13 @@ export function decodeFilterFromSearch(search: string): FilterState {
   const valid = new Set<string>(ALL_STEP_FILTER_KEYS as readonly string[])
   const chips = new Set<StepFilterKey>()
   const raw = params.get(URL_PARAM_CHIPS)
-  if (raw) {
+  if (raw && !DEPRECATED_STEP_FILTER_KEYS.has(raw)) {
     for (const k of raw.split(',')) {
       const trimmed = k.trim()
-      if (valid.has(trimmed)) chips.add(trimmed as StepFilterKey)
+      if (valid.has(trimmed)) {
+        chips.add(trimmed as StepFilterKey)
+        break
+      }
     }
   }
   const sourceIdRaw = params.get(URL_PARAM_SRC)

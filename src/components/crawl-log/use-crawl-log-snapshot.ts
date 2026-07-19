@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * 重构 #4：抓取记录页唯一权威数据 hook。
+ * 重构 #4：任务中心唯一权威数据 hook。
  *
  * 数据真相来源：`/api/crawl-log/status` 返回的 snapshot（含 activeJob / latestJob / sources）。
  *

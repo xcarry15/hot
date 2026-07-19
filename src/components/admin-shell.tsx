@@ -5,9 +5,8 @@ import type { ComponentType } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { useTheme } from '@/components/theme-provider'
-import { Activity, ExternalLink, Inbox, LogOut, Settings, Sun, Moon } from 'lucide-react'
+import { Activity, ExternalLink, Inbox, Settings, Sun, Moon } from 'lucide-react'
 import { URL_PARAM_DETAIL, URL_PARAM_TAB } from '@/components/crawl-log/constants'
-import { logoutAdminSession } from '@/features/admin-auth.client'
 
 type TabKey = 'articles' | 'crawl-log' | 'settings'
 
@@ -42,8 +41,8 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { key: 'articles', label: '情报收件箱', icon: Inbox },
-  { key: 'crawl-log', label: '抓取记录', icon: Activity },
+  { key: 'crawl-log', label: '任务中心', icon: Activity },
+  { key: 'articles', label: '内容管理', icon: Inbox },
   { key: 'settings', label: '设置', icon: Settings },
 ]
 
@@ -97,11 +96,6 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
 
   const toggleTheme = () => {
     setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')
-  }
-
-  const handleLogout = async () => {
-    await logoutAdminSession()
-    router.replace('/admin/login')
   }
 
   const handleTabChange = (tab: TabKey) => {
@@ -170,13 +164,6 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
           </nav>
 
           <div className="px-2 py-3 border-t border-border/70">
-            <button
-              onClick={handleLogout}
-              className="w-full flex h-9 items-center gap-2 rounded-md px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            >
-              <LogOut className="h-[15px] w-[15px] shrink-0" strokeWidth={1.8} />
-              <span>退出后台</span>
-            </button>
             <button
               onClick={() => router.push('/')}
               className="mb-2 w-full flex h-9 items-center gap-2 rounded-md px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"

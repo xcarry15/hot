@@ -9,6 +9,7 @@ import { parsePushMode } from '@/contracts/push';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
 
 export const PUSH_RETRY_DELAY_MS = 6 * 60 * 60 * 1000; // 6h
+export const PUSH_MAX_RETRIES = 5;
 
 export interface PushSettings {
   pushMode: PushMode;
@@ -42,6 +43,7 @@ export async function shouldPushAtPipelineEnd(): Promise<boolean> {
 export function pushableWhere(settings: PushSettings) {
   return {
     pushedAt: null,
+    pushRetryCount: { lt: PUSH_MAX_RETRIES },
     status: 'active' as const,
     representativeArticle: {
       is: {
@@ -49,6 +51,7 @@ export function pushableWhere(settings: PushSettings) {
         relevance: { gte: settings.minRelevance },
         aiStatus: 'done' as const,
         clusterStatus: 'clustered' as const,
+        technicalIgnoredAt: null,
       },
     },
     OR: [

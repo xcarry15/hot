@@ -9,6 +9,7 @@ export async function fetchCrawlLogSnapshot(limit = 500): Promise<CrawlLogSnapsh
     sources: Array.isArray(data.sources) ? data.sources as SourceProgress[] : [],
     fetchedAt: typeof data.fetchedAt === 'number' ? data.fetchedAt : Date.now(),
     technicalTotal: typeof data.technicalTotal === 'number' ? data.technicalTotal : 0,
+    autoRetryTotal: typeof data.autoRetryTotal === 'number' ? data.autoRetryTotal : 0,
   }
 }
 

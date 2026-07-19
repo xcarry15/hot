@@ -23,6 +23,8 @@ export interface ArticleProgress {
   ai: StepStatus;
   /** AI 完成后的最终有效评分；未完成时为 null。 */
   score: number | null;
+  /** 仅用于列表标题后的轻量异常标签，不暴露 AI 分析明细。 */
+  anomalyLabels: Array<'ad' | 'duplicate'>;
   push: StepStatus;
   skipReason?: string;
   lastTime: number;
@@ -30,9 +32,13 @@ export interface ArticleProgress {
   pushRetryAt?: string | null;
   /** P1-6: AI 失败后的下次重试时间 */
   aiRetryAt?: string | null;
+  /** 正文处理失败后的下次自动重试时间 */
+  processRetryAt?: string | null;
   clusterStatus: 'pending' | 'clustered' | 'failed' | 'needs_review';
   clusterRetryAt?: string | null;
   technicalIssues: Array<'process_failed' | 'cluster_failed' | 'ai_failed' | 'push_failed'>;
+  technicalState?: 'auto_retry' | 'manual' | 'ignored' | null;
+  technicalIgnoredAt?: string | null;
   isEventRepresentative: boolean;
 }
 
@@ -95,6 +101,7 @@ export interface CrawlLogSnapshot {
   sources: SourceProgress[];
   fetchedAt: number;
   technicalTotal: number;
+  autoRetryTotal?: number;
 }
 
 export interface CrawlLogJobStatusSnapshot {

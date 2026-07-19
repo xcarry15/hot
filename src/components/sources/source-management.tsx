@@ -222,7 +222,7 @@ export function SourceManagement() {
       if (data?.queued === false) {
         toast.info(data.error || '已有抓取任务在执行中')
       } else {
-        toast.success('重试已加入队列，可在抓取记录页查看进度')
+        toast.success('重试已加入队列，可在任务中心查看进度')
       }
       loadSources()
     } catch {

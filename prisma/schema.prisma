@@ -55,6 +55,9 @@ model Article {
   nextClusterRetryAt DateTime?
   eventKey      String    @default("")
   fetchStatus   FetchStatus @default(pending) // pending=待抓取, fetched=已抓取有内容, failed=已确认抓取失败
+  fetchRetryCount Int       @default(0) // 正文处理连续失败次数；达到 5 次后停止自动重试
+  nextFetchRetryAt DateTime? // 正文处理失败后的下次自动重试时间
+  technicalIgnoredAt DateTime? // 管理员忽略技术异常后，不再计入任务中心待办
   articleBody   String    @default("") // 已从 rawContent 提取的正文（缓存，避免每次 AI 重新 extractArticleBody）
   // AI fields
   relevance     Int       @default(0) // 0-100，与连锁消费行业的相关度
@@ -109,8 +112,11 @@ model Article {
   @@unique([url])
   @@index([contentHash])
   @@index([eventId, createdAt])
+  @@index([eventId, publishedAt, createdAt])
   @@index([clusterStatus, nextClusterRetryAt, createdAt])
   @@index([fetchStatus])
+  @@index([fetchStatus, nextFetchRetryAt, createdAt])
+  @@index([technicalIgnoredAt, updatedAt])
   @@index([aiStatus, createdAt])
   // AI worker filters by status + retry window, then processes oldest rows first.
   @@index([aiStatus, nextAiRetryAt, createdAt])
@@ -138,6 +144,7 @@ model Event {
   publicSortAt            DateTime?
   pushedAt                DateTime?
   nextPushRetryAt         DateTime?
+  pushRetryCount          Int       @default(0) // 连续批次投递失败次数；达到 5 次后停止自动重试
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 

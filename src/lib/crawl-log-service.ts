@@ -2,15 +2,15 @@
  * Crawl Log snapshot 应用服务。
  *
  * `getCrawlLogSnapshot(limit)` 负责：
- *   - 在单个 `$transaction` 中读取 active jobs / latest jobs / articles / discarded items
- *     与推送设置（拆出事务外的设置读取，仅为避免阻断）；
+ *   - 在单个 `$transaction` 中读取 active jobs / latest jobs / 最近 articles / discarded items；
+ *   - 额外按已有技术队列 id 补齐窗口外待办，不扩大普通文章查询范围；
  *   - 解析 Job.payload/result 的安全 JSON；
  *   - 复用 `@/lib/article-pipeline-status` 的纯投影（不许复制条件）；
  *   - 按 sourceId 分组并按 articles+discarded 数量降序排序。
  *
  * 设计约束：
  *   - 不依赖 Next.js Request / Response；
- *   - 不修改查询上限 500、Job 排序、Source 分组与 active/latest 语义；
+ *   - 普通文章查询上限 500；技术待办按 id 补齐；Job 排序、Source 分组与 active/latest 语义不变；
  *   - Service 内部不出现 no-cache 之类的 HTTP 头，那是 Route 的职责。
  */
 import { db } from '@/lib/db';
@@ -21,7 +21,7 @@ import {
   type ArticleStepInput,
   type PushThresholds,
 } from '@/lib/article-pipeline-status';
-import type { Job } from '@prisma/client';
+import type { Job, Prisma } from '@prisma/client';
 import type {
   ArticleProgress,
   CrawlLogJobStatusSnapshot,
@@ -35,6 +35,30 @@ const DEFAULT_LIMIT = 500;
 const MAX_LIMIT = 500;
 const ACTIVE_JOBS_LIMIT = 5;
 const LATEST_JOBS_LIMIT = 5;
+
+const crawlLogArticleSelect = {
+  id: true,
+  title: true,
+  publishedAt: true,
+  sourceId: true,
+  fetchStatus: true,
+  nextFetchRetryAt: true,
+  technicalIgnoredAt: true,
+  clusterStatus: true,
+  nextClusterRetryAt: true,
+  aiStatus: true,
+  score: true,
+  isAd: true,
+  eventId: true,
+  event: { select: { articleCount: true, pushedAt: true, nextPushRetryAt: true, representativeArticleId: true } },
+  nextAiRetryAt: true,
+  relevance: true,
+  createdAt: true,
+  updatedAt: true,
+  summary: true,
+  skipReason: true,
+  source: { select: { name: true } },
+} satisfies Prisma.ArticleSelect;
 
 function safeJsonParse<T = Record<string, unknown>>(raw: string | null | undefined): T | null {
   if (!raw) return null;
@@ -111,7 +135,7 @@ export async function getCrawlLogJobStatus(): Promise<CrawlLogJobStatusSnapshot>
 }
 
 /**
- * 取抓取记录页唯一权威快照：activeJob + latestJob + sources + fetchedAt。
+ * 取任务中心唯一权威快照：activeJob + latestJob + sources + fetchedAt。
  * 单进程全局单 Job 不变量下，activeJobs ≤ 1；多条时记服务端告警并稳定选择最新一条。
  */
 export async function getCrawlLogSnapshot(
@@ -124,63 +148,59 @@ export async function getCrawlLogSnapshot(
   const pushSettings = await readPushSettings();
   const technicalItems = await getTechnicalWorkQueue();
   const technicalByArticleId = new Map(technicalItems.map((item) => [item.articleId, item]));
+  const technicalArticleIds = technicalItems.map((item) => item.articleId);
 
-  const [activeJobs, latestJobs, articles, discarded, configuredSources = []] = await db.$transaction([
-    db.job.findMany({
-      where: { status: 'running' },
-      orderBy: { createdAt: 'desc' },
-      take: ACTIVE_JOBS_LIMIT,
-    }),
-    db.job.findMany({
-      where: { status: { in: ['completed', 'failed'] } },
-      orderBy: { completedAt: 'desc' },
-      take: LATEST_JOBS_LIMIT,
-    }),
-    db.article.findMany({
-      take: limit,
-      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-      select: {
-        id: true,
-        title: true,
-        publishedAt: true,
-        sourceId: true,
-        fetchStatus: true,
-        clusterStatus: true,
-        nextClusterRetryAt: true,
-        aiStatus: true,
-        score: true,
-        eventId: true,
-        event: { select: { pushedAt: true, nextPushRetryAt: true, representativeArticleId: true } },
-         nextAiRetryAt: true,
-        relevance: true,
-        createdAt: true,
-        updatedAt: true,
-        summary: true,
-        skipReason: true,
-        source: { select: { name: true } },
-      },
-    }),
-    db.discardedItem.findMany({
-      take: limit,
-      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-      select: {
-        id: true,
-        sourceId: true,
-        title: true,
-        url: true,
-        reason: true,
-        detail: true,
-        publishedAt: true,
-        createdAt: true,
-        source: { select: { name: true } },
-      },
-    }),
-    db.source.findMany({
-      where: { deletedAt: null },
-      orderBy: { createdAt: 'asc' },
-      select: { id: true, name: true },
-    }),
+  const [[activeJobs, latestJobs, recentArticles, discarded, configuredSources = []], technicalArticles] = await Promise.all([
+    db.$transaction([
+      db.job.findMany({
+        where: { status: 'running' },
+        orderBy: { createdAt: 'desc' },
+        take: ACTIVE_JOBS_LIMIT,
+      }),
+      db.job.findMany({
+        where: { status: { in: ['completed', 'failed'] } },
+        orderBy: { completedAt: 'desc' },
+        take: LATEST_JOBS_LIMIT,
+      }),
+      db.article.findMany({
+        where: { source: { enabled: true, deletedAt: null } },
+        take: limit,
+        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+        select: crawlLogArticleSelect,
+      }),
+      db.discardedItem.findMany({
+        where: { source: { enabled: true, deletedAt: null } },
+        take: limit,
+        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+          id: true,
+          sourceId: true,
+          title: true,
+          url: true,
+          reason: true,
+          detail: true,
+          publishedAt: true,
+          createdAt: true,
+          source: { select: { name: true } },
+        },
+      }),
+      db.source.findMany({
+        where: { enabled: true, deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, name: true },
+      }),
+    ]),
+    technicalArticleIds.length > 0
+      ? db.article.findMany({
+          where: { id: { in: technicalArticleIds }, source: { enabled: true, deletedAt: null } },
+          select: crawlLogArticleSelect,
+        })
+      : Promise.resolve([]),
   ]);
+  // 普通流水线保持最近 limit 篇；技术待办不受时间窗口限制，并按 id 去重合并。
+  const articles = Array.from(new Map(
+    [...recentArticles, ...technicalArticles].map((article) => [article.id, article]),
+  ).values());
 
   if (activeJobs.length > 1) {
     console.error(
@@ -239,6 +259,7 @@ export async function getCrawlLogSnapshot(
   }
 
   const bySource = new Map<string, SourceProgress>();
+  const enabledSourceIds = new Set(configuredSources.map((source) => source.id));
   const ensureSourceGroup = (sourceId: string, name: string | undefined) => {
     if (!bySource.has(sourceId)) {
       const runResult = sourceRunResults.get(sourceId);
@@ -306,6 +327,10 @@ export async function getCrawlLogSnapshot(
       cluster: projection.cluster,
       ai: projection.ai,
       score: projection.ai === 'done' ? a.score : null,
+      anomalyLabels: [
+        ...(a.isAd ? ['ad' as const] : []),
+        ...(a.event && a.event.articleCount > 1 && !isRepresentative ? ['duplicate' as const] : []),
+      ],
       push: projection.push,
       skipReason: deriveSkipReason({
         aiStatus: a.aiStatus,
@@ -315,10 +340,13 @@ export async function getCrawlLogSnapshot(
       lastTime: a.updatedAt.getTime(),
       // P1-6: 推送/AI 重试时间，方便管理员判断"何时自动重试"
       pushRetryAt: projection.pushRetryAt ?? (a.event?.nextPushRetryAt ? a.event.nextPushRetryAt.toISOString() : null),
+      processRetryAt: a.fetchStatus === 'failed' && a.nextFetchRetryAt ? a.nextFetchRetryAt.toISOString() : null,
       aiRetryAt: a.aiStatus === 'failed' && a.nextAiRetryAt ? a.nextAiRetryAt.toISOString() : null,
       clusterStatus: a.clusterStatus as ArticleProgress['clusterStatus'],
       clusterRetryAt: a.clusterStatus === 'failed' && a.nextClusterRetryAt ? a.nextClusterRetryAt.toISOString() : null,
       technicalIssues: technicalItem?.issues ?? [],
+      technicalState: a.technicalIgnoredAt ? 'ignored' : (technicalItem?.state ?? null),
+      technicalIgnoredAt: a.technicalIgnoredAt?.toISOString() ?? null,
       isEventRepresentative: isRepresentative,
     };
     group.articles.push(articleProgress);
@@ -344,7 +372,7 @@ export async function getCrawlLogSnapshot(
 
   // P0-3: 补充 Job result 中存在但当前快照中无文章/未入库的源（0 条结果 / 失败源）。
   for (const [sourceId, runResult] of sourceRunResults) {
-    if (!bySource.has(sourceId)) {
+    if (enabledSourceIds.has(sourceId) && !bySource.has(sourceId)) {
       ensureSourceGroup(sourceId, runResult.sourceName);
     }
   }
@@ -376,6 +404,7 @@ export async function getCrawlLogSnapshot(
     latestJob,
     sources,
     fetchedAt: Date.now(),
-    technicalTotal: technicalItems.length,
+    technicalTotal: technicalItems.filter((item) => item.state === 'manual').length,
+    autoRetryTotal: technicalItems.filter((item) => item.state === 'auto_retry').length,
   };
 }

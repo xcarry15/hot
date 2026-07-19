@@ -17,34 +17,53 @@ export function isArticleFailed(a: ArticleProgress): boolean {
 }
 
 // ========== Filter predicates ==========
-// 多选 chip：同一时间可选多个，匹配逻辑为 OR（任一命中即保留）。
-// 选 0 个 = 不按状态过滤，显示所有文章。
+// 状态筛选为单选；null/空集合表示“全部”。
 
 export type StepFilterKey =
-  | 'ai-done'        // AI 分析完成
-  | 'pushed'         // 已推送（push === 'done'）
-  | 'process-pending' // 待详情抓取
-  | 'cluster-pending' // 待事件聚类
-  | 'cluster-failed' // 聚类技术失败
-  | 'cluster-review' // 聚类结果待人工复核
-  | 'ai-pending'     // 待 AI 分析
-  | 'push-pending'   // 待推送
-  | 'has-fail'       // 任意步骤失败
+  | 'normal-all'
+  | 'normal-processing'
+  | 'normal-ai'
+  | 'normal-push'
+  | 'normal-pushed'
+  | 'anomaly-all'
+  | 'anomaly-manual'
+  | 'anomaly-review'
+  | 'anomaly-ad'
+  | 'anomaly-duplicate'
+  | 'anomaly-failure'
+  | 'ignored'
+  /** 仅保留给内部纯函数与旧测试调用；不进入新 UI/URL。 */
+  | 'ai-done'
+  | 'pushed'
+  | 'process-pending'
+  | 'cluster-pending'
+  | 'cluster-failed'
+  | 'cluster-review'
+  | 'ai-pending'
+  | 'push-pending'
+  | 'anomaly'
+  | 'has-fail'
+  | 'manual-fail'
+  | 'auto-retry'
 
 export const ALL_STEP_FILTER_KEYS: readonly StepFilterKey[] = [
-  'ai-done', 'pushed',
-  'process-pending', 'cluster-pending', 'cluster-failed', 'cluster-review', 'ai-pending', 'push-pending',
-  'has-fail',
+  'normal-all', 'normal-processing', 'normal-ai', 'normal-push', 'normal-pushed',
+  'anomaly-all', 'anomaly-manual', 'anomaly-review', 'anomaly-ad', 'anomaly-duplicate', 'anomaly-failure',
+  'ignored',
 ] as const
 
 /**
  * P2-2: 旧 'in-progress' URL 参数的迁移别名。
  * 页面已不再显示此 chip，但旧链接中可能存在。自动转换为空筛选（显示全部）。
  */
-export const DEPRECATED_STEP_FILTER_KEYS = new Set(['in-progress'])
+export const DEPRECATED_STEP_FILTER_KEYS = new Set([
+  'in-progress', 'ai-done', 'pushed', 'process-pending', 'cluster-pending',
+  'cluster-failed', 'cluster-review', 'ai-pending', 'push-pending', 'anomaly',
+  'has-fail', 'manual-fail', 'auto-retry', 'anomaly-business',
+])
 
 export interface FilterState {
-  /** 多选 chip：OR 联合；为空 = 不按状态过滤 */
+  /** 单选状态；使用 Set 保持现有 URL/调用契约，但最多只保留一个值 */
   chips: ReadonlySet<StepFilterKey>
   /** 数据源范围；'all' = 不按源过滤 */
   sourceId: string

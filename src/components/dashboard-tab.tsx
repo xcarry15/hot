@@ -145,14 +145,14 @@ function TrendBody({ points }: { points: DashboardAnalytics['trend'] }) {
   ] as const
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
         {series.map((item) => (
           <span key={item.key} className="inline-flex items-center gap-1"><i className={`h-2 w-2 rounded-sm ${item.color}`} />{item.label}</span>
         ))}
       </div>
 
-      <div className="flex h-36 items-end gap-1 border-b border-l px-2 pb-1 sm:gap-2">
+      <div className="flex h-32 items-end gap-1 border-b border-l px-2 pb-1 sm:gap-2">
         {points.map((point) => (
           <div key={point.date} className="group relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
             <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden min-w-[118px] -translate-x-1/2 rounded-md border bg-popover px-2 py-1.5 text-[10px] text-popover-foreground shadow-md group-hover:block group-focus-within:block" role="tooltip">
@@ -163,7 +163,7 @@ function TrendBody({ points }: { points: DashboardAnalytics['trend'] }) {
               <div className="flex justify-between gap-3"><span>已推送</span><span className="tabular-nums">{point.pushed}</span></div>
             </div>
             <div
-              className="flex h-28 w-full max-w-12 flex-col-reverse justify-start overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-24 w-full max-w-12 flex-col-reverse justify-start overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               tabIndex={0}
               aria-label={`${point.label}：AI完成 ${point.newArticles}，重复项 ${point.duplicates}，软文 ${point.ads}，已推送 ${point.pushed}`}
             >
@@ -190,11 +190,11 @@ function TrendCard({
 }) {
   return (
     <Card className="py-0">
-      <CardContent className="p-3 sm:p-4">
-        <div className="mb-3 flex items-center justify-between gap-2">
+      <CardContent className="p-2.5">
+        <div className="mb-2 flex items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-medium">{title}</h3>
-            <p className="text-[10px] text-muted-foreground">互斥分层显示处理结果，悬停查看 AI完成、重复、软文与推送数量</p>
+            <p className="text-[10px] text-muted-foreground">悬停查看各类处理结果</p>
           </div>
           {points.length > 1 && <span className="text-[10px] text-muted-foreground">{points.length} 个时间点</span>}
         </div>
@@ -218,21 +218,14 @@ function CrawlTimeCard({
   return (
     <Card className="py-0">
       <CardContent className="p-2.5">
-        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-medium">抓取记录</h3>
+        <div className="mb-1 flex flex-wrap items-center gap-1">
+          <div className="mr-2 shrink-0">
+            <h3 className="text-sm font-medium">任务中心</h3>
             <p className="text-[10px] text-muted-foreground">共 {pagination.total} 条 · 自动任务与手动任务</p>
           </div>
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-blue-500" />自动</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-violet-500" />手动</span>
-          </div>
-        </div>
-
-        <div className="mb-1.5 flex flex-wrap items-center gap-1">
           <Select value={filters.trigger} onValueChange={(value) => onTriggerChange(value as CrawlTriggerFilter)}>
-            <SelectTrigger className="h-7 w-[92px] text-[11px]"><SelectValue placeholder="触发方式" /></SelectTrigger>
-            <SelectContent>
+            <SelectTrigger className="h-7 w-[92px] rounded-none border-border bg-transparent text-[11px] shadow-none focus:ring-1"><SelectValue placeholder="触发方式" /></SelectTrigger>
+            <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部方式</SelectItem>
               <SelectItem value="auto">自动</SelectItem>
               <SelectItem value="manual">手动</SelectItem>
@@ -240,8 +233,8 @@ function CrawlTimeCard({
             </SelectContent>
           </Select>
           <Select value={filters.status} onValueChange={(value) => onStatusChange(value as CrawlStatusFilter)}>
-            <SelectTrigger className="h-7 w-[88px] text-[11px]"><SelectValue placeholder="结果" /></SelectTrigger>
-            <SelectContent>
+            <SelectTrigger className="h-7 w-[88px] rounded-none border-border bg-transparent text-[11px] shadow-none focus:ring-1"><SelectValue placeholder="结果" /></SelectTrigger>
+            <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部结果</SelectItem>
               <SelectItem value="completed">完成</SelectItem>
               <SelectItem value="running">运行中</SelectItem>
@@ -250,21 +243,25 @@ function CrawlTimeCard({
             </SelectContent>
           </Select>
           <Select value={filters.type} onValueChange={(value) => onTypeChange(value as CrawlTypeFilter)}>
-            <SelectTrigger className="h-7 w-[88px] text-[11px]"><SelectValue placeholder="任务类型" /></SelectTrigger>
-            <SelectContent>
+            <SelectTrigger className="h-7 w-[88px] rounded-none border-border bg-transparent text-[11px] shadow-none focus:ring-1"><SelectValue placeholder="任务类型" /></SelectTrigger>
+            <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部任务</SelectItem>
               <SelectItem value="full">全流程</SelectItem>
               <SelectItem value="collect">采集</SelectItem>
             </SelectContent>
           </Select>
           <Select value={filters.sourceId} onValueChange={onSourceChange}>
-            <SelectTrigger className="h-7 w-[126px] text-[11px]"><SelectValue placeholder="数据源" /></SelectTrigger>
-            <SelectContent>
+            <SelectTrigger className="h-7 w-[126px] rounded-none border-border bg-transparent text-[11px] shadow-none focus:ring-1"><SelectValue placeholder="数据源" /></SelectTrigger>
+            <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部数据源</SelectItem>
               {sources.map((source) => <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>)}
             </SelectContent>
           </Select>
-          {pagination.totalPages > 1 && <span className="ml-auto text-[11px] text-muted-foreground">第 {pagination.page}/{pagination.totalPages} 页</span>}
+          <div className="ml-auto flex items-center gap-2 text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1"><i className="h-1.5 w-1.5 rounded-full bg-blue-500" />自动</span>
+            <span className="inline-flex items-center gap-1"><i className="h-1.5 w-1.5 rounded-full bg-violet-500" />手动</span>
+            {pagination.totalPages > 1 && <span>第 {pagination.page}/{pagination.totalPages} 页</span>}
+          </div>
         </div>
 
         {records.length > 0 ? (
@@ -283,29 +280,29 @@ function CrawlTimeCard({
               <tbody>
                 {records.map((record) => (
                   <tr key={record.id} className="border-b last:border-0" title={record.error ?? undefined}>
-                    <td className="px-1.5 py-1.5 tabular-nums">{formatRecordTime(record.startedAt)}</td>
-                    <td className="px-1.5 py-1.5">
+                    <td className="px-1.5 py-1 tabular-nums">{formatRecordTime(record.startedAt)}</td>
+                    <td className="px-1.5 py-1">
                       <Badge variant={record.trigger === 'auto' ? 'secondary' : 'outline'} className={`px-1.5 py-0 text-[10px] ${record.trigger === 'manual' ? 'border-violet-200 text-violet-700 dark:border-violet-800 dark:text-violet-300' : ''}`}>
                         {crawlTriggerLabel(record.trigger)}
                       </Badge>
                     </td>
-                    <td className="max-w-[260px] px-1.5 py-1.5">
+                    <td className="max-w-[260px] px-1.5 py-1">
                       <div className="max-w-[260px] truncate font-medium" title={record.sourceLabel}>{record.type === 'full' ? '全流程' : '采集'} · <span className="font-normal text-muted-foreground">{record.sourceLabel}</span></div>
                     </td>
-                    <td className="px-1.5 py-1.5">
+                    <td className="px-1.5 py-1">
                       <Badge variant={record.status === 'failed' ? 'destructive' : record.status === 'completed' ? 'secondary' : 'outline'} className="px-1.5 py-0 text-[10px]">
                         {crawlStatusLabel(record.status)}
                       </Badge>
                     </td>
-                    <td className="px-1.5 py-1.5 text-muted-foreground tabular-nums">{formatDuration(record.durationMs)}</td>
-                    <td className="px-1.5 py-1.5 tabular-nums">{record.itemsFound == null ? '—' : formatNumber(record.itemsFound)}</td>
+                    <td className="px-1.5 py-1 text-muted-foreground tabular-nums">{formatDuration(record.durationMs)}</td>
+                    <td className="px-1.5 py-1 tabular-nums">{record.itemsFound == null ? '—' : formatNumber(record.itemsFound)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <div className="py-5 text-center text-xs text-muted-foreground">暂无符合条件的抓取记录</div>
+          <div className="py-5 text-center text-xs text-muted-foreground">暂无符合条件的任务记录</div>
         )}
 
         {pagination.totalPages > 1 && (
@@ -589,7 +586,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
 
   if (loading) {
     return (
-      <div className="space-y-2 p-3 sm:p-4">
+      <div className="space-y-1.5 pt-2">
         <div className="flex items-center justify-between gap-2 border-b pb-2">
           <Skeleton className="h-5 w-16" />
           <Skeleton className="h-7 w-20" />
@@ -603,54 +600,50 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
 
   const summary = analytics.summary
   return (
-    <div className="space-y-2 p-3 sm:p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
-        <div className="flex items-center gap-2">
+    <div className="space-y-1 pt-1 [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:shadow-none">
+      <div className="flex min-h-12 flex-wrap items-stretch border bg-border">
+        <div className="flex items-center gap-1.5 bg-background px-2">
           <h2 className="text-sm font-semibold">概览</h2>
-          <label htmlFor="overview-range" className="text-[10px] text-muted-foreground">统计周期</label>
           <select
             id="overview-range"
             value={range}
             onChange={(event) => setRange(event.target.value as DashboardAnalyticsRange)}
-            className="h-7 rounded-md border bg-background px-2 text-[11px] outline-none focus:ring-2 focus:ring-ring"
+            className="h-7 border bg-background px-2 text-[11px] outline-none focus:ring-1 focus:ring-ring"
           >
             {RANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-        </div>
-        <div className="flex items-center gap-1.5">
           <button
-            className={`rounded-md px-2 py-1 text-[11px] transition-colors ${autoRefresh ? 'bg-emerald-100 font-medium text-emerald-700' : 'bg-muted text-muted-foreground'}`}
+            className={`h-7 border px-2 text-[11px] transition-colors hover:bg-muted ${autoRefresh ? 'text-foreground' : 'text-muted-foreground'}`}
             onClick={() => setAutoRefresh(!autoRefresh)}
             aria-pressed={autoRefresh}
           >
             自动更新 {autoRefresh ? '开' : '关'}
           </button>
-          <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-[11px]" onClick={handleRefresh}>
+          <Button size="sm" variant="ghost" className="h-7 gap-1 rounded-none px-2 text-[11px]" onClick={handleRefresh}>
             <RefreshCw className="h-3.5 w-3.5" />刷新
           </Button>
         </div>
+        <div className="grid min-w-[420px] flex-1 grid-cols-2 gap-px sm:grid-cols-4">
+          <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">公开浏览</span><strong className="text-base tabular-nums">{formatNumber(summary.views)}</strong></div>
+          <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">查看原文</span><strong className="text-base tabular-nums">{formatNumber(summary.originalClicks)}</strong></div>
+          <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">点击率</span><strong className="text-base tabular-nums">{formatPercent(summary.clickRate)}</strong></div>
+          <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">待归类</span><strong className="text-base tabular-nums">{formatNumber(analytics.inbox.pending)}</strong></div>
+        </div>
       </div>
 
-      <section className="space-y-2">
-
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Card className="py-0"><CardContent className="p-2.5"><div className="text-[10px] text-muted-foreground">公开浏览</div><div className="mt-1 text-lg font-semibold tabular-nums">{formatNumber(summary.views)}</div></CardContent></Card>
-          <Card className="py-0"><CardContent className="p-2.5"><div className="text-[10px] text-muted-foreground">查看原文</div><div className="mt-1 text-lg font-semibold tabular-nums">{formatNumber(summary.originalClicks)}</div></CardContent></Card>
-          <Card className="py-0"><CardContent className="p-2.5"><div className="text-[10px] text-muted-foreground">原文点击率</div><div className="mt-1 text-lg font-semibold tabular-nums">{formatPercent(summary.clickRate)}</div></CardContent></Card>
-          <Card className="py-0"><CardContent className="p-2.5"><div className="text-[10px] text-muted-foreground">待归类积压</div><div className="mt-1 flex items-end gap-2"><span className="text-lg font-semibold tabular-nums">{formatNumber(analytics.inbox.pending)}</span><span className="text-[10px] text-muted-foreground">{analytics.inbox.trend.length > 1 ? `近${analytics.inbox.trend.length}天` : '今日'}</span></div><div className="mt-1 flex h-3 items-end gap-0.5" aria-label="近7天待归类积压趋势">{analytics.inbox.trend.map((point) => { const max = Math.max(1, ...analytics.inbox.trend.map((item) => item.pending)); return <span key={point.date} className="min-w-0 flex-1 bg-primary/50" style={{ height: `${Math.max(15, point.pending / max * 100)}%` }} title={`${point.date}: ${point.pending} 篇`} /> })}</div></CardContent></Card>
-        </div>
+      <section className="space-y-1">
 
           <Card className="py-0">
             <CardContent className="p-2.5 sm:p-3">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-medium">数据源质量</h3>
-                  <p className="text-[10px] text-muted-foreground">点击数据源查看周期趋势；点击列标题查看字段说明</p>
+                  <p className="text-[10px] text-muted-foreground">点击行查看详情，点击列标题查看说明</p>
                 </div>
                 <select
                   value={sourceSort}
                   onChange={(event) => setSourceSort(event.target.value as SourceSort)}
-                  className="h-7 rounded-md border bg-background px-2 text-[11px] outline-none focus:ring-2 focus:ring-ring"
+                  className="h-7 border bg-background px-2 text-[11px] outline-none focus:ring-1 focus:ring-ring"
                   aria-label="数据源排序"
                 >
                   <option value="found">按发现数</option>
@@ -877,19 +870,19 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
 
           <TrendCard title={`${RANGE_OPTIONS.find((option) => option.value === range)?.label ?? ''}文章处理结果趋势`} points={analytics.trend} />
 
-          {suggestions.length > 0 && <Card><CardContent className="p-3"><div className="mb-2 flex items-center gap-2"><span className="text-sm font-medium">人工反馈建议</span><Badge variant="secondary" className="text-[10px]">需确认</Badge></div><div className="space-y-2">{suggestions.slice(0, 5).map((item) => <div key={item.id} className="rounded-md border p-2"><div className="flex items-center gap-2"><span className="text-xs font-medium">{item.title}</span><span className="ml-auto text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span></div><p className="mt-1 text-[11px] text-muted-foreground">{item.detail}</p><div className="mt-2 flex gap-1.5"><Button size="sm" className="h-7 px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'apply')}>确认应用</Button><Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'dismiss')}>忽略</Button></div></div>)}</div></CardContent></Card>}
+          {suggestions.length > 0 && <Card><CardContent className="p-2.5"><div className="mb-1.5 flex items-center gap-2"><span className="text-sm font-medium">人工反馈建议</span><Badge variant="secondary" className="rounded-none text-[10px]">需确认</Badge></div><div className="divide-y border-t">{suggestions.slice(0, 5).map((item) => <div key={item.id} className="py-2"><div className="flex items-center gap-2"><span className="text-xs font-medium">{item.title}</span><span className="ml-auto text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span></div><p className="mt-0.5 text-[11px] text-muted-foreground">{item.detail}</p><div className="mt-1.5 flex gap-1"><Button size="sm" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'apply')}>确认应用</Button><Button size="sm" variant="ghost" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'dismiss')}>忽略</Button></div></div>)}</div></CardContent></Card>}
 
           {attention.length > 0 && (
             <Card className="border-amber-200 dark:border-amber-900/50">
               <CardContent className="p-3">
-                <div className="mb-3 flex items-center gap-2">
+                <div className="mb-2 flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
                   <span className="text-sm font-medium">需要关注</span>
                   <span className="ml-auto text-[11px] text-muted-foreground">{attention.length} 个数据源</span>
                 </div>
-                <div className="space-y-1.5">
+                <div className="divide-y border-t">
                   {attention.map((item) => (
-                    <div key={item.sourceId} className="rounded-md border border-amber-200/50 bg-amber-50/50 p-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+                    <div key={item.sourceId} className="py-2">
                       <div className="mb-1 flex flex-wrap items-center gap-2">
                         <span className="font-medium text-sm">{item.sourceName}</span>
                         <Badge variant={statusConfig(item.sourceStatus, item.sourceEnabled).variant} className="px-1.5 py-0 text-[10px]">
@@ -902,7 +895,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                       </div>
                       <div className="space-y-1">
                         {item.alerts.map((alert, idx) => (
-                          <div key={idx} title={alert.detail} className={`flex items-center gap-2 rounded px-2 py-1 text-[11px] ${alert.level === 'critical' ? 'bg-red-100/70 text-red-800 dark:bg-red-950/40 dark:text-red-200' : 'bg-amber-100/70 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200'}`}>
+                          <div key={idx} title={alert.detail} className={`flex items-center gap-2 border-l-2 px-2 py-1 text-[11px] ${alert.level === 'critical' ? 'border-red-500 text-red-700 dark:text-red-300' : 'border-amber-500 text-amber-700 dark:text-amber-300'}`}>
                             <alert.icon className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                             <span className="font-medium">{alert.label}</span>
                             <span className="font-medium">{alert.value}</span>
@@ -926,7 +919,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <h3 className="text-sm font-medium">{sourceDetail.sources[0].name} · 周期详情</h3>
-                      <p className="text-[10px] text-muted-foreground">可结合抓取记录查看具体失败文章和过滤原因</p>
+                                                <p className="text-[10px] text-muted-foreground">可结合任务中心查看具体失败文章和过滤原因</p>
                     </div>
                     <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSelectedSourceId(null)}>收起</Button>
                   </div>

@@ -5,12 +5,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 import { toast } from 'sonner'
 import {
-  Loader2, Activity, Play, Download, FileText, Network, Bot, Send, RefreshCcw, XCircle, Check,
+  Loader2, Activity, Play, RefreshCcw, XCircle, Check,
 } from 'lucide-react'
 
 // ── New sub-modules ──
@@ -19,7 +16,15 @@ import type {
 } from './crawl-log/types'
 import type { JobSnapshot, SourceProgress } from '@/contracts/crawl-log'
 import { EMPTY_FILTER_STATE, isFilterStateActive } from './crawl-log/types'
-import { STEP_FILTER_CHIPS, type FilterChipKey, URL_PARAM_DETAIL, URL_PARAM_DETAIL_KIND } from './crawl-log/constants'
+import {
+  ANOMALY_FILTER_CHIPS,
+  NORMAL_FILTER_CHIPS,
+  PRIMARY_FILTER_CHIPS,
+  STEP_FILTER_CHIPS,
+  type FilterChipKey,
+  URL_PARAM_DETAIL,
+  URL_PARAM_DETAIL_KIND,
+} from './crawl-log/constants'
 import {
   applyFilterState, matchStepChip, writeFilterToUrl,
   readFilterFromCurrentUrl,
@@ -28,16 +33,16 @@ import { SourceBlock } from './crawl-log/source-block'
 import { StageButton } from './crawl-log/stage-button'
 import { useCrawlLogSnapshot } from './crawl-log/use-crawl-log-snapshot'
 import { EmptyState } from '@/components/ui/empty-state'
-import ArticleDetailSheet from './article-detail-sheet'
+import DiscardedDetailSheet from './article-detail-sheet'
 import { fetchSettings, saveSettings } from '@/features/settings-api.client'
 import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
-import { triggerArticleWorkflow } from '@/features/articles-api.client'
+import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
 import { retrySource, retrySources } from '@/features/sources-api.client'
 
 // ========== Main Component ==========
 
 export default function CrawlLogTab({ active = true }: { active?: boolean }) {
-  const { snapshot, loading, error, lastSyncedAt, refreshSnapshot } = useCrawlLogSnapshot({
+  const { snapshot, loading, error, refreshSnapshot } = useCrawlLogSnapshot({
     // 项目日处理量低于 200；保留一定余量即可，避免每轮传输 1000 条明细。
     limit: 250,
     enabled: active,
@@ -52,8 +57,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [stopLoading, setStopLoading] = useState(false)
-  const [detailArticleId, setDetailArticleId] = useState<string | null>(null)
-  const [detailKind, setDetailKind] = useState<'article' | 'discarded'>('article')
+  const [discardedDetailId, setDiscardedDetailId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
 
   // P2-1: 从 URL 恢复详情状态
@@ -62,10 +66,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     const syncDetailFromUrl = () => {
       const params = new URLSearchParams(window.location.search)
       const detailId = params.get(URL_PARAM_DETAIL)
-      const detailKindParam = params.get(URL_PARAM_DETAIL_KIND) as 'article' | 'discarded' | null
-      setDetailArticleId(detailId)
-      setDetailKind(detailKindParam === 'discarded' ? 'discarded' : 'article')
-      setDetailOpen(Boolean(detailId))
+      const isDiscarded = params.get(URL_PARAM_DETAIL_KIND) === 'discarded'
+      setDiscardedDetailId(isDiscarded ? detailId : null)
+      setDetailOpen(Boolean(detailId && isDiscarded))
     }
     syncDetailFromUrl()
     window.addEventListener('popstate', syncDetailFromUrl)
@@ -81,25 +84,25 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     setDetailOpen(open)
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
-    if (open && detailArticleId) {
-      url.searchParams.set(URL_PARAM_DETAIL, detailArticleId)
-      url.searchParams.set(URL_PARAM_DETAIL_KIND, detailKind)
+    if (open && discardedDetailId) {
+      url.searchParams.set(URL_PARAM_DETAIL, discardedDetailId)
+      url.searchParams.set(URL_PARAM_DETAIL_KIND, 'discarded')
     } else {
       url.searchParams.delete(URL_PARAM_DETAIL)
       url.searchParams.delete(URL_PARAM_DETAIL_KIND)
     }
     window.history.replaceState(null, '', url.toString())
-  }, [detailArticleId, detailKind])
+  }, [discardedDetailId])
 
   useEffect(() => {
     if (!active || typeof window === 'undefined') return
     const url = new URL(window.location.href)
-    if (detailOpen && detailArticleId) {
-      url.searchParams.set(URL_PARAM_DETAIL, detailArticleId)
-      url.searchParams.set(URL_PARAM_DETAIL_KIND, detailKind)
+    if (detailOpen && discardedDetailId) {
+      url.searchParams.set(URL_PARAM_DETAIL, discardedDetailId)
+      url.searchParams.set(URL_PARAM_DETAIL_KIND, 'discarded')
     }
     window.history.replaceState(null, '', url.toString())
-  }, [active, detailArticleId, detailKind, detailOpen])
+  }, [active, discardedDetailId, detailOpen])
 
   // 局部请求级 loading：仅用于按钮点击瞬间——成功入队 / 失败都不持久化。
   const [stageRequestLoading, setStageRequestLoading] = useState<Record<string, boolean>>({})
@@ -113,10 +116,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   const filterCounts = useMemo(() => {
     const counts: Partial<Record<FilterChipKey, number>> = {}
-    const scopedSources = filterState.sourceId === 'all'
-      ? sources
-      : sources.filter(s => s.id === filterState.sourceId)
-    for (const src of scopedSources) {
+    for (const src of sources) {
+      // “全部”展示当前快照文章总数；已忽略虽默认不展开，仍属于文章总量。
       counts.all = (counts.all ?? 0) + src.articles.length
       for (const a of src.articles || []) {
         for (const chip of STEP_FILTER_CHIPS) {
@@ -127,11 +128,10 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       }
     }
     return counts
-  }, [sources, filterState.sourceId])
-
-  const allSources = useMemo(() => sources.map(s => ({ id: s.id, name: s.name })), [sources])
+  }, [sources])
   const failedSources = useMemo(() => sources.filter(source => source.lastRunStatus === 'failed' || source.status === 'error'), [sources])
   const failedArticles = snapshot?.technicalTotal ?? 0
+  const autoRetryArticles = snapshot?.autoRetryTotal ?? 0
 
   // 展开/折叠偏好是纯 UI 状态：从 snapshot 派生的 expanded 字段是默认值，
   // 本地 overrides 覆盖之。
@@ -140,6 +140,10 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     ...s,
     expanded: expandedOverrides[s.id] ?? s.expanded,
   })), [sources, expandedOverrides])
+  const sourceSummaryById = useMemo(
+    () => new Map(sourcesWithExpansion.map(source => [source.id, source])),
+    [sourcesWithExpansion],
+  )
   const handleToggleSource = useCallback((sourceId: string) => {
     setExpandedOverrides(prev => {
       const cur = prev[sourceId] ?? sources.find(s => s.id === sourceId)?.expanded ?? true
@@ -151,6 +155,19 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     () => applyFilterState(sourcesWithExpansion, filterState),
     [sourcesWithExpansion, filterState],
   )
+  const selectedFilter = filterState.chips.values().next().value as StepFilterKey | undefined
+  const activePrimaryFilter: FilterChipKey = selectedFilter?.startsWith('normal-')
+    ? 'normal-all'
+    : selectedFilter?.startsWith('anomaly-')
+      ? 'anomaly-all'
+      : selectedFilter === 'ignored'
+        ? 'ignored'
+        : 'all'
+  const secondaryFilterChips = activePrimaryFilter === 'normal-all'
+    ? NORMAL_FILTER_CHIPS
+    : activePrimaryFilter === 'anomaly-all'
+      ? ANOMALY_FILTER_CHIPS
+      : []
 
   // Fetch initial auto-crawl state
   useEffect(() => {
@@ -210,42 +227,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
         itemLabel: activeJob.currentItemLabel,
       }
     }
-    // 历史结果：尝试从 latestJob.result 派生 done/errors
-    if (latestJob && latestJob.result && typeof latestJob.result === 'object') {
-      type StageResult = {
-        processed?: number
-        errors?: number
-        totalSources?: number
-        total?: number
-      }
-      const result = latestJob.result as {
-        stages?: Record<string, StageResult>
-        result?: StageResult
-      }
-      const stages = result.stages
-      const stageResult = stages?.collect ?? result.result
-      if (stageResult) {
-        const total = stageResult.totalSources ?? stageResult.total ?? stageResult.processed ?? 0
-        const done = stageResult.processed ?? (latestJob.status === 'completed' ? total : 0)
-        const stageLabel = latestJob.currentStage === 'collect' ? '采集'
-          : latestJob.currentStage === 'process' ? '处理'
-          : latestJob.currentStage === 'cluster' ? '事件聚类'
-          : latestJob.currentStage === 'ai' ? 'AI分析'
-          : latestJob.currentStage === 'push' ? '推送'
-          : ''
-        return {
-          isRunning: false,
-          pct: latestJob.status === 'completed' ? 100 : null,
-          total,
-          done,
-          errors: stageResult.errors ?? 0,
-          stageLabel: stages ? '' : stageLabel,
-          itemLabel: latestJob.status === 'failed' ? latestJob.error : '',
-        }
-      }
-    }
     return null
-  }, [activeJob, latestJob])
+  }, [activeJob])
 
   const activeTaskView = useMemo(() => {
     if (!activeJob) return null
@@ -446,40 +429,35 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     }
   }, [isOperationBusy, refreshSnapshot, stepActionLoading])
 
-  const handleOpenArticle = useCallback((articleId: string) => {
-    setDetailKind('article')
-    setDetailArticleId(articleId)
-    setDetailOpen(true)
-    // P2-1: 更新 URL 深链
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href)
-      url.searchParams.set(URL_PARAM_DETAIL, articleId)
-      url.searchParams.set(URL_PARAM_DETAIL_KIND, 'article')
-      window.history.replaceState(null, '', url.toString())
+  const handleTechnicalStatus = useCallback(async (articleId: string, action: 'ignore' | 'restore') => {
+    if (isOperationBusy) return
+    try {
+      await updateArticleTechnicalStatus(articleId, action)
+      toast.success(action === 'ignore' ? '已从技术待办中忽略' : '已恢复技术待办')
+      await refreshSnapshot()
+    } catch {
+      toast.error('操作失败')
     }
+  }, [isOperationBusy, refreshSnapshot])
+
+  const handleOpenArticle = useCallback((articleId: string) => {
+    if (typeof window === 'undefined') return
+    void import('@/components/intelligence-inbox')
+    const url = new URL('/admin', window.location.origin)
+    url.searchParams.set('articleId', articleId)
+    url.searchParams.set('panel', 'content')
+    window.history.pushState(null, '', url.toString())
+    window.dispatchEvent(new Event('hot2:urlchange'))
   }, [])
 
   const handleOpenDiscarded = useCallback((id: string) => {
-    setDetailKind('discarded')
-    setDetailArticleId(id)
+    setDiscardedDetailId(id)
     setDetailOpen(true)
     // P2-1: 更新 URL 深链
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href)
       url.searchParams.set(URL_PARAM_DETAIL, id)
       url.searchParams.set(URL_PARAM_DETAIL_KIND, 'discarded')
-      window.history.replaceState(null, '', url.toString())
-    }
-  }, [])
-
-  const handleSelectArticle = useCallback((id: string) => {
-    setDetailKind('article')
-    setDetailArticleId(id)
-    // P2-1: 详情内切换到另一篇文章时也更新 URL
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href)
-      url.searchParams.set(URL_PARAM_DETAIL, id)
-      url.searchParams.set(URL_PARAM_DETAIL_KIND, 'article')
       window.history.replaceState(null, '', url.toString())
     }
   }, [])
@@ -499,22 +477,17 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   // ── Render Helpers ──
 
-  const formatTime = (ts: number) => {
-    const d = new Date(ts)
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
-  }
-
   const stageButtonLoading = (stage: 'all' | 'collect' | 'process' | 'cluster' | 'ai' | 'push') =>
     stageRequestLoading[stage] || stageLoading[stage]
 
   return (
     <div className="flex flex-col h-full">
       {/* ===== Header ===== */}
-      <div className="px-3 py-3 sm:px-4 sm:py-4 border-b bg-muted space-y-3">
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="border-b bg-muted px-3 py-2 sm:px-4 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-2 shrink-0">
             <Activity className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold">抓取记录</span>
+            <span className="text-sm font-semibold">任务中心</span>
           </div>
 
           {headerBadge.spinning ? (
@@ -528,56 +501,62 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
             </Badge>
           )}
 
-          {lastSyncedAt != null && (
-            <span className="text-[11px] text-muted-foreground font-mono hidden sm:inline">
-              synced@{formatTime(lastSyncedAt)}
-            </span>
-          )}
+          <div className="flex items-center gap-1 flex-wrap">
+          <StageButton
+            label="采集"
+            loading={stageButtonLoading('collect')}
+            disabled={isOperationBusy}
+            onClick={() => runStage('collect')}
+          />
+          <StageButton
+            label="处理"
+            loading={stageButtonLoading('process')}
+            disabled={isOperationBusy}
+            onClick={() => runStage('process')}
+          />
+          <StageButton
+            label="事件聚类"
+            loading={stageButtonLoading('cluster')}
+            disabled={isOperationBusy}
+            onClick={() => runStage('cluster')}
+          />
+          <StageButton
+            label="AI分析"
+            loading={stageButtonLoading('ai')}
+            disabled={isOperationBusy}
+            onClick={() => runStage('ai')}
+          />
+          <StageButton
+            label="推送"
+            loading={stageButtonLoading('push')}
+            disabled={isOperationBusy}
+            onClick={() => runStage('push')}
+          />
+          </div>
 
           <div className="flex-1" />
 
-          <Select
-            value={filterState.sourceId}
-            onValueChange={(v) => setFilterState(prev => ({ ...prev, sourceId: v }))}
-          >
-            <SelectTrigger
-              size="sm"
-              className="h-8 text-xs gap-1 min-w-[120px] max-w-[200px]"
-              aria-label="数据源筛选"
-            >
-              <span className="text-muted-foreground">源:</span>
-              <SelectValue placeholder="全部源" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部源</SelectItem>
-              {allSources.map(s => (
-                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground select-none cursor-pointer shrink-0">
+          <label className="flex items-center gap-1 text-xs text-muted-foreground select-none cursor-pointer shrink-0">
             <Switch
               checked={filterState.includeDiscarded}
               onCheckedChange={(v) => setFilterState(prev => ({ ...prev, includeDiscarded: v }))}
               aria-label="包含未入库项"
-              className="scale-90"
+              className="scale-75"
             />
             <span>含未入库</span>
           </label>
 
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground select-none cursor-pointer shrink-0">
+          <label className="flex items-center gap-1 text-xs text-muted-foreground select-none cursor-pointer shrink-0">
             <Switch
               checked={filterState.publishedToday}
               onCheckedChange={(v) => setFilterState(prev => ({ ...prev, publishedToday: v }))}
               aria-label="只看今天发布的文章"
-              className="scale-90"
+              className="scale-75"
             />
-            <span>今天</span>
+            <span>今日发布</span>
           </label>
 
-          <label className="flex items-center gap-2 text-xs text-muted-foreground select-none cursor-pointer shrink-0">
-            <span className="hidden sm:inline">自动抓取</span>
+          <label className="flex items-center gap-1 text-xs text-muted-foreground select-none cursor-pointer shrink-0">
             {autoCrawl === null ? (
               <span className="text-xs text-muted-foreground/50 italic">读取中...</span>
             ) : (
@@ -585,15 +564,17 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
                 checked={autoCrawl}
                 onCheckedChange={handleToggleAutoCrawl}
                 disabled={autoCrawlSaving}
+                className="scale-75"
               />
             )}
+            <span className="hidden sm:inline">自动抓取</span>
           </label>
 
           <Button
             size="sm"
             onClick={() => runStage('all')}
             disabled={isOperationBusy}
-            className="h-8 gap-1.5 text-xs px-3 whitespace-nowrap"
+            className="h-7 gap-1 px-2.5 text-xs whitespace-nowrap"
           >
             {stageButtonLoading('all') ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -609,7 +590,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
               variant="destructive"
               onClick={handleStopWorker}
               disabled={stopLoading}
-              className="h-8 gap-1.5 text-xs px-3 whitespace-nowrap"
+            className="h-7 gap-1 px-2.5 text-xs whitespace-nowrap"
               aria-label="停止后台抓取"
             >
               {stopLoading ? (
@@ -626,7 +607,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
             variant="outline"
             onClick={handleRefresh}
             disabled={refreshing}
-            className="h-8 gap-1.5 text-xs px-3 shrink-0"
+            className="h-7 gap-1 px-2 text-xs shrink-0"
             title="从数据库拉取真实状态,清除卡住的转圈"
           >
             {refreshing ? (
@@ -638,63 +619,17 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           </Button>
         </div>
 
-        {/* 高级：分阶段运行 */}
-        <details className="rounded-md border border-dashed px-2 py-1">
-          <summary className="cursor-pointer select-none text-xs text-muted-foreground py-1">
-            分步运行
-          </summary>
-          <div className="flex items-center gap-2 flex-wrap pt-1">
-          <StageButton
-            label="采集"
-            icon={Download}
-            loading={stageButtonLoading('collect')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('collect')}
-          />
-          <StageButton
-            label="处理"
-            icon={FileText}
-            loading={stageButtonLoading('process')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('process')}
-          />
-          <StageButton
-            label="事件聚类"
-            icon={Network}
-            loading={stageButtonLoading('cluster')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('cluster')}
-          />
-          <StageButton
-            label="AI分析"
-            icon={Bot}
-            loading={stageButtonLoading('ai')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('ai')}
-          />
-          <StageButton
-            label="推送"
-            icon={Send}
-            loading={stageButtonLoading('push')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('push')}
-          />
-          </div>
-        </details>
-
-          {/* 筛选组 — 多选 chip 横向滚动 + 源下拉 + 含未入库 + 清除 */}
-          <div className="flex items-center gap-2 flex-wrap min-w-0 w-full">
+          {/* 两级筛选：先判断正常/异常，再查看互斥的具体状态。 */}
+          <div className="flex min-w-0 w-full flex-col gap-1">
             <div
-              className="flex items-center gap-1 bg-muted-foreground/10 rounded-full p-1 overflow-x-auto [&::-webkit-scrollbar]:hidden min-w-0"
-              role="group"
-              aria-label="状态筛选（多选，任一命中即保留）"
+              className="flex min-w-0 items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+              role="radiogroup"
+              aria-label="任务状态分类"
             >
-              {STEP_FILTER_CHIPS.map(chip => {
+              {PRIMARY_FILTER_CHIPS.map(chip => {
                 const isAllChip = chip.key === 'all'
                 const statusKey = chip.key as StepFilterKey
-                const active = isAllChip
-                  ? filterState.chips.size === 0
-                  : filterState.chips.has(statusKey)
+                const active = activePrimaryFilter === chip.key
                 const n = filterCounts[chip.key] ?? 0
                 return (
                   <button
@@ -704,19 +639,15 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
                         setFilterState(prev => ({ ...prev, chips: new Set() }))
                         return
                       }
-                      setFilterState(prev => {
-                        const next = new Set(prev.chips)
-                        if (next.has(statusKey)) next.delete(statusKey)
-                        else next.add(statusKey)
-                        return { ...prev, chips: next }
-                      })
+                      setFilterState(prev => ({ ...prev, chips: new Set([statusKey]) }))
                     }}
-                    aria-pressed={active}
+                    role="radio"
+                    aria-checked={active}
                     title={chip.description}
-                    className={`text-xs px-2.5 py-1 rounded-full transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    className={`flex h-7 shrink-0 items-center gap-1.5 border px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                       active
-                        ? 'bg-primary text-primary-foreground shadow-sm font-medium'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+                        ? 'border-foreground bg-foreground font-medium text-background'
+                        : 'border-border bg-background text-muted-foreground hover:text-foreground'
                     }`}
                   >
                     <span>{chip.label}</span>
@@ -726,18 +657,31 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
                   </button>
                 )
               })}
+              {isFilterStateActive(filterState) && (
+                <Button size="sm" variant="ghost" onClick={() => setFilterState(EMPTY_FILTER_STATE)} className="h-7 px-2 text-xs text-muted-foreground" title="清除所有筛选">清除</Button>
+              )}
             </div>
 
-            {isFilterStateActive(filterState) && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setFilterState(EMPTY_FILTER_STATE)}
-                className="h-8 text-xs px-2 text-muted-foreground hover:text-foreground"
-                title="清除所有筛选（含 URL 参数）"
-              >
-                清除筛选
-              </Button>
+            {secondaryFilterChips.length > 0 && (
+              <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-l-2 border-muted-foreground/30 pl-2 [&::-webkit-scrollbar]:hidden" role="radiogroup" aria-label="具体任务状态">
+                {secondaryFilterChips.map(chip => {
+                  const statusKey = chip.key as StepFilterKey
+                  const active = filterState.chips.has(statusKey)
+                  return (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      title={chip.description}
+                      onClick={() => setFilterState(prev => ({ ...prev, chips: new Set([statusKey]) }))}
+                      className={`h-6 shrink-0 border px-2 text-[11px] transition-colors ${active ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {chip.label} <span className="tabular-nums opacity-75">({filterCounts[chip.key] ?? 0})</span>
+                    </button>
+                  )
+                })}
+              </div>
             )}
           </div>
 
@@ -791,45 +735,17 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           </div>
         )}
 
-        {progressView && !progressView.isRunning && (
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-1.5 bg-background rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full bg-emerald-500 transition-[width] duration-300 ease-out ${progressView.pct == null ? 'w-1/3' : ''}`}
-                style={progressView.pct == null ? undefined : { width: `${progressView.pct}%` }}
-                role="progressbar"
-                aria-valuenow={progressView.pct ?? undefined}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-label="抓取进度"
-              />
-            </div>
-            <div className="flex items-center gap-3 text-xs shrink-0">
-              {progressView.stageLabel && (
-                <span className="text-emerald-700 font-medium">{progressView.stageLabel}</span>
-              )}
-              {progressView.total > 0 && (
-                <span className="text-muted-foreground">
-                  {progressView.done}/{progressView.total}
-                </span>
-              )}
-              {progressView.errors > 0 && (
-                <span className="text-destructive font-medium">✕{progressView.errors}</span>
-              )}
-            </div>
-          </div>
-        )}
-
         {!progressView && sources.length === 0 && !loading && (
           <p className="text-xs text-muted-foreground">
             数据源抓取时将在这里实时显示进度
           </p>
         )}
-        {(failedSources.length > 0 || failedArticles > 0) && (
+        {(failedSources.length > 0 || failedArticles > 0 || autoRetryArticles > 0) && (
           <div className="flex flex-wrap items-center gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <span className="font-medium">异常摘要</span>
             {failedSources.length > 0 && <span>{failedSources.length} 个数据源失败</span>}
-            {failedArticles > 0 && <span>全局技术待办 {failedArticles} 篇；当前列表显示最近 {sources.reduce((count, source) => count + source.articles.length, 0)} 篇</span>}
+            {autoRetryArticles > 0 && <span>自动恢复中 {autoRetryArticles} 篇</span>}
+            {failedArticles > 0 && <span>需人工处理 {failedArticles} 篇；当前列表已包含全部技术待办</span>}
             {failedSources.length > 0 && <Button size="sm" variant="outline" className="ml-auto h-7 border-amber-300 px-2 text-xs text-amber-900" disabled={isOperationBusy} onClick={() => void handleRetryFailedSources()}>一键重试异常源</Button>}
           </div>
         )}
@@ -842,9 +758,11 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
             <SourceBlock
               key={source.id}
               source={source}
+              summarySource={sourceSummaryById.get(source.id)}
               onToggle={() => handleToggleSource(source.id)}
               onStepAction={handleStepAction}
               onStepActionLoading={isStepActionLoading}
+              onTechnicalStatus={handleTechnicalStatus}
               onOpenArticle={handleOpenArticle}
               onOpenDiscarded={handleOpenDiscarded}
               onDiscardedRetried={() => { void refreshSnapshot() }}
@@ -856,7 +774,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           {filteredSources.length === 0 && (
             error ? (
               <EmptyState
-                title="抓取记录加载失败"
+              title="任务中心加载失败"
                 description={error}
                 action={
                   <Button size="sm" variant="outline" onClick={handleRefresh} disabled={refreshing}>
@@ -885,16 +803,11 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
         </div>
       </ScrollArea>
 
-      {/* Article Detail Sheet */}
-      <ArticleDetailSheet
-        articleId={detailArticleId}
-        kind={detailKind}
+      {/* 未入库记录仍保留轻量诊断；已入库文章直接进入内容管理。 */}
+      <DiscardedDetailSheet
+        discardedId={discardedDetailId}
         open={detailOpen}
         onOpenChange={handleDetailOpenChange}
-        onArticleUpdated={handleRefresh}
-        onSelectArticle={handleSelectArticle}
-        onStepAction={handleStepAction}
-        isJobRunning={isOperationBusy}
       />
     </div>
   )

@@ -40,6 +40,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
 
   const pendingWhere: Prisma.ArticleWhereInput = {
     aiStatus: { in: ['pending', 'failed'] },
+    technicalIgnoredAt: null,
     eventId: { not: null },
     clusterStatus: { in: ['clustered', 'needs_review'] },
     OR: [

@@ -11,12 +11,14 @@ export const ArticleRow = memo(function ArticleRow({
   article,
   onStepAction,
   onStepActionLoading,
+  onTechnicalStatus,
   onOpenArticle,
   isJobRunning,
 }: {
   article: ArticleProgress
   onStepAction?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => void
   onStepActionLoading?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => boolean
+  onTechnicalStatus?: (articleId: string, action: 'ignore' | 'restore') => void
   onOpenArticle?: (articleId: string) => void
   /** P1-1: 批量 Job 运行时，单篇动作禁用，避免并发冲突 */
   isJobRunning?: boolean
@@ -44,6 +46,11 @@ export const ArticleRow = memo(function ArticleRow({
     onOpenArticle?.(article.id)
   }, [onOpenArticle, article.id])
 
+  const handlePrefetch = useCallback(() => {
+    void import('@/components/intelligence-inbox')
+    prefetchArticleDetail(article.id)
+  }, [article.id])
+
   const processLoading = onStepActionLoading?.(article.id, 'process') ?? false
   const clusterLoading = onStepActionLoading?.(article.id, 'cluster') ?? false
   const aiLoading = onStepActionLoading?.(article.id, 'ai') ?? false
@@ -57,15 +64,18 @@ export const ArticleRow = memo(function ArticleRow({
         : nextAction?.step === 'push'
           ? pushLoading
           : false
-  const pushWaiting = nextAction?.step === 'push'
-    && Boolean(article.pushRetryAt && new Date(article.pushRetryAt) > new Date())
-  const canRunNextAction = Boolean(nextAction) && !isJobRunning && !nextActionLoading && !pushWaiting
+  const retryAt = nextAction?.step === 'process' ? article.processRetryAt
+    : nextAction?.step === 'cluster' ? article.clusterRetryAt
+      : nextAction?.step === 'ai' ? article.aiRetryAt
+        : nextAction?.step === 'push' ? article.pushRetryAt : null
+  const retryWaiting = article.technicalState === 'auto_retry' && Boolean(retryAt && new Date(retryAt) > new Date())
+  const canRunNextAction = Boolean(nextAction) && !isJobRunning && !nextActionLoading && !retryWaiting
   const actionFor = (step: 'process' | 'cluster' | 'ai' | 'push') =>
     nextAction?.step === step && canRunNextAction ? handleNextAction : undefined
 
   return (
     <div className={`group flex min-h-6 items-center gap-1 border-l-2 border-l-transparent px-2 py-0.5 text-[12px] leading-5 overflow-hidden whitespace-nowrap transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)] ${
-      isSkipped ? 'opacity-50' : ''
+      isSkipped || article.technicalState === 'ignored' ? 'opacity-50' : ''
     }`}>
       {pubDate && (
         <span
@@ -80,38 +90,68 @@ export const ArticleRow = memo(function ArticleRow({
           <ScoreBadge score={article.score} variant="compact-square" />
         </span>
       )}
-      {article.clusterStatus === 'needs_review' && (
-        <span className="shrink-0 bg-amber-100 px-1 text-[10px] leading-5 text-amber-800">待复核</span>
-      )}
-      <button
-        className="truncate min-w-0 flex-1 text-muted-foreground group-hover:text-foreground text-left"
-        title={article.title}
-        onClick={handleOpen}
-        onMouseEnter={() => prefetchArticleDetail(article.id)}
-        onMouseLeave={() => cancelArticleDetailPrefetch(article.id)}
-        onFocus={() => prefetchArticleDetail(article.id)}
-      >
-        {article.title}
-      </button>
-      {(isSkipped || article.ai === 'skipped') && article.skipReason && (
-        <SkipBadge reason={article.skipReason} />
-      )}
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        <button
+          className="truncate min-w-0 text-muted-foreground group-hover:text-foreground text-left"
+          title={article.title}
+          onClick={handleOpen}
+          onMouseEnter={handlePrefetch}
+          onMouseLeave={() => cancelArticleDetailPrefetch(article.id)}
+          onFocus={handlePrefetch}
+        >
+          {article.title}
+        </button>
+        {article.anomalyLabels?.includes('ad') && (
+          <span className="shrink-0 bg-slate-500 px-1 text-[11px] font-medium leading-5 text-white" title="业务识别：AI 判定为广告或软文">软文</span>
+        )}
+        {article.anomalyLabels?.includes('duplicate') && (
+          <span className="shrink-0 bg-amber-500 px-1 text-[11px] font-medium leading-5 text-white" title="业务识别：已归入同一事件，非当前代表文章">重复</span>
+        )}
+        {article.clusterStatus === 'needs_review' && (
+          <>
+            <span className="shrink-0 bg-orange-500 px-1 text-[11px] font-medium leading-5 text-white">待复核</span>
+            <button type="button" onClick={() => navigateWithinAdmin(`/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=cluster`)} className="inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted">去聚类复核</button>
+          </>
+        )}
+        {article.technicalState === 'auto_retry' && (
+          <>
+            <span className="shrink-0 bg-red-600 px-1 text-[11px] font-medium leading-5 text-white" title="流程失败，正在自动恢复">异常</span>
+            {retryAt && <span className="shrink-0 bg-blue-600 px-1 text-[11px] font-medium leading-5 text-white" title={`将在 ${new Date(retryAt).toLocaleString('zh-CN')} 自动重试`}>自动恢复中</span>}
+            <button type="button" onClick={() => onTechnicalStatus?.(article.id, 'ignore')} disabled={isJobRunning} className="inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted" title="立即停止后续自动重试并忽略">强制忽略</button>
+          </>
+        )}
+        {article.technicalState === 'manual' && (
+          <>
+            <span className="shrink-0 bg-red-600 px-1 text-[11px] font-medium leading-5 text-white">需人工处理</span>
+            <button type="button" onClick={() => onTechnicalStatus?.(article.id, 'ignore')} disabled={isJobRunning} className="inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted" title="从技术待办中忽略">忽略</button>
+          </>
+        )}
+        {article.technicalState === 'ignored' && (
+          <>
+            <span className="shrink-0 bg-zinc-500 px-1 text-[11px] font-medium leading-5 text-white">已忽略</span>
+            <button type="button" onClick={() => onTechnicalStatus?.(article.id, 'restore')} disabled={isJobRunning} className="inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted">恢复</button>
+          </>
+        )}
+        {(isSkipped || article.ai === 'skipped') && article.skipReason && (
+          <SkipBadge reason={article.skipReason} />
+        )}
+      </div>
       <div className="flex items-center gap-0.5 shrink-0 group-hover:ring-1 group-hover:ring-blue-300 group-hover:ring-offset-1">
         <StepIndicator label="采集" status={article.crawl} />
         <StepIndicator
           label="处理"
           status={processLoading ? 'running' : article.process}
           onClick={actionFor('process')}
-          forceLabel={nextAction?.step === 'process' ? '重试' : undefined}
-          title={article.process === 'failed' ? '点击重试处理' : undefined}
+          forceLabel={nextAction?.step === 'process' ? (retryWaiting ? '等待' : '重试') : undefined}
+          title={retryWaiting && article.processRetryAt ? `处理将在 ${new Date(article.processRetryAt).toLocaleString('zh-CN')} 自动重试` : article.process === 'failed' ? '点击重试处理' : undefined}
         />
         <StepIndicator
           label="聚类"
           status={clusterLoading ? 'running' : article.cluster}
           onClick={actionFor('cluster')}
-          forceLabel={nextAction?.step === 'cluster' ? '重试' : undefined}
+          forceLabel={nextAction?.step === 'cluster' ? (retryWaiting ? '等待' : '重试') : undefined}
           title={article.clusterStatus === 'needs_review'
-            ? '聚类结果存在歧义，请到情报收件箱人工复核'
+            ? '聚类结果存在歧义，请到内容管理人工复核'
             : article.cluster === 'failed'
               ? '点击重试聚类'
             : article.clusterRetryAt
@@ -122,19 +162,17 @@ export const ArticleRow = memo(function ArticleRow({
           label="AI分析"
           status={aiLoading ? 'running' : article.ai}
           onClick={actionFor('ai')}
-          forceLabel={nextAction?.step === 'ai' ? '重试' : undefined}
+          forceLabel={nextAction?.step === 'ai' ? (retryWaiting ? '等待' : '重试') : undefined}
           title={article.ai === 'failed' ? '点击重试 AI 分析' : article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined}
         />
         <StepIndicator
           label="推送"
           status={pushLoading ? 'running' : article.push}
           onClick={actionFor('push')}
-          forceLabel={nextAction?.step === 'push' ? (pushWaiting ? '等待' : '重试') : undefined}
-          title={pushWaiting ? `推送将在 ${new Date(article.pushRetryAt!).toLocaleString('zh-CN')} 后自动重试` : article.push === 'failed' ? '点击重试投递' : undefined}
+          forceLabel={nextAction?.step === 'push' ? (retryWaiting ? '等待' : '重试') : undefined}
+          title={retryWaiting && article.pushRetryAt ? `推送将在 ${new Date(article.pushRetryAt).toLocaleString('zh-CN')} 后自动重试` : article.push === 'failed' ? '点击重试投递' : undefined}
         />
       </div>
-      {article.clusterStatus === 'needs_review' && <button type="button" onClick={() => navigateWithinAdmin(`/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=cluster`)} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted">去聚类复核</button>}
-      <button type="button" onClick={() => navigateWithinAdmin(`/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=content`)} className="h-5 shrink-0 border px-1.5 text-[10px] hover:bg-muted">查看内容</button>
       <span className="text-[11px] text-muted-foreground/50 shrink-0 tabular-nums w-14 text-right" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
         {article.lastTime ? (() => {
           const d = new Date(article.lastTime)
