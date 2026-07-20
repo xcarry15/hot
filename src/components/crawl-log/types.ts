@@ -3,17 +3,17 @@
 import type { ArticleProgress } from '@/contracts/crawl-log'
 
 export function isArticleSkipped(a: ArticleProgress): boolean {
-  return [a.crawl, a.process, a.cluster, a.ai, a.push].some(s =>
+  return [a.crawl, a.process, a.ai, a.cluster, a.push].some(s =>
     s === 'skipped' || s === 'filtered' || s === 'not_applicable'
   )
 }
 
 export function isArticleFullyDone(a: ArticleProgress): boolean {
-  return a.crawl === 'done' && a.process === 'done' && a.cluster === 'done' && a.ai === 'done' && a.push === 'done'
+  return a.crawl === 'done' && a.process === 'done' && a.ai === 'done' && a.cluster === 'done' && a.push === 'done'
 }
 
 export function isArticleFailed(a: ArticleProgress): boolean {
-  return [a.crawl, a.process, a.cluster, a.ai, a.push].some(s => s === 'failed')
+  return [a.crawl, a.process, a.ai, a.cluster, a.push].some(s => s === 'failed')
 }
 
 // ========== Filter predicates ==========
@@ -23,6 +23,7 @@ export type StepFilterKey =
   | 'normal-all'
   | 'normal-processing'
   | 'normal-ai'
+  | 'normal-cluster'
   | 'normal-push'
   | 'normal-pushed'
   | 'anomaly-all'
@@ -34,7 +35,7 @@ export type StepFilterKey =
   | 'ignored'
 
 export const ALL_STEP_FILTER_KEYS: readonly StepFilterKey[] = [
-  'normal-all', 'normal-processing', 'normal-ai', 'normal-push', 'normal-pushed',
+  'normal-all', 'normal-processing', 'normal-ai', 'normal-cluster', 'normal-push', 'normal-pushed',
   'anomaly-all', 'anomaly-manual', 'anomaly-review', 'anomaly-ad', 'anomaly-duplicate', 'anomaly-failure',
   'ignored',
 ] as const
@@ -81,15 +82,15 @@ export interface SessionStats {
   stageLabel?: string
 }
 
-export type StageKey = 'collect' | 'process' | 'cluster' | 'ai' | 'push' | 'all'
+export type StageKey = 'collect' | 'process' | 'ai' | 'cluster' | 'push' | 'all'
 
 export type StageLoading = Record<StageKey, boolean>
 
 export const EMPTY_STAGE_LOADING: StageLoading = {
   collect: false,
   process: false,
-  cluster: false,
   ai: false,
+  cluster: false,
   push: false,
   all: false,
 }

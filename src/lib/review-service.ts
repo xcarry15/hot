@@ -156,7 +156,9 @@ export async function generateTuningSuggestions() {
       brand: true,
       category: true,
       summary: true,
-      tags: true,
+      eventSubjects: true,
+      eventAction: true,
+      eventObject: true,
       keyPoints: true,
     },
     orderBy: { manualCorrectedAt: 'desc' },
@@ -202,6 +204,9 @@ export async function generateTuningSuggestions() {
     ['relevance_adjusted', '复核相关度规则', '人工多次调整相关度，建议检查行业相关性边界与示例。', { action: 'manual-review' }],
     ['brand_adjusted', '复核品牌识别', '人工多次修正品牌，建议检查品牌词典和品牌识别提示词。', { action: 'manual-review' }],
     ['category_adjusted', '复核分类规则', '人工多次修正分类，建议检查分类边界与提示词示例。', { action: 'manual-review' }],
+    ['eventSubjects_adjusted', '复核事件主体提取', '人工多次修正事件主体，建议检查事件身份提示词中的主体命名规则。', { action: 'manual-review' }],
+    ['eventAction_adjusted', '复核事件行为提取', '人工多次修正事件行为，建议检查行为及事件阶段的提取规则。', { action: 'manual-review' }],
+    ['eventObject_adjusted', '复核具体事项提取', '人工多次修正具体事项，建议检查区分事件所需的对象与限定信息。', { action: 'manual-review' }],
   ] as const;
   const created: string[] = [];
   for (const [kind, title, detail, payload] of suggestions) {

@@ -2,7 +2,7 @@
  * 文章流水线状态投影（重构 #4）。
  *
  * 目的：消除 /api/crawl-log/status 与前端各组件对"步骤状态"的多套独立推断。
- * 此模块是唯一权威实现，任何路由 / 前端组件需要给出 crawl/process/ai/push
+ * 此模块是唯一权威实现，任何路由 / 前端组件需要给出 crawl/process/ai/cluster/push
  * 的显示状态时，都必须调用 projectArticleSteps()，不得重新发明条件。
  *
  * 投影规则冻结（见重构报告 12.6）。任何调整都需要同步更新 push.ts 的 pushableWhere
@@ -21,7 +21,7 @@ export type StepStatus =
   | 'filtered'
   | 'not_applicable';
 
-export type ArticleStepKey = 'crawl' | 'process' | 'cluster' | 'ai' | 'push';
+export type ArticleStepKey = 'crawl' | 'process' | 'ai' | 'cluster' | 'push';
 
 /** 与前端 types.ts 兼容：'running' 仅用于 UI 动画层，DB 投影不带此状态。 */
 export type DisplayStepStatus = StepStatus | 'running';
@@ -69,6 +69,7 @@ export interface ArticleStepProjection {
  * - crawl：Article 行存在 → done
  * - process：fetched → done；failed → failed；pending → pending
  * - ai：process 未完成 → blocked；aiStatus=done → done；skipped → skipped；failed → failed；其它 → pending
+ * - cluster：AI 未完成 → blocked；clustered/needs_review → done；failed → failed；其它 → pending
  * - push：
  *   - pushedAt != null → done
  *   - process/AI 尚未完成 → blocked
@@ -92,19 +93,8 @@ export function projectArticleSteps(
     : article.fetchStatus === 'failed' ? 'failed'
     : 'pending';
 
-  let cluster: StepStatus;
-  if (process !== 'done') {
-    cluster = 'blocked';
-  } else if (article.clusterStatus === 'clustered' || article.clusterStatus === 'needs_review') {
-    cluster = 'done';
-  } else if (article.clusterStatus === 'failed') {
-    cluster = 'failed';
-  } else {
-    cluster = 'pending';
-  }
-
   let ai: StepStatus;
-  if (cluster !== 'done') {
+  if (process !== 'done') {
     ai = 'blocked';
   } else if (article.aiStatus === 'done') {
     ai = 'done';
@@ -114,6 +104,17 @@ export function projectArticleSteps(
     ai = 'failed';
   } else {
     ai = 'pending';
+  }
+
+  let cluster: StepStatus;
+  if (ai !== 'done') {
+    cluster = ai === 'failed' || ai === 'skipped' ? 'not_applicable' : 'blocked';
+  } else if (article.clusterStatus === 'clustered' || article.clusterStatus === 'needs_review') {
+    cluster = 'done';
+  } else if (article.clusterStatus === 'failed') {
+    cluster = 'failed';
+  } else {
+    cluster = 'pending';
   }
 
   let pushStatus: StepStatus = 'pending';
@@ -128,11 +129,10 @@ export function projectArticleSteps(
     pushStatus = 'done';
   } else if (article.clusterStatus === 'needs_review') {
     pushStatus = 'blocked';
-  } else if (cluster !== 'done' || (ai !== 'done' && ai !== 'failed' && ai !== 'skipped')) {
-    // process 未完成，或 ai 尚未 ready（含 pending / blocked）
-    pushStatus = 'blocked';
   } else if (ai === 'skipped' || ai === 'failed') {
     pushStatus = 'not_applicable';
+  } else if (ai !== 'done' || cluster !== 'done') {
+    pushStatus = 'blocked';
   } else if (push.pushMode === 'off') {
     pushStatus = 'not_applicable';
   } else if (article.score < push.minScore || article.relevance < push.minRelevance) {
@@ -147,7 +147,7 @@ export function projectArticleSteps(
   const isInProgress = (() => {
     const stepHasOpen = (s: StepStatus) =>
       s === 'pending' || s === 'blocked';
-    return stepHasOpen(process) || stepHasOpen(cluster) || stepHasOpen(ai) || stepHasOpen(pushStatus);
+    return stepHasOpen(process) || stepHasOpen(ai) || stepHasOpen(cluster) || stepHasOpen(pushStatus);
   })();
 
   return { crawl, process, cluster, ai, push: pushStatus, pushRetryAt, isInProgress };

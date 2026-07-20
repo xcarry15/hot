@@ -253,13 +253,13 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   // 当前阶段按钮的 loading 状态：activeJob.currentStage 已知 → 标记对应按钮。
   // stageRequestLoading 仅记录"用户刚点了还没返回"瞬间，不持久化。
   const stageLoading = useMemo(() => {
-    const empty = { collect: false, process: false, cluster: false, ai: false, push: false, all: false }
+    const empty = { collect: false, process: false, ai: false, cluster: false, push: false, all: false }
     if (!activeJob) return empty
     const stage = activeJob.currentStage
     if (stage === 'collect') return { ...empty, collect: true, all: activeJob.type === 'full' }
     if (stage === 'process') return { ...empty, process: true, all: activeJob.type === 'full' }
-    if (stage === 'cluster') return { ...empty, cluster: true, all: activeJob.type === 'full' }
     if (stage === 'ai') return { ...empty, ai: true, all: activeJob.type === 'full' }
+    if (stage === 'cluster') return { ...empty, cluster: true, all: activeJob.type === 'full' }
     if (stage === 'push') return { ...empty, push: true, all: activeJob.type === 'full' }
     return empty
   }, [activeJob])
@@ -273,8 +273,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       const stageLabel =
         activeJob.currentStage === 'collect' ? '采集'
         : activeJob.currentStage === 'process' ? '处理'
-        : activeJob.currentStage === 'cluster' ? '事件聚类'
         : activeJob.currentStage === 'ai' ? 'AI分析'
+        : activeJob.currentStage === 'cluster' ? '事件聚类'
         : activeJob.currentStage === 'push' ? '推送'
         : ''
       return {
@@ -292,29 +292,29 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   const activeTaskView = useMemo(() => {
     if (!activeJob) return null
-    type Stage = 'collect' | 'process' | 'cluster' | 'ai' | 'push'
+    type Stage = 'collect' | 'process' | 'ai' | 'cluster' | 'push'
     const labels: Record<Stage, string> = {
       collect: '采集',
       process: '处理',
-      cluster: '聚类',
       ai: 'AI 分析',
+      cluster: '聚类',
       push: '推送',
     }
     const singleStages: Record<Stage, Stage[]> = {
       collect: ['collect'],
-      process: ['process', 'cluster', 'ai'],
-      cluster: ['cluster', 'ai'],
-      ai: ['ai'],
+      process: ['process', 'ai', 'cluster'],
+      cluster: ['cluster'],
+      ai: ['ai', 'cluster'],
       push: ['push'],
     }
     const startStage = activeJob.workflowStartAt ?? activeJob.currentStage
     const stages: Stage[] = activeJob.activeArticleId && startStage
       ? singleStages[startStage]
       : activeJob.type === 'full'
-        ? ['collect', 'process', 'cluster', 'ai', 'push']
+        ? ['collect', 'process', 'ai', 'cluster', 'push']
         : activeJob.type === 'fastProcess'
           ? ['process']
-          : activeJob.type === 'collect' || activeJob.type === 'process' || activeJob.type === 'cluster' || activeJob.type === 'ai' || activeJob.type === 'push'
+          : activeJob.type === 'collect' || activeJob.type === 'process' || activeJob.type === 'ai' || activeJob.type === 'cluster' || activeJob.type === 'push'
             ? [activeJob.type]
             : []
     const currentStage = activeJob.currentStage ?? startStage
@@ -412,9 +412,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     }
   }
 
-  const runStage = async (stage: 'all' | 'collect' | 'process' | 'cluster' | 'ai' | 'push') => {
+  const runStage = async (stage: 'all' | 'collect' | 'process' | 'ai' | 'cluster' | 'push') => {
     if (isOperationBusy || operationRequestLockRef.current) return
-    if (stage === 'all' && typeof window !== 'undefined' && !window.confirm('运行全流程将依次执行采集、处理、事件聚类、AI 分析，并可能推送文章。确认继续吗？')) {
+    if (stage === 'all' && typeof window !== 'undefined' && !window.confirm('运行全流程将依次执行采集、处理、AI 分析、事件聚类，并可能推送文章。确认继续吗？')) {
       return
     }
     operationRequestLockRef.current = true
@@ -560,7 +560,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   // ── Render Helpers ──
 
-  const stageButtonLoading = (stage: 'all' | 'collect' | 'process' | 'cluster' | 'ai' | 'push') =>
+  const stageButtonLoading = (stage: 'all' | 'collect' | 'process' | 'ai' | 'cluster' | 'push') =>
     stageRequestLoading[stage] || stageLoading[stage]
 
   return (
@@ -598,16 +598,16 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
             onClick={() => runStage('process')}
           />
           <StageButton
-            label="事件聚类"
-            loading={stageButtonLoading('cluster')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('cluster')}
-          />
-          <StageButton
             label="AI分析"
             loading={stageButtonLoading('ai')}
             disabled={isOperationBusy}
             onClick={() => runStage('ai')}
+          />
+          <StageButton
+            label="事件聚类"
+            loading={stageButtonLoading('cluster')}
+            disabled={isOperationBusy}
+            onClick={() => runStage('cluster')}
           />
           <StageButton
             label="推送"

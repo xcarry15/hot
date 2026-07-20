@@ -53,7 +53,11 @@ model Article {
   clusterError  String?
   clusterRetryCount Int   @default(0)
   nextClusterRetryAt DateTime?
-  eventKey      String    @default("")
+  eventSubjects String    @default("[]") // JSON string[]；规范事件身份中的主体
+  eventAction   String    @default("") // 规范事件身份中的行为，包含计划/正式/完成等阶段
+  eventObject   String    @default("") // 规范事件身份中的具体事项、对象或关键限定
+  eventKey      String    @default("") // 程序由主体/行为/具体事项确定性生成
+  eventKeyConfidence Int? // 0-100，AI 对事件身份提取的置信度；人工修正为 100
   fetchStatus   FetchStatus @default(pending) // pending=待抓取, fetched=已抓取有内容, failed=已确认抓取失败
   fetchRetryCount Int       @default(0) // 正文处理连续失败次数；达到 5 次后停止自动重试
   nextFetchRetryAt DateTime? // 正文处理失败后的下次自动重试时间
@@ -64,7 +68,6 @@ model Article {
   summary       String    @default("")
   brand         String    @default("")
   category      String    @default("") // 餐饮/零售/品牌/加盟/其他
-  tags          String    @default("[]") // JSON array
   keyPoints     String    @default("[]") // JSON array
   score         Int       @default(0) // 0-100
   keywordMatched Boolean  @default(false) // 处理阶段是否命中已配置关键词；用于确定性特殊加分
@@ -112,6 +115,7 @@ model Article {
 
   @@unique([url])
   @@index([contentHash])
+  @@index([eventKey, publishedAt])
   @@index([eventId, createdAt])
   @@index([eventId, publishedAt, createdAt])
   @@index([clusterStatus, nextClusterRetryAt, createdAt])
@@ -321,10 +325,10 @@ model DiscardedRetryAudit {
 }
 
 enum JobType {
-  full     // collect -> process -> cluster -> ai -> push
+  full     // collect -> process -> ai -> cluster -> push
   collect  // only collect all sources
   process  // only fetch pending details
-  cluster  // only cluster fetched articles into events
+  cluster  // only cluster AI-analyzed articles into events
   ai       // only run AI on pending articles
   push     // only push unpushed articles
   fastProcess  // @deprecated 已移除，仅保留以兼容历史 Job 记录
@@ -340,8 +344,8 @@ enum JobStatus {
 enum JobStage {
   collect
   process
-  cluster
   ai
+  cluster
   push
 }
 

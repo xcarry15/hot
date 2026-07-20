@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { getPushTargetStatesForEvents } from '@/lib/push/delivery';
 
-export type TechnicalIssue = 'process_failed' | 'cluster_failed' | 'ai_failed' | 'push_failed';
+export type TechnicalIssue = 'process_failed' | 'ai_failed' | 'cluster_failed' | 'push_failed';
 
 export interface TechnicalWorkItem {
   articleId: string;
@@ -61,14 +61,14 @@ async function buildTechnicalWorkQueue(): Promise<TechnicalWorkItem[]> {
       if (article.nextFetchRetryAt) retryDates.push(article.nextFetchRetryAt);
       else requiresManual = true;
     }
-    if (article.clusterStatus === 'failed') {
-      issues.push('cluster_failed');
-      if (article.nextClusterRetryAt) retryDates.push(article.nextClusterRetryAt);
-      else requiresManual = true;
-    }
     if (article.aiStatus === 'failed' || (article.aiStatus === 'skipped' && article.skipReason?.startsWith('AI 连续失败'))) {
       issues.push('ai_failed');
       if (article.nextAiRetryAt) retryDates.push(article.nextAiRetryAt);
+      else requiresManual = true;
+    }
+    if (article.clusterStatus === 'failed') {
+      issues.push('cluster_failed');
+      if (article.nextClusterRetryAt) retryDates.push(article.nextClusterRetryAt);
       else requiresManual = true;
     }
     items.set(article.id, {

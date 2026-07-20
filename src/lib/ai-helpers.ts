@@ -52,6 +52,32 @@ export function extractJsonObject(text: string): Record<string, unknown> {
   }
 }
 
+/**
+ * 严格解析完整 JSON 对象。
+ * 主分析链路已经要求只输出 JSON，因此不接受 Markdown 围栏、前后解释
+ * 文字或 JSON 数组；格式不合规直接交给上层失败重试。
+ */
+export function parseStrictJsonObject(text: string): Record<string, unknown> {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    throw new Error('LLM 响应必须是完整 JSON 对象，不允许包含 Markdown 或其他文字');
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (err) {
+    throw new Error(
+      `LLM 响应 JSON 解析失败: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('LLM 响应必须是 JSON 对象');
+  }
+  return parsed as Record<string, unknown>;
+}
+
 /** 尝试多种方式提取 JSON 文本片段，失败返回空串 */
 function extractFirstJson(text: string): string {
   const trimmed = text.trim();
@@ -108,28 +134,3 @@ export function pickStringArray(v: unknown, maxItems: number): string[] {
     .slice(0, maxItems);
 }
 
-/** 带情感色调的标签对象 */
-export interface TagItem {
-  n: string // 标签名
-  t: string // 色调: 正/负/中/警/机
-}
-
-/**
- * 取标签对象数组字段,裁剪到 maxItems 条。
- * 兼容旧格式(纯字符串数组) → 降级为 t:"中"。
- */
-export function pickTagArray(v: unknown, maxItems: number): TagItem[] {
-  if (!Array.isArray(v)) return [];
-  return v.slice(0, maxItems).map(item => {
-    if (typeof item === 'string') {
-      return { n: item, t: '中' };
-    }
-    if (typeof item === 'object' && item !== null) {
-      const obj = item as Record<string, unknown>;
-      const name = typeof obj.n === 'string' ? obj.n.trim() : '';
-      const tone = typeof obj.t === 'string' && ['正','负','中','警','机'].includes(obj.t) ? obj.t : '中';
-      return { n: name, t: tone };
-    }
-    return { n: String(item), t: '中' };
-  }).filter(x => x.n.length > 0);
-}

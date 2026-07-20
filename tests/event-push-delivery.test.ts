@@ -40,7 +40,6 @@ function representative(overrides: Record<string, unknown> = {}) {
     summary: '摘要',
     brand: '',
     category: '餐饮',
-    tags: '[]',
     keyPoints: '[]',
     url: 'https://example.com/a1',
     isAd: false,

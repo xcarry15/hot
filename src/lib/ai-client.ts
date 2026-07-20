@@ -76,7 +76,7 @@ export interface AISettings {
   blockContentScore: string;
   blockKeyPoints: string;
   blockSummary: string;
-  blockTags: string;
+  blockEventIdentity: string;
   blockBrand: string;
   /** 打分权重(动态可调) */
   weightEvent: number;
@@ -133,7 +133,7 @@ export async function getAISettings(): Promise<AISettings> {
     blockContentScore: map.ai_block_content_score,
     blockKeyPoints: map.ai_block_key_points,
     blockSummary: map.ai_block_summary,
-    blockTags: map.ai_block_tags,
+    blockEventIdentity: map.ai_block_event_identity,
     blockBrand: map.ai_block_brand,
     weightEvent: clampWeight(map[SETTING_KEYS.AI_WEIGHT_EVENT], DEFAULT_WEIGHT_EVENT),
     weightContent: clampWeight(map[SETTING_KEYS.AI_WEIGHT_CONTENT], DEFAULT_WEIGHT_CONTENT),
@@ -163,6 +163,8 @@ export interface ChatCompletionResponse {
   model: string;
 }
 
+export type ChatResponseFormat = 'json_object';
+
 // ── Unified Chat Completion ───────────────────────────────────────
 
 /**
@@ -171,7 +173,7 @@ export interface ChatCompletionResponse {
  */
 export async function createChatCompletion(
   messages: ChatMessage[],
-  options?: { temperature?: number; maxTokens?: number; signal?: AbortSignal }
+  options?: { temperature?: number; maxTokens?: number; responseFormat?: ChatResponseFormat; signal?: AbortSignal }
 ): Promise<ChatCompletionResponse> {
   const settings = await getAISettings();
   assertProviderAvailable(settings.provider);
@@ -181,7 +183,10 @@ export async function createChatCompletion(
     maxTokens: options?.maxTokens ?? settings.maxTokens,
   };
 
-  return createOpenAICompatibleCompletion(settings, messages, finalOptions, 2, options?.signal);
+  return createOpenAICompatibleCompletion(settings, messages, {
+    ...finalOptions,
+    responseFormat: options?.responseFormat,
+  }, 2, options?.signal);
 }
 
 /**
@@ -191,7 +196,7 @@ export async function createChatCompletion(
 async function createOpenAICompatibleCompletion(
   settings: AISettings,
   messages: ChatMessage[],
-  options: { temperature: number; maxTokens: number },
+  options: { temperature: number; maxTokens: number; responseFormat?: ChatResponseFormat },
   retries = 2,
   parentSignal?: AbortSignal,
 ): Promise<ChatCompletionResponse> {
@@ -204,6 +209,9 @@ async function createOpenAICompatibleCompletion(
     stream: false,
     temperature: options.temperature,
     max_tokens: options.maxTokens,
+    ...(options.responseFormat === 'json_object'
+      ? { response_format: { type: 'json_object' } }
+      : {}),
   };
 
   // OpenCode free models can be slower; give them a longer timeout
@@ -276,6 +284,14 @@ async function createOpenAICompatibleCompletion(
     console.error(`[ai-client] ${settings.provider} API error (${response.status}): ${errorText.substring(0, 500)}`);
 
     lastError = { status: response.status, message: errorText.substring(0, 200) };
+
+    // 部分 OpenAI 兼容网关不实现 response_format：去掉可选参数重试，
+    // 但上层仍会执行严格 JSON 解析和 Schema 校验。
+    if (response.status === 400 && body.response_format && /response[_ -]?format|json_object|unsupported/i.test(errorText)) {
+      delete body.response_format;
+      console.warn(`[ai-client] ${settings.provider} 不支持 response_format，降级为严格客户端校验`);
+      continue;
+    }
 
     // 429 与 5xx 服务端错误：指数退避重试
     if ((response.status === 429 || response.status >= 500) && attempt < retries) {

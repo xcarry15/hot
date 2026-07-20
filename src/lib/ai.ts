@@ -7,16 +7,14 @@ import { fetchArticleDetail } from './detail-fetcher';
 import { cleanContentMarkdown, extractArticleBody, meaningfulTextLength } from './cleaner';
 import { MIN_MEANINGFUL_CHARS } from './shared/content-policy';
 import { buildStep2Prompt } from './prompts';
+import { buildSystemContent } from './ai-helpers';
 import {
-  buildSystemContent,
-  extractJsonObject,
-  pickStringArray,
-  pickTagArray,
-  type TagItem,
-} from './ai-helpers';
+  buildCanonicalEventKey,
+  normalizeEventIdentity,
+  serializeEventSubjects,
+} from '@/contracts/event-identity';
 import { assertNotAborted } from './worker-stop';
 import { advanceJobProgress, startJobStage } from './job-progress';
-import { z } from 'zod';
 import { applyScorePolicy } from './score-policy';
 import { createHash } from 'node:crypto';
 import { buildAiResetDataForArticle } from './article-ai-reset';
@@ -28,24 +26,10 @@ import {
   type ArticleAiSnapshot,
   type ManualCalibrationValues,
 } from './article-calibration';
-import { recalculateArticleEvent } from './event-service';
+import { parseAiAnalysisOutput } from './ai-output';
 
 // v11：提高重要人事变动和有实质规模的开关店新闻评分。
-const PROMPT_VERSION = 'v11';
-
-const analysisSchema = z.object({
-  event_score: z.number().int().min(0).max(100),
-  content_score: z.number().int().min(0).max(100),
-  relevance: z.number().int().min(0).max(100),
-  is_ad: z.boolean(),
-  ad_probability: z.number().int().min(0).max(100),
-  confidence: z.number().int().min(0).max(100),
-  category: z.enum(['餐饮', '零售', '品牌', '加盟', '食品', '供应链', '政策', '资本', '消费者', '科技', '人事', '其他']),
-  summary: z.string().min(1).max(600),
-  brand: z.union([z.array(z.string()), z.string()]),
-  tags: z.array(z.union([z.string(), z.object({ n: z.string(), t: z.string() })])).max(3),
-  key_points: z.array(z.string()).max(5),
-});
+const PROMPT_VERSION = 'v12';
 
 // AI 失败最大重试次数。超过后标 skipped 放弃，防止 provider 持续故障时无限重试烧 token。
 const AI_MAX_RETRIES = 5;
@@ -66,7 +50,11 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
   promptHash: string;
   summary: string;
   brand: string;
-  tags: TagItem[];
+  eventSubjects: string[];
+  eventAction: string;
+  eventObject: string;
+  eventKey: string;
+  eventKeyConfidence: number;
   keyPoints: string[];
 } | null> {
   // P0-2: Lazy fetch detail if not already available
@@ -113,12 +101,9 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
       { role: 'user', content: prompt },
     ];
 
-    const result = await createChatCompletion(messages, { signal });
+    const result = await createChatCompletion(messages, { responseFormat: 'json_object', signal });
     assertNotAborted(signal);
-    const parsed = analysisSchema.parse(extractJsonObject(result.content));
-    const brandItems = Array.isArray(parsed.brand)
-      ? parsed.brand
-      : parsed.brand.split(/[|,，]/);
+    const parsed = parseAiAnalysisOutput(result.content);
     return {
       eventScore: parsed.event_score,
       isAd: parsed.is_ad,
@@ -128,10 +113,13 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
       category: parsed.category,
       contentScore: parsed.content_score,
       summary: parsed.summary,
-      brand: JSON.stringify(brandItems.map(x => x.trim()).filter(Boolean).slice(0, 2)),
-      tags: pickTagArray(parsed.tags, 3),
-      // key_points 上限 5 条(默认块要求 1~5 条精炼硬事实)
-      keyPoints: pickStringArray(parsed.key_points, 5),
+      brand: JSON.stringify(parsed.brand),
+      eventSubjects: parsed.event_subjects,
+      eventAction: parsed.event_action,
+      eventObject: parsed.event_object,
+      eventKey: parsed.event_key,
+      eventKeyConfidence: parsed.event_key_confidence,
+      keyPoints: parsed.key_points,
       model: result.model,
       provider: result.provider,
       promptHash: createHash('sha256').update(messages.map(x => `${x.role}:${x.content}`).join('\n')).digest('hex'),
@@ -165,6 +153,7 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
 
   // 已完成 → 不再处理
   if (article.aiStatus === 'done') return { status: 'done' };
+  if (article.eventId) throw new Error('AI 分析前必须先解除旧 Event 归属');
 
   // Content quality gate: skip AI if content is too short, regardless of fetchStatus
   const contentLength = meaningfulTextLength(article.cleanContent || '');
@@ -177,7 +166,6 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         skipReason: `内容不足（< ${MIN_MEANINGFUL_CHARS} 字符）`,
       },
     });
-    await recalculateArticleEvent(articleId);
     return { status: 'skipped' };
   }
 
@@ -212,7 +200,11 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       summary: step2.summary,
       brand: step2.brand,
       category: step2.category,
-      tags: JSON.stringify(step2.tags),
+      eventSubjects: serializeEventSubjects(step2.eventSubjects),
+      eventAction: step2.eventAction,
+      eventObject: step2.eventObject,
+      eventKey: step2.eventKey,
+      eventKeyConfidence: step2.eventKeyConfidence,
       keyPoints: JSON.stringify(step2.keyPoints),
       score: policy.finalScore,
       rawScore: policy.rawScore,
@@ -231,6 +223,14 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       article as ManualCalibrationValues,
       article.manualOverrides,
     );
+    const effectiveIdentity = normalizeEventIdentity({
+      subjects: effective.eventSubjects,
+      action: effective.eventAction,
+      object: effective.eventObject,
+    });
+    const identityManuallyOverridden = parseManualOverrides(article.manualOverrides).some((field) => (
+      field === 'eventSubjects' || field === 'eventAction' || field === 'eventObject'
+    ));
     const effectiveScore = buildEffectiveScoreUpdate({
       eventScore: effective.eventScore,
       contentScore: effective.contentScore,
@@ -250,7 +250,11 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         category: effective.category,
         summary: effective.summary,
         brand: effective.brand,
-        tags: effective.tags,
+        eventSubjects: serializeEventSubjects(effectiveIdentity.subjects),
+        eventAction: effectiveIdentity.action,
+        eventObject: effectiveIdentity.object,
+        eventKey: buildCanonicalEventKey(effectiveIdentity),
+        eventKeyConfidence: identityManuallyOverridden ? 100 : step2.eventKeyConfidence,
         keyPoints: effective.keyPoints,
         ...effectiveScore,
         eventScore: effective.eventScore,
@@ -268,7 +272,6 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       },
     });
 
-    await recalculateArticleEvent(articleId);
     return { status: 'done' };
   } else {
     // AI 调用完全失败 — 指数退避 + 失败计数。
@@ -300,7 +303,6 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         },
       });
     }
-    await recalculateArticleEvent(articleId);
     return { status: 'failed', errorKind: 'content' };
   }
 }
@@ -333,7 +335,11 @@ export async function reprocessWithAI(
       relevance: true,
       category: true,
       brand: true,
-      tags: true,
+      eventSubjects: true,
+      eventAction: true,
+      eventObject: true,
+      eventKey: true,
+      eventKeyConfidence: true,
       keyPoints: true,
       score: true,
       keywordMatched: true,
@@ -362,13 +368,7 @@ export async function reprocessWithAI(
       technicalIgnoredAt: null,
     },
   });
-  let result: AIProcessResult;
-  try {
-    result = await processWithAI({ ...articleData, aiStatus: 'pending', aiRetryCount: 0 } as Article, signal);
-  } catch (error) {
-    await recalculateArticleEvent(articleId);
-    throw error;
-  }
+  const result = await processWithAI({ ...articleData, aiStatus: 'pending', aiRetryCount: 0 } as Article, signal);
   if (jobId) {
     await advanceJobProgress(jobId, {
       doneDelta: 1,

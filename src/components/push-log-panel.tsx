@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -15,6 +15,7 @@ import {
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchPushLog, fetchPushLogStats } from '@/features/push-log-api.client'
+import { isRequestAborted, isRequestJsonError } from '@/lib/request-json.client'
 
 interface PushLog {
   id: string
@@ -61,23 +62,44 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
   const [statusFilter, setStatusFilter] = useState('all')
   const [sourceFilter, setSourceFilter] = useState('all')
   const [webhookFilter, setWebhookFilter] = useState('all')
+  const logRequestRef = useRef<AbortController | null>(null)
 
-  const fetchLogs = useCallback(async () => {
-    setLoading(true)
+  const fetchLogs = useCallback(async (background = false) => {
+    logRequestRef.current?.abort()
+    const controller = new AbortController()
+    logRequestRef.current = controller
+    if (!background) setLoading(true)
+
+    const params = {
+      page,
+      pageSize: 20,
+      status: statusFilter === 'all' ? undefined : statusFilter,
+      source: sourceFilter === 'all' ? undefined : sourceFilter,
+      webhookRemark: webhookFilter === 'all' ? undefined : webhookFilter,
+    }
+
     try {
-      const result = await fetchPushLog({
-        page,
-        pageSize: 20,
-        status: statusFilter === 'all' ? undefined : statusFilter,
-        source: sourceFilter === 'all' ? undefined : sourceFilter,
-        webhookRemark: webhookFilter === 'all' ? undefined : webhookFilter,
-      })
-      setData(result as unknown as PushLogResponse)
+      let result: Awaited<ReturnType<typeof fetchPushLog>>
+      try {
+        result = await fetchPushLog(params, controller.signal)
+      } catch (error) {
+        // Next dev 热更新、切页或本机连接短暂重置时，浏览器常把失败表现为
+        // status=0 的 “Failed to fetch”。只对这类瞬时网络错误重试一次。
+        if (!isRequestJsonError(error, 0) || controller.signal.aborted) throw error
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 300))
+        if (controller.signal.aborted) return
+        result = await fetchPushLog(params, controller.signal)
+      }
+      if (!controller.signal.aborted) setData(result as unknown as PushLogResponse)
     } catch (error) {
+      if (isRequestAborted(error) || controller.signal.aborted) return
       toast.error('推送记录加载失败')
       console.error('[push-log-panel] fetchLogs failed:', error)
     } finally {
-      setLoading(false)
+      if (logRequestRef.current === controller) {
+        logRequestRef.current = null
+        if (!controller.signal.aborted) setLoading(false)
+      }
     }
   }, [page, sourceFilter, statusFilter, webhookFilter])
 
@@ -91,10 +113,11 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
   useEffect(() => {
     if (!active) return
     const handle = setTimeout(() => { void fetchLogs() }, 0)
-    const interval = setInterval(() => { void fetchLogs() }, 30000)
+    const interval = setInterval(() => { void fetchLogs(true) }, 30000)
     return () => {
       clearTimeout(handle)
       clearInterval(interval)
+      logRequestRef.current?.abort()
     }
   }, [active, fetchLogs])
 
@@ -102,6 +125,10 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
     if (!active || refreshToken === 0) return
     void fetchLogs()
   }, [active, fetchLogs, refreshToken])
+
+  useEffect(() => () => {
+    logRequestRef.current?.abort()
+  }, [])
 
   const updateFilter = (setter: (value: string) => void, value: string) => {
     setter(value)

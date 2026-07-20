@@ -67,7 +67,7 @@ export default function PromptsTab({ settings, setSettings }: Props) {
       ai_block_content_score: PROMPT_BLOCK_META.contentScore.defaultBlock,
       ai_block_key_points: PROMPT_BLOCK_META.keyPoints.defaultBlock,
       ai_block_summary: PROMPT_BLOCK_META.summary.defaultBlock,
-      ai_block_tags: PROMPT_BLOCK_META.tags.defaultBlock,
+      ai_block_event_identity: PROMPT_BLOCK_META.eventIdentity.defaultBlock,
       ai_block_brand: PROMPT_BLOCK_META.brand.defaultBlock,
       ai_weight_event: String(SCORE_WEIGHT_META.event.defaultWeight),
       ai_weight_content: String(SCORE_WEIGHT_META.content.defaultWeight),
@@ -195,7 +195,7 @@ export default function PromptsTab({ settings, setSettings }: Props) {
 
           {/* 评判块 */}
           <div className="space-y-2">
-            <p className="text-[11px] text-muted-foreground">下列 9 个块只描述各字段的判断标准；执行顺序、证据边界和 JSON 结构由代码统一维护。</p>
+            <p className="text-[11px] text-muted-foreground">下列 9 个块只描述各字段的判断标准；执行顺序、事件键拼装、证据边界和 JSON 结构由代码统一维护。</p>
             {PROMPT_BLOCK_ORDER.map((blockId) => {
               const meta = PROMPT_BLOCK_META[blockId]
               const isCustom = !!settings[meta.key] && settings[meta.key] !== meta.defaultBlock

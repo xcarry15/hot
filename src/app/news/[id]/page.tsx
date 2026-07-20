@@ -9,10 +9,9 @@ import PublicHeader from '@/components/public-header'
 import PublicOriginalLink, { PublicShareButton } from '@/components/public-original-link'
 import PublicViewTracker from '@/components/public-view-tracker'
 import { ScoreBadge } from '@/components/ui/score-badge'
-import { getTagToneClass } from '@/features/article-tag-style'
 import { getPublicArticleDetail } from '@/lib/public-article-service'
 import { getPublicSiteUrl } from '@/lib/public-site'
-import { parseTags, splitBrands } from '@/lib/shared/article-codecs'
+import { splitBrands } from '@/lib/shared/article-codecs'
 import { formatPublicDateTime, formatPublicTime } from '@/lib/shared/public-date'
 
 export const dynamic = 'force-dynamic'
@@ -68,7 +67,6 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
     return <PublicErrorState detail />
   }
   if (!article) notFound()
-  const tags = parseTags(article.tags)
   const brands = splitBrands(article.brand)
   const originalUrl = safeExternalUrl(article.url)
   const effectiveDate = article.publishedAt || article.createdAt
@@ -104,11 +102,6 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
               {brands.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   {brands.map((brand, index) => <Badge key={`${brand}-${index}`} variant="outline" className="rounded-none border-[var(--public-ink)] bg-[var(--public-ink)] px-2 py-0.5 text-white">{brand.trim()}</Badge>)}
-                </div>
-              )}
-              {tags.length > 0 && (
-                <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
-                  {tags.map((tag, index) => <Badge key={`${tag.name}-${index}`} variant="outline" className={`rounded-none px-0 py-0 text-sm font-semibold ${getTagToneClass(tag.tone)}`}>{tag.name}</Badge>)}
                 </div>
               )}
             </div>

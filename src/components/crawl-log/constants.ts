@@ -23,8 +23,9 @@ export const PRIMARY_FILTER_CHIPS: readonly StepFilterChip[] = [
 
 export const NORMAL_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'normal-all', label: '全部正常', description: '全部正常流转文章' },
-  { key: 'normal-processing', label: '处理中', description: '正在采集、处理或等待聚类' },
-  { key: 'normal-ai', label: '待 AI', description: '聚类完成，等待 AI 分析' },
+  { key: 'normal-processing', label: '处理中', description: '正在采集或提取正文' },
+  { key: 'normal-ai', label: '待 AI', description: '正文处理完成，等待 AI 分析' },
+  { key: 'normal-cluster', label: '待聚类', description: 'AI 已生成事件身份，等待事件聚类' },
   { key: 'normal-push', label: '待推送', description: '已满足推送条件，等待投递' },
   { key: 'normal-pushed', label: '已推送', description: '已成功完成投递' },
 ] as const

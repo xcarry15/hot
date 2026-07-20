@@ -3,7 +3,7 @@
  * 该文件只能依赖运行时无关代码，收件箱客户端可以安全引用。
  */
 export const MANUAL_OVERRIDE_FIELDS = [
-  'relevance', 'summary', 'brand', 'category', 'tags', 'keyPoints',
+  'relevance', 'summary', 'brand', 'category', 'eventSubjects', 'eventAction', 'eventObject', 'keyPoints',
   'eventScore', 'contentScore', 'adProbability', 'isAd',
 ] as const;
 

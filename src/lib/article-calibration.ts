@@ -13,7 +13,11 @@ export interface ArticleAiSnapshot {
   summary: string;
   brand: string;
   category: string;
-  tags: string;
+  eventSubjects: string;
+  eventAction: string;
+  eventObject: string;
+  eventKey: string;
+  eventKeyConfidence: number;
   keyPoints: string;
   score: number;
   eventScore: number;
@@ -57,7 +61,9 @@ export function mergeAiResultWithManualOverrides(
     summary: overrides.has('summary') ? current.summary : ai.summary,
     brand: overrides.has('brand') ? current.brand : ai.brand,
     category: overrides.has('category') ? current.category : ai.category,
-    tags: overrides.has('tags') ? current.tags : ai.tags,
+    eventSubjects: overrides.has('eventSubjects') ? current.eventSubjects : ai.eventSubjects,
+    eventAction: overrides.has('eventAction') ? current.eventAction : ai.eventAction,
+    eventObject: overrides.has('eventObject') ? current.eventObject : ai.eventObject,
     keyPoints: overrides.has('keyPoints') ? current.keyPoints : ai.keyPoints,
     eventScore: overrides.has('eventScore') ? current.eventScore : ai.eventScore,
     contentScore: overrides.has('contentScore') ? current.contentScore : ai.contentScore,

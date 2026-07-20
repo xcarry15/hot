@@ -11,8 +11,8 @@ export function buildScorePolicySnapshot(
   keywordMatched = false,
 ): string {
   return JSON.stringify({
-    version: 'local-v10-keyword-bonus', weightEvent, weightContent,
-    adFreeThreshold: 20, adPenaltyRate: 0.15, adHardThreshold: 70,
+    version: 'local-v11-keyword-bonus', weightEvent, weightContent,
+    adFreeThreshold: 20, adPenaltyRate: 0.15, adHardThreshold: 50,
     lowEvidenceAdCap: 45, usefulAdCap: 70,
     contentBonus80: 2, contentBonus90: 4,
     keywordBonus, keywordMatched,
@@ -50,12 +50,12 @@ export function applyScorePolicy(
   // 品牌自发信息也可能含有门店计划、人事任命等有效情报：有硬事实时允许进入关注池，
   // 纯宣传且证据薄弱时仍严格封顶。
   const adCap = eventScore >= 75 && contentScore >= 65 ? 70 : 45;
-  const scoreAfterAdRule = isAd || normalizedAdProbability >= 70 ? Math.min(adCap, adjustedScore) : adjustedScore;
+  const scoreAfterAdRule = isAd || normalizedAdProbability >= 50 ? Math.min(adCap, adjustedScore) : adjustedScore;
   const finalScore = Math.min(100, scoreAfterAdRule + appliedKeywordBonus);
 
   return {
     rawScore,
     finalScore,
-    version: `local-v10-keyword-bonus:e${weightEvent}-c${weightContent}-k${appliedKeywordBonus}`,
+    version: `local-v11-keyword-bonus:e${weightEvent}-c${weightContent}-k${appliedKeywordBonus}`,
   };
 }

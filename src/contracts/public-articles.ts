@@ -21,7 +21,6 @@ export interface PublicArticleListItemDto {
   summary: string;
   brand: string;
   category: string;
-  tags: string;
   score: number;
   publishedAt: string | null;
   createdAt: string;

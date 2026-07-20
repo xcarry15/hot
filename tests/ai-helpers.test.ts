@@ -7,7 +7,6 @@ import {
   buildSystemContent,
   extractJsonObject,
   pickStringArray,
-  pickTagArray,
 } from '@/lib/ai-helpers';
 import { DEFAULT_SYSTEM_PROMPT, JSON_SUFFIX } from '@/lib/prompts';
 
@@ -72,22 +71,3 @@ describe('pickStringArray', () => {
   });
 });
 
-describe('pickTagArray', () => {
-  it('字符串数组降级为 t:"中"', () => {
-    expect(pickTagArray(['a', 'b'], 2)).toEqual([
-      { n: 'a', t: '中' },
-      { n: 'b', t: '中' },
-    ]);
-  });
-
-  it('对象数组保留合法 tone', () => {
-    expect(pickTagArray([{ n: 'a', t: '正' }, { n: 'b', t: '非法' }], 2)).toEqual([
-      { n: 'a', t: '正' },
-      { n: 'b', t: '中' },
-    ]);
-  });
-
-  it('裁剪到 maxItems', () => {
-    expect(pickTagArray(['a', 'b', 'c'], 2)).toHaveLength(2);
-  });
-});

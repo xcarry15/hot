@@ -12,6 +12,7 @@ import { URL_PARAM_CHIPS, URL_PARAM_SRC, URL_PARAM_DISC, URL_PARAM_TODAY } from 
 export type ArticleFilterBucket =
   | 'normal-processing'
   | 'normal-ai'
+  | 'normal-cluster'
   | 'normal-push'
   | 'normal-pushed'
   | 'anomaly-manual'
@@ -32,8 +33,9 @@ export function getArticleFilterBucket(article: ArticleProgress): ArticleFilterB
   ) return 'anomaly-failure'
   if ((article.anomalyLabels?.length ?? 0) > 0) return 'anomaly-business'
   if (article.push === 'done') return 'normal-pushed'
-  if (article.ai === 'done' && article.push === 'pending') return 'normal-push'
-  if (article.process === 'done' && article.cluster === 'done' && article.ai === 'pending') return 'normal-ai'
+  if (article.ai === 'done' && article.cluster === 'pending') return 'normal-cluster'
+  if (article.cluster === 'done' && article.push === 'pending') return 'normal-push'
+  if (article.process === 'done' && article.ai === 'pending') return 'normal-ai'
   return 'normal-processing'
 }
 

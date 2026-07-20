@@ -7,7 +7,7 @@
  *
  * 单步分析架构（buildStep2Prompt 一次 LLM 调用产出全部字段）:
  *   - 9 个「评判块」(打分组: 广告判定/事件评分/行业分类/相关度;
- *     内容组: 内容评分/要点/洞察/标签/品牌提取) 由用户在设置区编辑
+ *     内容组: 内容评分/要点/洞察/事件身份/品牌提取) 由用户在设置区编辑
  *   - 公共框架(任务说明 / {content} 占位符 / JSON输出格式)由代码固定生成,用户不可编辑
  *   - buildStep2Prompt 把公共框架 + 9 个块拼成完整 prompt
  *
@@ -23,8 +23,8 @@ export const JSON_SUFFIX =
 
 // ── 系统角色(全局,人设)──────────────────────────────────────
 // 统一约束事实提取、行业判断和表达边界，各字段细则由评判块维护。
-export const DEFAULT_SYSTEM_PROMPT =
-  '你是连锁消费行业分析师，服务餐饮、零售从业者。\n从标题与正文中提取可验证事实，判断行业相关性、事件影响和内容价值。\n表达清晰、口语化、有判断，但不夸大、不编造、不把推测当事实。';
+export const DEFAULT_SYSTEM_PROMPT = `你是一个深耕连锁消费行业的资深分析师,你眼光毒辣、脾气暴躁、说话通俗易懂却又一针见血。
+你的任务是筛选出真正有信息量的内容,帮他们快速识别文章背后的逻辑、趋势、风险。`;
 
 // ════════════════════════════════════════════════════════════════
 // 打分组评判块(广告判定 + 事件评分 + 行业分类 + 相关度)
@@ -33,11 +33,11 @@ export const DEFAULT_SYSTEM_PROMPT =
 // 广告判定块:产出 is_ad(广告判定)
 // 设计目标:精准识别付费软文,避免把正常报道错判为广告拉低分数。
 export const DEFAULT_BLOCK_AD = `【广告判定】
-- true：核心目的是促销、导购、招商或单方面宣传，缺少独立信息
+- true：核心目的是促销、导购、软文植入、招商或品牌单方面宣传，缺少独立信息
 - false：核心目的是报道事件、财报、人事、监管或行业趋势
-- 公益捐赠、救灾、辟谣、事故通报不因企业发布而自动算广告
+- 公益捐赠、救灾、辟谣、事故通报不因品牌发布而自动算广告
 - 不以文章对品牌的正面或负面态度代替判定
-ad_probability：0-39 低，40-69 可疑，70-100 高；概率达到 70 时 is_ad 为 true。`;
+ad_probability：0-19 低，20-49 可疑，50-100 高；概率达到 50 时 is_ad 为 true。`;
 
 // 品牌提取块:产出 brand JSON 数组（最多 2 个）
 // 设计目标:精确提取文章里涉及的具体品牌主体,用于卡片/搜索/推送展示。
@@ -48,24 +48,16 @@ export const DEFAULT_BLOCK_BRAND = `【brand 涉及品牌——JSON 字符串数
 - 无明确品牌则输出 []`;
 
 // 事件评分块：产出 event_score（0-100）
-export const DEFAULT_BLOCK_EVENT_SCORE = `【event_score 0-100｜事件影响】
-只评估事件对餐饮/零售连锁行业的影响，不受文章长度、文风和推送阈值影响。
-- 85-100：改变行业或头部企业格局，如大型并购、重大政策、全国性大幅扩店/关店、创始人或董事长/CEO 交接引发战略变化
-- 70-84：对某品类或重要企业有明显影响，如核心经营高管任免/离职、连锁品牌批量开关店、进入/退出重要市场、IPO 或重大财报变化
-- 55-69：明确且值得跟踪，如区域负责人变动、有数量和时间的区域开关店计划、单一旗舰店/首店开闭
-- 30-54：日常经营、局部活动、普通店长或非核心岗位变动、单一常规门店开闭、常规营销
-- 0-29：无明确新事件、纯观点、重复旧闻或主题基本无关`;
+export const DEFAULT_BLOCK_EVENT_SCORE = `【event_score 0-100】事件行业影响力: 评估事件对行业格局的扰动程度。重点锚定【热门品牌】【人事变动】【门店规模】【融资/IPO】四类高优事件。无视文章写作质量。
+评分区间:
+  85-100: 行业震动级：绝对头部/万店品牌重大动作。如：创始人/CEO级人事突变、千店级以上闭店或万店规模达成、百亿级融资/重磅IPO。
+  70-84: 战略转折级：知名品牌关键动作。如：核心高管更迭、百店级以上规模增减、亿元级融资/交表、重大战略转型（如全面开放加盟）。
+  40-69: 局部动作级：区域品牌或中小规模事件。如：常规高管变动、局部门店调整、千万级及以下早期融资、新模式首店试水。
+  10-39: 日常噪音级：基层人事变动、单店开闭、常规节日营销、新品上新。
+  0-9: 无具体事件。纯趋势预测、纯观点、人物特写。`;
 
 // 行业分类块:产出 category
-export const DEFAULT_BLOCK_CATEGORY = `【category】餐饮/零售/品牌/加盟/食品/供应链/政策/资本/消费者/科技/人事/其他
-- 餐饮：餐厅、茶饮、咖啡、餐饮品牌经营
-- 零售：超市、便利店、百货、商场、零食零售
-- 品牌：商标、声誉、维权或品牌策略；加盟：特许经营、加盟政策或加盟商问题
-- 食品：食品饮料制造、原料或产品质量；供应链：仓配、物流、采购或原料波动
-- 政策：法规、监管和行业政策；资本：融资、股权、并购、上市或财报
-- 消费者：消费行为、食品安全、投诉或权益；科技：技术或平台能力是核心事件
-- 人事：高管任免离职；其他：以上均不符合
-只选一个最主要类别，不被次要案例带偏。`;
+export const DEFAULT_BLOCK_CATEGORY = `【category】餐饮/零售/品牌/加盟/食品/供应链/政策/资本/消费者/科技/人事/其他`;
 
 // 相关度块:产出 relevance(0-100),与餐饮/零售连锁行业的直接相关性
 export const DEFAULT_BLOCK_RELEVANCE = `【relevance 0-100｜行业相关度】
@@ -77,45 +69,45 @@ export const DEFAULT_BLOCK_RELEVANCE = `【relevance 0-100｜行业相关度】
 单纯出现一个平台或品牌名，不足以给高分。`;
 
 // ════════════════════════════════════════════════════════════════
-// 内容组评判块(内容评分 + 要点 + 洞察 + 标签 + 品牌提取)
+// 内容组评判块(内容评分 + 要点 + 洞察 + 事件身份 + 品牌提取)
 // ════════════════════════════════════════════════════════════════
 
 // 内容评分块:产出 content_score(0-100)
-export const DEFAULT_BLOCK_CONTENT_SCORE = `【content_score 0-100｜内容可用性】
-只评估正文提供的有效信息，不评估事件大小。
-- 85-100：关键数据、时间线、多方信源和限制条件充分，可直接支撑决策
-- 70-84：核心事实和数据清楚，有较强参考价值
-- 50-69：事实完整，但主要是常规报道或单一信源
-- 30-49：有明确事件，但数据少、套话多或论证不足
-- 0-29：正文不完整、重复拼接、纯观点或基本没有新信息
-文章越长不代表分数越高。`;
+export const DEFAULT_BLOCK_CONTENT_SCORE = `【content_score 0-100】内容信息信噪比: 评估文章降低读者搜寻成本的程度。只看【增量事实占比】×【可量化程度】，无视事件大小。
+  评分区间: {
+    85-100: 高增量+高量化。含确切硬数据（金额/比例/时间线）、多信源交叉、独家内部信息、清晰归因。
+    60-84: 结构化事实+部分量化。5W1H完整，逻辑自洽，含部分数据支撑，读者无需再查其他资料。
+    30-59: 低增量+低量化。通稿复述，增量事实<20%（一两句话可概括），缺独立数据，套话多。
+    0-29: 零增量+零量化。拼凑/洗稿/AI生成，情绪渲染重，无具体事实。
+  }`;
 
 // 要点提取块:产出 key_points(1-5条核心事实)
 // 设计目标:精炼、核心,每条 50 字以内的高密度信息。
-export const DEFAULT_BLOCK_KEY_POINTS = `【key_points｜1-5 条核心事实，每条不超过 50 字】
+export const DEFAULT_BLOCK_KEY_POINTS = `【key_points｜1-5 条核心事实，每条不超过 40 字】
 - 每条尽量包含“主体 + 动作/变化 + 数据/结果”
-- 优先金额、比例、门店数、时间、地点和明确决定
+- 优先原文中的金额、比例、门店数、时间、地点和明确决定
 - 同一事实不拆分，不重复标题，不写评价、动机或空泛趋势
 - 文章只有一个有效事实时，只输出 1 条`;
 
-// 洞察块：产出 summary（100~180 字，事实、含义和影响相互区分）
+// 洞察块：产出 summary（100~150 字，一针见血、直指本质）
 // 设计目标:让连锁品牌企业的数据分析师读完能快速把握竞品动态、品牌战略走向和行业信号。
-export const DEFAULT_BLOCK_SUMMARY = `【summary｜100-180 字】
-一段话说清：最重要的事实、其代表的经营/行业含义、对相关企业或人群的影响。
-- 事实在前，判断在后；判断必须能由正文支撑
-- 信息不足时直接说清已知事实，不强行上升到战略或动机
-- 可以锋利，但不嘲讽、不贴标签、不编造“真实算盘”
-- 不复述标题，不列点，不用“说白了、值得关注、未来可期、这波操作”等套话`;
+export const DEFAULT_BLOCK_SUMMARY = `【summary｜一针见血｜100~150 字】
+用一整段大白话把事情说透，不列点、不写标题、不复述新闻，一针见血，直指本质。
+只做三件事：抓住一个最硬的事实，点破背后的真实算盘，说清它会伤到谁、利好谁或把品牌带去哪里。
+口吻暴躁、毒辣，但要说人话，不要为骂而骂。短句优先，删掉所有能删的铺垫。
+每篇都要根据文章里最值得说的矛盾选择角度，不要连续使用相同开头、句式和结尾。
+只认正文证据，不编动机。允许正面判断，不要为了显得深刻强行唱衰。
+禁止行业黑话名词，要求口语化`;
 
-// 标签提取块:产出 tags(细分类目标签,数组,3 条以内)
-// 设计目标:精准细分类目,用于卡片标签展示和筛选。避免宽泛同义词。
-export const DEFAULT_BLOCK_TAGS = `【tags 细分主题标签——最多 3 条】
-- n：2-4 字，描述事件动作或实质主题，不使用品牌名、category 或“行业动态”等宽泛词
-- 标签之间不同义、不重复
-- t: 好坏属性，看颜色即知：
-  正 = 好消息（成功/增长/突破）  ·  负 = 坏消息（失败/处罚/危机）
-  警 = 需警惕（承压/收紧/隐患）  ·  机 = 有机会（新赛道/蓝海/可复制）
-  中 = 纯信息（无明显好坏倾向）`;
+// 事件身份块：产出三段式事件键原料，由程序确定性生成最终 eventKey。
+// 设计目标：不同媒体对同一件事改写标题时，仍能稳定提取相同的主体、行为和具体事项。
+export const DEFAULT_BLOCK_EVENT_IDENTITY = `【规范事件身份｜用于识别“同一件事的不同报道”】
+- event_subjects：1-3 个核心主体，使用正式名称或稳定常用简称；联合事件按主次排列，不写媒体、记者和泛行业
+- event_action：一个最短、稳定的具体行为，必须保留事件阶段，例如“计划开业”“正式开业”“完成收购”，不能只写“布局”“升级”“发力”，也不重复主体和对象
+- event_object：一个具体事项，写清对象、结果及必要限定；季度、批次、门店地点、产品名等能区分事件的信息必须保留
+- event_key_confidence：0-100，仅表示三段式事件身份是否明确，不表示文章质量
+- 主体/行为/事项都必须来自标题或正文；同一篇包含多个独立事件时，只提取标题和正文篇幅共同指向的核心事件
+- 不自行拼接 event_key，程序会按“主体+主体/行为/具体事项”统一生成`;
 
 // ════════════════════════════════════════════════════════════════
 // 块元数据(供前端校验 / 提示 / 渲染用)
@@ -129,7 +121,7 @@ export type PromptBlockId =
   | 'contentScore'
   | 'keyPoints'
   | 'summary'
-  | 'tags'
+  | 'eventIdentity'
   | 'brand';
 
 export interface PromptBlockMeta {
@@ -142,7 +134,7 @@ export interface PromptBlockMeta {
     | 'ai_block_content_score'
     | 'ai_block_key_points'
     | 'ai_block_summary'
-    | 'ai_block_tags'
+    | 'ai_block_event_identity'
     | 'ai_block_brand';
   /** 块 id */
   id: PromptBlockId;
@@ -202,14 +194,14 @@ export const PROMPT_BLOCK_META: Record<PromptBlockId, PromptBlockMeta> = {
     key: 'ai_block_summary',
     label: '洞察',
     defaultBlock: DEFAULT_BLOCK_SUMMARY,
-    scoreHint: '100~180 字，写清事实、含义和影响，不无证据推测动机。',
+    scoreHint: '100~150 字，一针见血、直指本质，只认正文证据、不编动机。',
   },
-  tags: {
-    id: 'tags',
-    key: 'ai_block_tags',
-    label: '标签提取',
-    defaultBlock: DEFAULT_BLOCK_TAGS,
-    scoreHint: '最多 3 条细分主题标签(2~4 字),用于卡片角标展示。要细不要宽,避免同义重复。',
+  eventIdentity: {
+    id: 'eventIdentity',
+    key: 'ai_block_event_identity',
+    label: '事件身份',
+    defaultBlock: DEFAULT_BLOCK_EVENT_IDENTITY,
+    scoreHint: '提取主体/行为/具体事项三段式身份，程序据此生成规范事件键并用于后续聚类。',
   },
   brand: {
     id: 'brand',
@@ -229,7 +221,7 @@ export const PROMPT_BLOCK_ORDER: PromptBlockId[] = [
   'relevance',
   'keyPoints',
   'summary',
-  'tags',
+  'eventIdentity',
   'brand',
 ];
 
@@ -242,7 +234,7 @@ export type PromptBlockKey =
   | 'ai_block_content_score'
   | 'ai_block_key_points'
   | 'ai_block_summary'
-  | 'ai_block_tags'
+  | 'ai_block_event_identity'
   | 'ai_block_brand';
 
 // ════════════════════════════════════════════════════════════════
@@ -260,7 +252,7 @@ interface PromptBlockInput {
   blockContentScore?: string;
   blockKeyPoints?: string;
   blockSummary?: string;
-  blockTags?: string;
+  blockEventIdentity?: string;
   blockBrand?: string;
 }
 
@@ -271,7 +263,7 @@ function pickBlock(custom: string | undefined, id: PromptBlockId): string {
 
 /**
  * 拼完整 prompt(广告判定 + 事件评分 + 行业分类 + 相关度 +
- * 内容评分 + 要点 + 洞察 + 标签 + 品牌提取),单次 LLM 调用产出全部字段。
+ * 内容评分 + 要点 + 洞察 + 事件身份 + 品牌提取),单次 LLM 调用产出全部字段。
  */
 export function buildStep2Prompt(
   blocks: PromptBlockInput,
@@ -284,7 +276,7 @@ export function buildStep2Prompt(
   const contentBlock = pickBlock(blocks.blockContentScore, 'contentScore');
   const keyPointsBlock = pickBlock(blocks.blockKeyPoints, 'keyPoints');
   const summaryBlock = pickBlock(blocks.blockSummary, 'summary');
-  const tagsBlock = pickBlock(blocks.blockTags, 'tags');
+  const eventIdentityBlock = pickBlock(blocks.blockEventIdentity, 'eventIdentity');
   const brandNameBlock = pickBlock(blocks.blockBrand, 'brand');
 
   return [
@@ -314,7 +306,7 @@ export function buildStep2Prompt(
     '',
     summaryBlock,
     '',
-    tagsBlock,
+    eventIdentityBlock,
     '',
     '输出 JSON：',
     '{',
@@ -325,13 +317,16 @@ export function buildStep2Prompt(
     '  "category": "<单一分类>",',
     '  "relevance": <0-100整数>,',
     '  "content_score": <0-100整数>,',
-    '  "summary": "<100-180字：事实+含义+影响>",',
+    '  "summary": "<100-150字：一针见血、直指本质>",',
     '  "brand": ["<品牌1>", "<品牌2>"],',
-    '  "tags": [{"n":"<标签名>","t":"<正/负/中/警/机>"}],',
+    '  "event_subjects": ["<核心主体1>", "<联合主体2>"],',
+    '  "event_action": "<含事件阶段的具体行为>",',
+    '  "event_object": "<具体事项、对象、结果及关键限定>",',
+    '  "event_key_confidence": <0-100整数>,',
     '  "key_points": ["<核心事实>"]',
     '}',
     '',
-    '缺少信息时使用空数组或降低分数，不编造事实。',
+    '普通数组字段缺少信息时使用空数组；事件主体/行为/具体事项必须完整，证据不足时降低 event_key_confidence，不编造事实。',
   ]
     .join('\n')
     // 使用替换函数，避免 content 中的 $& / $' / $` / $n 被当作替换模板解析
@@ -375,6 +370,6 @@ export const DEFAULT_PROMPT_SETTINGS = {
   ai_block_content_score: DEFAULT_BLOCK_CONTENT_SCORE,
   ai_block_key_points: DEFAULT_BLOCK_KEY_POINTS,
   ai_block_summary: DEFAULT_BLOCK_SUMMARY,
-  ai_block_tags: DEFAULT_BLOCK_TAGS,
+  ai_block_event_identity: DEFAULT_BLOCK_EVENT_IDENTITY,
   ai_block_brand: DEFAULT_BLOCK_BRAND,
 } as const;

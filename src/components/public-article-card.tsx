@@ -1,6 +1,5 @@
 import Link from 'next/link'
-import { parseTags, splitBrands } from '@/lib/shared/article-codecs'
-import { getTagToneClass } from '@/features/article-tag-style'
+import { splitBrands } from '@/lib/shared/article-codecs'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import type { PublicArticleListItemDto } from '@/contracts/public-articles'
 import { formatPublicTime } from '@/lib/shared/public-date'
@@ -8,7 +7,7 @@ import type { CSSProperties } from 'react'
 
 type PublicArticleMetaItem = {
   label: string
-  kind: 'brand' | 'tag' | 'meta'
+  kind: 'brand' | 'meta'
   className: string
 }
 
@@ -19,17 +18,11 @@ export default function PublicArticleCard({
   article: PublicArticleListItemDto
   revealIndex?: number
 }) {
-  const tags = parseTags(article.tags)
   const brands = splitBrands(article.brand)
   const effectiveDate = article.publishedAt || article.createdAt
   const brandItems: PublicArticleMetaItem[] = brands
     .map((brand) => ({ label: brand.trim(), kind: 'brand' as const, className: '' }))
     .filter((item) => item.label)
-  const tagItems: PublicArticleMetaItem[] = tags.map((tag) => ({
-    label: tag.name,
-    kind: 'tag' as const,
-    className: getTagToneClass(tag.tone),
-  }))
   const categoryItems: PublicArticleMetaItem[] = article.category
     ? [{ label: article.category, kind: 'meta', className: '' }]
     : []
@@ -37,7 +30,7 @@ export default function PublicArticleCard({
     ? [{ label: `原始：${article.originalSource}`, kind: 'meta', className: '' }]
     : []
   const sourceItems: PublicArticleMetaItem[] = [{ label: article.source.name, kind: 'meta', className: '' }]
-  const metaGroups = [brandItems, tagItems, categoryItems, originalSourceItems, sourceItems].filter((group) => group.length > 0)
+  const metaGroups = [brandItems, categoryItems, originalSourceItems, sourceItems].filter((group) => group.length > 0)
 
   return (
     <li

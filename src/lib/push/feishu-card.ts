@@ -11,7 +11,7 @@
  *   - 近期关联动态块（实际时间窗口 30 天）后置，title 截 50 字 + … 控制高度
  *   - 标题后缀 [软文] 仅 isAd=true 时附加（与 aiStatus='done' 契约一致）
  */
-import { parseJsonArray, parseTags, splitBrands } from '@/lib/shared/article-codecs';
+import { parseJsonArray, splitBrands } from '@/lib/shared/article-codecs';
 import { formatRelativeTime } from '@/lib/shared/date';
 import { getScoreStyle } from '@/lib/shared/score-style';
 
@@ -24,7 +24,6 @@ export interface FeishuCardArticleInput {
   category: string;
   score: number;
   relevance: number;
-  tags: string;
   keyPoints: string;
   url: string;
   aiStatus: string;
@@ -68,9 +67,6 @@ export function buildFeishuCard(
   options: FeishuCardOptions = {},
 ): Record<string, unknown> {
   const keyPoints = parseJsonArray(article.keyPoints);
-  // tags 与 keyPoints 同样存为 JSON 字符串,这里做容错解析
-  // 兼容旧格式(string[])和新格式(TagItem[{n,t}])
-  const tags = parseTags(article.tags).map((t) => t.name);
   const brandLabel = splitBrands(article.brand).join(' | ');
   const relatedArticles = options.relatedArticles ?? [];
 
@@ -111,13 +107,9 @@ export function buildFeishuCard(
   }
 
   // 要点:每条前缀「›」(单箭头,更锐利,符合情报场景的「读取-行动」语义)
-  // tags 作为细分主题角标，紧跟在"要点"标题后(紫色 [xxx] 样式)
-  if (keyPoints.length > 0 || tags.length > 0) {
+  if (keyPoints.length > 0) {
     lines.push('');
-    const tagPills = tags.length > 0
-      ? `  <font color='violet'>[${tags.join('] [')}]</font>`
-      : '';
-    lines.push(`<font color='orange'>**📌 要点**</font>${tagPills}`);
+    lines.push(`<font color='orange'>**📌 要点**</font>`);
     for (const p of keyPoints) {
       lines.push(`› ${p}`);
     }

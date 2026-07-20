@@ -10,6 +10,8 @@ const MAX_CLUSTER_BATCH = 200;
 export function buildClusterPendingWhere(now = new Date()): Prisma.ArticleWhereInput {
   return {
     fetchStatus: 'fetched',
+    aiStatus: 'done',
+    eventKey: { not: '' },
     technicalIgnoredAt: null,
     eventId: null,
     AND: [

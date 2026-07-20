@@ -34,7 +34,6 @@ function eventRow(id: string, publishedAt: string, sourceCount = 1) {
       summary: `摘要 ${id}`,
       brand: '品牌A',
       category: '行业',
-      tags: '[]',
       keyPoints: '[]',
       score: 82,
       pinUntil: null,

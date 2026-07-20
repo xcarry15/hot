@@ -170,6 +170,7 @@ export async function getEventArticles(eventId: string) {
           id: true,
           title: true,
           url: true,
+          eventKey: true,
           score: true,
           relevance: true,
           eventScore: true,

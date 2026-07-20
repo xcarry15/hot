@@ -31,8 +31,15 @@ import {
   parseArticleAiSnapshot,
   type ManualOverrideField,
 } from '@/lib/article-calibration';
-import { recalculateArticleEvent, reconcileEventAfterArticleDeletion } from '@/lib/event-service';
+import { recalculateArticleEvent, recalculateEventById, reconcileEventAfterArticleDeletion } from '@/lib/event-service';
 import { splitBrands } from '@/lib/shared/article-codecs';
+import {
+  buildCanonicalEventKey,
+  isCompleteEventIdentity,
+  normalizeEventIdentity,
+  serializeEventSubjects,
+} from '@/contracts/event-identity';
+import { clusterArticle, markClusterFailure } from '@/lib/event-clustering-service';
 
 // ── 类型化筛选器 ────────────────────────────────────────────────
 
@@ -111,6 +118,7 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
       { title: { contains: filter.search } },
       { summary: { contains: filter.search } },
       { brand: { contains: filter.search } },
+      { eventKey: { contains: filter.search } },
     ] };
     where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), searchWhere];
   }
@@ -212,7 +220,7 @@ export interface UpdateArticleEditorialInput {
   summary?: string;
   brand?: string;
   category?: string;
-  tags?: Array<{ name: string; tone?: string }>;
+  eventIdentity?: { subjects: string[]; action: string; object: string };
   keyPoints?: string[];
   publicOverride?: 'auto' | 'public' | 'hidden';
   relevance?: number;
@@ -251,7 +259,10 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
       summary: true,
       brand: true,
       category: true,
-      tags: true,
+      eventSubjects: true,
+      eventAction: true,
+      eventObject: true,
+      eventKeyConfidence: true,
       keyPoints: true,
       relevance: true,
       eventScore: true,
@@ -261,6 +272,8 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
       keywordMatched: true,
       manualOverrides: true,
       aiSnapshot: true,
+      aiStatus: true,
+      eventId: true,
     },
   });
   if (!current) return null;
@@ -273,7 +286,16 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
   if (summary !== undefined) { data.summary = summary; touched.push('summary'); }
   if (category !== undefined) { data.category = category; touched.push('category'); }
   if (input.brand !== undefined) { data.brand = JSON.stringify(splitBrands(input.brand).slice(0, 20)); touched.push('brand'); }
-  if (input.tags !== undefined) { data.tags = JSON.stringify(input.tags.slice(0, 30).map((tag) => ({ n: tag.name.trim().slice(0, 50), t: (tag.tone || '中').trim().slice(0, 10) })).filter((tag) => tag.n)); touched.push('tags'); }
+  if (input.eventIdentity !== undefined) {
+    const identity = normalizeEventIdentity(input.eventIdentity);
+    if (!isCompleteEventIdentity(identity)) throw new Error('事件身份必须完整填写主体、行为和具体事项');
+    data.eventSubjects = serializeEventSubjects(identity.subjects);
+    data.eventAction = identity.action;
+    data.eventObject = identity.object;
+    data.eventKey = buildCanonicalEventKey(identity);
+    data.eventKeyConfidence = 100;
+    touched.push('eventSubjects', 'eventAction', 'eventObject');
+  }
   if (input.keyPoints !== undefined) { data.keyPoints = JSON.stringify(input.keyPoints.map((item) => item.trim().slice(0, 500)).filter(Boolean).slice(0, 20)); touched.push('keyPoints'); }
   if (input.publicOverride !== undefined) data.publicOverride = input.publicOverride;
   const relevance = cleanScore(input.relevance);
@@ -286,10 +308,40 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
   if (typeof adProbability === 'number') { data.adProbability = adProbability; touched.push('adProbability'); }
   if (input.isAd !== undefined) { data.isAd = input.isAd; touched.push('isAd'); }
 
-  const validRestored = restored.filter((field) => isRestorableSnapshotValue(field, snapshot[field]));
+  const identityFields: ManualOverrideField[] = ['eventSubjects', 'eventAction', 'eventObject'];
+  const restoreIdentity = restored.some((field) => identityFields.includes(field))
+    && identityFields.every((field) => typeof snapshot[field] === 'string');
+  const validRestored = restored
+    .filter((field) => !identityFields.includes(field) && isRestorableSnapshotValue(field, snapshot[field]));
+  if (restoreIdentity) validRestored.push(...identityFields);
   for (const field of validRestored) {
     const value = snapshot[field];
     data[field] = value as never;
+  }
+  const identityChanged = touched.some((field) => identityFields.includes(field))
+    || validRestored.some((field) => identityFields.includes(field));
+  if (identityChanged) {
+    const identity = normalizeEventIdentity({
+      subjects: typeof data.eventSubjects === 'string' ? data.eventSubjects : current.eventSubjects,
+      action: typeof data.eventAction === 'string' ? data.eventAction : current.eventAction,
+      object: typeof data.eventObject === 'string' ? data.eventObject : current.eventObject,
+    });
+    if (!isCompleteEventIdentity(identity)) throw new Error('事件身份必须完整填写主体、行为和具体事项');
+    data.eventSubjects = serializeEventSubjects(identity.subjects);
+    data.eventAction = identity.action;
+    data.eventObject = identity.object;
+    data.eventKey = buildCanonicalEventKey(identity);
+    data.eventKeyConfidence = touched.some((field) => identityFields.includes(field))
+      ? 100
+      : typeof snapshot.eventKeyConfidence === 'number'
+        ? snapshot.eventKeyConfidence
+        : current.eventKeyConfidence;
+    data.event = { disconnect: true };
+    data.clusterStatus = 'pending';
+    data.clusteredAt = null;
+    data.clusterError = null;
+    data.clusterRetryCount = 0;
+    data.nextClusterRetryAt = null;
   }
 
   const nextEventScore = typeof data.eventScore === 'number' ? data.eventScore : current.eventScore;
@@ -310,14 +362,25 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
     }));
   }
   Object.assign(data, buildManualOverrideUpdate(current.manualOverrides, touched, validRestored));
-  const contentChanged = touched.some((field) => ['summary', 'brand', 'category', 'tags', 'keyPoints'].includes(field))
-    || validRestored.some((field) => ['summary', 'brand', 'category', 'tags', 'keyPoints'].includes(field));
+  const contentChanged = touched.some((field) => ['summary', 'brand', 'category', 'keyPoints'].includes(field))
+    || validRestored.some((field) => ['summary', 'brand', 'category', 'keyPoints'].includes(field));
   await db.$transaction(async (tx) => {
     await tx.article.update({ where: { id }, data });
     await refreshPublicPublication(id, tx, { contentChanged });
   });
   invalidatePublicArticleCache();
-  await recalculateArticleEvent(id);
+  if (identityChanged) {
+    if (current.eventId) await recalculateEventById(current.eventId);
+    if (current.aiStatus === 'done') {
+      try {
+        await clusterArticle(id);
+      } catch (error) {
+        await markClusterFailure(id, error);
+      }
+    }
+  } else {
+    await recalculateArticleEvent(id);
+  }
   return getArticleDetail(id);
 }
 

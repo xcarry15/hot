@@ -14,7 +14,7 @@ describe('buildStep2Prompt', () => {
     blockContentScore: '',
     blockKeyPoints: '',
     blockSummary: '',
-    blockTags: '',
+    blockEventIdentity: '',
     blockBrand: '',
   };
 
@@ -52,12 +52,15 @@ describe('buildStep2Prompt', () => {
     expect(prompt).toContain('评分不受本地权重、公开/推送阈值或文风影响');
     expect(prompt).toContain('<<<ARTICLE>>>');
     expect(prompt).toContain('不编造事实');
+    expect(prompt).toContain('event_subjects');
+    expect(prompt).toContain('event_action');
+    expect(prompt).toContain('event_object');
   });
 
   it('提高重要人事变动和规模化开关店的事件分', () => {
     const prompt = buildStep2Prompt(blocks, '正文');
-    expect(prompt).toContain('核心经营高管任免/离职');
-    expect(prompt).toContain('连锁品牌批量开关店');
-    expect(prompt).toContain('普通店长或非核心岗位变动');
+    expect(prompt).toContain('创始人/CEO级人事突变');
+    expect(prompt).toContain('千店级以上闭店或万店规模达成');
+    expect(prompt).toContain('基层人事变动、单店开闭、常规节日营销、新品上新');
   });
 });

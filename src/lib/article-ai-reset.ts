@@ -12,7 +12,11 @@ export function buildAiResetData(options: { preserveManualOverrides?: boolean } 
       summary: '',
       brand: '',
       category: '',
-      tags: '[]',
+      eventSubjects: '[]',
+      eventAction: '',
+      eventObject: '',
+      eventKey: '',
+      eventKeyConfidence: null,
       keyPoints: '[]',
       score: 0,
       eventScore: null,
@@ -51,7 +55,9 @@ export function buildAiResetDataForArticle(
     summary: string;
     brand: string;
     category: string;
-    tags: string;
+    eventSubjects: string;
+    eventAction: string;
+    eventObject: string;
     keyPoints: string;
     eventScore: number | null;
     contentScore: number | null;

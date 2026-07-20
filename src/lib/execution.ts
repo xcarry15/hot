@@ -26,9 +26,8 @@ import { clusterAllPending } from './pipeline/cluster';
 import { analyzeAllPending } from './pipeline/analyze';
 import { reprocessWithAI } from './ai';
 import { refetchArticle } from './article-refetch-service';
-import { clusterArticle } from './event-clustering-service';
+import { clusterArticle, markClusterFailure } from './event-clustering-service';
 import { recalculateEventById } from './event-service';
-import { refreshPublicPublication } from './public-publication-service';
 import { getFailedPushTargets, pushArticleToFeishu } from './push/delivery';
 import { pushAllPendingArticles } from './pipeline/push-bridge';
 import { shouldPushAtPipelineEnd } from './push/policy';
@@ -56,7 +55,7 @@ import {
   advanceJobProgress,
 } from './job-progress';
 
-export type JobType = 'full' | 'collect' | 'process' | 'cluster' | 'ai' | 'push';
+export type JobType = 'full' | 'collect' | 'process' | 'ai' | 'cluster' | 'push';
 type JobExecutor = (
   payload: Record<string, unknown>,
   signal?: AbortSignal,
@@ -199,17 +198,24 @@ async function executeFullJob(
   const processResult = await processAllPending(signal, jobId);
 
   assertNotAborted(signal);
-  const clusterResult = await clusterAllPending(signal, jobId);
+  let aiResult: Awaited<ReturnType<typeof analyzeAllPending>>;
+  try {
+    aiResult = await analyzeAllPending(signal, jobId);
+  } catch (error) {
+    // Provider 全局故障时，仍归类本轮已经成功完成 AI 的文章，避免有效结果长期悬空。
+    if (!signal?.aborted) await clusterAllPending(signal, jobId);
+    throw error;
+  }
   assertNotAborted(signal);
-  const aiResult = await analyzeAllPending(signal, jobId);
+  const clusterResult = await clusterAllPending(signal, jobId);
   assertNotAborted(signal);
 
   const result: Record<string, unknown> = {
     stages: {
       collect: summarizeCollectResult(collectResult),
       process: processResult,
-      cluster: clusterResult,
       ai: aiResult,
+      cluster: clusterResult,
     },
   };
   if (await shouldPushAtPipelineEnd()) {
@@ -321,24 +327,51 @@ async function executeAiJob(
     if (jobId) await startJobStage(jobId, { stage: 'ai', total: articleIds.length });
     let processed = 0;
     let errors = 0;
+    const analyzedIds: string[] = [];
     for (const id of articleIds) {
       assertNotAborted(signal);
       try {
+        await prepareArticleForAiRegeneration(id);
         const result = await reprocessWithAI(id, signal);
         const failed = !result || result.status === 'failed';
         if (failed) errors++;
-        else processed++;
+        else {
+          processed++;
+          if (result.status === 'done') analyzedIds.push(id);
+        }
         if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, errorDelta: failed ? 1 : 0 });
       } catch {
         errors++;
         if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, errorDelta: 1 });
       }
     }
-    return { articleIds, processed, errors };
+    let clustered = 0;
+    let clusterErrors = 0;
+    if (analyzedIds.length > 0 && jobId) await startJobStage(jobId, { stage: 'cluster', total: analyzedIds.length });
+    for (const id of analyzedIds) {
+      assertNotAborted(signal);
+      let failed = false;
+      try {
+        await clusterSingleArticle(id, signal);
+        clustered++;
+      } catch {
+        failed = true;
+        clusterErrors++;
+      }
+      if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, errorDelta: failed ? 1 : 0 });
+    }
+    return { articleIds, processed, errors, clustered, clusterErrors };
   }
   if (articleId) {
+    await prepareArticleForAiRegeneration(articleId);
     const result = await reprocessWithAI(articleId, signal, jobId);
-    return { articleId, result: result ?? { status: 'not_found' } };
+    let cluster: Awaited<ReturnType<typeof clusterArticle>> | null = null;
+    if (result?.status === 'done') {
+      if (jobId) await startJobStage(jobId, { stage: 'cluster', total: 1 });
+      cluster = await clusterSingleArticle(articleId, signal);
+      if (jobId) await advanceJobProgress(jobId, { doneDelta: 1 });
+    }
+    return { articleId, result: result ?? { status: 'not_found' }, cluster };
   }
   const result = await analyzeAllPending(signal, jobId);
   return { result };
@@ -430,25 +463,30 @@ async function executeSingleArticleWorkflow(
         clusterError: null,
         clusterRetryCount: 0,
         nextClusterRetryAt: null,
-        eventKey: '',
       },
     });
     if (intent === 'regenerate' && article.eventId) await recalculateEventById(article.eventId);
   }
 
-  if (startAt === 'process' || startAt === 'cluster') {
-    assertNotAborted(signal);
-    if (jobId) await startJobStage(jobId, { stage: 'cluster', total: 1, currentItemLabel: article.title });
-    result.cluster = { eventId: await clusterArticle(articleId, signal) };
-    stages.push('cluster');
-    if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
+  if (startAt === 'ai') {
+    await prepareArticleForAiRegeneration(articleId);
   }
 
-  if (startAt !== 'push') {
+  if (startAt === 'process' || startAt === 'ai') {
     assertNotAborted(signal);
     result.ai = await reprocessWithAI(articleId, signal, jobId);
     stages.push('ai');
-    await refreshPublicPublication(articleId);
+  }
+
+  if (startAt === 'process' || startAt === 'cluster' || startAt === 'ai') {
+    assertNotAborted(signal);
+    const aiResult = result.ai as Awaited<ReturnType<typeof reprocessWithAI>> | undefined;
+    if (startAt === 'cluster' || aiResult?.status === 'done') {
+      if (jobId) await startJobStage(jobId, { stage: 'cluster', total: 1, currentItemLabel: article.title });
+      result.cluster = await clusterSingleArticle(articleId, signal);
+      stages.push('cluster');
+      if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
+    }
   } else {
     if (jobId) await startJobStage(jobId, { stage: 'push', total: 1, currentItemLabel: article.title });
     if (article.eventId) {
@@ -459,6 +497,32 @@ async function executeSingleArticleWorkflow(
     if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
   }
   return result;
+}
+
+async function prepareArticleForAiRegeneration(articleId: string): Promise<void> {
+  const article = await db.article.findUnique({ where: { id: articleId }, select: { eventId: true } });
+  if (!article) return;
+  await db.article.update({
+    where: { id: articleId },
+    data: {
+      eventId: null,
+      clusterStatus: 'pending',
+      clusteredAt: null,
+      clusterError: null,
+      clusterRetryCount: 0,
+      nextClusterRetryAt: null,
+    },
+  });
+  if (article.eventId) await recalculateEventById(article.eventId);
+}
+
+async function clusterSingleArticle(articleId: string, signal?: AbortSignal) {
+  try {
+    return await clusterArticle(articleId, signal);
+  } catch (error) {
+    await markClusterFailure(articleId, error);
+    throw error;
+  }
 }
 
 /**

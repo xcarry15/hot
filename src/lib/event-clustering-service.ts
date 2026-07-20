@@ -4,15 +4,18 @@ import {
   EVENT_CLUSTER_MAX_CANDIDATES,
   EVENT_CLUSTER_MAX_RETRIES,
   EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP,
+  EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE,
   EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP,
+  EVENT_CLUSTER_MIN_KEY_CONFIDENCE,
   EVENT_CLUSTER_RULE_VERSION,
   EVENT_CLUSTER_STRONG_CONTENT_JACCARD,
   EVENT_CLUSTER_STRONG_CONTENT_OVERLAP,
+  EVENT_CLUSTER_STRONG_IDENTITY_SCORE,
   EVENT_CLUSTER_STRONG_TITLE_DAYS,
   EVENT_CLUSTER_STRONG_TITLE_OVERLAP,
   EVENT_CLUSTER_WINDOW_DAYS,
-  buildRuleEventKey,
   contentShingleSimilarity,
+  hasEventIdentityQualifierConflict,
   hasLiteralContentOverlap,
   hasEventPhaseConflict,
   isMultiTopicTitle,
@@ -20,16 +23,17 @@ import {
   overlapCoefficient,
   sharedEventAnchors,
 } from '@/contracts/event-clustering';
+import { parseEventSubjects } from '@/contracts/event-identity';
 import { createChatCompletion } from '@/lib/ai-client';
-import { extractJsonObject } from '@/lib/ai-helpers';
+import { parseStrictJsonObject } from '@/lib/ai-helpers';
 import { db } from '@/lib/db';
+import { recalculateEventById } from '@/lib/event-service';
 
 const aiDecisionSchema = z.object({
   same_event: z.boolean(),
   confidence: z.number().int().min(0).max(100),
-  event_key: z.string().max(160).optional().default(''),
-  reason: z.string().max(300),
-});
+  reason: z.string().trim().max(50),
+}).strict();
 
 type ClusterClient = Pick<Prisma.TransactionClient, 'article' | 'event' | 'eventClusterAudit'>;
 const CONTENT_RECALL_CANDIDATES = 12;
@@ -42,7 +46,11 @@ type Candidate = {
     title: string;
     cleanContent: string;
     contentHash: string;
+    eventSubjects: string;
+    eventAction: string;
+    eventObject: string;
     eventKey: string;
+    eventKeyConfidence: number | null;
     publishedAt: Date | null;
     createdAt: Date;
   }>;
@@ -54,6 +62,13 @@ export interface AiCandidateAudit {
     exactTitle: boolean;
     fingerprint: boolean;
     eventKeyMatch: boolean;
+    subjectOverlap: number;
+    actionOverlap: number;
+    objectOverlap: number;
+    identityScore: number;
+    identityConfidence: number;
+    qualifierConflict: boolean;
+    identityConflict: boolean;
     titleOverlap: number;
     contentOverlap: number;
     contentJaccard: number;
@@ -62,7 +77,7 @@ export interface AiCandidateAudit {
     multiTopic: boolean;
     sharedAnchors: string[];
   };
-  aiDecision: { sameEvent: boolean; confidence: number; reason: string; eventKey: string };
+  aiDecision: { sameEvent: boolean; confidence: number; reason: string };
 }
 
 export function buildAiClusterAuditEvidence(candidates: AiCandidateAudit[], selectedCandidateEventId: string | null) {
@@ -73,8 +88,56 @@ function articleDate(article: { publishedAt: Date | null; createdAt: Date }): Da
   return article.publishedAt ?? article.createdAt;
 }
 
+type IdentityArticle = {
+  eventSubjects: string;
+  eventAction: string;
+  eventObject: string;
+  eventKeyConfidence: number | null;
+};
+
+function componentSimilarity(left: string, right: string): number {
+  const normalizedLeft = normalizeEventText(left);
+  const normalizedRight = normalizeEventText(right);
+  if (!normalizedLeft || !normalizedRight) return 0;
+  if (normalizedLeft === normalizedRight) return 1;
+  return overlapCoefficient(left, right);
+}
+
+function subjectSimilarity(left: string, right: string): number {
+  const leftSubjects = parseEventSubjects(left);
+  const rightSubjects = parseEventSubjects(right);
+  if (leftSubjects.length === 0 || rightSubjects.length === 0) return 0;
+  const directionalAverage = (from: string[], to: string[]) => from.reduce((sum, subject) => (
+    sum + Math.max(...to.map((candidate) => componentSimilarity(subject, candidate)))
+  ), 0) / from.length;
+  // 联合事件必须覆盖双方主体；只共享一个品牌不能把不同合作方的事件合并。
+  return Math.min(
+    directionalAverage(leftSubjects, rightSubjects),
+    directionalAverage(rightSubjects, leftSubjects),
+  );
+}
+
+function compareIdentity(left: IdentityArticle, right: IdentityArticle) {
+  const subjectOverlap = subjectSimilarity(left.eventSubjects, right.eventSubjects);
+  const actionOverlap = componentSimilarity(left.eventAction, right.eventAction);
+  const objectOverlap = componentSimilarity(left.eventObject, right.eventObject);
+  const identityConfidence = Math.min(left.eventKeyConfidence ?? 0, right.eventKeyConfidence ?? 0);
+  const identityScore = subjectOverlap * 0.45 + actionOverlap * 0.25 + objectOverlap * 0.3;
+  const qualifierConflict = hasEventIdentityQualifierConflict(left.eventObject, right.eventObject);
+  return {
+    subjectOverlap,
+    actionOverlap,
+    objectOverlap,
+    identityScore,
+    identityConfidence,
+    qualifierConflict,
+    identityConflict: identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
+      && (subjectOverlap < 0.35 || qualifierConflict),
+  };
+}
+
 function candidateEvidence(
-  article: { title: string; cleanContent: string; contentHash: string; eventKey: string; publishedAt: Date | null; createdAt: Date },
+  article: { title: string; cleanContent: string; contentHash: string; eventSubjects: string; eventAction: string; eventObject: string; eventKey: string; eventKeyConfidence: number | null; publishedAt: Date | null; createdAt: Date },
   candidate: Candidate,
   includeContent = true,
 ) {
@@ -82,6 +145,13 @@ function candidateEvidence(
   let exactTitle = false;
   let fingerprint = false;
   let eventKeyMatch = false;
+  let subjectOverlap = 0;
+  let actionOverlap = 0;
+  let objectOverlap = 0;
+  let identityScore = 0;
+  let identityConfidence = 0;
+  let qualifierConflict = false;
+  let identityConflict = false;
   let titleOverlap = 0;
   let contentOverlap = 0;
   let contentJaccard = 0;
@@ -93,6 +163,16 @@ function candidateEvidence(
     exactTitle ||= normalizedTitle.length > 0 && normalizedTitle === normalizeEventText(member.title);
     fingerprint ||= article.contentHash.length > 0 && article.contentHash === member.contentHash;
     eventKeyMatch ||= article.eventKey.length > 0 && article.eventKey === member.eventKey;
+    const identity = compareIdentity(article, member);
+    if (identity.identityScore > identityScore) {
+      subjectOverlap = identity.subjectOverlap;
+      actionOverlap = identity.actionOverlap;
+      objectOverlap = identity.objectOverlap;
+      identityScore = identity.identityScore;
+      identityConfidence = identity.identityConfidence;
+      qualifierConflict = identity.qualifierConflict;
+      identityConflict = identity.identityConflict;
+    }
     titleOverlap = Math.max(titleOverlap, overlapCoefficient(article.title, member.title));
     if (includeContent) {
       const content = contentShingleSimilarity(article.cleanContent, member.cleanContent);
@@ -100,7 +180,10 @@ function candidateEvidence(
       contentJaccard = Math.max(contentJaccard, content.jaccard);
     }
     daysApart = Math.min(daysApart, Math.abs(articleDate(article).getTime() - articleDate(member).getTime()) / 86_400_000);
-    phaseConflict ||= hasEventPhaseConflict(article.title, member.title);
+    phaseConflict ||= hasEventPhaseConflict(
+      `${article.title} ${article.eventAction} ${article.eventObject}`,
+      `${member.title} ${member.eventAction} ${member.eventObject}`,
+    );
     multiTopic ||= isMultiTopicTitle(member.title);
     const anchors = sharedEventAnchors(article.title, member.title);
     if (anchors.length > sharedAnchors.length) sharedAnchors = anchors;
@@ -109,6 +192,13 @@ function candidateEvidence(
     exactTitle,
     fingerprint,
     eventKeyMatch,
+    subjectOverlap,
+    actionOverlap,
+    objectOverlap,
+    identityScore,
+    identityConfidence,
+    qualifierConflict,
+    identityConflict,
     titleOverlap,
     contentOverlap,
     contentJaccard,
@@ -134,7 +224,7 @@ async function createEventForArticle(
       firstSeenAt: seenAt,
       lastSeenAt: seenAt,
       articleCount: 1,
-      // 聚类发生在 AI 之前；代表文章必须等待 AI 完成后由 event-service 统一选择。
+      // AI 已完成；事务结束后由 event-service 统一选择代表文章并刷新公开状态。
       representativeArticleId: null,
     },
     select: { id: true },
@@ -214,45 +304,29 @@ async function attachArticle(
 }
 
 async function askAiSameEvent(
-  article: { title: string; cleanContent: string },
+  article: { title: string; cleanContent: string; eventKey: string; eventKeyConfidence: number | null },
   candidate: Candidate,
   signal?: AbortSignal,
 ) {
-  const candidateArticles = candidate.articles.slice(0, 3).map((item) => `- 标题：${item.title}\n  正文：${item.cleanContent.slice(0, 500)}`).join('\n');
+  const candidateArticles = candidate.articles.slice(0, 3).map((item) => `- 事件键：${item.eventKey}（置信度 ${item.eventKeyConfidence ?? 0}）\n  标题：${item.title}\n  正文：${item.cleanContent.slice(0, 500)}`).join('\n');
   const prompt = `判断是否是同一个具体新闻事件。
 同一事件必须同时满足：核心主体相同、具体动作/结果相同、时间阶段一致。
 以下均不算同一事件：只有品牌/地点/奖项/话题相同；预告与事后结果；聚合快讯仅有一个子项重合。
 证据不足时返回 false。
 
+新文章事件键：${article.eventKey}（置信度 ${article.eventKeyConfidence ?? 0}）
 新文章：${article.title}
 正文：${article.cleanContent.slice(0, 900)}
 
 候选报道：
 ${candidateArticles}
 
-只返回 JSON：{"same_event":false,"confidence":0,"event_key":"核心主体|具体动作|具体事项","reason":"不超过50字"}`;
+只返回 JSON：{"same_event":false,"confidence":0,"reason":"不超过50字"}`;
   const result = await createChatCompletion([
     { role: 'system', content: '你是保守的新闻事件聚类器，只根据给定文本判断，证据不足时分开。' },
     { role: 'user', content: prompt },
-  ], { temperature: 0, maxTokens: 300, signal });
-  return aiDecisionSchema.parse(extractJsonObject(result.content));
-}
-
-async function generateEventKey(article: { title: string; cleanContent: string }, signal?: AbortSignal): Promise<string> {
-  try {
-    const result = await createChatCompletion([
-      { role: 'system', content: '你是新闻事件键提取器，不推测未出现的事实。' },
-      { role: 'user', content: `提取“核心主体|具体动作|具体事项”，使其可用于区分具体新闻事件。
-不使用“战略升级、进一步布局、行业动态”等泛词。无法确定则返回空字符串。
-标题：${article.title}
-正文：${article.cleanContent.slice(0, 600)}
-只返回 JSON：{"event_key":""}` },
-    ], { temperature: 0, maxTokens: 300, signal });
-    return aiDecisionSchema.pick({ event_key: true }).parse(extractJsonObject(result.content)).event_key.trim();
-  } catch (error) {
-    console.warn('[event-clustering] eventKey AI fallback:', error);
-    return '';
-  }
+  ], { temperature: 0, maxTokens: 300, responseFormat: 'json_object', signal });
+  return aiDecisionSchema.parse(parseStrictJsonObject(result.content));
 }
 
 export async function clusterArticle(articleId: string, signal?: AbortSignal): Promise<{ eventId: string; action: string }> {
@@ -263,37 +337,39 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       title: true,
       cleanContent: true,
       contentHash: true,
+      eventSubjects: true,
+      eventAction: true,
+      eventObject: true,
       eventKey: true,
+      eventKeyConfidence: true,
       publishedAt: true,
       createdAt: true,
       clusterStatus: true,
+      aiStatus: true,
     },
   });
   if (!article) throw new Error('文章不存在');
+  if (article.aiStatus !== 'done' || !article.eventKey) throw new Error('文章尚未完成事件身份分析');
   if (article.clusterStatus === 'clustered' || article.clusterStatus === 'needs_review') {
     const current = await db.article.findUnique({ where: { id: article.id }, select: { eventId: true } });
     if (current?.eventId) return { eventId: current.eventId, action: 'existing' };
   }
 
   const multiTopic = isMultiTopicTitle(article.title);
-  const generatedKey = article.eventKey || (multiTopic
-    ? buildRuleEventKey(article.title)
-    : await generateEventKey(article, signal));
-  const eventKey = generatedKey || buildRuleEventKey(article.title);
-  if (eventKey !== article.eventKey) await db.article.update({ where: { id: article.id }, data: { eventKey } });
   if (multiTopic) {
-    const eventId = await db.$transaction((tx) => createEventForArticle(tx, { ...article, eventKey }, {
+    const eventId = await db.$transaction((tx) => createEventForArticle(tx, article, {
       action: 'fallback_create',
       decisionSource: 'rule',
       confidence: 50,
       evidence: {
-        eventKey,
+        eventKey: article.eventKey,
         multiTopic: true,
         reason: '标题包含多个独立主体与动作，不能自动归入单一 Event',
         ...buildAiClusterAuditEvidence([], null),
       },
       needsReview: true,
     }));
+    await recalculateEventById(eventId);
     return { eventId, action: 'fallback_create' };
   }
   const referenceAt = articleDate(article);
@@ -305,16 +381,28 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       status: 'active',
       firstSeenAt: { lte: windowEnd },
       lastSeenAt: { gte: windowStart },
-      articles: { some: { clusterStatus: 'clustered' } },
+      articles: { some: { clusterStatus: 'clustered', aiStatus: 'done' } },
     },
     select: {
       id: true,
       representativeArticleId: true,
       articles: {
-        where: { clusterStatus: 'clustered' },
+        where: { clusterStatus: 'clustered', aiStatus: 'done' },
         orderBy: { createdAt: 'desc' },
         take: 8,
-        select: { id: true, title: true, cleanContent: true, contentHash: true, eventKey: true, publishedAt: true, createdAt: true },
+        select: {
+          id: true,
+          title: true,
+          cleanContent: true,
+          contentHash: true,
+          eventSubjects: true,
+          eventAction: true,
+          eventObject: true,
+          eventKey: true,
+          eventKeyConfidence: true,
+          publishedAt: true,
+          createdAt: true,
+        },
       },
     },
     orderBy: { lastSeenAt: 'desc' },
@@ -322,16 +410,19 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
   const recalled = candidates
     .map((candidate) => ({
       candidate,
-      evidence: candidateEvidence({ ...article, eventKey }, candidate, false),
+      evidence: candidateEvidence(article, candidate, false),
       contentHint: hasCandidateContentHint(article, candidate),
     }))
     .sort((left, right) => {
       const score = (value: typeof left.evidence) => Number(value.fingerprint) * 5
         + Number(value.exactTitle) * 4
-        + Number(value.eventKeyMatch) * 1.5
-        + value.titleOverlap * 2
+        + Number(value.eventKeyMatch) * 8
+        + value.identityScore * 6
+        + value.subjectOverlap * 2
+        + value.titleOverlap * 1.5
         + Math.min(value.sharedAnchors.length, 3)
         - Number(value.phaseConflict) * 3
+        - Number(value.identityConflict) * 5
         - Number(value.multiTopic) * 1.5
         - Math.min(value.daysApart, EVENT_CLUSTER_WINDOW_DAYS) / EVENT_CLUSTER_WINDOW_DAYS;
       return Number(right.contentHint) * 4 + score(right.evidence)
@@ -339,47 +430,71 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     })
     .slice(0, CONTENT_RECALL_CANDIDATES);
   const ranked = recalled
-    .map(({ candidate }) => ({ candidate, evidence: candidateEvidence({ ...article, eventKey }, candidate) }))
+    .map(({ candidate }) => ({ candidate, evidence: candidateEvidence(article, candidate) }))
     .sort((left, right) => {
       const score = (value: typeof left.evidence) => Number(value.fingerprint) * 5
         + Number(value.exactTitle) * 4
-        + Number(value.eventKeyMatch) * 1.5
+        + Number(value.eventKeyMatch) * 8
+        + value.identityScore * 6
         + value.contentOverlap * 3
         + value.contentJaccard * 2
         + value.titleOverlap
         - Number(value.phaseConflict) * 3
+        - Number(value.identityConflict) * 5
         - Number(value.multiTopic) * 1.5;
       return score(right.evidence) - score(left.evidence);
     })
     .slice(0, EVENT_CLUSTER_MAX_CANDIDATES);
 
-  const exact = ranked.find(({ evidence }) => evidence.fingerprint || (evidence.exactTitle && !evidence.phaseConflict));
+  const exact = ranked.find(({ evidence }) => evidence.fingerprint || (
+    evidence.exactTitle
+    && !evidence.phaseConflict
+    && !evidence.identityConflict
+    && (evidence.eventKeyMatch || evidence.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE)
+  ));
   if (exact) {
     const eventId = await db.$transaction((tx) => attachArticle(tx, article, exact.candidate, 'exact', 100, exact.evidence));
+    await recalculateEventById(eventId);
     return { eventId, action: 'attach' };
   }
   const strong = ranked.find(({ evidence }) => {
-    if (evidence.phaseConflict || evidence.multiTopic) return false;
+    if (evidence.phaseConflict || evidence.identityConflict || evidence.multiTopic) return false;
+    const keyConfirmed = evidence.eventKeyMatch
+      && evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE;
+    const identityConfirmed = evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
+      && evidence.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE
+      && evidence.subjectOverlap >= 0.6
+      && evidence.actionOverlap >= 0.5
+      && evidence.objectOverlap >= 0.45;
     const contentConfirmed = evidence.contentOverlap >= EVENT_CLUSTER_STRONG_CONTENT_OVERLAP
       && evidence.contentJaccard >= EVENT_CLUSTER_STRONG_CONTENT_JACCARD;
     const titleConfirmed = evidence.sharedAnchors.length > 0
       && evidence.titleOverlap >= EVENT_CLUSTER_STRONG_TITLE_OVERLAP
-      && evidence.daysApart <= EVENT_CLUSTER_STRONG_TITLE_DAYS;
-    return contentConfirmed || titleConfirmed;
+      && evidence.daysApart <= EVENT_CLUSTER_STRONG_TITLE_DAYS
+      && evidence.identityScore >= 0.6
+      && evidence.actionOverlap >= 0.45
+      && evidence.objectOverlap >= 0.65;
+    return keyConfirmed || identityConfirmed || contentConfirmed || titleConfirmed;
   });
   if (strong) {
     const confidence = Math.min(99, Math.round(65
-      + strong.evidence.titleOverlap * 15
-      + strong.evidence.contentOverlap * 12
-      + strong.evidence.contentJaccard * 8));
+      + Number(strong.evidence.eventKeyMatch) * 20
+      + strong.evidence.identityScore * 12
+      + strong.evidence.titleOverlap * 6
+      + strong.evidence.contentOverlap * 5));
     const eventId = await db.$transaction((tx) => attachArticle(tx, article, strong.candidate, 'rule', confidence, strong.evidence));
+    await recalculateEventById(eventId);
     return { eventId, action: 'attach' };
   }
-  const ambiguous = ranked.filter(({ evidence }) => !evidence.multiTopic && (
-    evidence.eventKeyMatch
-    || (evidence.sharedAnchors.length > 0 && evidence.titleOverlap >= EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP)
-    || evidence.contentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
-  )).slice(0, 2);
+  const ambiguous = ranked.filter(({ evidence }) => !evidence.multiTopic
+    && !evidence.phaseConflict
+    && !evidence.identityConflict
+    && (
+      evidence.eventKeyMatch
+      || evidence.identityScore >= EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE
+      || (evidence.sharedAnchors.length > 0 && evidence.titleOverlap >= EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP)
+      || evidence.contentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
+    )).slice(0, 2);
   const aiCandidates: AiCandidateAudit[] = [];
   for (const item of ambiguous) {
     let decision;
@@ -390,7 +505,7 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       aiCandidates.push({
         candidateEventId: item.candidate.id,
         ruleEvidence: item.evidence,
-        aiDecision: { sameEvent: false, confidence: 0, reason: 'AI 判断失败，已保守分开', eventKey: '' },
+        aiDecision: { sameEvent: false, confidence: 0, reason: 'AI 判断失败，已保守分开' },
       });
       continue;
     }
@@ -401,29 +516,36 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
         sameEvent: decision.same_event,
         confidence: decision.confidence,
         reason: decision.reason,
-        eventKey: decision.event_key,
       },
     };
     aiCandidates.push(auditDecision);
     if (decision.same_event && decision.confidence >= 70) {
-      if (decision.event_key && decision.event_key !== eventKey) {
-        await db.article.update({ where: { id: article.id }, data: { eventKey: decision.event_key } });
-      }
       const eventId = await db.$transaction((tx) => attachArticle(tx, article, item.candidate, 'ai', decision.confidence, buildAiClusterAuditEvidence(aiCandidates, item.candidate.id)));
+      await recalculateEventById(eventId);
       return { eventId, action: 'attach' };
     }
   }
   const needsReview = ambiguous.length > 0 && aiCandidates.some((candidate) => (
     candidate.aiDecision.confidence > 0 && candidate.aiDecision.confidence < 75
   ));
-  const eventId = await db.$transaction((tx) => createEventForArticle(tx, { ...article, eventKey }, {
+  const eventId = await db.$transaction((tx) => createEventForArticle(tx, article, {
     action: needsReview ? 'fallback_create' : 'create',
     decisionSource: needsReview ? 'ai' : 'rule',
     confidence: needsReview ? 50 : 90,
-    evidence: { eventKey, ...buildAiClusterAuditEvidence(aiCandidates, null) },
+    evidence: {
+      eventKey: article.eventKey,
+      eventKeyConfidence: article.eventKeyConfidence,
+      eventIdentity: {
+        subjects: parseEventSubjects(article.eventSubjects),
+        action: article.eventAction,
+        object: article.eventObject,
+      },
+      ...buildAiClusterAuditEvidence(aiCandidates, null),
+    },
     needsReview,
     candidateEventId: aiCandidates[0]?.candidateEventId,
   }));
+  await recalculateEventById(eventId);
   return { eventId, action: needsReview ? 'fallback_create' : 'create' };
 }
 

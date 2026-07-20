@@ -39,11 +39,20 @@ export async function PATCH(
     const publicOverride = body.publicOverride === 'auto' || body.publicOverride === 'public' || body.publicOverride === 'hidden'
       ? body.publicOverride
       : undefined;
+    const rawEventIdentity = body.eventIdentity && typeof body.eventIdentity === 'object'
+      ? body.eventIdentity as Record<string, unknown>
+      : null;
     const article = await runExclusiveMutation('编辑文章', () => updateArticleEditorial(id, {
       summary: typeof body.summary === 'string' ? body.summary : undefined,
       brand: typeof body.brand === 'string' ? body.brand : undefined,
       category: typeof body.category === 'string' ? body.category : undefined,
-      tags: Array.isArray(body.tags) ? body.tags.filter((item): item is { name: string; tone?: string } => Boolean(item && typeof item === 'object' && typeof (item as { name?: unknown }).name === 'string')) : undefined,
+      eventIdentity: rawEventIdentity ? {
+        subjects: Array.isArray(rawEventIdentity.subjects)
+          ? rawEventIdentity.subjects.filter((item): item is string => typeof item === 'string')
+          : [],
+        action: typeof rawEventIdentity.action === 'string' ? rawEventIdentity.action : '',
+        object: typeof rawEventIdentity.object === 'string' ? rawEventIdentity.object : '',
+      } : undefined,
       keyPoints: Array.isArray(body.keyPoints) ? body.keyPoints.filter((item): item is string => typeof item === 'string') : undefined,
       publicOverride,
       relevance: scoreValue(body.relevance) ?? undefined,

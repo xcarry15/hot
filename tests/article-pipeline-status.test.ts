@@ -79,15 +79,16 @@ describe('article-pipeline-status — ai', () => {
     const proj = projectArticleSteps(article({ aiStatus: 'pending' }), push());
     expect(proj.ai).toBe('pending');
   });
-  it('聚类未完成或失败 → AI blocked', () => {
-    expect(projectArticleSteps(article({ clusterStatus: 'pending' }), push()).ai).toBe('blocked');
-    expect(projectArticleSteps(article({ clusterStatus: 'failed' }), push()).ai).toBe('blocked');
+  it('聚类状态不反向阻塞 AI', () => {
+    expect(projectArticleSteps(article({ clusterStatus: 'pending' }), push()).ai).toBe('done');
+    expect(projectArticleSteps(article({ clusterStatus: 'failed' }), push()).ai).toBe('done');
   });
 });
 
 describe('article-pipeline-status — cluster', () => {
-  it('处理未完成 → blocked', () => {
+  it('处理或 AI 未完成 → blocked', () => {
     expect(projectArticleSteps(article({ fetchStatus: 'pending', clusterStatus: 'pending' }), push()).cluster).toBe('blocked');
+    expect(projectArticleSteps(article({ aiStatus: 'pending', clusterStatus: 'pending' }), push()).cluster).toBe('blocked');
   });
   it('pending / failed / clustered / needs_review 正确投影', () => {
     expect(projectArticleSteps(article({ clusterStatus: 'pending' }), push()).cluster).toBe('pending');

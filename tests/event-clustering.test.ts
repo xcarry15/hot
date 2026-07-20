@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildRuleEventKey, contentShingleSimilarity, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors } from '@/contracts/event-clustering';
+import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors } from '@/contracts/event-clustering';
+import { buildCanonicalEventKey, normalizeEventIdentity } from '@/contracts/event-identity';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
 import { buildAiClusterAuditEvidence, type AiCandidateAudit } from '@/lib/event-clustering-service';
 
@@ -18,8 +19,15 @@ describe('轻量事件聚类规则', () => {
     expect(score).toBeLessThan(0.5);
   });
 
-  it('规则事件键长度受控', () => {
-    expect(buildRuleEventKey('标题'.repeat(200))).toHaveLength(160);
+  it('事件身份经程序确定性生成三段式事件键', () => {
+    const identity = normalizeEventIdentity({
+      subjects: ['胖东来', '郑州文和友'],
+      action: '联合调改',
+      object: '郑州门店项目',
+    });
+    expect(buildCanonicalEventKey(identity)).toBe('胖东来+郑州文和友/联合调改/郑州门店项目');
+    expect(buildCanonicalEventKey({ ...identity, subjects: [...identity.subjects].reverse() }))
+      .toBe('胖东来+郑州文和友/联合调改/郑州门店项目');
   });
 
   it('转载改写正文仍能形成强内容证据', () => {
@@ -34,6 +42,12 @@ describe('轻量事件聚类规则', () => {
 
   it('预告与已经发生的结果视为阶段冲突', () => {
     expect(hasEventPhaseConflict('第三届百货节即将启幕', '第三届百货节启幕，首日销售增长')).toBe(true);
+  });
+
+  it('不同年份、季度或届次视为事件身份冲突', () => {
+    expect(hasEventIdentityQualifierConflict('2026 Q1 财报', '2026年第二季度财报')).toBe(true);
+    expect(hasEventIdentityQualifierConflict('第三届百货节', '第四届百货节')).toBe(true);
+    expect(hasEventIdentityQualifierConflict('2026 Q1 财报', '2026年第一季度业绩')).toBe(false);
   });
 
   it('聚合快讯不会直接自动并入其中一个子事件', () => {
@@ -55,6 +69,8 @@ describe('轻量事件聚类规则', () => {
     const now = new Date('2026-07-18T00:00:00Z');
     expect(buildClusterPendingWhere(now)).toEqual({
       fetchStatus: 'fetched',
+      aiStatus: 'done',
+      eventKey: { not: '' },
       eventId: null,
       technicalIgnoredAt: null,
       AND: [
@@ -72,9 +88,18 @@ describe('轻量事件聚类规则', () => {
 });
 
 describe('聚类 AI 候选审计', () => {
+  const identityEvidence = {
+    subjectOverlap: 1,
+    actionOverlap: 0.8,
+    objectOverlap: 0.75,
+    identityScore: 0.87,
+    identityConfidence: 85,
+    qualifierConflict: false,
+    identityConflict: false,
+  };
   const candidates: AiCandidateAudit[] = [
-    { candidateEventId: 'A', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, titleOverlap: 0.5, contentOverlap: 0.3, contentJaccard: 0.2, daysApart: 1, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌A'] }, aiDecision: { sameEvent: false, confidence: 58, reason: '周期不同', eventKey: '拒绝键' } },
-    { candidateEventId: 'B', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, titleOverlap: 0.7, contentOverlap: 0.8, contentJaccard: 0.6, daysApart: 0, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌B'] }, aiDecision: { sameEvent: true, confidence: 82, reason: '事项一致', eventKey: '采用键' } },
+    { candidateEventId: 'A', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, ...identityEvidence, titleOverlap: 0.5, contentOverlap: 0.3, contentJaccard: 0.2, daysApart: 1, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌A'] }, aiDecision: { sameEvent: false, confidence: 58, reason: '周期不同' } },
+    { candidateEventId: 'B', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, ...identityEvidence, titleOverlap: 0.7, contentOverlap: 0.8, contentJaccard: 0.6, daysApart: 0, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌B'] }, aiDecision: { sameEvent: true, confidence: 82, reason: '事项一致' } },
   ];
 
   it('先拒绝 A、再接受 B 时保存全部候选并标记 B', () => {

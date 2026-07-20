@@ -111,7 +111,7 @@ export async function fetchArticleList(
 
 export async function updateArticleEditorial(
   articleId: string,
-  input: { summary?: string; brand?: string; category?: string; tags?: Array<{ name: string; tone?: string }>; keyPoints?: string[]; publicOverride?: 'auto' | 'public' | 'hidden'; relevance?: number; eventScore?: number; contentScore?: number; adProbability?: number; isAd?: boolean; restoreFields?: ManualOverrideField[] },
+  input: { summary?: string; brand?: string; category?: string; eventIdentity?: { subjects: string[]; action: string; object: string }; keyPoints?: string[]; publicOverride?: 'auto' | 'public' | 'hidden'; relevance?: number; eventScore?: number; contentScore?: number; adProbability?: number; isAd?: boolean; restoreFields?: ManualOverrideField[] },
 ): Promise<ArticleDetailDto> {
   const article = await requestJson<ArticleDetailDto>('PATCH', `/api/articles/${articleId}`, { body: input });
   primeArticleDetailCache(article);

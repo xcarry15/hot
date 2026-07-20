@@ -17,7 +17,11 @@ export const ARTICLE_LIST_SELECT = {
   eventId: true,
   clusterStatus: true,
   clusteredAt: true,
+  eventSubjects: true,
+  eventAction: true,
+  eventObject: true,
   eventKey: true,
+  eventKeyConfidence: true,
   eventScore: true,
   contentScore: true,
   adProbability: true,
@@ -30,7 +34,6 @@ export const ARTICLE_LIST_SELECT = {
   summary: true,
   brand: true,
   category: true,
-  tags: true,
   score: true,
   aiConfidence: true,
   aiStatus: true,
@@ -77,7 +80,11 @@ export interface ArticleListFieldsDto {
   eventId: string | null;
   clusterStatus: string;
   clusteredAt: string | null;
+  eventSubjects: string;
+  eventAction: string;
+  eventObject: string;
   eventKey: string;
+  eventKeyConfidence: number | null;
   event: {
     id: string;
     articleCount: number;
@@ -94,7 +101,6 @@ export interface ArticleListFieldsDto {
   summary: string;
   brand: string;
   category: string;
-  tags: string;
   score: number;
   /** 评分构成（仅 AI 完成后有值） */
   eventScore: number | null;
@@ -244,7 +250,11 @@ function serializeArticleListFields(
     eventId: article.eventId,
     clusterStatus: article.clusterStatus,
     clusteredAt: toIso(article.clusteredAt),
+    eventSubjects: article.eventSubjects,
+    eventAction: article.eventAction,
+    eventObject: article.eventObject,
     eventKey: article.eventKey,
+    eventKeyConfidence: article.eventKeyConfidence,
     event: article.event ? {
       ...article.event,
       pushedAt: toIso(article.event.pushedAt),
@@ -258,7 +268,6 @@ function serializeArticleListFields(
     summary: article.summary,
     brand: article.brand,
     category: article.category,
-    tags: article.tags,
     score: article.score,
     eventScore: article.eventScore ?? null,
     contentScore: article.contentScore ?? null,

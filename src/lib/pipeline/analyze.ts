@@ -21,7 +21,6 @@ import {
   advanceJobProgress,
   startJobStage,
 } from '@/lib/job-progress';
-import { refreshPublicPublications } from '@/lib/public-publication-service';
 
 const AI_TIMEOUT_MS = 90_000;
 const MAX_BATCH_SIZE = 500;
@@ -31,7 +30,7 @@ const MAX_AI_CONCURRENCY = 10;
 const AI_DELAY_MS = 300;
 
 /**
- * Stage 3: Run AI for all articles with aiStatus=pending or failed.
+ * Stage 3: Run AI for fetched, not-yet-clustered articles with aiStatus=pending or failed.
  * Batches with concurrency from settings.ai_concurrency (1-10, default 3)
  * and 300ms delay between batches.
  */
@@ -40,9 +39,10 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
 
   const pendingWhere: Prisma.ArticleWhereInput = {
     aiStatus: { in: ['pending', 'failed'] },
+    fetchStatus: 'fetched',
     technicalIgnoredAt: null,
-    eventId: { not: null },
-    clusterStatus: { in: ['clustered', 'needs_review'] },
+    eventId: null,
+    clusterStatus: 'pending',
     OR: [
       { nextAiRetryAt: null },
       { nextAiRetryAt: { lte: new Date() } },
@@ -68,7 +68,11 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
       summary: true,
       brand: true,
       category: true,
-      tags: true,
+      eventSubjects: true,
+      eventAction: true,
+      eventObject: true,
+      eventKey: true,
+      eventKeyConfidence: true,
       keyPoints: true,
       score: true,
       keywordMatched: true,
@@ -85,7 +89,6 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
 
   let processed = 0;
   let errors = 0;
-  const refreshedArticleIds: string[] = [];
   // AI 并发可配置（设置项 ai_concurrency，默认 3，范围 1-10）。
   // 调高可缩短批处理时间但撞 429 风险增大；provider 故障时降低可减少无效请求。
   const rawConcurrency = parseInt(await getSetting(SETTING_KEYS.AI_CONCURRENCY) || String(DEFAULT_AI_CONCURRENCY), 10);
@@ -102,7 +105,6 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
       select: articleSelect,
       orderBy: { createdAt: 'asc' },
     });
-    refreshedArticleIds.push(...pending.map((article) => article.id));
     for (let i = 0; i < pending.length; i += concurrency) {
       assertNotAborted(signal);
       const batch = pending.slice(i, i + concurrency);
@@ -129,8 +131,6 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
     }
   }
 
-  // 统一把本批文章的持久化公开状态与最终 aiStatus/score 对齐。
-  await refreshPublicPublications(refreshedArticleIds, db);
   if (globalFailure) throw new Error('AI Provider 或配置异常，剩余积压未处理');
 
   return { total, processed, errors };

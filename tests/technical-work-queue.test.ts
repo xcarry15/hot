@@ -21,7 +21,7 @@ describe('technical work queue', () => {
     ]));
     const queue = await getTechnicalWorkQueue();
     expect(queue).toHaveLength(2);
-    expect(queue.find((item) => item.articleId === 'a1')?.issues).toEqual(['process_failed', 'cluster_failed', 'ai_failed', 'push_failed']);
+    expect(queue.find((item) => item.articleId === 'a1')?.issues).toEqual(['process_failed', 'ai_failed', 'cluster_failed', 'push_failed']);
     expect(queue.find((item) => item.articleId === 'a2')?.issues).toEqual(['push_failed']);
   });
 });

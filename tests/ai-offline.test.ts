@@ -66,11 +66,13 @@ vi.mock('@/lib/ai-helpers', () => ({
     content_score: 60,
     summary: 'test',
     brand: '测试品牌A',
-    tags: ['t1'],
+    event_subjects: ['测试主体'],
+    event_action: '发布',
+    event_object: '测试事项',
+    event_key_confidence: 90,
     key_points: ['p1'],
   }),
   pickStringArray: vi.fn().mockReturnValue([]),
-  pickTagArray: vi.fn().mockReturnValue([]),
 }));
 
 vi.mock('@/lib/dedup', () => ({

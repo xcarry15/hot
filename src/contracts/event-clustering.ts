@@ -1,13 +1,16 @@
 export const EVENT_CLUSTER_WINDOW_DAYS = 7;
 export const EVENT_CLUSTER_MAX_CANDIDATES = 5;
 export const EVENT_CLUSTER_MAX_RETRIES = 5;
-export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v2';
+export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v3';
 export const EVENT_CLUSTER_STRONG_TITLE_OVERLAP = 0.66;
 export const EVENT_CLUSTER_STRONG_TITLE_DAYS = 2;
 export const EVENT_CLUSTER_STRONG_CONTENT_OVERLAP = 0.72;
 export const EVENT_CLUSTER_STRONG_CONTENT_JACCARD = 0.45;
 export const EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP = 0.4;
 export const EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP = 0.35;
+export const EVENT_CLUSTER_MIN_KEY_CONFIDENCE = 65;
+export const EVENT_CLUSTER_STRONG_IDENTITY_SCORE = 0.72;
+export const EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE = 0.46;
 export const EVENT_CLUSTER_ANCHOR_MIN_LENGTH = 2;
 
 export type ClusterStatus = 'pending' | 'clustered' | 'failed' | 'needs_review';
@@ -115,6 +118,38 @@ export function sharedEventAnchors(left: string, right: string): string[] {
   return [...a].filter((token) => b.has(token));
 }
 
+function eventQualifiers(value: string): Map<string, Set<string>> {
+  const normalized = value.normalize('NFKC').toLowerCase();
+  const result = new Map<string, Set<string>>();
+  const add = (kind: string, token: string) => {
+    const values = result.get(kind) ?? new Set<string>();
+    values.add(token);
+    result.set(kind, values);
+  };
+  for (const match of normalized.matchAll(/20\d{2}/gu)) add('year', match[0]);
+  const quarterMap: Record<string, string> = { 一: '1', 二: '2', 三: '3', 四: '4' };
+  for (const match of normalized.matchAll(/q([1-4])|第?([一二三四1-4])季度/gu)) {
+    const quarter = match[1] ?? match[2];
+    if (quarter) add('quarter', quarterMap[quarter] ?? quarter);
+  }
+  for (const match of normalized.matchAll(/第([一二三四五六七八九十\d]+)(期|届|批)/gu)) {
+    if (match[1] && match[2]) add(match[2], match[1]);
+  }
+  return result;
+}
+
+export function hasEventIdentityQualifierConflict(left: string, right: string): boolean {
+  const leftQualifiers = eventQualifiers(left);
+  const rightQualifiers = eventQualifiers(right);
+  for (const kind of ['year', 'quarter', '期', '届', '批']) {
+    const leftValues = leftQualifiers.get(kind);
+    const rightValues = rightQualifiers.get(kind);
+    if (!leftValues?.size || !rightValues?.size) continue;
+    if (![...leftValues].some((value) => rightValues.has(value))) return true;
+  }
+  return false;
+}
+
 const FUTURE_PHASE_PATTERN = /即将|将于|将在|拟|计划|预计|筹备|待开|有望/u;
 const REALIZED_PHASE_PATTERN = /正式|已经|已|落地|亮相|开业|启幕|首日|增长|完成|投运|开仓|撤场|摘牌|获批|签约/u;
 
@@ -124,8 +159,4 @@ export function hasEventPhaseConflict(left: string, right: string): boolean {
   const leftRealized = REALIZED_PHASE_PATTERN.test(left);
   const rightRealized = REALIZED_PHASE_PATTERN.test(right);
   return (leftFuture && rightRealized && !rightFuture) || (rightFuture && leftRealized && !leftFuture);
-}
-
-export function buildRuleEventKey(title: string): string {
-  return normalizeEventText(title).slice(0, 160);
 }

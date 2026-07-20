@@ -24,7 +24,7 @@ describe('EXPORTABLE_SETTING_KEYS', () => {
     for (const k of [
       'ai_block_ad', 'ai_block_event_score', 'ai_block_category', 'ai_block_relevance',
       'ai_block_content_score', 'ai_block_key_points', 'ai_block_summary',
-      'ai_block_tags', 'ai_block_brand',
+      'ai_block_event_identity', 'ai_block_brand',
     ]) {
       expect(set.has(k), `缺少提示词块键 ${k}`).toBe(true);
     }

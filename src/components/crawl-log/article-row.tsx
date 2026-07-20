@@ -33,13 +33,13 @@ export const ArticleRow = memo(function ArticleRow({
 
   const nextAction = useMemo(() => article.process === 'failed'
     ? { step: 'process' as const, label: '重试处理' }
-    : article.cluster === 'failed'
-      ? { step: 'cluster' as const, label: '重试聚类' }
-      : article.ai === 'failed' || (article.ai === 'skipped' && article.skipReason?.startsWith('AI 连续失败'))
-          ? { step: 'ai' as const, label: '重试 AI' }
-          : article.push === 'failed'
-            ? { step: 'push' as const, label: article.pushRetryAt && new Date(article.pushRetryAt) > new Date() ? '等待重试' : '重试投递' }
-            : null, [article.ai, article.cluster, article.process, article.push, article.pushRetryAt, article.skipReason])
+    : article.ai === 'failed' || (article.ai === 'skipped' && article.skipReason?.startsWith('AI 连续失败'))
+      ? { step: 'ai' as const, label: '重试 AI' }
+      : article.cluster === 'failed'
+        ? { step: 'cluster' as const, label: '重试聚类' }
+        : article.push === 'failed'
+          ? { step: 'push' as const, label: article.pushRetryAt && new Date(article.pushRetryAt) > new Date() ? '等待重试' : '重试投递' }
+          : null, [article.ai, article.cluster, article.process, article.push, article.pushRetryAt, article.skipReason])
 
   const handleNextAction = useCallback(() => {
     if (!nextAction) return
@@ -96,7 +96,8 @@ export const ArticleRow = memo(function ArticleRow({
       )}
       <div className="flex min-w-0 flex-1 items-center gap-1">
         <button
-          className="truncate min-w-0 text-muted-foreground group-hover:text-foreground text-left"
+          type="button"
+          className="min-w-0 flex-1 truncate text-muted-foreground group-hover:text-foreground text-left"
           title={article.title}
           onClick={handleOpen}
           onMouseEnter={handlePrefetch}
@@ -150,6 +151,13 @@ export const ArticleRow = memo(function ArticleRow({
           title={retryWaiting && article.processRetryAt ? `处理将在 ${new Date(article.processRetryAt).toLocaleString('zh-CN')} 自动重试` : article.process === 'failed' ? '点击重试处理' : undefined}
         />
         <StepIndicator
+          label="AI分析"
+          status={aiLoading ? 'running' : article.ai}
+          onClick={actionFor('ai')}
+          forceLabel={nextAction?.step === 'ai' ? (retryWaiting ? '等待' : '重试') : undefined}
+          title={article.ai === 'failed' ? '点击重试 AI 分析' : article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined}
+        />
+        <StepIndicator
           label="聚类"
           status={clusterLoading ? 'running' : article.cluster}
           onClick={actionFor('cluster')}
@@ -158,16 +166,9 @@ export const ArticleRow = memo(function ArticleRow({
             ? '聚类结果存在歧义，点击打开文章工作台复核'
             : article.cluster === 'failed'
               ? '点击重试聚类'
-            : article.clusterRetryAt
-              ? `聚类将于 ${new Date(article.clusterRetryAt).toLocaleString('zh-CN')} 后自动重试`
-              : undefined}
-        />
-        <StepIndicator
-          label="AI分析"
-          status={aiLoading ? 'running' : article.ai}
-          onClick={actionFor('ai')}
-          forceLabel={nextAction?.step === 'ai' ? (retryWaiting ? '等待' : '重试') : undefined}
-          title={article.ai === 'failed' ? '点击重试 AI 分析' : article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined}
+              : article.clusterRetryAt
+                ? `聚类将于 ${new Date(article.clusterRetryAt).toLocaleString('zh-CN')} 后自动重试`
+                : undefined}
         />
         <StepIndicator
           label="推送"

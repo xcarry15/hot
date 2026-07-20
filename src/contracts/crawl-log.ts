@@ -36,7 +36,7 @@ export interface ArticleProgress {
   processRetryAt?: string | null;
   clusterStatus: 'pending' | 'clustered' | 'failed' | 'needs_review';
   clusterRetryAt?: string | null;
-  technicalIssues: Array<'process_failed' | 'cluster_failed' | 'ai_failed' | 'push_failed'>;
+  technicalIssues: Array<'process_failed' | 'ai_failed' | 'cluster_failed' | 'push_failed'>;
   technicalState?: 'auto_retry' | 'manual' | 'ignored' | null;
   technicalIgnoredAt?: string | null;
   isEventRepresentative: boolean;
@@ -71,9 +71,9 @@ export interface SourceProgress {
   lastRunError?: string;
 }
 
-export type JobType = 'full' | 'collect' | 'process' | 'cluster' | 'ai' | 'push' | 'fastProcess';
+export type JobType = 'full' | 'collect' | 'process' | 'ai' | 'cluster' | 'push' | 'fastProcess';
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type JobStage = 'collect' | 'process' | 'cluster' | 'ai' | 'push';
+export type JobStage = 'collect' | 'process' | 'ai' | 'cluster' | 'push';
 
 export interface JobSnapshot {
   id: string;

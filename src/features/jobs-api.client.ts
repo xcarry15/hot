@@ -14,7 +14,7 @@ export const triggerFullCrawl = (signal?: AbortSignal) =>
 
 /** 触发单个阶段（'all' 等价于 full pipeline） */
 export const triggerCrawlStage = (
-  stage: 'all' | 'collect' | 'process' | 'cluster' | 'ai' | 'push',
+  stage: 'all' | 'collect' | 'process' | 'ai' | 'cluster' | 'push',
   signal?: AbortSignal,
 ) =>
   stage === 'all'
