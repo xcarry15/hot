@@ -165,7 +165,7 @@ export function PresetSourcesManagement() {
   return (
     <div className="flex flex-col h-full">
       {/* Top Bar */}
-      <div className="p-2 border-b space-y-2">
+      <div className="space-y-1.5 border-b p-2">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Bookmark className="h-4 w-4" />
@@ -181,7 +181,7 @@ export function PresetSourcesManagement() {
             variant="outline"
             onClick={handleAddAll}
             disabled={adding || availableCount === 0}
-            className="gap-1.5 h-8 px-3 text-xs"
+            className="h-7 gap-1.5 px-2.5 text-xs"
           >
             {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             一键添加全部
@@ -189,10 +189,10 @@ export function PresetSourcesManagement() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="h-8 w-[120px] text-xs">
+            <SelectTrigger className="h-7 w-[120px] text-xs">
               <SelectValue placeholder="分类" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部分类</SelectItem>
               {categoryOrder.map(c => (
                 <SelectItem key={c} value={c}>{CATEGORY_ICONS[c]} {c}</SelectItem>
@@ -206,7 +206,7 @@ export function PresetSourcesManagement() {
                 size="sm"
                 onClick={handleAddSelected}
                 disabled={adding}
-                className="gap-1.5 h-8 px-3 text-xs"
+                className="h-7 gap-1.5 px-2.5 text-xs"
               >
                 {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                 添加选中 ({selectedIds.size})
@@ -215,7 +215,7 @@ export function PresetSourcesManagement() {
                 size="sm"
                 variant="ghost"
                 onClick={toggleSelectAll}
-                className="h-8 px-2 text-xs"
+                className="h-7 px-2 text-xs"
               >
                 全选/取消
               </Button>
@@ -226,7 +226,7 @@ export function PresetSourcesManagement() {
               size="sm"
               variant="ghost"
               onClick={toggleSelectAll}
-              className="h-8 px-2 text-xs"
+              className="h-7 px-2 text-xs"
             >
               全选可用
             </Button>
@@ -239,10 +239,10 @@ export function PresetSourcesManagement() {
         {sortedCategories.length === 0 ? (
           <EmptyState title="暂无预设源" />
         ) : (
-          <div className="p-2 space-y-2">
+          <div className="space-y-2 p-2">
             {sortedCategories.map(category => (
               <div key={category}>
-                <div className="flex items-center gap-2 mb-2">
+                <div className="mb-1 flex items-center gap-2">
                   <span className="text-base">{CATEGORY_ICONS[category] || '📌'}</span>
                   <span className="text-sm font-semibold">{category}</span>
                   <Badge variant="secondary" className="text-xs px-2 py-0">
@@ -253,7 +253,7 @@ export function PresetSourcesManagement() {
                   {grouped[category].map(preset => (
                     <div
                       key={preset.id}
-                      className={`border rounded-md p-2 text-sm transition-colors ${
+                      className={`border px-2 py-1.5 text-xs transition-colors ${
                         preset.isAdded
                           ? 'bg-emerald-50/50 border-emerald-200'
                           : selectedIds.has(preset.id)
@@ -289,10 +289,10 @@ export function PresetSourcesManagement() {
                               </Badge>
                             )}
                           </div>
-                          <div className="text-xs text-muted-foreground truncate mt-1">
+                          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
                             {preset.description}
                           </div>
-                          <div className="text-xs text-muted-foreground/70 truncate">
+                          <div className="truncate text-[10px] text-muted-foreground/70">
                             {preset.url}
                           </div>
                         </div>
@@ -302,7 +302,7 @@ export function PresetSourcesManagement() {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-8 text-xs px-2.5 shrink-0"
+                            className="h-7 shrink-0 px-2.5 text-xs"
                             onClick={() => handleAddSingle(preset)}
                             disabled={adding}
                           >

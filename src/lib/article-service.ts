@@ -32,6 +32,7 @@ import {
   type ManualOverrideField,
 } from '@/lib/article-calibration';
 import { recalculateArticleEvent, reconcileEventAfterArticleDeletion } from '@/lib/event-service';
+import { splitBrands } from '@/lib/shared/article-codecs';
 
 // ── 类型化筛选器 ────────────────────────────────────────────────
 
@@ -257,6 +258,7 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
       contentScore: true,
       adProbability: true,
       isAd: true,
+      keywordMatched: true,
       manualOverrides: true,
       aiSnapshot: true,
     },
@@ -295,7 +297,7 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
   const nextAdProbability = typeof data.adProbability === 'number' ? data.adProbability : current.adProbability;
   const nextIsAd = typeof data.isAd === 'boolean' ? data.isAd : current.isAd;
   if (nextEventScore != null && nextContentScore != null && nextAdProbability != null) {
-    const { weightEvent, weightContent } = await getAISettings();
+    const { weightEvent, weightContent, keywordMatchBonus } = await getAISettings();
     Object.assign(data, buildEffectiveScoreUpdate({
       eventScore: nextEventScore,
       contentScore: nextContentScore,
@@ -303,6 +305,8 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
       isAd: nextIsAd,
       weightEvent,
       weightContent,
+      keywordMatched: current.keywordMatched,
+      keywordBonus: keywordMatchBonus,
     }));
   }
   Object.assign(data, buildManualOverrideUpdate(current.manualOverrides, touched, validRestored));

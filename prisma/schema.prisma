@@ -67,6 +67,7 @@ model Article {
   tags          String    @default("[]") // JSON array
   keyPoints     String    @default("[]") // JSON array
   score         Int       @default(0) // 0-100
+  keywordMatched Boolean  @default(false) // 处理阶段是否命中已配置关键词；用于确定性特殊加分
   eventScore    Int?      // AI 原始事件影响力分；策略调整时用于零成本重算
   contentScore  Int?      // AI 原始内容质量分；策略调整时用于零成本重算
   rawScore      Int?      // 应用广告规则前的确定性加权分

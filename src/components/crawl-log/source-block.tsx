@@ -6,6 +6,7 @@ import { DiscardedRow } from './discarded-row'
 import { DISCARD_REASON_LABELS } from './helpers'
 import { hasArticleAnomaly } from './filter'
 import type { SourceProgress, DiscardedRow as DiscardedRowType } from './types'
+import type { ArticleWorkspacePanel } from '@/components/article-workspace'
 
 function humanizeSourceError(value?: string): string {
   if (!value) return ''
@@ -27,6 +28,7 @@ export const SourceBlock = memo(function SourceBlock({
   onStepActionLoading,
   onTechnicalStatus,
   onOpenArticle,
+  onOpenArticlePanel,
   onOpenDiscarded,
   onDiscardedRetried,
   onRetrySource,
@@ -40,10 +42,11 @@ export const SourceBlock = memo(function SourceBlock({
   onStepActionLoading?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => boolean
   onTechnicalStatus?: (articleId: string, action: 'ignore' | 'restore') => void
   onOpenArticle?: (articleId: string) => void
+  onOpenArticlePanel?: (articleId: string, panel: ArticleWorkspacePanel) => void
   onOpenDiscarded?: (id: string) => void
   onDiscardedRetried?: () => void
   onRetrySource?: (sourceId: string) => void
-  /** P1-1: 批量 Job 运行时，单篇动作禁用 */
+  /** 批量 Job 运行时禁用单篇动作。 */
   isJobRunning?: boolean
 }) {
   const statusIcon = source.status === 'running' ? <Loader2 className="h-4 w-4 animate-spin text-blue-600" /> :
@@ -145,6 +148,7 @@ export const SourceBlock = memo(function SourceBlock({
                 onStepActionLoading={onStepActionLoading}
                 onTechnicalStatus={onTechnicalStatus}
                 onOpenArticle={onOpenArticle}
+                onOpenArticlePanel={onOpenArticlePanel}
                 isJobRunning={isJobRunning}
               />
             ))}

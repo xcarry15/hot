@@ -88,6 +88,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
     mocks.getAISettings.mockResolvedValue({
       weightEvent: 60,
       weightContent: 40,
+      keywordMatchBonus: 5,
       step2ContentMaxChars: 5000,
     });
   });

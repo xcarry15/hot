@@ -144,6 +144,10 @@ describe('processAllPending 全文关键字匹配', () => {
     expect(result.errors).toBe(0);
     expect(mocks.articleDelete).not.toHaveBeenCalled();
     expect(mocks.discardedItemUpsert).not.toHaveBeenCalled();
+    expect(mocks.articleUpdate).toHaveBeenCalledWith({
+      where: { id: 'art-001' },
+      data: { keywordMatched: true },
+    });
   });
 
   it('正文不命中关键字 → 文章删除 + DiscardedItem 写入 filter:keyword', async () => {
@@ -164,6 +168,23 @@ describe('processAllPending 全文关键字匹配', () => {
     const upsertArgs = mocks.discardedItemUpsert.mock.calls[0][0];
     expect(upsertArgs.create.reason).toBe('filter:keyword');
     expect(upsertArgs.create.title).toBe('奈雪发布2026战略');
+  });
+
+  it('白名单不命中，但标题是明确行业事件 → 保留进入 AI 筛选', async () => {
+    const article = mockPendingArticle({ title: '便利店，正在被“便利”反杀' });
+    mocks.articleFindMany.mockResolvedValueOnce([article]);
+    mocks.fetchArticleDetail.mockResolvedValueOnce('行业报告显示，便利店门店总量增长，但单店收入和客流同比下降。'.repeat(3));
+    mocks.keywordFindMany.mockResolvedValueOnce([{ word: '奈雪' }]);
+
+    const result = await processAllPending();
+
+    expect(result.processed).toBe(1);
+    expect(mocks.articleDelete).not.toHaveBeenCalled();
+    expect(mocks.discardedItemUpsert).not.toHaveBeenCalled();
+    expect(mocks.articleUpdate).toHaveBeenCalledWith({
+      where: { id: 'art-001' },
+      data: { keywordMatched: false },
+    });
   });
 });
 

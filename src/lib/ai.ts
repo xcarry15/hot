@@ -30,8 +30,8 @@ import {
 } from './article-calibration';
 import { recalculateArticleEvent } from './event-service';
 
-// v8：精简、口语化、多样化的行业洞察。
-const PROMPT_VERSION = 'v8';
+// v11：提高重要人事变动和有实质规模的开关店新闻评分。
+const PROMPT_VERSION = 'v11';
 
 const analysisSchema = z.object({
   event_score: z.number().int().min(0).max(100),
@@ -102,8 +102,11 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
     : `${textContent.slice(0, Math.floor(maxChars * 0.7))}\n\n[正文中段已截断]\n\n${textContent.slice(-Math.ceil(maxChars * 0.3))}`;
 
   try {
-    // 块化拼接:公共框架 + 内容评分块 + 要点块 + 点评块 → 完整 Step2 prompt
-    const prompt = buildStep2Prompt(settings, truncated);
+    // 块化拼接：公共框架 + 9 个字段规则 → 完整单次分析 prompt。
+    const prompt = buildStep2Prompt(
+      settings,
+      `【标题】${article.title}\n\n【正文】\n${truncated}`,
+    );
 
     const messages: ChatMessage[] = [
       { role: 'system', content: buildSystemContent(settings.systemPrompt) },
@@ -180,9 +183,9 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
 
   // 开头统一跑，processWithAI 不再单独查。
 
-  // 读取设置，获取动态权重（默认事件重要性 70 / 内容质量 30）。
+  // 读取设置，获取动态权重（默认事件影响 75 / 内容可用性 25）。
   const settings = await getAISettings();
-  const { weightEvent, weightContent } = settings;
+  const { weightEvent, weightContent, keywordMatchBonus } = settings;
 
   // Deep analysis: 一次性生成全部字段（复用已查询的 article 对象，无额外 DB 查询）
   let step2;
@@ -197,10 +200,12 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
   assertNotAborted(signal);
 
   if (step2) {
-    // v9：拓展情报价值为主，证据完整度校准；高广告概率按证据质量分级封顶。
+    // 原始事件分与内容分由 AI 独立产出，本地策略再统一应用权重和广告封顶。
     const policy = applyScorePolicy(
       step2.eventScore, step2.contentScore, step2.adProbability,
       step2.isAd, weightEvent, weightContent,
+      article.keywordMatched === true,
+      keywordMatchBonus,
     );
     const aiSnapshot: ArticleAiSnapshot = {
       relevance: step2.relevance,
@@ -233,6 +238,8 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       isAd: effective.isAd,
       weightEvent,
       weightContent,
+      keywordMatched: article.keywordMatched === true,
+      keywordBonus: keywordMatchBonus,
     });
 
     assertNotAborted(signal);
@@ -329,6 +336,7 @@ export async function reprocessWithAI(
       tags: true,
       keyPoints: true,
       score: true,
+      keywordMatched: true,
       eventScore: true,
       contentScore: true,
       rawScore: true,

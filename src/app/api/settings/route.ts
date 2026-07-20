@@ -35,8 +35,8 @@ export async function PUT(request: Request) {
 }
 
 const previewSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('score-preview'), weightEvent: z.number().int().min(0).max(100), weightContent: z.number().int().min(0).max(100) }).refine(value => value.weightEvent + value.weightContent === 100, '评分权重合计必须为 100'),
-  z.object({ action: z.literal('public-preview'), minScore: z.number().int().min(0).max(100), hideAds: z.boolean() }),
+  z.object({ action: z.literal('score-preview'), weightEvent: z.number().int().min(0).max(100), weightContent: z.number().int().min(0).max(100), keywordBonus: z.number().int().min(0).max(20) }).refine(value => value.weightEvent + value.weightContent === 100, '评分权重合计必须为 100'),
+  z.object({ action: z.literal('public-preview'), minScore: z.number().int().min(0).max(100), minRelevance: z.number().int().min(0).max(100), hideAds: z.boolean() }),
   z.object({ action: z.literal('push-preview'), minScore: z.number().int().min(0).max(100), minRelevance: z.number().int().min(0).max(100), pushMode: z.string() }),
 ]);
 
@@ -47,8 +47,8 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
     }
-    if (parsed.data.action === 'score-preview') return NextResponse.json(await previewScorePolicy(parsed.data.weightEvent, parsed.data.weightContent));
-    if (parsed.data.action === 'public-preview') return NextResponse.json(await previewPublicPublication(parsed.data.minScore, parsed.data.hideAds));
+    if (parsed.data.action === 'score-preview') return NextResponse.json(await previewScorePolicy(parsed.data.weightEvent, parsed.data.weightContent, parsed.data.keywordBonus));
+    if (parsed.data.action === 'public-preview') return NextResponse.json(await previewPublicPublication(parsed.data.minScore, parsed.data.minRelevance, parsed.data.hideAds));
     return NextResponse.json(await previewPushDelivery(parsed.data.minScore, parsed.data.minRelevance, parsed.data.pushMode));
   } catch (error: unknown) {
     return apiError(error, '评分策略预演失败');

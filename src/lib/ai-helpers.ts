@@ -14,14 +14,17 @@ import {
   JSON_SUFFIX,
 } from './prompts';
 
+const SYSTEM_EVIDENCE_BOUNDARY =
+  '\n\n硬性证据边界：category 只按核心事件和主体归类；不得把推测、动机或道德判断写成事实；救灾、公益、事故和员工/消费者伤害等议题保持克制，没有正文证据时不使用欺诈、割韭菜、刷存在感、跑路等指控性表达。';
+
 /**
  * 把自定义 system prompt 拼上 JSON 输出指令。
  * customSystem 为空字符串 / undefined → 用 DEFAULT_SYSTEM_PROMPT。
- * 始终在末尾追加 JSON_SUFFIX。
+ * 始终在末尾追加不可覆盖的证据边界和 JSON_SUFFIX。
  */
 export function buildSystemContent(customSystem?: string): string {
   const base = customSystem && customSystem.trim() ? customSystem : DEFAULT_SYSTEM_PROMPT;
-  return base + JSON_SUFFIX;
+  return base + SYSTEM_EVIDENCE_BOUNDARY + JSON_SUFFIX;
 }
 
 /**

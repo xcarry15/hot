@@ -29,6 +29,7 @@ describe('public-publication-service', () => {
     mocks.event.update.mockResolvedValue({});
     mocks.setting.findUnique
       .mockResolvedValueOnce({ value: '70' })
+      .mockResolvedValueOnce({ value: '50' })
       .mockResolvedValueOnce({ value: 'true' });
   });
 
@@ -39,6 +40,7 @@ describe('public-publication-service', () => {
       clusterStatus: 'clustered',
       aiStatus: 'done',
       score: 82,
+      relevance: 90,
       isAd: false,
       publicOverride: 'auto',
       publicStatus: 'unpublished',
@@ -68,6 +70,7 @@ describe('public-publication-service', () => {
       clusterStatus: 'clustered',
       aiStatus: 'done',
       score: 62,
+      relevance: 90,
       isAd: false,
       publicOverride: 'auto',
       publicStatus: 'published',
@@ -99,6 +102,7 @@ describe('public-publication-service', () => {
       clusterStatus: 'clustered',
       aiStatus: 'done',
       score: 82,
+      relevance: 90,
       isAd: false,
       publicOverride: 'auto',
       publicStatus: 'published',
@@ -124,6 +128,7 @@ describe('public-publication-service', () => {
     mocks.setting.findUnique
       .mockReset()
       .mockResolvedValueOnce({ value: '95' })
+      .mockResolvedValueOnce({ value: '95' })
       .mockResolvedValueOnce({ value: 'true' });
     mocks.article.findUnique.mockResolvedValue({
       id: 'a1',
@@ -131,6 +136,7 @@ describe('public-publication-service', () => {
       clusterStatus: 'clustered',
       aiStatus: 'done',
       score: 20,
+      relevance: 20,
       isAd: true,
       publicOverride: 'public',
       publicStatus: 'revoked',
@@ -160,6 +166,7 @@ describe('public-publication-service', () => {
       clusterStatus: 'clustered',
       aiStatus: 'done',
       score: 82,
+      relevance: 90,
       isAd: false,
       publicOverride: 'auto',
       publicStatus: 'published',
@@ -188,7 +195,7 @@ describe('public-publication-service', () => {
         firstSeenAt: new Date('2026-07-15T00:00:00.000Z'),
       });
     mocks.article.findUnique.mockResolvedValue({
-      id: 'a1', eventId: 'e1', clusterStatus: 'clustered', aiStatus: 'done', score: 82,
+      id: 'a1', eventId: 'e1', clusterStatus: 'clustered', aiStatus: 'done', score: 82, relevance: 90,
       isAd: false, publicOverride: 'auto', publicStatus: 'published',
       publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'), publicRevokedAt: null,
       publicContentUpdatedAt: new Date('2026-07-15T00:00:00.000Z'), publishedAt: new Date('2026-07-15T00:00:00.000Z'),
@@ -200,6 +207,25 @@ describe('public-publication-service', () => {
     expect(mocks.article.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { eventId: 'e1', id: { not: 'a1' } },
       data: expect.objectContaining({ publicStatus: 'unpublished', publicPublicationReason: 'not-event-representative' }),
+    }));
+  });
+
+  it('高分但行业相关度低时不会自动公开', async () => {
+    mocks.article.findUnique.mockResolvedValue({
+      id: 'a1', eventId: 'e1', clusterStatus: 'clustered', aiStatus: 'done', score: 90, relevance: 40,
+      isAd: false, publicOverride: 'auto', publicStatus: 'published',
+      publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'), publicRevokedAt: null,
+      publicContentUpdatedAt: new Date('2026-07-15T00:00:00.000Z'), publishedAt: new Date('2026-07-15T00:00:00.000Z'),
+      source: { publicEnabled: true, deletedAt: null },
+    });
+
+    await expect(refreshPublicPublication('a1')).resolves.toBe(true);
+
+    expect(mocks.article.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        publicStatus: 'revoked',
+        publicPublicationReason: 'relevance-below-threshold',
+      }),
     }));
   });
 });

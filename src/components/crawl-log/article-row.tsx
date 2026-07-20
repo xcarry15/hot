@@ -1,9 +1,11 @@
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import { cancelArticleDetailPrefetch, prefetchArticleDetail } from '@/features/articles-api.client'
 import { formatPubDate } from './helpers'
 import { StepIndicator, SkipBadge } from './step-indicator'
 import type { ArticleProgress } from './types'
+import type { ArticleWorkspacePanel } from '@/components/article-workspace'
+import { preloadArticleWorkspace } from '@/components/article-workspace-drawer'
 
 // ========== Article Row ==========
 
@@ -13,6 +15,7 @@ export const ArticleRow = memo(function ArticleRow({
   onStepActionLoading,
   onTechnicalStatus,
   onOpenArticle,
+  onOpenArticlePanel,
   isJobRunning,
 }: {
   article: ArticleProgress
@@ -20,14 +23,15 @@ export const ArticleRow = memo(function ArticleRow({
   onStepActionLoading?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => boolean
   onTechnicalStatus?: (articleId: string, action: 'ignore' | 'restore') => void
   onOpenArticle?: (articleId: string) => void
-  /** P1-1: 批量 Job 运行时，单篇动作禁用，避免并发冲突 */
+  onOpenArticlePanel?: (articleId: string, panel: ArticleWorkspacePanel) => void
+  /** 批量 Job 运行时禁用单篇动作，避免并发冲突。 */
   isJobRunning?: boolean
 }) {
   const isSkipped = article.crawl === 'skipped'
   const pubDate = formatPubDate(article.publishedAt)
 
 
-  const nextAction = article.process === 'failed'
+  const nextAction = useMemo(() => article.process === 'failed'
     ? { step: 'process' as const, label: '重试处理' }
     : article.cluster === 'failed'
       ? { step: 'cluster' as const, label: '重试聚类' }
@@ -35,7 +39,7 @@ export const ArticleRow = memo(function ArticleRow({
           ? { step: 'ai' as const, label: '重试 AI' }
           : article.push === 'failed'
             ? { step: 'push' as const, label: article.pushRetryAt && new Date(article.pushRetryAt) > new Date() ? '等待重试' : '重试投递' }
-            : null
+            : null, [article.ai, article.cluster, article.process, article.push, article.pushRetryAt, article.skipReason])
 
   const handleNextAction = useCallback(() => {
     if (!nextAction) return
@@ -47,7 +51,7 @@ export const ArticleRow = memo(function ArticleRow({
   }, [onOpenArticle, article.id])
 
   const handlePrefetch = useCallback(() => {
-    void import('@/components/intelligence-inbox')
+    preloadArticleWorkspace()
     prefetchArticleDetail(article.id)
   }, [article.id])
 
@@ -110,7 +114,7 @@ export const ArticleRow = memo(function ArticleRow({
         {article.clusterStatus === 'needs_review' && (
           <>
             <span className="shrink-0 bg-orange-500 px-1 text-[11px] font-medium leading-5 text-white">待复核</span>
-            <button type="button" onClick={() => navigateWithinAdmin(`/admin?tab=articles&articleId=${encodeURIComponent(article.id)}&panel=cluster`)} className="inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted">去聚类复核</button>
+            <button type="button" onClick={() => onOpenArticlePanel?.(article.id, 'cluster')} className="inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted">去聚类复核</button>
           </>
         )}
         {article.technicalState === 'auto_retry' && (
@@ -151,7 +155,7 @@ export const ArticleRow = memo(function ArticleRow({
           onClick={actionFor('cluster')}
           forceLabel={nextAction?.step === 'cluster' ? (retryWaiting ? '等待' : '重试') : undefined}
           title={article.clusterStatus === 'needs_review'
-            ? '聚类结果存在歧义，请到内容管理人工复核'
+            ? '聚类结果存在歧义，点击打开文章工作台复核'
             : article.cluster === 'failed'
               ? '点击重试聚类'
             : article.clusterRetryAt
@@ -185,8 +189,3 @@ export const ArticleRow = memo(function ArticleRow({
     </div>
   )
 })
-
-function navigateWithinAdmin(href: string): void {
-  window.history.pushState(null, '', href)
-  window.dispatchEvent(new Event('hot2:urlchange'))
-}

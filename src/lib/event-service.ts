@@ -172,11 +172,20 @@ export async function getEventArticles(eventId: string) {
           url: true,
           score: true,
           relevance: true,
+          eventScore: true,
+          contentScore: true,
+          aiConfidence: true,
+          aiStatus: true,
+          publicStatus: true,
+          publicOverride: true,
+          isAd: true,
+          brand: true,
+          category: true,
           reviewStatus: true,
           clusterStatus: true,
           publishedAt: true,
           createdAt: true,
-          source: { select: { name: true, type: true } },
+          source: { select: { name: true, type: true, publicEnabled: true, deletedAt: true } },
         },
       },
       assignedAudits: {
@@ -241,6 +250,12 @@ export async function getEventArticles(eventId: string) {
     })),
     articles: event.articles.map((article) => ({
       ...article,
+      source: {
+        name: article.source.name,
+        type: article.source.type,
+        publicEnabled: article.source.publicEnabled,
+        deleted: article.source.deletedAt !== null,
+      },
       publishedAt: article.publishedAt?.toISOString() ?? null,
       createdAt: article.createdAt.toISOString(),
     })),
@@ -349,13 +364,25 @@ export async function searchActiveEvents(query: string, excludeEventId?: string)
       lastSeenAt: true,
       publicStatus: true,
       pushedAt: true,
-      representativeArticle: { select: { title: true, source: { select: { name: true } } } },
+      representativeArticle: {
+        select: {
+          title: true,
+          score: true,
+          relevance: true,
+          publishedAt: true,
+          source: { select: { name: true } },
+        },
+      },
     },
   });
   return events.map((event) => ({
     ...event,
     lastSeenAt: event.lastSeenAt.toISOString(),
     pushedAt: event.pushedAt?.toISOString() ?? null,
+    representativeArticle: event.representativeArticle ? {
+      ...event.representativeArticle,
+      publishedAt: event.representativeArticle.publishedAt?.toISOString() ?? null,
+    } : null,
   }));
 }
 

@@ -5,7 +5,7 @@ import type {
   ArticleProgress, FilterState, SourceProgress, StepFilterKey,
 } from './types'
 import {
-  ALL_STEP_FILTER_KEYS, DEPRECATED_STEP_FILTER_KEYS, EMPTY_FILTER_STATE, isArticleFailed,
+  ALL_STEP_FILTER_KEYS, EMPTY_FILTER_STATE, isArticleFailed,
 } from './types'
 import { URL_PARAM_CHIPS, URL_PARAM_SRC, URL_PARAM_DISC, URL_PARAM_TODAY } from './constants'
 
@@ -45,7 +45,7 @@ export function hasArticleAnomaly(article: ArticleProgress): boolean {
  * 单个 chip 对一篇文章的命中判断。
  *
  * 这是 filter 的最小判定单元，每个 key 都应是"互不蕴含"的可观察谓词。
- * 例如一篇文章可同时命中聚类失败和总失败，但 'ai-done' 和 'ai-pending' 互斥。
+ * 例如一篇文章可同时命中软文和重复，但一级状态仍保持互斥。
  */
 export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boolean {
   const bucket = getArticleFilterBucket(article)
@@ -60,55 +60,9 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
       return article.anomalyLabels?.includes('duplicate') ?? false
     case 'ignored':
       return bucket === 'ignored'
-    case 'ai-done':
-      return article.ai === 'done'
-    case 'pushed':
-      return article.push === 'done'
-    case 'process-pending':
-      return article.process === 'pending' || article.process === 'blocked'
-    case 'cluster-pending':
-      return article.process === 'done' && article.cluster === 'pending'
-    case 'cluster-failed':
-      return article.cluster === 'failed'
-    case 'cluster-review':
-      return article.clusterStatus === 'needs_review'
-    case 'ai-pending':
-      return article.process === 'done' && article.ai === 'pending'
-    case 'push-pending':
-      return article.push === 'pending'
-    case 'anomaly':
-      return hasArticleAnomaly(article)
-    case 'has-fail':
-      return isArticleFailed(article)
-    case 'manual-fail':
-      return article.technicalState === 'manual'
-    case 'auto-retry':
-      return article.technicalState === 'auto_retry'
     default:
       return bucket === key
   }
-}
-
-/**
- * 兼容内部调用的集合形状；状态筛选只读取第一个有效值。
- *
- * 实现要点：先看 chips 是否为空（热路径短路），避免无谓遍历。
- */
-export function articleMatchesChips(
-  article: ArticleProgress,
-  chips: Iterable<StepFilterKey>,
-): boolean {
-  for (const k of chips) {
-    return matchStepChip(article, k)
-  }
-  return true
-}
-
-/** 一组文章在该 chip 下命中数 */
-export function countMatches(articles: readonly ArticleProgress[], key: StepFilterKey): number {
-  let n = 0
-  for (const a of articles) if (matchStepChip(a, key)) n++
-  return n
 }
 
 /**
@@ -216,7 +170,7 @@ export function decodeFilterFromSearch(search: string): FilterState {
   const valid = new Set<string>(ALL_STEP_FILTER_KEYS as readonly string[])
   const chips = new Set<StepFilterKey>()
   const raw = params.get(URL_PARAM_CHIPS)
-  if (raw && !DEPRECATED_STEP_FILTER_KEYS.has(raw)) {
+  if (raw) {
     for (const k of raw.split(',')) {
       const trimmed = k.trim()
       if (valid.has(trimmed)) {

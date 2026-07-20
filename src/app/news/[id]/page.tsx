@@ -77,17 +77,17 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
 
   return (
     <div className="public-site flex min-h-[100dvh] flex-col bg-background text-foreground">
-      <PublicHeader active="articles" />
+      <PublicHeader active="articles" readingProgress />
       <PublicViewTracker articleId={article.id} />
 
       <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-6 sm:py-8">
         <div className="mx-auto max-w-[840px]">
-          <Link href="/" className="inline-flex items-center text-sm text-[var(--public-muted)] underline-offset-4 transition-colors hover:text-[var(--public-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">
+          <Link href="/" className="public-back-link inline-flex items-center text-sm text-[var(--public-muted)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">
             ← 返回文章列表
           </Link>
 
           <article className="mt-3 bg-[var(--public-canvas)] px-0 pt-3 pb-5 sm:mt-3 sm:px-8 sm:pt-4 sm:pb-7">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--public-muted)]">
+            <div className="public-detail-intro flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--public-muted)]">
               <time dateTime={effectiveDate}>{formatPublicDateTime(effectiveDate)}</time>
               <span className="text-[var(--public-hairline-strong)]">|</span>
               <span>{article.source.name}</span>
@@ -97,9 +97,9 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
               {originalUrl && <div className="ml-auto"><PublicOriginalLink href={originalUrl} articleId={article.id} shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} /></div>}
             </div>
 
-            <h1 className="public-display mt-2 text-3xl leading-[1.25] text-[var(--public-ink)] sm:mt-2 sm:text-4xl">{article.title}</h1>
+            <h1 className="public-detail-block public-detail-delay-1 public-display mt-2 text-pretty text-3xl leading-[1.25] text-[var(--public-ink)] sm:mt-2 sm:text-4xl">{article.title}</h1>
 
-            <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="public-detail-block public-detail-delay-2 mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
               <span aria-label={`评分 ${article.score} 分`} className="inline-flex shrink-0 items-center"><ScoreBadge score={article.score} variant="compact-square-wide" /></span>
               {brands.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -114,7 +114,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
             </div>
 
             {(hasSummary || hasKeyPoints) && (
-              <div className="mt-6 grid gap-4 border-t border-[var(--public-hairline)] pt-5 md:grid-cols-2 md:gap-5">
+              <div className="public-detail-block public-detail-delay-3 mt-6 grid gap-4 border-t border-[var(--public-hairline)] pt-5 md:grid-cols-2 md:gap-5">
                 {hasKeyPoints && (
                   <section className={!hasSummary ? 'md:col-span-2' : ''}>
                     <div className="h-full bg-[var(--public-surface-soft)] px-4 py-4 sm:px-5 sm:py-5">
@@ -130,14 +130,14 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
                   <section className={!hasKeyPoints ? 'md:col-span-2' : ''}>
                     <div className="h-full bg-[var(--public-surface-soft)] px-4 py-4 sm:px-5 sm:py-5">
                       <h2 className="text-sm font-semibold text-[var(--public-primary)]">AI洞察</h2>
-                      <p className="mt-3 border-l-2 border-[var(--public-primary)] pl-3 text-[15px] leading-7 text-[var(--public-body)] sm:leading-8">{article.summary}</p>
+                      <p className="mt-3 border-l-2 border-[var(--public-primary)] pl-3 text-pretty text-[15px] leading-7 text-[var(--public-body)] sm:leading-8">{article.summary}</p>
                     </div>
                   </section>
                 )}
               </div>
             )}
 
-            <div className="mt-7 flex justify-center pt-2">
+            <div className="public-detail-block public-detail-delay-3 mt-7 flex justify-center pt-2">
               <PublicShareButton shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} title={article.title} summary={article.summary || article.excerpt} publishedAt={formatPublicDateTime(effectiveDate)} />
             </div>
 
@@ -147,7 +147,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
                 <ul className="mt-3 space-y-2 text-sm">
                   {article.sources.map((item) => (
                     <li key={item.id} className="flex items-start justify-between gap-4 border-b border-[var(--public-hairline)] pb-2">
-                      <div className="min-w-0"><a href={item.url} target="_blank" rel="noreferrer" className="line-clamp-2 text-[var(--public-body)] hover:text-[var(--public-primary)] hover:underline">{item.title}</a><p className="mt-1 text-xs text-[var(--public-muted)]">{item.source.name}</p></div>
+                      <div className="min-w-0"><a href={item.url} target="_blank" rel="noreferrer" className="line-clamp-2 text-[var(--public-body)] transition-colors hover:text-[var(--public-primary)] hover:underline">{item.title}</a><p className="mt-1 text-xs text-[var(--public-muted)]">{item.source.name}</p></div>
                     </li>
                   ))}
                 </ul>
@@ -157,15 +157,15 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
             <nav className="mt-5 border-t border-[var(--public-hairline)] pt-4" aria-label="文章导航">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
                 {article.navigation.previous && (
-                  <Link href={`/news/${article.navigation.previous.id}`} className="group/navigation flex w-full min-w-0 items-center gap-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] sm:flex-1 sm:basis-0">
+                  <Link href={`/news/${article.navigation.previous.id}`} className="public-navigation-link group/navigation flex w-full min-w-0 items-center gap-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] sm:flex-1 sm:basis-0">
                     <span className="shrink-0 text-xs text-[var(--public-muted-soft)]">上一篇：</span>
-                    <span className="truncate text-[var(--public-body)] transition-colors group-hover/navigation:text-[var(--public-primary)]">{article.navigation.previous.title}</span>
+                    <span className="public-navigation-title truncate text-[var(--public-body)]">{article.navigation.previous.title}</span>
                   </Link>
                 )}
                 {article.navigation.next && (
-                  <Link href={`/news/${article.navigation.next.id}`} className="group/navigation flex w-full min-w-0 items-center gap-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] sm:flex-1 sm:basis-0 sm:justify-end">
+                  <Link href={`/news/${article.navigation.next.id}`} className="public-navigation-link group/navigation flex w-full min-w-0 items-center gap-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] sm:flex-1 sm:basis-0 sm:justify-end">
                     <span className="shrink-0 text-xs text-[var(--public-muted-soft)]">下一篇：</span>
-                    <span className="truncate text-[var(--public-body)] transition-colors group-hover/navigation:text-[var(--public-primary)]">{article.navigation.next.title}</span>
+                    <span className="public-navigation-title truncate text-[var(--public-body)]">{article.navigation.next.title}</span>
                   </Link>
                 )}
               </div>
@@ -183,12 +183,12 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
                   const itemDate = item.publishedAt || item.createdAt
                   return (
                     <li key={item.id}>
-                      <Link href={`/news/${item.id}`} className="group/related grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)] sm:grid-cols-[5rem_minmax(0,1fr)] sm:gap-3">
+                      <Link href={`/news/${item.id}`} className="public-related-link group/related grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)] sm:grid-cols-[5rem_minmax(0,1fr)] sm:gap-3">
                         <time dateTime={itemDate} className="pt-2 text-right font-mono text-xs tabular-nums text-[var(--public-muted)]">{formatPublicTime(itemDate)}</time>
                         <div className="border-l border-[var(--public-hairline)] pb-1 pl-3 sm:pl-4">
-                          <div className="block rounded-none border border-transparent bg-transparent px-2 py-2 transition-[background-color,border-color,transform] duration-200 group-hover/related:-translate-y-px group-hover/related:border-[var(--public-hairline-strong)] group-hover/related:bg-[var(--public-surface-soft)] motion-reduce:transition-none motion-reduce:group-hover/related:transform-none">
+                          <div className="public-related-surface block rounded-none bg-transparent px-2 py-2">
                           <div className="flex items-start justify-between gap-3">
-                            <span className="line-clamp-2 text-sm font-medium leading-6 text-[var(--public-ink)]">{item.title}</span>
+                            <span className="public-related-title line-clamp-2 text-sm font-medium leading-6 text-[var(--public-ink)]">{item.title}</span>
                             <ScoreBadge score={item.score} variant="compact-square" />
                           </div>
                           </div>

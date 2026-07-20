@@ -7,10 +7,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
 import {
-  Loader2, Activity, Play, RefreshCcw, XCircle, Check,
+  Loader2, Activity, Play, RefreshCcw, XCircle, Check, Search,
 } from 'lucide-react'
 
-// ── New sub-modules ──
 import type {
   FilterState, StepFilterKey,
 } from './crawl-log/types'
@@ -25,6 +24,7 @@ import {
   URL_PARAM_DETAIL,
   URL_PARAM_DETAIL_KIND,
 } from './crawl-log/constants'
+import type { ArticleWorkspacePanel } from '@/components/article-workspace'
 import {
   applyFilterState, matchStepChip, writeFilterToUrl,
   readFilterFromCurrentUrl,
@@ -34,6 +34,8 @@ import { StageButton } from './crawl-log/stage-button'
 import { useCrawlLogSnapshot } from './crawl-log/use-crawl-log-snapshot'
 import { EmptyState } from '@/components/ui/empty-state'
 import DiscardedDetailSheet from './article-detail-sheet'
+import ArticleWorkspaceDrawer from './article-workspace-drawer'
+import ArticleLibrarySheet from './article-library-sheet'
 import { fetchSettings, saveSettings } from '@/features/settings-api.client'
 import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
 import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
@@ -52,23 +54,50 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const [autoCrawl, setAutoCrawl] = useState<boolean | null>(null)
   const [autoCrawlSaving, setAutoCrawlSaving] = useState(false)
   const autoCrawlSavingRef = useRef(false)
-  // P2-3: 使用惰性初始化读 URL，避免 mount effect 与后续 effect 竞态清空深链。
+  // 惰性读取 URL，避免挂载时覆盖深链状态。
   const [filterState, setFilterState] = useState<FilterState>(() => readFilterFromCurrentUrl())
   const scrollRef = useRef<HTMLDivElement>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [stopLoading, setStopLoading] = useState(false)
   const [discardedDetailId, setDiscardedDetailId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [articleDetailId, setArticleDetailId] = useState<string | null>(null)
+  const [articleDetailPanel, setArticleDetailPanel] = useState<ArticleWorkspacePanel | null>(null)
+  const [articleDetailOpen, setArticleDetailOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [libraryView, setLibraryView] = useState<'all' | 'attention' | 'unreviewed' | 'cluster_review' | 'low_confidence'>('all')
+  const [humanQueue, setHumanQueue] = useState({ total: 0, clusterReview: 0, unreviewed: 0, lowConfidence: 0 })
 
-  // P2-1: 从 URL 恢复详情状态
+  const refreshHumanQueue = useCallback(() => {
+    fetch('/api/admin/work-queue-summary')
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => data?.human && setHumanQueue(data.human))
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    if (!active) return
+    refreshHumanQueue()
+    const handleFocus = () => refreshHumanQueue()
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [active, refreshHumanQueue])
+
+  // 从 URL 恢复详情状态。
   useEffect(() => {
     if (typeof window === 'undefined') return
     const syncDetailFromUrl = () => {
       const params = new URLSearchParams(window.location.search)
       const detailId = params.get(URL_PARAM_DETAIL)
       const isDiscarded = params.get(URL_PARAM_DETAIL_KIND) === 'discarded'
-      setDiscardedDetailId(isDiscarded ? detailId : null)
-      setDetailOpen(Boolean(detailId && isDiscarded))
+      const nextArticleId = params.get('articleId')
+      const panel = params.get('panel')
+      const openDiscarded = !nextArticleId && Boolean(detailId && isDiscarded)
+      setDiscardedDetailId(openDiscarded ? detailId : null)
+      setDetailOpen(openDiscarded)
+      setArticleDetailId(nextArticleId)
+      setArticleDetailPanel(panel === 'cluster' || panel === 'content' ? panel : null)
+      setArticleDetailOpen(Boolean(nextArticleId))
     }
     syncDetailFromUrl()
     window.addEventListener('popstate', syncDetailFromUrl)
@@ -79,12 +108,53 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     }
   }, [])
 
-  // P2-1: 详情状态变化 → URL
+  const writeArticleDetailUrl = useCallback((articleId: string | null, panel?: ArticleWorkspacePanel | null) => {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (articleId) url.searchParams.set('articleId', articleId)
+    else url.searchParams.delete('articleId')
+    if (panel) url.searchParams.set('panel', panel)
+    else if (panel === null || !articleId) url.searchParams.delete('panel')
+    url.searchParams.delete(URL_PARAM_DETAIL)
+    url.searchParams.delete(URL_PARAM_DETAIL_KIND)
+    url.searchParams.delete('tab')
+    window.history.replaceState(null, '', url.toString())
+  }, [])
+
+  const openArticleWorkspace = useCallback((articleId: string, panel: ArticleWorkspacePanel) => {
+    setDetailOpen(false)
+    setDiscardedDetailId(null)
+    setArticleDetailId(articleId)
+    setArticleDetailPanel(panel)
+    writeArticleDetailUrl(articleId, panel)
+    setArticleDetailOpen(true)
+  }, [writeArticleDetailUrl])
+
+  const handleArticleDetailOpenChange = useCallback((open: boolean) => {
+    setArticleDetailOpen(open)
+    if (!open) {
+      setArticleDetailId(null)
+      setArticleDetailPanel(null)
+      writeArticleDetailUrl(null, null)
+    }
+  }, [writeArticleDetailUrl])
+
+  const handleArticleChange = useCallback((articleId: string | null, panel?: ArticleWorkspacePanel | null) => {
+    setArticleDetailId(articleId)
+    if (panel !== undefined) setArticleDetailPanel(panel)
+    else if (!articleId) setArticleDetailPanel(null)
+    setArticleDetailOpen(Boolean(articleId))
+    writeArticleDetailUrl(articleId, panel)
+  }, [writeArticleDetailUrl])
+
+  // 未入库详情状态同步到 URL。
   const handleDetailOpenChange = useCallback((open: boolean) => {
     setDetailOpen(open)
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
     if (open && discardedDetailId) {
+      url.searchParams.delete('articleId')
+      url.searchParams.delete('panel')
       url.searchParams.set(URL_PARAM_DETAIL, discardedDetailId)
       url.searchParams.set(URL_PARAM_DETAIL_KIND, 'discarded')
     } else {
@@ -93,16 +163,6 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     }
     window.history.replaceState(null, '', url.toString())
   }, [discardedDetailId])
-
-  useEffect(() => {
-    if (!active || typeof window === 'undefined') return
-    const url = new URL(window.location.href)
-    if (detailOpen && discardedDetailId) {
-      url.searchParams.set(URL_PARAM_DETAIL, discardedDetailId)
-      url.searchParams.set(URL_PARAM_DETAIL_KIND, 'discarded')
-    }
-    window.history.replaceState(null, '', url.toString())
-  }, [active, discardedDetailId, detailOpen])
 
   // 局部请求级 loading：仅用于按钮点击瞬间——成功入队 / 失败都不持久化。
   const [stageRequestLoading, setStageRequestLoading] = useState<Record<string, boolean>>({})
@@ -441,21 +501,44 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   }, [isOperationBusy, refreshSnapshot])
 
   const handleOpenArticle = useCallback((articleId: string) => {
-    if (typeof window === 'undefined') return
-    void import('@/components/intelligence-inbox')
-    const url = new URL('/admin', window.location.origin)
-    url.searchParams.set('articleId', articleId)
-    url.searchParams.set('panel', 'content')
-    window.history.pushState(null, '', url.toString())
-    window.dispatchEvent(new Event('hot2:urlchange'))
+    openArticleWorkspace(articleId, 'content')
+  }, [openArticleWorkspace])
+
+  const handleOpenArticlePanel = useCallback((articleId: string, panel: ArticleWorkspacePanel) => {
+    openArticleWorkspace(articleId, panel)
+  }, [openArticleWorkspace])
+
+  const openLibrary = useCallback((view: typeof libraryView = 'all') => {
+    setLibraryView(view)
+    setLibraryOpen(true)
   }, [])
 
+  const openArticleFromLibrary = useCallback((articleId: string) => {
+    setDetailOpen(false)
+    setDiscardedDetailId(null)
+    setArticleDetailId(articleId)
+    setArticleDetailPanel('content')
+    writeArticleDetailUrl(articleId, 'content')
+    setArticleDetailOpen(true)
+    setLibraryOpen(false)
+  }, [writeArticleDetailUrl])
+
+  const handleLibraryChanged = useCallback(() => {
+    void refreshSnapshot()
+    refreshHumanQueue()
+  }, [refreshHumanQueue, refreshSnapshot])
+
   const handleOpenDiscarded = useCallback((id: string) => {
+    setArticleDetailOpen(false)
+    setArticleDetailId(null)
+    setArticleDetailPanel(null)
     setDiscardedDetailId(id)
     setDetailOpen(true)
-    // P2-1: 更新 URL 深链
+    // 更新未入库详情深链。
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href)
+      url.searchParams.delete('articleId')
+      url.searchParams.delete('panel')
       url.searchParams.set(URL_PARAM_DETAIL, id)
       url.searchParams.set(URL_PARAM_DETAIL_KIND, 'discarded')
       window.history.replaceState(null, '', url.toString())
@@ -617,6 +700,17 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
             )}
             {refreshing ? '刷新中...' : '刷新'}
           </Button>
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => openLibrary('all')}
+            className="h-7 gap-1 px-2 text-xs shrink-0"
+            title="搜索全部历史文章"
+          >
+            <Search className="h-3.5 w-3.5" />
+            全部文章
+          </Button>
         </div>
 
           {/* 两级筛选：先判断正常/异常，再查看互斥的具体状态。 */}
@@ -749,6 +843,11 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
             {failedSources.length > 0 && <Button size="sm" variant="outline" className="ml-auto h-7 border-amber-300 px-2 text-xs text-amber-900" disabled={isOperationBusy} onClick={() => void handleRetryFailedSources()}>一键重试异常源</Button>}
           </div>
         )}
+        <div className="flex flex-wrap items-center gap-2 border bg-background px-3 py-2 text-xs">
+          <span className="font-medium">人工待办</span>
+          <span className="text-muted-foreground">共 {humanQueue.total} 篇 · 聚类复核 {humanQueue.clusterReview} · 待归类 {humanQueue.unreviewed} · 低置信 {humanQueue.lowConfidence}</span>
+          <Button size="sm" variant="outline" className="ml-auto h-7 px-2 text-xs" onClick={() => openLibrary('attention')}>打开待办队列</Button>
+        </div>
       </div>
 
       {/* ===== Source List ===== */}
@@ -764,6 +863,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
               onStepActionLoading={isStepActionLoading}
               onTechnicalStatus={handleTechnicalStatus}
               onOpenArticle={handleOpenArticle}
+              onOpenArticlePanel={handleOpenArticlePanel}
               onOpenDiscarded={handleOpenDiscarded}
               onDiscardedRetried={() => { void refreshSnapshot() }}
               onRetrySource={handleRetrySource}
@@ -803,11 +903,26 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
         </div>
       </ScrollArea>
 
-      {/* 未入库记录仍保留轻量诊断；已入库文章直接进入内容管理。 */}
+      {/* 未入库记录保留轻量诊断；已入库文章进入当前工作台的详情抽屉。 */}
       <DiscardedDetailSheet
         discardedId={discardedDetailId}
         open={detailOpen}
         onOpenChange={handleDetailOpenChange}
+      />
+      <ArticleLibrarySheet
+        open={libraryOpen}
+        initialView={libraryView}
+        counts={humanQueue}
+        onOpenChange={setLibraryOpen}
+        onOpenArticle={openArticleFromLibrary}
+      />
+      <ArticleWorkspaceDrawer
+        articleId={articleDetailId}
+        panel={articleDetailPanel}
+        open={articleDetailOpen}
+        onOpenChange={handleArticleDetailOpenChange}
+        onArticleChange={handleArticleChange}
+        onChanged={handleLibraryChanged}
       />
     </div>
   )

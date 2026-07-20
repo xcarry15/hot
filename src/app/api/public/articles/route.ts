@@ -21,12 +21,9 @@ export async function GET(request: Request) {
       return response;
     }
 
-    const dateLimitRaw = searchParams.get('dateLimit');
-    const dateLimitValue = dateLimitRaw === null ? undefined : Number(dateLimitRaw);
     const response = NextResponse.json(await listPublicArticles({
       ...filters,
-      before: searchParams.get('before') ?? undefined,
-      dateLimit: Number.isFinite(dateLimitValue) ? dateLimitValue : undefined,
+      cursor: searchParams.get('cursor') ?? undefined,
     }));
     response.headers.set('Cache-Control', 'private, no-store');
     return response;

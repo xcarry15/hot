@@ -26,6 +26,7 @@ export interface Settings extends Record<PromptBlockKey, string> {
   push_min_score: string
   push_min_relevance: string
   public_min_score: string
+  public_min_relevance: string
   public_hide_ads: string
   public_important_rule: string
   public_general_rule: string
@@ -38,6 +39,7 @@ export interface Settings extends Record<PromptBlockKey, string> {
   ai_system_prompt: string
   ai_weight_event: string
   ai_weight_content: string
+  ai_keyword_match_bonus: string
   ai_step2_content_max_chars: string
 }
 

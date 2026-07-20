@@ -3,8 +3,8 @@ import { Card, CardContent } from '@/components/ui/card'
 
 export default function AccountTab() {
   return (
-    <Card className="py-0">
-      <CardContent className="p-4">
+    <Card className="mt-2 py-0">
+      <CardContent className="p-3">
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-emerald-600" />
           <div>

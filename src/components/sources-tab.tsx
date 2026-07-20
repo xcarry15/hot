@@ -10,21 +10,21 @@ export function SourcesManagement() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b bg-muted/30 px-2 py-1.5">
+      <div className="flex shrink-0 items-center gap-2 border-b bg-background px-2 py-1.5">
         <span className="mr-1 text-xs font-semibold text-foreground">数据源</span>
         <div
           role="tablist"
           aria-label="数据源管理视图"
-          className="inline-flex items-center rounded-md bg-muted p-0.5"
+          className="inline-flex items-center border bg-background"
         >
           <button
             type="button"
             role="tab"
             aria-selected={view === 'configured'}
             onClick={() => setView('configured')}
-            className={`rounded px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            className={`border-r px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               view === 'configured'
-                ? 'bg-background font-medium text-foreground shadow-sm'
+                ? 'bg-foreground font-medium text-background'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
@@ -35,9 +35,9 @@ export function SourcesManagement() {
             role="tab"
             aria-selected={view === 'presets'}
             onClick={() => setView('presets')}
-            className={`rounded px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            className={`px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               view === 'presets'
-                ? 'bg-background font-medium text-foreground shadow-sm'
+                ? 'bg-foreground font-medium text-background'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >

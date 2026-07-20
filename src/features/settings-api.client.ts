@@ -75,7 +75,7 @@ export async function testAiSettings(input: AiTestInput, signal?: AbortSignal): 
   return requestJson<AiTestResult>('POST', '/api/settings/test-ai', { body: input, signal });
 }
 
-export interface ScorePreviewInput { weightEvent: number; weightContent: number }
+export interface ScorePreviewInput { weightEvent: number; weightContent: number; keywordBonus: number }
 export interface ScorePreviewResult { total: number; changed: number; increased: number; decreased: number; samples: { id: string; title: string; before: number; after: number; delta: number }[] }
 export async function previewScoreSettings(input: ScorePreviewInput, signal?: AbortSignal): Promise<ScorePreviewResult> {
   return requestJson<ScorePreviewResult>('POST', '/api/settings', {
@@ -84,13 +84,13 @@ export async function previewScoreSettings(input: ScorePreviewInput, signal?: Ab
   });
 }
 
-export interface PublicPreviewResult { candidates: number; eligible: number; wouldPublish: number; wouldHide: number; minScore: number; hideAds: boolean }
+export interface PublicPreviewResult { candidates: number; eligible: number; wouldPublish: number; wouldHide: number; minScore: number; minRelevance: number; hideAds: boolean }
 export interface PushPreviewResult { pushMode: string; pushable: number; webhookCount: number; willPush: number }
 export async function previewPushSettings(input: { minScore: number; minRelevance: number; pushMode: string }, signal?: AbortSignal): Promise<PushPreviewResult> {
   return requestJson('POST', '/api/settings', { body: { action: 'push-preview', ...input }, signal });
 }
 
-export async function previewPublicSettings(input: { minScore: number; hideAds: boolean }, signal?: AbortSignal): Promise<PublicPreviewResult> {
+export async function previewPublicSettings(input: { minScore: number; minRelevance: number; hideAds: boolean }, signal?: AbortSignal): Promise<PublicPreviewResult> {
   return requestJson('POST', '/api/settings', { body: { action: 'public-preview', ...input }, signal });
 }
 

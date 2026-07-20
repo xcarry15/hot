@@ -150,14 +150,253 @@
   --public-hairline-strong: #d6cfc4;
   --public-font-sans: var(--font-yahei);
   --public-font-serif: var(--font-yahei);
+  --public-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --public-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --public-motion-fast: 140ms;
+  --public-motion-base: 220ms;
   color-scheme: light;
   font-family: var(--public-font-sans);
+}
+
+.public-site ::selection {
+  background: rgb(204 120 92 / 22%);
+  color: var(--public-ink);
 }
 
 .public-site .public-display {
   font-family: var(--public-font-serif);
   font-weight: 700;
   letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.public-section-enter,
+.public-detail-intro,
+.public-detail-block,
+.public-date-heading,
+.public-article-motion,
+.public-notice-enter,
+.public-popover-enter,
+.public-mobile-nav-enter {
+  animation-duration: var(--public-motion-base);
+  animation-fill-mode: both;
+  animation-timing-function: var(--public-ease-out);
+}
+
+.public-section-enter,
+.public-detail-intro {
+  animation-name: public-rise-in;
+}
+
+.public-detail-block {
+  animation-name: public-rise-in;
+}
+
+.public-detail-delay-1 {
+  animation-delay: 55ms;
+}
+
+.public-detail-delay-2 {
+  animation-delay: 95ms;
+}
+
+.public-detail-delay-3 {
+  animation-delay: 135ms;
+}
+
+.public-date-heading {
+  animation-name: public-fade-in;
+  animation-delay: var(--public-reveal-delay, 0ms);
+}
+
+.public-article-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 152px;
+}
+
+.public-article-motion {
+  animation-name: public-list-item-in;
+  animation-delay: var(--public-reveal-delay, 0ms);
+}
+
+.public-article-surface,
+.public-related-surface {
+  transition-duration: 180ms;
+  transition-property: background-color, transform;
+  transition-timing-function: var(--public-ease-out);
+}
+
+.public-article-title,
+.public-related-title,
+.public-navigation-title {
+  transition-duration: var(--public-motion-fast);
+  transition-property: color;
+  transition-timing-function: ease;
+}
+
+.public-timeline-marker {
+  transform-origin: center;
+  transition-duration: 180ms;
+  transition-property: background-color, transform;
+  transition-timing-function: var(--public-ease-out);
+}
+
+.public-notice-enter {
+  animation-name: public-notice-in;
+}
+
+.public-popover-enter {
+  animation-duration: 170ms;
+  animation-name: public-popover-in;
+  transform-origin: top right;
+}
+
+.public-mobile-nav-enter {
+  animation-duration: 180ms;
+  animation-name: public-mobile-nav-in;
+}
+
+.public-pressable {
+  touch-action: manipulation;
+  transition-duration: var(--public-motion-fast);
+  transition-property: transform;
+  transition-timing-function: var(--public-ease-out);
+}
+
+.public-pressable:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.public-back-link {
+  transition-duration: var(--public-motion-fast);
+  transition-property: color, transform;
+  transition-timing-function: var(--public-ease-out);
+}
+
+.public-reading-progress {
+  bottom: -1px;
+  contain: layout paint;
+  height: 2px;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}
+
+.public-reading-progress__value {
+  background: var(--public-primary);
+  display: block;
+  height: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  width: 100%;
+  will-change: transform;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .public-article-link:hover .public-article-surface,
+  .public-related-link:hover .public-related-surface {
+    background: var(--public-surface-soft);
+    transform: translateX(4px);
+  }
+
+  .public-article-link:hover .public-article-title,
+  .public-related-link:hover .public-related-title,
+  .public-navigation-link:hover .public-navigation-title {
+    color: var(--public-primary);
+  }
+
+  .public-article-link:hover .public-timeline-marker {
+    background: var(--public-primary-active);
+    transform: scale(1.24);
+  }
+
+  .public-back-link:hover {
+    color: var(--public-primary);
+    transform: translateX(-2px);
+  }
+}
+
+@keyframes public-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes public-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes public-list-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes public-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes public-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes public-mobile-nav-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-section-enter,
+  .public-detail-intro,
+  .public-detail-block,
+  .public-date-heading,
+  .public-article-motion,
+  .public-notice-enter,
+  .public-popover-enter,
+  .public-mobile-nav-enter {
+    animation: none;
+  }
+
+  .public-article-surface,
+  .public-related-surface,
+  .public-timeline-marker,
+  .public-pressable,
+  .public-back-link {
+    transition-duration: 1ms;
+  }
 }
 
 @layer base {

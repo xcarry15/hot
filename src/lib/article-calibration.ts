@@ -87,6 +87,8 @@ export function buildEffectiveScoreUpdate(input: {
   isAd: boolean;
   weightEvent: number;
   weightContent: number;
+  keywordMatched: boolean;
+  keywordBonus: number;
 }): Pick<Prisma.ArticleUpdateInput, 'score' | 'rawScore' | 'scorePolicyVersion' | 'scorePolicySnapshot'> {
   const policy = applyScorePolicy(
     input.eventScore,
@@ -95,11 +97,18 @@ export function buildEffectiveScoreUpdate(input: {
     input.isAd,
     input.weightEvent,
     input.weightContent,
+    input.keywordMatched,
+    input.keywordBonus,
   );
   return {
     score: policy.finalScore,
     rawScore: policy.rawScore,
     scorePolicyVersion: policy.version,
-    scorePolicySnapshot: buildScorePolicySnapshot(input.weightEvent, input.weightContent),
+    scorePolicySnapshot: buildScorePolicySnapshot(
+      input.weightEvent,
+      input.weightContent,
+      input.keywordBonus,
+      input.keywordMatched,
+    ),
   };
 }

@@ -32,7 +32,12 @@ vi.mock('@/lib/ai-client', () => ({
   invalidateAISettingsCache: vi.fn(),
 }));
 
+vi.mock('@/lib/event-service', () => ({
+  recalculateEventById: vi.fn(),
+}));
+
 import { PUT as settingsPUT } from '@/app/api/settings/route';
+import { DEFAULT_BLOCK_SUMMARY } from '@/lib/prompts';
 
 describe('settings PUT 事务化', () => {
   beforeEach(() => {
@@ -136,5 +141,52 @@ describe('settings PUT 事务化', () => {
     expect(body.success).toBe(true);
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
     expect(typeof mocks.transaction.mock.calls[0][0]).toBe('function');
+  });
+
+  it('提示词保存空值时持久化当前默认文本', async () => {
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ai_block_summary: '' }),
+    });
+
+    const res = await settingsPUT(req);
+
+    expect(res.status).toBe(200);
+    expect(mocks.settingUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { key: 'ai_block_summary' },
+      create: { key: 'ai_block_summary', value: DEFAULT_BLOCK_SUMMARY },
+      update: { value: DEFAULT_BLOCK_SUMMARY },
+    }));
+  });
+
+  it('提示词保存纯空白时也持久化当前默认文本', async () => {
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ai_block_summary: '   ' }),
+    });
+
+    const res = await settingsPUT(req);
+
+    expect(res.status).toBe(200);
+    expect(mocks.settingUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { key: 'ai_block_summary' },
+      create: { key: 'ai_block_summary', value: DEFAULT_BLOCK_SUMMARY },
+      update: { value: DEFAULT_BLOCK_SUMMARY },
+    }));
+  });
+
+  it('关键词命中加分限定为 0-20', async () => {
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ai_keyword_match_bonus: '21' }),
+    });
+
+    const res = await settingsPUT(req);
+
+    expect(res.status).toBe(400);
+    expect(mocks.transaction).not.toHaveBeenCalled();
   });
 });

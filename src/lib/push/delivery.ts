@@ -19,7 +19,7 @@ import { sendFeishuWebhook } from '@/lib/push/feishu-transport';
 /** 同 eventId 并发防重；同一时刻只允许一次推送尝试。 */
 const inFlightPushes = new Map<string, Promise<PushArticleResult>>();
 
-export type PushDeliveryMode = 'normal' | 'retry_failed' | 'repush_all';
+export type PushDeliveryMode = 'normal' | 'retry_failed' | 'manual_force' | 'repush_all';
 
 export interface PushTargetState {
   webhookUrl: string;
@@ -137,7 +137,7 @@ async function pushEventToFeishuInternal(
     return emptyPushResult(mode, 'failed', `推送重试等待中，可重试时间: ${event.nextPushRetryAt.toISOString()}`);
   }
 
-  if (mode !== 'repush_all') {
+  if (mode === 'normal' || mode === 'retry_failed') {
     const settings = await readPushSettings();
     if (settings.pushMode === 'off') {
       return emptyPushResult(mode, 'failed', '当前推送模式已关闭');

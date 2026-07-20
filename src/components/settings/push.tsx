@@ -112,11 +112,11 @@ export default function PushTab({ settings, setSettings }: Props) {
   }, [settings.push_min_relevance, settings.push_min_score, settings.push_mode])
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2 pt-2">
       {/* 飞书推送配置 */}
       <Card className="py-0">
-        <CardContent className="p-4 space-y-3">
-          <div className="flex items-center gap-2">
+        <CardContent className="space-y-2.5 p-3">
+          <div className="flex items-center gap-2 border-b pb-2">
             <Send className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-semibold">飞书推送配置</span>
           </div>
@@ -126,9 +126,9 @@ export default function PushTab({ settings, setSettings }: Props) {
             <Label className="text-xs">Webhook URL</Label>
             <p className="text-xs text-muted-foreground">支持配置多个 Webhook URL，推送时依次发送。可添加备注区分不同飞书群。</p>
 
-            <div className="space-y-1.5 mt-1.5">
+            <div className="mt-1.5 space-y-1">
               {webhooks.length === 0 && (
-                <div className="text-xs text-muted-foreground py-3 border border-dashed rounded-lg text-center">
+                <div className="border border-dashed py-3 text-center text-xs text-muted-foreground">
                   暂未配置 Webhook，点击下方按钮添加
                 </div>
               )}
@@ -136,7 +136,7 @@ export default function PushTab({ settings, setSettings }: Props) {
               {webhooks.map((webhook, index) => {
                 const ts = testStates[index]
                 return (
-                  <div key={index} className={`flex items-center gap-2 p-2 rounded-lg border ${webhook.enabled ? '' : 'opacity-50 bg-muted/20'}`}>
+                  <div key={index} className={`flex items-center gap-1.5 border p-1.5 ${webhook.enabled ? '' : 'opacity-50 bg-muted/20'}`}>
                     <Switch
                       checked={webhook.enabled}
                       onCheckedChange={(checked) => updateWebhook(index, 'enabled', checked)}
@@ -186,7 +186,7 @@ export default function PushTab({ settings, setSettings }: Props) {
             <Button
               size="sm"
               variant="outline"
-              className="h-8 px-3 gap-1.5 text-xs"
+              className="h-7 gap-1.5 px-2.5 text-xs"
               disabled={webhooks.length >= WEBHOOK_MAX_COUNT || anyTesting}
               onClick={addWebhook}
             >
@@ -232,7 +232,7 @@ export default function PushTab({ settings, setSettings }: Props) {
             ) : (
               <div className="space-y-1.5">
                 <Label className="text-xs">推送时间</Label>
-                <div className="h-8 px-3 flex items-center text-xs text-muted-foreground bg-muted/30 rounded-md border border-dashed">
+                <div className="flex h-8 items-center border border-dashed bg-muted/30 px-3 text-xs text-muted-foreground">
                   {settings.push_mode === 'realtime' ? '实时推送：每轮抓取分析完成后立即推送' : '已关闭推送'}
                 </div>
               </div>
@@ -261,8 +261,8 @@ export default function PushTab({ settings, setSettings }: Props) {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-            <Button size="sm" variant="outline" className="h-8 px-3 text-xs" disabled={previewing} onClick={() => void previewPush()}>{previewing ? '预览中…' : '预览推送结果'}</Button>
+          <div className="flex flex-wrap items-center gap-2 border-t pt-2">
+            <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" disabled={previewing} onClick={() => void previewPush()}>{previewing ? '预览中…' : '预览推送结果'}</Button>
             {preview && <span className="text-xs text-muted-foreground">当前约 {preview.pushable} 篇符合阈值；{preview.webhookCount} 个 Webhook 可用，预计本轮推送 {preview.willPush} 篇。</span>}
           </div>
 
@@ -271,7 +271,7 @@ export default function PushTab({ settings, setSettings }: Props) {
 
       {/* 抓取配置 */}
       <Card className="py-0">
-        <CardContent className="p-4 space-y-3">
+        <CardContent className="space-y-2 p-3">
           <span className="text-sm font-semibold">抓取配置</span>
           <div className="space-y-1.5">
             <Label className="text-xs">抓取间隔（分钟）</Label>

@@ -193,7 +193,7 @@ export default function KeywordsTab() {
 
   if (loading) {
     return (
-      <div className="p-4 space-y-3">
+      <div className="space-y-2 p-3">
         {Array.from({ length: 4 }).map((_, i) => (
           <Skeleton key={i} className="h-16 w-full" />
         ))}
@@ -204,7 +204,7 @@ export default function KeywordsTab() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-4 py-3 border-b bg-muted">
+      <div className="border-b bg-background px-3 py-2">
         <div className="flex items-center gap-2 flex-wrap">
           <Tag className="h-4 w-4 text-primary shrink-0" />
           <span className="text-sm font-semibold">关键词管理</span>
@@ -222,7 +222,7 @@ export default function KeywordsTab() {
             <Button
               size="sm"
               variant="outline"
-              className="h-8 px-2.5 text-xs gap-1.5"
+              className="h-7 gap-1.5 px-2.5 text-xs"
               onClick={() => fileInputRef.current?.click()}
               disabled={bulkLoading}
             >
@@ -232,7 +232,7 @@ export default function KeywordsTab() {
             <Button
               size="sm"
               variant="outline"
-              className="h-8 px-2.5 text-xs gap-1.5"
+              className="h-7 gap-1.5 px-2.5 text-xs"
               onClick={handleExport}
               disabled={keywords.length === 0}
             >
@@ -242,7 +242,7 @@ export default function KeywordsTab() {
             <Button
               size="sm"
               variant="outline"
-              className="h-8 px-2.5 text-xs gap-1.5 text-destructive hover:text-destructive"
+              className="h-7 gap-1.5 px-2.5 text-xs text-destructive hover:text-destructive"
               onClick={() => setClearAllDialogOpen(true)}
               disabled={keywords.length === 0 || bulkLoading}
             >
@@ -254,30 +254,30 @@ export default function KeywordsTab() {
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
-        <div className="p-3 sm:p-4 space-y-3">
+        <div className="space-y-2 p-2">
           {/* Add Keywords */}
           <section className="flex items-start gap-2">
             <Textarea
               placeholder="输入关键词（每行一个）..."
               value={bulkText}
               onChange={(e) => setBulkText(e.target.value)}
-              className="min-h-[72px] text-sm resize-y flex-1"
+              className="min-h-[58px] flex-1 resize-y text-xs"
             />
-            <Button size="sm" onClick={handleBulkAdd} disabled={!bulkText.trim() || bulkLoading} className="h-9 px-3 text-xs gap-1.5 shrink-0">
+            <Button size="sm" onClick={handleBulkAdd} disabled={!bulkText.trim() || bulkLoading} className="h-8 shrink-0 gap-1.5 px-3 text-xs">
               {bulkLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
               添加
             </Button>
           </section>
 
-          {candidates.length > 0 && <section className="rounded-md border bg-amber-50/50 p-3 dark:bg-amber-950/10">
+          {candidates.length > 0 && <section className="border border-amber-300 bg-amber-50/50 p-2.5 dark:bg-amber-950/10">
             <div className="mb-2 flex items-center gap-2"><span className="text-sm font-medium">未命中候选词</span><Badge variant="secondary" className="text-xs">{candidates.length}</Badge><span className="text-xs text-muted-foreground">本地统计生成，需人工确认后加入词库</span></div>
-            <div className="space-y-1.5">{candidates.slice(0, 12).map((candidate) => <div key={candidate.id} className="rounded border bg-background px-3 py-2"><div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-sm font-medium">{candidate.phrase}</span><span className="shrink-0 text-xs text-muted-foreground">出现 {candidate.occurrences} 次 · {candidate.sourceCount} 个来源 · 可恢复 {candidate.recallCount} 篇</span><Button size="sm" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'approve-candidate')}>采用并恢复</Button><Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'dismiss-candidate')}>永久忽略</Button></div>{candidate.sampleTitles.length > 0 && <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">{candidate.sampleTitles.slice(0, 3).map((title) => <p key={title} className="truncate">· {title}</p>)}</div>}</div>)}</div>
+            <div className="space-y-1">{candidates.slice(0, 12).map((candidate) => <div key={candidate.id} className="border bg-background px-2.5 py-1.5"><div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-xs font-medium">{candidate.phrase}</span><span className="shrink-0 text-[11px] text-muted-foreground">出现 {candidate.occurrences} 次 · {candidate.sourceCount} 个来源 · 可恢复 {candidate.recallCount} 篇</span><Button size="sm" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'approve-candidate')}>采用并恢复</Button><Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'dismiss-candidate')}>永久忽略</Button></div>{candidate.sampleTitles.length > 0 && <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">{candidate.sampleTitles.slice(0, 3).map((title) => <p key={title} className="truncate">· {title}</p>)}</div>}</div>)}</div>
           </section>}
 
           {/* Search */}
           <div className="flex items-center gap-2">
             <Input
-              className="h-8 w-44 text-sm"
+              className="h-7 w-44 text-xs"
               placeholder="搜索关键词..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -301,16 +301,16 @@ export default function KeywordsTab() {
               className="py-6"
             />
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {groupKeys.map(group => (
                 <section key={group}>
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="mb-1 flex items-center gap-2">
                     <span className="text-sm font-medium text-muted-foreground">{group}</span>
                     <Badge variant="secondary" className="text-xs px-2 py-0">{grouped[group].length}</Badge>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1">
                     {grouped[group].map(kw => (
-                      <Badge key={kw.id} variant="outline" className="text-xs px-2 py-1 gap-1 font-normal">
+                      <Badge key={kw.id} variant="outline" className="gap-1 px-2 py-0.5 text-xs font-normal">
                         {kw.word}
                         <button
                           onClick={() => handleDelete(kw.id)}

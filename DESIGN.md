@@ -8,6 +8,26 @@ description: A warm-canvas editorial interface for Anthropic's Claude product. T
 # admin workflow, API contracts, architecture, or implementation status. Use README.md and
 # AGENTS.md as the authoritative project documents.
 
+# Hot2 public implementation profile
+#
+# The public article list and detail pages keep the warm editorial palette below, but apply it
+# with a flatter and more restrained component language: square controls, transparent article
+# rows, scarce borders, and no decorative card chrome. Public-page motion exists only to clarify
+# reading flow and interaction state; it must not change content order or delay navigation.
+#
+# Public motion tokens:
+# - ease-out: cubic-bezier(0.23, 1, 0.32, 1)
+# - fast feedback: 140ms
+# - standard reveal: 220ms
+# - list reveal: translateY(8px) + opacity, stagger capped at 7 items
+# - hover direction: article and related rows translateX(4px) on fine pointers only
+# - detail reading progress: 2px terracotta line under the sticky header
+# - performance: animate transform/opacity, use content-visibility for article rows, avoid animation libraries
+# - accessibility: prefers-reduced-motion removes entrance movement; focus-visible remains explicit
+#
+# Motion Do: make new content, popovers, mobile navigation, and reading position spatially clear.
+# Motion Don't: animate the timeline layout, auto-scroll, loop decoration, or add infinite scrolling.
+
 colors:
   primary: "#cc785c"
   primary-active: "#a9583e"

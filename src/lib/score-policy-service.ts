@@ -2,16 +2,17 @@ import { db } from './db';
 import { applyScorePolicy } from './score-policy';
 import { SETTING_KEYS } from './settings-catalog';
 
-export async function previewScorePolicy(weightEvent: number, weightContent: number) {
+export async function previewScorePolicy(weightEvent: number, weightContent: number, keywordBonus: number) {
   const articles = await db.article.findMany({
     where: { aiStatus: 'done', eventScore: { not: null }, contentScore: { not: null } },
-    select: { id: true, title: true, score: true, eventScore: true, contentScore: true, adProbability: true, isAd: true },
+    select: { id: true, title: true, score: true, eventScore: true, contentScore: true, adProbability: true, isAd: true, keywordMatched: true },
     orderBy: { createdAt: 'desc' },
   });
   const changes = articles.map(article => {
     const result = applyScorePolicy(
       article.eventScore!, article.contentScore!, article.adProbability ?? (article.isAd ? 100 : 0),
       article.isAd, weightEvent, weightContent,
+      article.keywordMatched, keywordBonus,
     );
     return { id: article.id, title: article.title, before: article.score, after: result.finalScore, delta: result.finalScore - article.score };
   });
@@ -24,7 +25,7 @@ export async function previewScorePolicy(weightEvent: number, weightContent: num
   };
 }
 
-export async function previewPublicPublication(minScore: number, hideAds: boolean) {
+export async function previewPublicPublication(minScore: number, minRelevance: number, hideAds: boolean) {
   const representativeBase = {
     aiStatus: 'done' as const,
     clusterStatus: 'clustered',
@@ -42,7 +43,7 @@ export async function previewPublicPublication(minScore: number, hideAds: boolea
           ...representativeBase,
           OR: [
             { publicOverride: 'public' },
-            { publicOverride: 'auto', score: { gte: minScore }, ...(hideAds ? { isAd: false } : {}) },
+            { publicOverride: 'auto', score: { gte: minScore }, relevance: { gte: minRelevance }, ...(hideAds ? { isAd: false } : {}) },
           ],
         },
       },
@@ -51,7 +52,7 @@ export async function previewPublicPublication(minScore: number, hideAds: boolea
   const candidates = await db.event.count({
     where: { ...eventBase, representativeArticle: { is: representativeBase } },
   });
-  return { candidates, eligible, wouldPublish: eligible, wouldHide: Math.max(0, candidates - eligible), minScore, hideAds };
+  return { candidates, eligible, wouldPublish: eligible, wouldHide: Math.max(0, candidates - eligible), minScore, minRelevance, hideAds };
 }
 
 export async function previewPushDelivery(minScore: number, minRelevance: number, pushMode: string) {

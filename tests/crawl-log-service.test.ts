@@ -341,7 +341,9 @@ describe('crawl-log-service', () => {
         updatedAt: new Date('2026-07-10T10:01:00Z'),
       };
       const newerAi = { ...collect, id: 'ai-job', type: 'ai', completedAt: new Date('2026-07-10T11:00:00Z') };
-      mocks.transaction.mockImplementation(async () => [[], [newerAi, collect], [], []]);
+      mocks.transaction.mockImplementation(async () => [[], [newerAi, collect], [], [], [
+        { id: 's-failed', name: '失败源' },
+      ]]);
 
       const snapshot = await getCrawlLogSnapshot();
       expect(snapshot.sources[0]).toMatchObject({

@@ -29,13 +29,14 @@ describe('公开状态 Event 门禁', () => {
   it('未归属 Event 的 Article 即使人工公开也不能发布', async () => {
     mocks.articleFindUnique.mockResolvedValue({
       id: 'a1', eventId: null, clusterStatus: 'pending', aiStatus: 'done', score: 100,
+      relevance: 100,
       isAd: false, publicOverride: 'public', publicStatus: 'unpublished',
       publicPublishedAt: null, publicRevokedAt: null, publicContentUpdatedAt: null, publishedAt: null,
       source: { publicEnabled: true, deletedAt: null },
     });
     await refreshPublicPublication('a1');
     expect(mocks.articleUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ publicStatus: 'unpublished', publicPublicationReason: 'event-not-ready' }),
+      data: expect.objectContaining({ publicStatus: 'unpublished', publicPublicationReason: 'not-event-representative' }),
     }));
     expect(mocks.eventUpdate).not.toHaveBeenCalled();
   });

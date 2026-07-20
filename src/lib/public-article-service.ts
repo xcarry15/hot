@@ -17,14 +17,17 @@ import type {
   PublicArticleRelatedDto,
 } from '@/contracts/public-articles';
 
-const PUBLIC_INITIAL_DATE_LIMIT = 3;
-const PUBLIC_SEARCH_DATE_LIMIT = 10;
-const PUBLIC_LOAD_MORE_DATE_LIMIT = 3;
+const PUBLIC_PAGE_SIZE = 12;
 const PUBLIC_CACHE_TTL_MS = 60_000;
 const PUBLIC_DETAIL_CACHE_TTL_MS = 30_000;
 const PUBLIC_MAX_ROWS_PER_DATE = 250;
 
-type PublicArticleListParams = { search?: string; before?: string; dateLimit?: number };
+type PublicArticleListParams = { search?: string; cursor?: string };
+
+type PublicArticleCursor = {
+  publicSortAt: Date;
+  id: string;
+};
 
 const representativeListSelect = {
   id: true,
@@ -108,12 +111,6 @@ function serializeEvent(row: PublicEventListRow, cleanContent = ''): PublicArtic
   };
 }
 
-function matchesSearch(row: PublicEventListRow, search: string): boolean {
-  if (!search) return true;
-  const article = row.representativeArticle!;
-  return `${article.title}\n${article.summary}\n${article.brand}`.toLowerCase().includes(search.toLowerCase());
-}
-
 function sortEvents(left: SortablePublicEventRow, right: SortablePublicEventRow): number {
   const dateKey = getPublicDateKey(effectiveDate(right)).localeCompare(getPublicDateKey(effectiveDate(left)));
   if (dateKey !== 0) return dateKey;
@@ -124,9 +121,22 @@ function sortEvents(left: SortablePublicEventRow, right: SortablePublicEventRow)
   return effectiveDate(right).getTime() - effectiveDate(left).getTime();
 }
 
-function dateLimit(params: PublicArticleListParams, hasSearch: boolean): number {
-  const fallback = params.before ? PUBLIC_LOAD_MORE_DATE_LIMIT : hasSearch ? PUBLIC_SEARCH_DATE_LIMIT : PUBLIC_INITIAL_DATE_LIMIT;
-  return Math.max(1, Math.min(PUBLIC_SEARCH_DATE_LIMIT, Math.floor(params.dateLimit ?? fallback)));
+function encodeCursor(row: { publicSortAt: Date | null; id: string }): string | null {
+  if (!row.publicSortAt) return null;
+  return Buffer.from(JSON.stringify([row.publicSortAt.toISOString(), row.id])).toString('base64url');
+}
+
+function decodeCursor(value: string | undefined): PublicArticleCursor | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as unknown;
+    if (!Array.isArray(parsed) || typeof parsed[0] !== 'string' || typeof parsed[1] !== 'string') return null;
+    const publicSortAt = new Date(parsed[0]);
+    if (Number.isNaN(publicSortAt.getTime()) || !parsed[1]) return null;
+    return { publicSortAt, id: parsed[1] };
+  } catch {
+    return null;
+  }
 }
 
 function buildSearchWhere(search: string) {
@@ -162,35 +172,33 @@ async function countPublicArticles(search: string): Promise<number> {
 
 async function buildList(params: PublicArticleListParams): Promise<PublicArticleListResponseDto> {
   const search = normalizeText(params.search, 100);
-  const before = params.before && /^\d{4}-\d{2}-\d{2}$/.test(params.before) ? params.before : '';
-  const limit = dateLimit(params, Boolean(search));
+  const cursor = decodeCursor(params.cursor);
   const searchWhere = buildSearchWhere(search);
   const feedWhere = {
     ...publicEventWhere,
-    ...(before ? { publicDateKey: { lt: before } } : {}),
+    ...(cursor ? {
+      OR: [
+        { publicSortAt: { lt: cursor.publicSortAt } },
+        { publicSortAt: cursor.publicSortAt, id: { lt: cursor.id } },
+      ],
+    } : {}),
     ...searchWhere,
   };
-  const dateRows = await db.event.groupBy({
-    by: ['publicDateKey'],
+  const rows = await db.event.findMany({
     where: feedWhere,
-    orderBy: { publicDateKey: 'desc' },
-    take: limit + 1,
-  });
-  const selectedDates = dateRows.slice(0, limit).map((row) => row.publicDateKey).filter(Boolean);
-  const rows = (await Promise.all(selectedDates.map((date) => db.event.findMany({
-    where: { ...feedWhere, publicDateKey: date },
     select: {
       id: true,
       firstSeenAt: true,
       lastSeenAt: true,
       articleCount: true,
+      publicSortAt: true,
       representativeArticle: { select: representativeListSelect },
     },
     orderBy: [{ publicSortAt: 'desc' }, { id: 'desc' }],
-    take: PUBLIC_MAX_ROWS_PER_DATE,
-  })))).flat();
-  const all = rows.filter((row) => matchesSearch(row, search)).sort(sortEvents);
-  const eligible = all;
+    take: PUBLIC_PAGE_SIZE + 1,
+  });
+  const hasMore = rows.length > PUBLIC_PAGE_SIZE;
+  const eligible = rows.slice(0, PUBLIC_PAGE_SIZE);
   const grouped = new Map<string, PublicEventListRow[]>();
   for (const row of eligible) {
     const key = getPublicDateKey(effectiveDate(row));
@@ -198,20 +206,22 @@ async function buildList(params: PublicArticleListParams): Promise<PublicArticle
     rows.push(row);
     grouped.set(key, rows);
   }
-  const groups: PublicArticleDateGroupDto[] = selectedDates.map((date) => {
-    const rows = grouped.get(date) ?? [];
-    return { date, count: rows.length, items: rows.map(serializeEvent) };
-  });
+  const groups: PublicArticleDateGroupDto[] = [...grouped.entries()].map(([date, dateRows]) => ({
+    date,
+    count: dateRows.length,
+    items: dateRows.map((row) => serializeEvent(row)),
+  }));
   const items = groups.flatMap((group) => group.items);
   const total = await countPublicArticles(search);
+  const lastRow = eligible.at(-1);
   return {
     total,
     items,
     groups,
     displayedArticleCount: items.length,
     displayedDateCount: groups.length,
-    nextDate: selectedDates.at(-1) ?? null,
-    hasMore: dateRows.length > selectedDates.length,
+    nextCursor: hasMore && lastRow ? encodeCursor(lastRow) : null,
+    hasMore,
   };
 }
 
@@ -221,7 +231,7 @@ export async function getPublicArticleFeedRevision(params: Pick<PublicArticleLis
 }
 
 export async function listPublicArticles(params: PublicArticleListParams = {}): Promise<PublicArticleListResponseDto> {
-  const key = JSON.stringify({ search: normalizeText(params.search, 100), before: params.before ?? '', dateLimit: params.dateLimit ?? '' });
+  const key = JSON.stringify({ search: normalizeText(params.search, 100), cursor: params.cursor ?? '' });
   const existing = publicArticleListCache.get(key);
   if (existing && existing.expiresAt > Date.now()) return existing.value;
   const value = buildList(params);

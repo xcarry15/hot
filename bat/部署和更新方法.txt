@@ -1,7 +1,7 @@
 Hot2 部署和更新方法（2026-07）
 ================================
 
-适用版本：Next.js 16 + Prisma/SQLite + PM2，Node.js 20+。
+适用版本：Next.js 16 + Prisma/SQLite + PM2，Node.js >= 20.9.0。
 生产目录：/www/wwwroot/hot.kfxz.cn
 应用端口：3011
 
@@ -10,20 +10,29 @@ Hot2 部署和更新方法（2026-07）
 
 在 Windows 本地运行 bat/run.bat 生成 zip。部署包不包含：
 
-- .env 和 db/（服务器配置、SQLite 数据必须保留在服务器）
-- node_modules、.next、tests、docs、构建缓存
+- .env* 和 db/（服务器配置、SQLite 数据必须保留在服务器）
+- node_modules、.next、tests、docs、design-previews、构建缓存
 - 一次性开发脚本 cleanup-legacy-settings.ts、backfill-prompt-defaults.ts
-- 根目录开发说明：README.md、AGENTS.md、DESIGN.md、CLAUDE.md；`bat/` 部署/Nginx 文档保留
+- 根目录 Markdown/本地工具配置及所有旧 zip；`bat/` 部署/Nginx 文档保留
 
-部署包保留 prisma/migrations、prisma/seed.ts、scripts/db-baseline.ts 和 scripts/cleanup-logs.ts，供服务器初始化、迁移和日志维护使用。
+部署包保留 prisma/migrations、prisma/seed.ts、scripts/db-baseline.ts、scripts/cleanup-logs.ts、scripts/optimize-database.ts 和 scripts/rebuild-public-publication.ts，供服务器初始化、迁移和维护使用。
 
 二、新服务器初始化
 --------------------
 
-上传并解压：
+将 zip 上传到应用目录之外（示例使用 `/tmp`），再收敛同步到生产目录：
 
+  rm -rf /tmp/h2-hot2-release
+  mkdir -p /tmp/h2-hot2-release
+  unzip -q /tmp/<部署包.zip> -d /tmp/h2-hot2-release
+  mkdir -p /www/wwwroot/hot.kfxz.cn
+  rsync -a --delete \
+    --exclude='.env' --exclude='.env.*' --exclude='db/' --exclude='node_modules/' \
+    /tmp/h2-hot2-release/ /www/wwwroot/hot.kfxz.cn/
   cd /www/wwwroot/hot.kfxz.cn
   npm install
+
+不要直接在生产目录执行 `unzip -o`：它只能覆盖文件，无法删除新版本已经移除的旧 Route、组件或脚本。
 
 创建 .env（只在第一次部署执行，之后不要覆盖）：
 
@@ -57,11 +66,14 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
 三、存量 db push 数据库首次切换
 --------------------------------
 
-只对历史上使用 `prisma db push`、尚未建立 `_prisma_migrations` 记录的服务器执行一次。先停服务并备份：
+只对历史上使用 `prisma db push`、尚未建立 `_prisma_migrations` 记录的服务器执行一次。先停服务并进行 SQLite 一致性备份：
 
   cd /www/wwwroot/hot.kfxz.cn
   pm2 stop h2-hot2
-  cp db/custom.db db/custom.db.bak.$(date +%Y%m%d-%H%M%S)
+  backup_dir="/www/backup/h2-hot2/$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$backup_dir"
+  sqlite3 db/custom.db ".timeout 5000" ".backup '$backup_dir/custom.db'"
+  cp -a db/custom.db-wal db/custom.db-shm "$backup_dir/" 2>/dev/null || true
 
 执行 baseline 预检：
 
@@ -75,12 +87,14 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
 
   npm run db:migrate:deploy
   npm run db:generate
+  npm run db:optimize
+  npm run db:rebuild-public
   npm run db:migrate:status
   pm2 start h2-hot2
 
 架构和数据库说明以根目录 `README.md` 为准，实际迁移顺序以 `prisma/migrations/` 为准。本文件不复制迁移清单，避免源码新增 migration 后出现文档漂移。
 
-切换完成后禁止再次执行 baseline；日常更新只执行 migrate deploy。
+切换完成后禁止再次执行 baseline；日常更新只执行 migrate deploy。`db:rebuild-public` 用于给既有 Event 重建公开发布与排序快照；首次跨过 `20260718230000_add_public_feed_sort` migration 时执行一次即可，不要加入每次更新的固定流程。
 
 四、日常更新
 ------------
@@ -92,13 +106,27 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
 
 服务器：
 
+  # 先将新 zip 上传到 /tmp/<部署包.zip>
   cd /www/wwwroot/hot.kfxz.cn
   pm2 stop h2-hot2
-  unzip -o <新 zip 文件>
-  npm install                         # package-lock/package.json 有变化时必须执行
+  backup_dir="/www/backup/h2-hot2/$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$backup_dir"
+  sqlite3 db/custom.db ".timeout 5000" ".backup '$backup_dir/custom.db'"
+  cp -a db/custom.db-wal db/custom.db-shm "$backup_dir/" 2>/dev/null || true
+
+  rm -rf /tmp/h2-hot2-release
+  mkdir -p /tmp/h2-hot2-release
+  unzip -q /tmp/<部署包.zip> -d /tmp/h2-hot2-release
+  rsync -a --delete \
+    --exclude='.env' --exclude='.env.*' --exclude='db/' --exclude='node_modules/' \
+    /tmp/h2-hot2-release/ /www/wwwroot/hot.kfxz.cn/
+
+  cd /www/wwwroot/hot.kfxz.cn
+  npm install                          # package-lock/package.json 有变化时必须执行
   npm run db:migrate:deploy            # 应用新增 migration；无新增时为空操作
   npm run db:generate
   npm run db:optimize                   # 启用/校验 WAL、NORMAL、busy_timeout 并执行 PRAGMA optimize
+  # 首次跨过 20260718230000 migration 时额外执行一次：npm run db:rebuild-public
   npm run build
   pm2 delete h2-hot2
   pm2 start npm --name h2-hot2 -- start
@@ -111,10 +139,8 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
 - 确认 `.env` 中的 `NEXT_PUBLIC_SITE_URL` 为当前正式域名，并在 build 前完成修改。
 - 修改 .env 后用 delete + start 让 PM2 重新读取环境变量；普通 restart 可能保留旧环境。
 - 保持 PM2 单实例运行，禁止 `-i max` 或 cluster 模式。
-- 每次 build 后清理 Nginx 反代缓存并 reload，避免旧 HTML 引用旧 chunk：
-
-  rm -rf /www/server/nginx/proxy_cache_dir/*
-  nginx -t && nginx -s reload
+- 普通应用更新不要清空 `/www/server/nginx/proxy_cache_dir/`：它是服务器全局缓存目录，可能影响其他站点。本项目动态请求已在站点配置中绕过代理缓存，构建后不需要 reload Nginx。
+- 只有实际修改 `bat/本项目的nginx.txt` 并同步到服务器站点配置时，才执行 `nginx -t && nginx -s reload`。
 
 五、日志维护
 ------------
@@ -156,7 +182,7 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
 - `/_next/static/` 由 Nginx 直接提供 immutable 静态资源。
 - 动态页面绕过 proxy_cache，避免重新构建后旧 HTML 引用已删除的 chunk。
 - 模板为 JS/CSS/JSON/SVG/HTML 响应启用 gzip，减少后台快照和前端资源传输体积。
-- 修改配置后执行 `nginx -t && nginx -s reload`。
+- 仅修改 Nginx 配置时执行 `nginx -t && nginx -s reload`；普通代码发布无需执行。
 
 八、从零重建（破坏性操作）
 --------------------------
@@ -164,8 +190,11 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
 仅在数据损坏或明确要清空全部业务数据时执行。先确认已有备份并停服务：
 
   pm2 stop h2-hot2
-  cp db/custom.db db/custom.db.bak.$(date +%Y%m%d-%H%M%S)
-rm -f db/custom.db db/custom.db-journal db/custom.db-wal db/custom.db-shm
+  backup_dir="/www/backup/h2-hot2/$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$backup_dir"
+  sqlite3 db/custom.db ".timeout 5000" ".backup '$backup_dir/custom.db'"
+  cp -a db/custom.db-wal db/custom.db-shm "$backup_dir/" 2>/dev/null || true
+  rm -f db/custom.db db/custom.db-journal db/custom.db-wal db/custom.db-shm
   npm run db:migrate:deploy
   npm run db:generate
   npm run db:seed
@@ -174,8 +203,6 @@ rm -f db/custom.db db/custom.db-journal db/custom.db-wal db/custom.db-shm
   pm2 delete h2-hot2
   pm2 start npm --name h2-hot2 -- start
   pm2 save
-  rm -rf /www/server/nginx/proxy_cache_dir/*
-  nginx -t && nginx -s reload
 
 ————————————————
 

@@ -25,7 +25,7 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-import { matchKeyword, invalidateKeywordCache } from '../src/lib/filter';
+import { evaluateKeywordMatch, invalidateKeywordCache, matchIndustryTitleSignal, matchKeyword } from '../src/lib/filter';
 
 beforeEach(() => {
   mocksHoisted.keywordFindMany.mockReset();
@@ -132,5 +132,26 @@ describe('matchKeyword 缓存行为', () => {
     const second = await matchKeyword('瑞幸文本');
     expect(second).toBe(false);
     expect(mocksHoisted.keywordFindMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('空词库会放行过滤，但不会伪造评分命中', async () => {
+    mocksHoisted.keywordFindMany.mockResolvedValue([]);
+    expect(await matchKeyword('任意文本')).toBe(true);
+    expect(await evaluateKeywordMatch('任意文本')).toEqual({ configured: false, matched: false });
+  });
+});
+
+describe('标题行业信号兜底', () => {
+  it.each([
+    '便利店，正在被“便利”反杀',
+    '中百超市湖南首店落户长沙',
+    '山东老牌酒楼正式闭店',
+    '一年消失8.5万家门店，烘焙赛道怎么了？',
+  ])('明确餐饮/零售业态标题会保留：%s', (title) => {
+    expect(matchIndustryTitleSignal(title)).toBe(true);
+  });
+
+  it('泛商业、房地产与互联网新闻不会被兜底词放行', () => {
+    expect(matchIndustryTitleSignal('拼多多斥33亿在上海买楼')).toBe(false);
   });
 });

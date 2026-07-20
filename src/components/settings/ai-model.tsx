@@ -91,23 +91,23 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   }
 
   return (
-    <Card className="py-0">
-      <CardContent className="p-4 space-y-4">
-        <div className="flex items-center gap-2">
+    <Card className="mt-2 py-0">
+      <CardContent className="space-y-3 p-3">
+        <div className="flex items-center gap-2 border-b pb-2">
           <Cpu className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-semibold">AI 模型配置</span>
         </div>
 
         {/* Provider selector */}
-        <div className="space-y-1.5">
-          <Label className="text-sm">模型厂商</Label>
+        <div className="space-y-1">
+          <Label className="text-xs">模型厂商</Label>
           <Select value={settings.ai_provider} onValueChange={handleProviderChange}>
-            <SelectTrigger className="h-9 text-sm">
+            <SelectTrigger className="h-8 text-xs">
               <SelectValue placeholder="选择模型厂商" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="rounded-none shadow-sm">
               {Object.values(AI_PROVIDERS).map((p) => (
-                <SelectItem key={p.id} value={p.id} className="text-sm">
+                <SelectItem key={p.id} value={p.id} className="text-xs">
                   {p.name}
                   {providerConfigs[p.id].apiKey ? ' ✓' : ''}
                 </SelectItem>
@@ -118,22 +118,22 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
 
         {/* API Key */}
         {currentProvider.needsApiKey && (
-          <div className="space-y-1.5">
-            <Label className="text-sm">API Key <span className="text-muted-foreground">({currentProvider.name})</span></Label>
+          <div className="space-y-1">
+            <Label className="text-xs">API Key <span className="text-muted-foreground">({currentProvider.name})</span></Label>
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Input
                   type={showApiKey ? 'text' : 'password'}
                   value={currentConfig.apiKey}
                   onChange={(e) => updateProviderConfig(currentProvider.id, 'apiKey', e.target.value)}
-                  className="h-9 text-sm pr-10 font-mono"
+                  className="h-8 pr-9 font-mono text-xs"
                   placeholder="sk-..."
                 />
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="absolute right-0 top-0 h-9 w-9 px-0"
+                  className="absolute right-0 top-0 h-8 w-8 px-0"
                   onClick={() => setShowApiKey(!showApiKey)}
                 >
                   {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
@@ -148,24 +148,24 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
 
         {/* Base URL */}
         {currentProvider.needsApiKey && (
-          <div className="space-y-1.5">
-            <Label className="text-sm">API 地址（默认已填充，可覆盖）</Label>
+          <div className="space-y-1">
+            <Label className="text-xs">API 地址（默认已填充，可覆盖）</Label>
             <Input
               value={currentConfig.baseUrl}
               onChange={(e) => updateProviderConfig(currentProvider.id, 'baseUrl', e.target.value)}
-              className="h-9 text-sm font-mono"
+              className="h-8 font-mono text-xs"
               placeholder="https://api.example.com/v1"
             />
           </div>
         )}
 
         {/* Model name */}
-        <div className="space-y-1.5">
-          <Label className="text-sm">模型名称</Label>
+        <div className="space-y-1">
+          <Label className="text-xs">模型名称</Label>
           <Input
             value={currentConfig.model}
             onChange={(e) => updateProviderConfig(currentProvider.id, 'model', e.target.value)}
-            className="h-9 text-sm font-mono"
+            className="h-8 font-mono text-xs"
             placeholder={currentProvider.defaultModel || '输入模型名称'}
           />
           {currentProvider.models.length > 0 && (
@@ -175,7 +175,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                   key={m}
                   type="button"
                   onClick={() => updateProviderConfig(currentProvider.id, 'model', m)}
-                  className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+                  className={`border px-2 py-0.5 text-[11px] transition-colors ${
                     currentConfig.model === m
                       ? 'bg-primary text-primary-foreground border-primary'
                       : 'bg-muted/30 text-muted-foreground border-border hover:bg-muted'
@@ -189,27 +189,27 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
         </div>
 
         {/* AI Parameters */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label className="text-sm">Temperature <span className="text-muted-foreground">(0-2)</span></Label>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Temperature <span className="text-muted-foreground">(0-2)</span></Label>
             <Input
               type="number"
               value={settings.ai_temperature}
               onChange={(e) => updateSetting('ai_temperature', e.target.value)}
-              className="h-9 text-sm"
+              className="h-8 text-xs"
               min="0"
               max="2"
               step="0.1"
               placeholder="0.2"
             />
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-sm">Max Tokens <span className="text-muted-foreground">(1-65536)</span></Label>
+          <div className="space-y-1">
+            <Label className="text-xs">Max Tokens <span className="text-muted-foreground">(1-65536)</span></Label>
             <Input
               type="number"
               value={settings.ai_max_tokens}
               onChange={(e) => updateSetting('ai_max_tokens', e.target.value)}
-              className="h-9 text-sm"
+              className="h-8 text-xs"
               min="1"
               max="65536"
               step="256"
@@ -223,7 +223,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
           <Button
             size="sm"
             variant="outline"
-            className="h-9 px-3 gap-1.5"
+            className="h-7 gap-1.5 px-2.5 text-xs"
             // 不因本地 apiKey 空而禁用：reveal 未回显(401)时本地虽空，但 test-ai
             // 会从 DB 读真实 key；强制禁用会让无 token 用户连测试都点不动，卡死在
             // 「留空=保留」的循环里。本地有无 key 都允许点，交给服务端兜底。
@@ -234,7 +234,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
             测试连接
           </Button>
           {aiTestResult && (
-            <div className={`flex items-center gap-1.5 text-sm ${aiTestResult.success ? 'text-emerald-600' : 'text-destructive'}`}>
+            <div className={`flex items-center gap-1.5 text-xs ${aiTestResult.success ? 'text-emerald-600' : 'text-destructive'}`}>
               {aiTestResult.success ? (
                 <>
                   <CheckCircle2 className="h-4 w-4" />
@@ -251,13 +251,13 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
         </div>
 
         {settings.ai_provider === 'opencode' && (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             OpenCode 提供免费模型调用，需先申请 API Key。申请地址：
             <a href="https://opencode.ai/auth" target="_blank" rel="noopener noreferrer" className="text-primary underline ml-1">opencode.ai/auth</a>
           </p>
         )}
         {aiTestResult && !aiTestResult.success && aiTestResult.error?.includes('调用次数已用完') && (
-          <p className="text-sm text-amber-600">
+          <p className="text-xs text-amber-600">
             今日调用次数已用完，请稍后重试或切换其他 AI 厂商。
           </p>
         )}

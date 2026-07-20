@@ -32,6 +32,7 @@ export const SETTING_KEYS = {
   PUSH_MIN_RELEVANCE: 'push_min_relevance',
   PUSH_TIME: 'push_time',
   PUBLIC_MIN_SCORE: 'public_min_score',
+  PUBLIC_MIN_RELEVANCE: 'public_min_relevance',
   PUBLIC_HIDE_ADS: 'public_hide_ads',
   PUBLIC_IMPORTANT_RULE: 'public_important_rule',
   PUBLIC_GENERAL_RULE: 'public_general_rule',
@@ -61,6 +62,7 @@ export const SETTING_KEYS = {
 
   AI_WEIGHT_EVENT: 'ai_weight_event',
   AI_WEIGHT_CONTENT: 'ai_weight_content',
+  AI_KEYWORD_MATCH_BONUS: 'ai_keyword_match_bonus',
   AI_CONCURRENCY: 'ai_concurrency',
 
 } as const;
@@ -131,6 +133,7 @@ const definitions: SettingDefinition[] = [
   { key: SETTING_KEYS.PUSH_MIN_RELEVANCE, defaultValue: '70', schema: intRange(0, 100, '最低相关度'), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUSH_TIME, defaultValue: '08:30', schema: pushTimeSchema, sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUBLIC_MIN_SCORE, defaultValue: '70', schema: intRange(0, 100, '公开最低评分'), sensitive: false, exportable: true, frontend: true, seed: true },
+  { key: SETTING_KEYS.PUBLIC_MIN_RELEVANCE, defaultValue: '50', schema: intRange(0, 100, '公开最低相关度'), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUBLIC_HIDE_ADS, defaultValue: 'true', schema: z.enum(['true', 'false']), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUBLIC_IMPORTANT_RULE, defaultValue: 'public', schema: z.enum(['auto', 'public', 'hidden']), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUBLIC_GENERAL_RULE, defaultValue: 'auto', schema: z.enum(['auto', 'public', 'hidden']), sensitive: false, exportable: true, frontend: true, seed: true },
@@ -160,6 +163,7 @@ const definitions: SettingDefinition[] = [
 
   { key: SETTING_KEYS.AI_WEIGHT_EVENT, defaultValue: String(SCORE_WEIGHT_META.event.defaultWeight), schema: intRange(0, 100, '事件权重'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_WEIGHT_CONTENT, defaultValue: String(SCORE_WEIGHT_META.content.defaultWeight), schema: intRange(0, 100, '内容权重'), sensitive: false, exportable: true, frontend: true, seed: false },
+  { key: SETTING_KEYS.AI_KEYWORD_MATCH_BONUS, defaultValue: '5', schema: intRange(0, 20, '关键词命中加分'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_CONCURRENCY, defaultValue: '3', schema: intRange(1, 10, 'AI并发数'), sensitive: false, exportable: true, frontend: false, seed: false },
 
   // Provider 专属配置由 AI_PROVIDERS 契约派生，避免 URL / 默认模型漂移。

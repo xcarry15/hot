@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRuleEventKey, normalizeEventText, overlapCoefficient } from '@/contracts/event-clustering';
+import { buildRuleEventKey, contentShingleSimilarity, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors } from '@/contracts/event-clustering';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
 import { buildAiClusterAuditEvidence, type AiCandidateAudit } from '@/lib/event-clustering-service';
 
@@ -22,11 +22,41 @@ describe('轻量事件聚类规则', () => {
     expect(buildRuleEventKey('标题'.repeat(200))).toHaveLength(160);
   });
 
+  it('转载改写正文仍能形成强内容证据', () => {
+    const left = 'Popeyes与淘宝闪购加速战略合作，首次在中国推出小店模型。'.repeat(20);
+    const right = 'Popeyes联合淘宝闪购深化战略合作，首次在中国探索小店模型。'.repeat(20);
+    expect(contentShingleSimilarity(left, right).overlap).toBeGreaterThan(0.7);
+  });
+
+  it('正文快速召回能识别共享长片段', () => {
+    expect(hasLiteralContentOverlap('开头不同，但是双方共同宣布小店模型将在中国落地。', '另一段文字，双方共同宣布小店模型将在中国落地。')).toBe(true);
+  });
+
+  it('预告与已经发生的结果视为阶段冲突', () => {
+    expect(hasEventPhaseConflict('第三届百货节即将启幕', '第三届百货节启幕，首日销售增长')).toBe(true);
+  });
+
+  it('聚合快讯不会直接自动并入其中一个子事件', () => {
+    expect(isMultiTopicTitle('华莱士开卖下午茶！蜀海供应链南京新仓投运')).toBe(true);
+    expect(isMultiTopicTitle('联商头条：7-11拟入股波兰最大便利店；深圳文和友撤场')).toBe(true);
+  });
+
+  it('单一主题的情绪化标题不会被误判为聚合快讯', () => {
+    expect(isMultiTopicTitle('加码咖啡，发力下午茶！华莱士推出7款果咖')).toBe(false);
+    expect(isMultiTopicTitle('LV也翻车！当品牌维权变成一场舆论自杀')).toBe(false);
+  });
+
+  it('同事件改写保留共享主体锚点，不同门店奖项不共享主体锚点', () => {
+    expect(sharedEventAnchors('十足便利与七鲜小厨合作', '十足便利店引进七鲜小厨专供菜')).toContain('十足');
+    expect(sharedEventAnchors('都江堰邻你超市荣获年度好门店', '永辉超市福州店荣获年度好门店')).toEqual([]);
+  });
+
   it('达到最大重试次数的聚类失败文章不会再次进入批次', () => {
     const now = new Date('2026-07-18T00:00:00Z');
     expect(buildClusterPendingWhere(now)).toEqual({
       fetchStatus: 'fetched',
       eventId: null,
+      technicalIgnoredAt: null,
       AND: [
         { OR: [
           { clusterStatus: 'pending' },
@@ -43,8 +73,8 @@ describe('轻量事件聚类规则', () => {
 
 describe('聚类 AI 候选审计', () => {
   const candidates: AiCandidateAudit[] = [
-    { candidateEventId: 'A', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, titleOverlap: 0.5 }, aiDecision: { sameEvent: false, confidence: 58, reason: '周期不同', eventKey: '拒绝键' } },
-    { candidateEventId: 'B', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, titleOverlap: 0.7 }, aiDecision: { sameEvent: true, confidence: 82, reason: '事项一致', eventKey: '采用键' } },
+    { candidateEventId: 'A', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, titleOverlap: 0.5, contentOverlap: 0.3, contentJaccard: 0.2, daysApart: 1, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌A'] }, aiDecision: { sameEvent: false, confidence: 58, reason: '周期不同', eventKey: '拒绝键' } },
+    { candidateEventId: 'B', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, titleOverlap: 0.7, contentOverlap: 0.8, contentJaccard: 0.6, daysApart: 0, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌B'] }, aiDecision: { sameEvent: true, confidence: 82, reason: '事项一致', eventKey: '采用键' } },
   ];
 
   it('先拒绝 A、再接受 B 时保存全部候选并标记 B', () => {

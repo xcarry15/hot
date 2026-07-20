@@ -45,4 +45,19 @@ describe('buildStep2Prompt', () => {
     const prompt = buildStep2Prompt(custom, '正文');
     expect(prompt).toContain('自定义广告判定');
   });
+
+  it('公共框架明确执行顺序、评分独立性和缺失信息处理', () => {
+    const prompt = buildStep2Prompt(blocks, '正文');
+    expect(prompt).toContain('1. 确定核心主体和事件');
+    expect(prompt).toContain('评分不受本地权重、公开/推送阈值或文风影响');
+    expect(prompt).toContain('<<<ARTICLE>>>');
+    expect(prompt).toContain('不编造事实');
+  });
+
+  it('提高重要人事变动和规模化开关店的事件分', () => {
+    const prompt = buildStep2Prompt(blocks, '正文');
+    expect(prompt).toContain('核心经营高管任免/离职');
+    expect(prompt).toContain('连锁品牌批量开关店');
+    expect(prompt).toContain('普通店长或非核心岗位变动');
+  });
 });

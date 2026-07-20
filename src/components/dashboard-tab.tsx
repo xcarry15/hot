@@ -189,7 +189,7 @@ function TrendCard({
   points: DashboardAnalytics['trend']
 }) {
   return (
-    <Card className="py-0">
+    <Card className="rounded-none py-0 shadow-none">
       <CardContent className="p-2.5">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div>
@@ -216,7 +216,7 @@ function CrawlTimeCard({
   onPageChange,
 }: CrawlTimeCardProps) {
   return (
-    <Card className="py-0">
+    <Card className="rounded-none py-0 shadow-none">
       <CardContent className="p-2.5">
         <div className="mb-1 flex flex-wrap items-center gap-1">
           <div className="mr-2 shrink-0">

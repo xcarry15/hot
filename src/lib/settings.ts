@@ -27,6 +27,7 @@ import {
   SETTING_DEFINITION_MAP,
   SETTING_KEYS,
 } from './settings-catalog';
+import { DEFAULT_PROMPT_SETTINGS } from './prompts';
 import type { WebhookConfig } from '@/contracts/webhook';
 import {
   parseWebhookConfigs,
@@ -38,7 +39,16 @@ import {
 /** 读取单个 Setting 值（不存在时返回配置目录中的默认值） */
 export async function getSetting(key: string): Promise<string> {
   const s = await db.setting.findUnique({ where: { key } });
-  return s?.value ?? getSettingDefinition(key)?.defaultValue ?? '';
+  return resolveSettingValue(key, s?.value);
+}
+
+function resolveSettingValue(key: string, value: string | null | undefined): string {
+  if (key in DEFAULT_PROMPT_SETTINGS) {
+    return value?.trim()
+      ? value
+      : DEFAULT_PROMPT_SETTINGS[key as keyof typeof DEFAULT_PROMPT_SETTINGS];
+  }
+  return value ?? getSettingDefinition(key)?.defaultValue ?? '';
 }
 
 /** 写入或更新单个 Setting */
@@ -56,7 +66,7 @@ export async function readAllSettings(): Promise<Record<string, string>> {
   const map = getSettingDefaults();
   for (const s of rows) {
     if (!SETTING_DEFINITION_MAP.has(s.key)) continue;
-    map[s.key] = s.value;
+    map[s.key] = resolveSettingValue(s.key, s.value);
   }
   return map;
 }

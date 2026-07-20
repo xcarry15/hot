@@ -4,6 +4,7 @@ import { getTagToneClass } from '@/features/article-tag-style'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import type { PublicArticleListItemDto } from '@/contracts/public-articles'
 import { formatPublicTime } from '@/lib/shared/public-date'
+import type { CSSProperties } from 'react'
 
 type PublicArticleMetaItem = {
   label: string
@@ -11,7 +12,13 @@ type PublicArticleMetaItem = {
   className: string
 }
 
-export default function PublicArticleCard({ article }: { article: PublicArticleListItemDto }) {
+export default function PublicArticleCard({
+  article,
+  revealIndex = 0,
+}: {
+  article: PublicArticleListItemDto
+  revealIndex?: number
+}) {
   const tags = parseTags(article.tags)
   const brands = splitBrands(article.brand)
   const effectiveDate = article.publishedAt || article.createdAt
@@ -33,15 +40,18 @@ export default function PublicArticleCard({ article }: { article: PublicArticleL
   const metaGroups = [brandItems, tagItems, categoryItems, originalSourceItems, sourceItems].filter((group) => group.length > 0)
 
   return (
-    <li>
-      <Link href={`/news/${article.id}`} className="group/article grid grid-cols-[4rem_minmax(0,1fr)] gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)] sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-5">
+    <li
+      className="public-article-item public-article-motion"
+      style={{ '--public-reveal-delay': `${Math.min(revealIndex, 7) * 35}ms` } as CSSProperties}
+    >
+      <Link href={`/news/${article.id}`} className="public-article-link group/article grid grid-cols-[4rem_minmax(0,1fr)] gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)] sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-5">
         <time dateTime={effectiveDate} className="pt-5 text-right font-mono text-xs tabular-nums text-[var(--public-muted)]">
           {formatPublicTime(effectiveDate)}
         </time>
 
         <div className="relative border-l border-[var(--public-hairline)] pb-4 pl-4 pt-1 sm:pl-6 sm:pb-5">
-          <span aria-hidden="true" className="absolute left-[-5px] top-5 h-2.5 w-2.5 rounded-full border-2 border-[var(--public-canvas)] bg-[var(--public-primary)] shadow-[0_0_0_1px_var(--public-hairline)]" />
-          <div className="rounded-none border border-transparent bg-transparent px-4 py-4 transition-[background-color,border-color,transform] duration-200 group-hover/article:-translate-y-px group-hover/article:border-[var(--public-hairline-strong)] group-hover/article:bg-[var(--public-surface-soft)] motion-reduce:transition-none motion-reduce:group-hover/article:transform-none sm:px-5 sm:py-5">
+          <span aria-hidden="true" className="public-timeline-marker absolute left-[-5px] top-5 h-2.5 w-2.5 rounded-full border-2 border-[var(--public-canvas)] bg-[var(--public-primary)] shadow-[0_0_0_1px_var(--public-hairline)]" />
+          <div className="public-article-surface rounded-none bg-transparent px-4 py-4 sm:px-5 sm:py-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-y-1 text-xs text-[var(--public-muted)]">
@@ -57,10 +67,10 @@ export default function PublicArticleCard({ article }: { article: PublicArticleL
                 ))}
               </div>
 
-              <h2 className="public-display mt-2 text-xl leading-snug text-[var(--public-ink)] transition-colors group-hover:text-[var(--public-primary)] sm:text-2xl">
+              <h2 className="public-article-title public-display mt-2 text-xl leading-snug text-[var(--public-ink)] sm:text-2xl">
                 {article.title}
               </h2>
-              <p className="mt-2 line-clamp-2 text-sm leading-7 text-[var(--public-body)]">
+              <p className="mt-2 line-clamp-2 text-pretty text-sm leading-7 text-[var(--public-body)]">
                 {article.excerpt || '暂无摘要'}
               </p>
 

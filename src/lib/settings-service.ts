@@ -9,6 +9,8 @@ import { applyScorePolicy, buildScorePolicySnapshot } from '@/lib/score-policy';
 import { parseWebhookConfigs, serializeWebhookConfigsForServer } from '@/contracts/webhook';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { PUBLIC_PUBLICATION_REBUILD_KEYS, rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
+import { DEFAULT_PROMPT_SETTINGS, SCORE_WEIGHT_META } from '@/lib/prompts';
+import { recalculateEventById } from '@/lib/event-service';
 
 const settingsUpdateSchema = z.record(z.string(), z.string());
 
@@ -17,7 +19,11 @@ export async function getSettings() {
   const map = getSettingDefaults({ redactSensitive: true });
   for (const setting of settings) {
     if (!SETTING_DEFINITION_MAP.has(setting.key)) continue;
-    map[setting.key] = SENSITIVE_SETTING_KEYS.has(setting.key) ? '' : setting.value;
+    map[setting.key] = SENSITIVE_SETTING_KEYS.has(setting.key)
+      ? ''
+      : setting.key in DEFAULT_PROMPT_SETTINGS && !setting.value.trim()
+        ? DEFAULT_PROMPT_SETTINGS[setting.key as keyof typeof DEFAULT_PROMPT_SETTINGS]
+        : setting.value;
   }
   return map;
 }
@@ -44,7 +50,11 @@ export async function updateSettings(input: unknown): Promise<
   const parsed = settingsUpdateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: '无效的请求格式', details: parsed.error.issues };
   const normalizedData = Object.fromEntries(Object.entries(parsed.data).map(([key, value]) => (
-    key === SETTING_KEYS.PUSH_TIME && value.startsWith('cron:') ? [key, '08:30'] : [key, value]
+    key === SETTING_KEYS.PUSH_TIME && value.startsWith('cron:')
+      ? [key, '08:30']
+      : !value.trim() && key in DEFAULT_PROMPT_SETTINGS
+        ? [key, DEFAULT_PROMPT_SETTINGS[key as keyof typeof DEFAULT_PROMPT_SETTINGS]]
+        : [key, value]
   )));
   const validationErrors: string[] = [];
   for (const [key, value] of Object.entries(normalizedData)) {
@@ -67,41 +77,68 @@ export async function updateSettings(input: unknown): Promise<
     updates = updates.map(([key, value]) => SENSITIVE_SETTING_KEYS.has(key) && value === '' && existingMap.has(key)
       ? [key, existingMap.get(key)!] : [key, value]);
   }
-  const previousWeights = await db.setting.findMany({
-    where: { key: { in: [SETTING_KEYS.AI_WEIGHT_EVENT, SETTING_KEYS.AI_WEIGHT_CONTENT] } },
+  const scoreSettingKeys = [
+    SETTING_KEYS.AI_WEIGHT_EVENT,
+    SETTING_KEYS.AI_WEIGHT_CONTENT,
+    SETTING_KEYS.AI_KEYWORD_MATCH_BONUS,
+  ];
+  const previousScoreSettings = await db.setting.findMany({
+    where: { key: { in: scoreSettingKeys } },
   });
-  const previousWeightMap = Object.fromEntries(previousWeights.map(x => [x.key, x.value]));
+  const previousScoreMap = Object.fromEntries(previousScoreSettings.map(x => [x.key, x.value]));
   const requestedEventWeight = parsed.data[SETTING_KEYS.AI_WEIGHT_EVENT];
   const requestedContentWeight = parsed.data[SETTING_KEYS.AI_WEIGHT_CONTENT];
-  const effectiveEventWeight = Number(requestedEventWeight ?? previousWeightMap[SETTING_KEYS.AI_WEIGHT_EVENT] ?? 70);
-  const effectiveContentWeight = Number(requestedContentWeight ?? previousWeightMap[SETTING_KEYS.AI_WEIGHT_CONTENT] ?? 30);
+  const requestedKeywordBonus = parsed.data[SETTING_KEYS.AI_KEYWORD_MATCH_BONUS];
+  const effectiveEventWeight = Number(
+    requestedEventWeight
+      ?? previousScoreMap[SETTING_KEYS.AI_WEIGHT_EVENT]
+      ?? SCORE_WEIGHT_META.event.defaultWeight,
+  );
+  const effectiveContentWeight = Number(
+    requestedContentWeight
+      ?? previousScoreMap[SETTING_KEYS.AI_WEIGHT_CONTENT]
+      ?? SCORE_WEIGHT_META.content.defaultWeight,
+  );
+  const effectiveKeywordBonus = Number(
+    requestedKeywordBonus
+      ?? previousScoreMap[SETTING_KEYS.AI_KEYWORD_MATCH_BONUS]
+      ?? 5,
+  );
   if (effectiveEventWeight + effectiveContentWeight !== 100) {
     return { ok: false, error: '设置值校验失败', details: ['评分权重合计必须为 100'] };
   }
-  const weightChanged = updates.some(([key, value]) =>
-    (key === SETTING_KEYS.AI_WEIGHT_EVENT || key === SETTING_KEYS.AI_WEIGHT_CONTENT)
-    && Number(previousWeightMap[key] ?? (key === SETTING_KEYS.AI_WEIGHT_EVENT ? 70 : 30)) !== Number(value)
-  );
-  const publicationNeedsRebuild = weightChanged || updates.some(([key]) => PUBLIC_PUBLICATION_REBUILD_KEYS.has(key));
+  const scorePolicyChanged = updates.some(([key, value]) => {
+    if (!scoreSettingKeys.includes(key)) return false;
+    const fallback = key === SETTING_KEYS.AI_WEIGHT_EVENT
+      ? SCORE_WEIGHT_META.event.defaultWeight
+      : key === SETTING_KEYS.AI_WEIGHT_CONTENT
+        ? SCORE_WEIGHT_META.content.defaultWeight
+        : 5;
+    return Number(previousScoreMap[key] ?? fallback) !== Number(value);
+  });
+  const publicationNeedsRebuild = scorePolicyChanged || updates.some(([key]) => PUBLIC_PUBLICATION_REBUILD_KEYS.has(key));
   const updateMap = Object.fromEntries(updates);
   const nextWeightEvent = Number(updateMap[SETTING_KEYS.AI_WEIGHT_EVENT] ?? effectiveEventWeight);
   const nextWeightContent = Number(updateMap[SETTING_KEYS.AI_WEIGHT_CONTENT] ?? effectiveContentWeight);
+  const nextKeywordBonus = Number(updateMap[SETTING_KEYS.AI_KEYWORD_MATCH_BONUS] ?? effectiveKeywordBonus);
 
   // 设置与历史文章重算在同一事务提交，避免“权重已保存、文章只更新一部分”。
-  const scoreRecomputed = weightChanged ? await db.$transaction(async tx => {
+  const scoreRecomputed = scorePolicyChanged ? await db.$transaction(async tx => {
     for (const [key, value] of updates) {
       await tx.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
     }
     let recomputed = 0;
-    if (weightChanged) {
+    const affectedEventIds = new Set<string>();
+    if (scorePolicyChanged) {
       const articles = await tx.article.findMany({
         where: { eventScore: { not: null }, contentScore: { not: null } },
-        select: { id: true, eventScore: true, contentScore: true, adProbability: true, isAd: true, manualOverrides: true },
+        select: { id: true, eventId: true, eventScore: true, contentScore: true, adProbability: true, isAd: true, keywordMatched: true },
       });
       for (const article of articles) {
         const result = applyScorePolicy(
           article.eventScore!, article.contentScore!, article.adProbability ?? (article.isAd ? 100 : 0),
           article.isAd, nextWeightEvent, nextWeightContent,
+          article.keywordMatched, nextKeywordBonus,
         );
         await tx.article.update({
           where: { id: article.id },
@@ -109,22 +146,29 @@ export async function updateSettings(input: unknown): Promise<
             score: result.finalScore,
             rawScore: result.rawScore,
             scorePolicyVersion: result.version,
-            scorePolicySnapshot: buildScorePolicySnapshot(nextWeightEvent, nextWeightContent),
+            scorePolicySnapshot: buildScorePolicySnapshot(
+              nextWeightEvent,
+              nextWeightContent,
+              nextKeywordBonus,
+              article.keywordMatched,
+            ),
           },
         });
+        if (article.eventId) affectedEventIds.add(article.eventId);
         recomputed++;
       }
     }
     if (publicationNeedsRebuild) {
-      await rebuildPublicPublicationSnapshot(tx, { contentChanged: weightChanged });
+      await rebuildPublicPublicationSnapshot(tx, { contentChanged: scorePolicyChanged });
     }
-    return recomputed;
+    return { recomputed, eventIds: [...affectedEventIds] };
   }, { maxWait: 10_000, timeout: 120_000 }) : await db.$transaction(async tx => {
     for (const [key, value] of updates) await tx.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
     if (publicationNeedsRebuild) await rebuildPublicPublicationSnapshot(tx, { contentChanged: false });
-    return 0;
+    return { recomputed: 0, eventIds: [] as string[] };
   }, { maxWait: 10_000, timeout: 120_000 });
+  for (const eventId of scoreRecomputed.eventIds) await recalculateEventById(eventId);
   invalidateAISettingsCache();
   invalidatePublicArticleCache();
-  return { ok: true, success: true, scoreRecomputed, publicationRebuilt: publicationNeedsRebuild };
+  return { ok: true, success: true, scoreRecomputed: scoreRecomputed.recomputed, publicationRebuilt: publicationNeedsRebuild };
 }

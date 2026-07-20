@@ -115,9 +115,9 @@ export default function PublicSharePoster(props: Props) {
 
           <p className="mt-4 text-center text-xs text-[#776b61]">保存图片、扫描二维码或复制链接即可转发</p>
           <div className="mx-auto mt-5 grid max-w-[390px] grid-cols-3 gap-2">
-            <button type="button" disabled={saving || !qrUrl} onClick={() => void savePoster()} className="inline-flex h-11 items-center justify-center gap-1.5 bg-[var(--public-primary)] px-2 text-sm font-medium text-white hover:bg-[var(--public-primary-active)] disabled:opacity-40">{saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{saving ? '保存中' : '保存图片'}</button>
-            <button type="button" onClick={() => void copyLink()} className="inline-flex h-11 items-center justify-center gap-1.5 border border-[#cbbbaf] bg-[#f5efe8] px-2 text-sm font-medium text-[#51473f] hover:bg-[#fffaf4]">{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? '已复制' : '复制链接'}</button>
-            <button type="button" onClick={() => void systemShare()} className="inline-flex h-11 items-center justify-center gap-1.5 bg-[#40372f] px-2 text-sm font-medium text-white hover:bg-[#55483e]"><Share2 className="h-4 w-4" />分享</button>
+            <button type="button" disabled={saving || !qrUrl} onClick={() => void savePoster()} className="public-pressable inline-flex h-11 items-center justify-center gap-1.5 bg-[var(--public-primary)] px-2 text-sm font-medium text-white transition-colors hover:bg-[var(--public-primary-active)] disabled:opacity-40">{saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{saving ? '保存中' : '保存图片'}</button>
+            <button type="button" onClick={() => void copyLink()} className="public-pressable inline-flex h-11 items-center justify-center gap-1.5 border border-[#cbbbaf] bg-[#f5efe8] px-2 text-sm font-medium text-[#51473f] transition-colors hover:bg-[#fffaf4]">{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? '已复制' : '复制链接'}</button>
+            <button type="button" onClick={() => void systemShare()} className="public-pressable inline-flex h-11 items-center justify-center gap-1.5 bg-[#40372f] px-2 text-sm font-medium text-white transition-colors hover:bg-[#55483e]"><Share2 className="h-4 w-4" />分享</button>
           </div>
         </div>
       </DialogContent>

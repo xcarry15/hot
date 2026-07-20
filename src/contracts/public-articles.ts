@@ -72,7 +72,7 @@ export interface PublicArticleListResponseDto {
   groups: PublicArticleDateGroupDto[];
   displayedArticleCount: number;
   displayedDateCount: number;
-  nextDate: string | null;
+  nextCursor: string | null;
   hasMore: boolean;
 }
 

@@ -221,17 +221,17 @@ export default function DataTab() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2 pt-2">
       {/* 配置导入/导出 */}
       <Card className="py-0">
-        <CardContent className="p-4 space-y-2">
-          <span className="text-sm font-semibold">配置导入/导出</span>
+        <CardContent className="space-y-2 p-3">
+          <div className="border-b pb-2 text-sm font-semibold">配置导入/导出</div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={handleExport} disabled={exporting} className="h-8 px-3 gap-1.5 text-xs">
+            <Button size="sm" variant="outline" onClick={handleExport} disabled={exporting} className="h-7 gap-1.5 px-2.5 text-xs">
               {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
               导出配置
             </Button>
-            <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importing} className="h-8 px-3 gap-1.5 text-xs">
+            <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importing} className="h-7 gap-1.5 px-2.5 text-xs">
               {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
               导入配置
             </Button>
@@ -243,8 +243,8 @@ export default function DataTab() {
 
       {/* 数据清理 */}
       <Card className="py-0">
-        <CardContent className="p-4 space-y-3">
-          <div className="flex items-center justify-between">
+        <CardContent className="space-y-2.5 p-3">
+          <div className="flex items-center justify-between border-b pb-2">
             <div className="flex items-center gap-2">
               <Database className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-semibold">数据清理</span>
@@ -264,7 +264,7 @@ export default function DataTab() {
               <FileText className="h-3.5 w-3.5" />
               文章
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
               <CleanupButton loading={cleanupLoading === 'low-quality'} onClick={handleDeleteLowQuality} label="低质量文章" count={cleanupStats ? cleanupStats.articlesLowQuality : null} unit="篇" />
               <CleanupButton loading={cleanupLoading === 'pushed-articles'} onClick={() => executeCleanup('pushed-articles', '清理已推送文章')} label="已推送文章" count={cleanupStats ? cleanupStats.articlesPushed : null} unit="篇" />
               <CleanupButton loading={cleanupLoading === 'reset-ai'} onClick={() => executeCleanup('reset-ai', '重置AI状态')} label="重置AI状态" icon={<RefreshCcw className="h-3.5 w-3.5" />} customLabel={cleanupStats ? `${cleanupStats.articlesTotal - cleanupStats.articlesPending} 篇已处理` : null} />
@@ -277,14 +277,14 @@ export default function DataTab() {
               <Database className="h-3.5 w-3.5" />
               日志
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
               <CleanupButton loading={cleanupLoading === 'dedup-logs'} onClick={() => executeCleanup('dedup-logs', '清理去重日志')} label="去重日志" count={cleanupStats ? cleanupStats.dedupLogs : null} unit="条" />
               <CleanupButton loading={cleanupLoading === 'fetch-logs'} onClick={() => executeCleanup('fetch-logs', '清理抓取日志')} label="抓取日志" count={cleanupStats ? cleanupStats.fetchLogs : null} unit="条" />
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-dashed">
-            <Button size="sm" variant="outline" disabled={vacuuming} onClick={handleVacuum} className="gap-1.5 h-8 px-3 text-xs shrink-0">
+            <Button size="sm" variant="outline" disabled={vacuuming} onClick={handleVacuum} className="h-7 shrink-0 gap-1.5 px-2.5 text-xs">
               {vacuuming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Shrink className="h-3.5 w-3.5" />}
               压缩数据库
             </Button>
@@ -292,7 +292,7 @@ export default function DataTab() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-dashed">
-            <Button size="sm" variant="destructive" disabled={deleteAllLoading} onClick={() => setDeleteAllOpen(true)} className="gap-1.5 h-8 px-3 text-xs shrink-0">
+            <Button size="sm" variant="destructive" disabled={deleteAllLoading} onClick={() => setDeleteAllOpen(true)} className="h-7 shrink-0 gap-1.5 px-2.5 text-xs">
               {deleteAllLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
               删除所有文章
             </Button>
@@ -300,7 +300,7 @@ export default function DataTab() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-dashed">
-            <Button size="sm" variant="destructive" disabled={purgeAllLoading} onClick={() => setPurgeAllOpen(true)} className="gap-1.5 h-8 px-3 text-xs shrink-0">
+            <Button size="sm" variant="destructive" disabled={purgeAllLoading} onClick={() => setPurgeAllOpen(true)} className="h-7 shrink-0 gap-1.5 px-2.5 text-xs">
               {purgeAllLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
               一键清空所有数据
             </Button>
@@ -400,7 +400,7 @@ function CleanupButton({ loading, onClick, label, count, unit, icon, customLabel
         variant="outline"
         disabled={loading}
         onClick={onClick}
-        className="gap-1.5 h-8 px-3 text-xs shrink-0"
+        className="h-7 shrink-0 gap-1.5 px-2.5 text-xs"
       >
         {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : (icon ?? <Trash2 className="h-3.5 w-3.5" />)}
         {label}

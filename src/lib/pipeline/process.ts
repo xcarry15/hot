@@ -13,7 +13,7 @@
  *     · repair 只处理近 7 天 fetched 且有 rawContent 的文章
  */
 import { db } from '@/lib/db';
-import { matchKeyword } from '@/lib/filter';
+import { evaluateKeywordMatch, matchIndustryTitleSignal } from '@/lib/filter';
 import { fetchArticleDetail } from '@/lib/detail-fetcher';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
 import { assertNotAborted } from '@/lib/worker-stop';
@@ -92,8 +92,17 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
           // 子串命中即通过。
           try {
             const text = `${article.title} ${content.slice(0, 1000)}`;
-            const matched = await matchKeyword(text);
-            if (!matched) {
+            // 品牌白名单命中，或标题本身已是明确的餐饮/零售业态事件，均保留。
+            // 便利店、超市、餐厅等行业报道不应因未提及已知品牌而在 AI 前被误删。
+            const keywordMatch = await evaluateKeywordMatch(text);
+            const retained = !keywordMatch.configured
+              || keywordMatch.matched
+              || matchIndustryTitleSignal(article.title);
+            await db.article.update({
+              where: { id: article.id },
+              data: { keywordMatched: keywordMatch.matched },
+            });
+            if (!retained) {
               try {
                 await recordKeywordCandidates(article.title);
               } catch (candidateError) {

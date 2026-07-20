@@ -246,19 +246,19 @@ export function SourceManagement() {
   return (
     <div className="flex flex-col h-full">
       {/* Top Bar */}
-      <div className="p-2 border-b space-y-2">
+      <div className="space-y-1.5 border-b p-2">
         <div className="flex flex-wrap items-center gap-2">
           <Input
             placeholder="搜索..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 w-40 text-xs"
+            className="h-7 w-40 text-xs"
           />
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-8 w-[88px] text-xs">
+            <SelectTrigger className="h-7 w-[88px] text-xs">
               <SelectValue placeholder="状态" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部</SelectItem>
               <SelectItem value="normal">正常</SelectItem>
               <SelectItem value="warning">警告</SelectItem>
@@ -266,7 +266,7 @@ export function SourceManagement() {
               <SelectItem value="disabled">禁用</SelectItem>
             </SelectContent>
           </Select>
-          <Button size="sm" onClick={openAddDialog} className="gap-1 h-8 px-2.5 text-xs">
+          <Button size="sm" onClick={openAddDialog} className="h-7 gap-1 px-2.5 text-xs">
             <Plus className="h-3.5 w-3.5" />
             添加
           </Button>
@@ -275,7 +275,7 @@ export function SourceManagement() {
             variant="outline"
             onClick={() => setBatchToggleTarget(true)}
             disabled={batchToggling || sources.length === 0 || sources.every(s => s.enabled)}
-            className="gap-1 h-8 px-2 text-xs"
+            className="h-7 gap-1 px-2 text-xs"
             title="开启所有数据源"
           >
             {batchToggling && batchToggleTarget === true ? <Loader2 className="h-3 w-3 animate-spin" /> : <Power className="h-3 w-3" />}
@@ -286,7 +286,7 @@ export function SourceManagement() {
             variant="outline"
             onClick={() => setBatchToggleTarget(false)}
             disabled={batchToggling || sources.length === 0 || sources.every(s => !s.enabled)}
-            className="gap-1 h-8 px-2 text-xs"
+            className="h-7 gap-1 px-2 text-xs"
             title="停用所有数据源"
           >
             {batchToggling && batchToggleTarget === false ? <Loader2 className="h-3 w-3 animate-spin" /> : <PowerOff className="h-3 w-3" />}
@@ -300,9 +300,9 @@ export function SourceManagement() {
         {filteredSources.length === 0 ? (
           <EmptyData message="暂无数据源" />
         ) : (
-          <div className="p-2 space-y-0.5">
+          <div className="space-y-px p-2">
             {filteredSources.map((source) => (
-              <div key={source.id} className="border rounded-md px-2 py-1.5 text-xs flex items-center gap-2">
+              <div key={source.id} className="flex flex-wrap items-center gap-2 border px-2 py-1 text-xs">
                 <button
                   className="shrink-0"
                   onClick={() => setExpandedErrors(expandedErrors === source.id ? null : source.id)}
@@ -315,13 +315,13 @@ export function SourceManagement() {
                 </button>
 
                 {/* Name & Type */}
-                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <div className="flex min-w-0 flex-1 items-center gap-1.5">
                   <span className="font-medium truncate">{source.name}</span>
                   <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 shrink-0">{source.type}</Badge>
                 </div>
 
                 {/* Stats */}
-                <div className="hidden lg:flex items-center gap-2 shrink-0 text-muted-foreground">
+                <div className="hidden shrink-0 items-center gap-2 text-muted-foreground lg:flex">
                   <span>{source.articleCount}篇</span>
                   <span>{formatRelativeTime(source.lastFetchedAt)}</span>
                   {source.consecutiveFailures > 0 && (
@@ -336,7 +336,7 @@ export function SourceManagement() {
                 />
 
                 {/* Actions */}
-                <div className="flex items-center gap-0.5 shrink-0">
+                <div className="flex shrink-0 items-center gap-0.5">
                   <Button
                     size="sm"
                     variant="ghost"
@@ -386,7 +386,7 @@ export function SourceManagement() {
 
                 {/* Expanded Errors */}
                 {expandedErrors === source.id && source.recentErrors.length > 0 && (
-                  <div className="pl-6 border-t mt-1.5 pt-1.5 space-y-0.5">
+                  <div className="w-full space-y-0.5 border-t pl-6 pt-1.5">
                     {source.recentErrors.map((err, i) => (
                       <div key={i} className="text-[10px] text-red-500 flex items-start gap-1">
                         <XCircle className="h-2.5 w-2.5 shrink-0 mt-0.5" />
@@ -413,15 +413,15 @@ export function SourceManagement() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-sm">名称 *</Label>
-                <Input value={formName} onChange={(e) => setFormName(e.target.value)} className="h-9 text-sm" placeholder="数据源名称" />
+                <Input value={formName} onChange={(e) => setFormName(e.target.value)} className="h-8 text-xs" placeholder="数据源名称" />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-sm">类型</Label>
                 <Select value={formType} onValueChange={(v) => { setFormType(v); setFormParserConfig(DEFAULT_PARSER_CONFIGS[v] || '{}') }}>
-                  <SelectTrigger className="h-9 text-sm">
+                  <SelectTrigger className="h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="rounded-none shadow-sm">
                     <SelectItem value="html">HTML</SelectItem>
                     <SelectItem value="rss">RSS</SelectItem>
                     <SelectItem value="websearch">网页搜索</SelectItem>
@@ -432,7 +432,7 @@ export function SourceManagement() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-sm">URL *</Label>
-              <Input value={formUrl} onChange={(e) => setFormUrl(e.target.value)} className="h-9 text-sm" placeholder="https://..." />
+              <Input value={formUrl} onChange={(e) => setFormUrl(e.target.value)} className="h-8 text-xs" placeholder="https://..." />
             </div>
             <div className="space-y-1.5">
               <Label className="text-sm">解析配置 (JSON)</Label>
@@ -453,7 +453,7 @@ export function SourceManagement() {
 
             {/* Test Result */}
             {testResult && (
-              <div className={`border rounded-xl p-3 ${testResult.success ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'}`}>
+              <div className={`border p-3 ${testResult.success ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'}`}>
                 <div className="flex items-center gap-1.5 text-sm font-medium mb-2">
                   {testResult.success ? (
                     <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> 测试成功 - {testResult.items.length} 条结果</>
@@ -465,7 +465,7 @@ export function SourceManagement() {
                 {testResult.items.length > 0 && (
                   <div className="mt-1 space-y-1 max-h-32 overflow-y-auto">
                     {testResult.items.map((item, i) => (
-                      <div key={i} className="text-sm bg-white/60 rounded-md px-2 py-1">
+                      <div key={i} className="bg-white/60 px-2 py-1 text-sm">
                         <div className="font-medium truncate">{item.title}</div>
                         {item.summary && <div className="text-muted-foreground truncate">{item.summary}</div>}
                       </div>
@@ -495,7 +495,7 @@ export function SourceManagement() {
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label className="text-sm">URL</Label>
-              <Input value={formUrl} onChange={(e) => setFormUrl(e.target.value)} className="h-9 text-sm" />
+              <Input value={formUrl} onChange={(e) => setFormUrl(e.target.value)} className="h-8 text-xs" />
             </div>
             <Button size="sm" onClick={async () => {
               setTesting(true)
@@ -517,12 +517,12 @@ export function SourceManagement() {
               开始测试
             </Button>
             {testResult && (
-              <div className={`border rounded-xl p-3 text-sm ${testResult.success ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'}`}>
+              <div className={`border p-3 text-sm ${testResult.success ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'}`}>
                 {testResult.success ? (
                   <div className="space-y-1">
                     <div className="font-medium text-emerald-700">发现 {testResult.items.length} 条内容</div>
                     {testResult.items.map((item, i) => (
-                      <div key={i} className="truncate bg-white/60 rounded-md px-2 py-1">{item.title}</div>
+                      <div key={i} className="truncate bg-white/60 px-2 py-1">{item.title}</div>
                     ))}
                   </div>
                 ) : (

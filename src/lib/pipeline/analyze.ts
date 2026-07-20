@@ -71,6 +71,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
       tags: true,
       keyPoints: true,
       score: true,
+      keywordMatched: true,
       eventScore: true,
       contentScore: true,
       rawScore: true,

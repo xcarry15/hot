@@ -5,6 +5,7 @@ import { invalidatePublicArticleCache } from '@/lib/public-article-cache'
 import { getPublicDateKey } from '@/lib/shared/public-date'
 
 const PUBLIC_MIN_SCORE_KEY = SETTING_KEYS.PUBLIC_MIN_SCORE
+const PUBLIC_MIN_RELEVANCE_KEY = SETTING_KEYS.PUBLIC_MIN_RELEVANCE
 const PUBLIC_HIDE_ADS_KEY = SETTING_KEYS.PUBLIC_HIDE_ADS
 
 export const PUBLIC_PUBLICATION_STATUS = {
@@ -15,6 +16,7 @@ export const PUBLIC_PUBLICATION_STATUS = {
 
 export const PUBLIC_PUBLICATION_REBUILD_KEYS: ReadonlySet<string> = new Set([
   PUBLIC_MIN_SCORE_KEY,
+  PUBLIC_MIN_RELEVANCE_KEY,
   PUBLIC_HIDE_ADS_KEY,
 ])
 
@@ -22,6 +24,7 @@ export type PublicPublicationDb = Pick<Prisma.TransactionClient, 'article' | 'ev
 
 type PublicPublicationConfig = {
   minScore: number
+  minRelevance: number
   hideAds: boolean
 }
 
@@ -31,6 +34,7 @@ type PublicPublicationCandidate = {
   clusterStatus: string
   aiStatus: string
   score: number
+  relevance: number
   isAd: boolean
   publicOverride: string
   publicStatus: string
@@ -45,13 +49,16 @@ type PublicPublicationCandidate = {
 }
 
 async function getPublicPublicationConfig(client: PublicPublicationDb = db): Promise<PublicPublicationConfig> {
-  const [minScore, hideAds] = await Promise.all([
+  const [minScore, minRelevance, hideAds] = await Promise.all([
     client.setting.findUnique({ where: { key: PUBLIC_MIN_SCORE_KEY }, select: { value: true } }),
+    client.setting.findUnique({ where: { key: PUBLIC_MIN_RELEVANCE_KEY }, select: { value: true } }),
     client.setting.findUnique({ where: { key: PUBLIC_HIDE_ADS_KEY }, select: { value: true } }),
   ])
   const parsedMinScore = Number(minScore?.value ?? 70)
+  const parsedMinRelevance = Number(minRelevance?.value ?? 50)
   return {
     minScore: Number.isFinite(parsedMinScore) ? Math.min(100, Math.max(0, Math.round(parsedMinScore))) : 70,
+    minRelevance: Number.isFinite(parsedMinRelevance) ? Math.min(100, Math.max(0, Math.round(parsedMinRelevance))) : 50,
     hideAds: hideAds?.value !== 'false',
   }
 }
@@ -62,6 +69,7 @@ function getRevokeReason(article: PublicPublicationCandidate, config: PublicPubl
   if (article.source.deletedAt || !article.source.publicEnabled) return 'source-disabled'
   if (article.publicOverride === 'hidden') return 'manual-hidden'
   if (article.publicOverride === 'auto' && article.score < config.minScore) return 'score-below-threshold'
+  if (article.publicOverride === 'auto' && article.relevance < config.minRelevance) return 'relevance-below-threshold'
   if (config.hideAds && article.publicOverride !== 'public' && article.isAd) return 'ad-hidden'
   return 'not-publicly-eligible'
 }
@@ -72,6 +80,7 @@ function isPubliclyEligible(article: PublicPublicationCandidate, config: PublicP
   if (article.source.deletedAt || !article.source.publicEnabled) return false
   if (article.publicOverride !== 'public' && article.publicOverride !== 'auto') return false
   if (article.publicOverride === 'auto' && article.score < config.minScore) return false
+  if (article.publicOverride === 'auto' && article.relevance < config.minRelevance) return false
   if (config.hideAds && article.publicOverride !== 'public' && article.isAd) return false
   return true
 }
@@ -145,6 +154,7 @@ const publicationSelect = {
   clusterStatus: true,
   aiStatus: true,
   score: true,
+  relevance: true,
   isAd: true,
   publicOverride: true,
   publicStatus: true,

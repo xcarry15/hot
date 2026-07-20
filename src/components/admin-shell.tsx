@@ -5,22 +5,18 @@ import type { ComponentType } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { useTheme } from '@/components/theme-provider'
-import { Activity, ExternalLink, Inbox, Settings, Sun, Moon } from 'lucide-react'
+import { Activity, ExternalLink, Settings, Sun, Moon } from 'lucide-react'
 import { URL_PARAM_DETAIL, URL_PARAM_TAB } from '@/components/crawl-log/constants'
 
-type TabKey = 'articles' | 'crawl-log' | 'settings'
+type TabKey = 'crawl-log' | 'settings'
 
 function AdminPageLoading() {
   return <div className="h-full animate-pulse bg-muted/20" aria-label="页面加载中" />
 }
 
-const loadIntelligenceInbox = () => import('@/components/intelligence-inbox')
 const loadCrawlLog = () => import('@/components/crawl-log-tab')
 const loadSettings = () => import('@/components/settings-tab')
 
-const IntelligenceInbox = dynamic(loadIntelligenceInbox, {
-  loading: AdminPageLoading,
-})
 const CrawlLogTab = dynamic(loadCrawlLog, {
   loading: AdminPageLoading,
 })
@@ -29,7 +25,6 @@ const SettingsTab = dynamic(loadSettings, {
 })
 
 const tabLoaders: Record<TabKey, () => Promise<unknown>> = {
-  articles: loadIntelligenceInbox,
   'crawl-log': loadCrawlLog,
   settings: loadSettings,
 }
@@ -41,17 +36,16 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { key: 'crawl-log', label: '任务中心', icon: Activity },
-  { key: 'articles', label: '内容管理', icon: Inbox },
+  { key: 'crawl-log', label: '工作台', icon: Activity },
   { key: 'settings', label: '设置', icon: Settings },
 ]
 
 function readInitialTab(): TabKey {
-  if (typeof window === 'undefined') return 'articles'
+  if (typeof window === 'undefined') return 'crawl-log'
   const params = new URLSearchParams(window.location.search)
   const tab = params.get(URL_PARAM_TAB)
-  if (tab === 'crawl-log' || tab === 'settings' || tab === 'articles') return tab
-  return params.has(URL_PARAM_DETAIL) ? 'crawl-log' : 'articles'
+  if (tab === 'settings' && !params.has('articleId') && !params.has(URL_PARAM_DETAIL)) return 'settings'
+  return 'crawl-log'
 }
 
 function AdminContent({ initialTab }: { initialTab: TabKey }) {
@@ -60,7 +54,7 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
   const { resolvedTheme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
-  const [queueCounts, setQueueCounts] = useState({ articles: 0, crawl: 0 })
+  const [queueCounts, setQueueCounts] = useState({ human: 0, technical: 0 })
   const lastQueueFetchAt = useRef(0)
 
   useEffect(() => {
@@ -83,7 +77,7 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
     lastQueueFetchAt.current = Date.now()
     fetch('/api/admin/work-queue-summary')
       .then((response) => response.ok ? response.json() : null)
-      .then((data) => data && setQueueCounts({ articles: data.human.total, crawl: data.technical.total }))
+      .then((data) => data && setQueueCounts({ human: data.human.total, technical: data.technical.total }))
       .catch(() => undefined)
   }, [])
 
@@ -104,13 +98,11 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
     refreshQueueCounts()
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
-    if (tab === 'articles') url.searchParams.delete(URL_PARAM_TAB)
+    if (tab === 'crawl-log') url.searchParams.delete(URL_PARAM_TAB)
     else url.searchParams.set(URL_PARAM_TAB, tab)
-    if (tab !== 'articles') {
+    if (tab !== 'crawl-log') {
       url.searchParams.delete('articleId')
       url.searchParams.delete('panel')
-    }
-    if (tab !== 'crawl-log') {
       url.searchParams.delete(URL_PARAM_DETAIL)
       url.searchParams.delete('detailKind')
     }
@@ -156,7 +148,7 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
                   >
                     <item.icon className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
                     <span>{item.label}</span>
-                    {(item.key === 'articles' ? queueCounts.articles : item.key === 'crawl-log' ? queueCounts.crawl : 0) > 0 && <span className="ml-auto text-[10px] tabular-nums text-amber-700">{item.key === 'articles' ? queueCounts.articles : queueCounts.crawl}</span>}
+                    {item.key === 'crawl-log' && (queueCounts.human + queueCounts.technical) > 0 && <span className="ml-auto text-[10px] tabular-nums text-amber-700">{queueCounts.human + queueCounts.technical}</span>}
                   </button>
                 )
               })}
@@ -187,11 +179,6 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
 
         <main className="flex-1 flex flex-col overflow-hidden min-h-0 bg-background">
           <div className="flex-1 overflow-hidden min-h-0 pb-16 sm:pb-0">
-            {visitedTabs.has('articles') && (
-              <section className={activeTab === 'articles' ? 'h-full' : 'hidden'} aria-hidden={activeTab !== 'articles'}>
-                <IntelligenceInbox active={activeTab === 'articles'} />
-              </section>
-            )}
             {visitedTabs.has('crawl-log') && (
               <section className={activeTab === 'crawl-log' ? 'h-full' : 'hidden'} aria-hidden={activeTab !== 'crawl-log'}>
                 <CrawlLogTab active={activeTab === 'crawl-log'} />
@@ -227,6 +214,6 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
   )
 }
 
-export default function AdminShell({ initialTab = 'articles' }: { initialTab?: TabKey }) {
+export default function AdminShell({ initialTab = 'crawl-log' }: { initialTab?: TabKey }) {
   return <AdminContent initialTab={initialTab} />
 }

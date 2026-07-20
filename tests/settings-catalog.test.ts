@@ -36,6 +36,7 @@ describe('settings catalog', () => {
     const frontendDefaults = getFrontendSettingDefaults();
 
     expect(runtimeDefaults.push_mode).toBe('realtime');
+    expect(runtimeDefaults.ai_keyword_match_bonus).toBe('5');
     expect(runtimeDefaults.ai_block_ad).toContain('is_ad');
     expect(frontendDefaults.ai_block_ad).toBe('');
     expect(frontendDefaults.crawl_interval_min).toBe('120');

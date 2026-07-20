@@ -7,6 +7,9 @@ const mocks = db as unknown as {
     findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
+  keyword: {
+    findMany: ReturnType<typeof vi.fn>;
+  };
 };
 
 vi.mock('@/lib/detail-fetcher', () => ({
@@ -21,6 +24,7 @@ describe('article-refetch-service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.article.update.mockResolvedValue({});
+    mocks.keyword.findMany.mockResolvedValue([]);
   });
 
   it('文章不存在时返回 null，不执行写入', async () => {
@@ -42,5 +46,9 @@ describe('article-refetch-service', () => {
         event: { disconnect: true },
       }),
     }));
+    expect(mocks.article.update).toHaveBeenLastCalledWith({
+      where: { id: 'a1' },
+      data: { keywordMatched: false },
+    });
   });
 });

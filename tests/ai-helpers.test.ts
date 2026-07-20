@@ -13,13 +13,17 @@ import { DEFAULT_SYSTEM_PROMPT, JSON_SUFFIX } from '@/lib/prompts';
 
 describe('buildSystemContent', () => {
   it('空自定义 system prompt 回退到默认', () => {
-    expect(buildSystemContent('')).toBe(DEFAULT_SYSTEM_PROMPT + JSON_SUFFIX);
-    expect(buildSystemContent('   ')).toBe(DEFAULT_SYSTEM_PROMPT + JSON_SUFFIX);
+    expect(buildSystemContent('')).toContain(DEFAULT_SYSTEM_PROMPT);
+    expect(buildSystemContent('   ')).toContain(DEFAULT_SYSTEM_PROMPT);
+    expect(buildSystemContent('')).toContain('硬性证据边界');
+    expect(buildSystemContent('').endsWith(JSON_SUFFIX)).toBe(true);
   });
 
-  it('非空自定义 system prompt 追加 JSON_SUFFIX', () => {
+  it('非空自定义 system prompt 仍追加证据边界和 JSON_SUFFIX', () => {
     const custom = '你是营销专家';
-    expect(buildSystemContent(custom)).toBe(custom + JSON_SUFFIX);
+    expect(buildSystemContent(custom)).toContain(custom);
+    expect(buildSystemContent(custom)).toContain('不得把推测、动机或道德判断写成事实');
+    expect(buildSystemContent(custom).endsWith(JSON_SUFFIX)).toBe(true);
   });
 });
 

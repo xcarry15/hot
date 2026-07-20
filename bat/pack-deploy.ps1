@@ -37,17 +37,17 @@ $ExcludePatterns = @(
     ".turbo",
     "coverage",
     ".git",
+    ".agents",
+    ".codex",
     ".claude",
     ".z-ai-config",
+    "design-previews",
     ".DS_Store",
     "nul",
     "next-env.d.ts",
     "worklog.md",
-    "CHANGELOG.md",
-    "README.md",
-    "AGENTS.md",
-    "DESIGN.md",
-    "CLAUDE.md",
+    # 根目录 Markdown 由下方路径级规则排除；bat/ 内部署文档继续保留
+    "config.toml",
     # bat/ 部署文档保留
     "docs",
     "skills",
@@ -56,6 +56,7 @@ $ExcludePatterns = @(
     "sources-check.json",
     "sources.json",
     ".env",
+    ".env.*",
     "db",
     "*.pem",
     "*.log",
@@ -65,15 +66,15 @@ $ExcludePatterns = @(
     "*.db-wal",
     "*.db-shm",
     "*.db.bak.*",
+    # 仅根目录和 bat/ 下的旧部署 zip 由下方路径级规则排除
     # scripts/ 整体不再排除;只按文件名精确排除一次性 dev 脚本,
     # 保留 db-baseline.ts(部署存量库首次切换时必需)。
     "scripts/backfill-prompt-defaults.ts",
     "scripts/cleanup-legacy-settings.ts",
-    # bat/ 目录里只排除打包工具脚本与已生成的 zip，保留部署文档
+    # bat/ 目录里只排除打包工具脚本，部署/Nginx 文档继续随包发布
     "bat/run.bat",
     "bat/pack-deploy.ps1",
-    "bat/启动.vbs",
-    "bat/*.zip"
+    "bat/启动.vbs"
 )
 
 function Test-ShouldExclude($relativePath, $patterns) {
@@ -82,11 +83,13 @@ function Test-ShouldExclude($relativePath, $patterns) {
     # 拆成路径段数组，便于按目录名匹配
     $segments = $p -split '\\'
     $leaf = $segments[-1]
+    if ($segments.Count -eq 1 -and $leaf -like '*.md') { return $true }
+    if (($segments.Count -eq 1 -or $segments[0].Equals('bat', [System.StringComparison]::OrdinalIgnoreCase)) -and $leaf -like '*.zip') { return $true }
     foreach ($exc in $patterns) {
         $e = $exc -replace '/', '\'
         if ($e.Contains('*')) {
             if ($e.Contains('\')) {
-                # 含路径分隔符的 glob，如 "bat/*.zip"：对完整相对路径做 -like
+                # 含路径分隔符的 glob：对完整相对路径做 -like
                 if ($p -like $e) { return $true }
             } else {
                 # 纯文件名 glob，如 "*.pem"：仅匹配 leaf，避免命中目录
@@ -162,55 +165,15 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Deploy Steps" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  0. Upload ZIP to server /www/wwwroot/hot.kfxz.cn/" -ForegroundColor Yellow
-Write-Host "     cd /www/wwwroot/hot.kfxz.cn && unzip -o <zip>" -ForegroundColor Yellow
-Write-Host "     npm install" -ForegroundColor Yellow
+Write-Host "  1. 将 ZIP 上传到 /tmp 等应用目录之外的位置。" -ForegroundColor Yellow
+Write-Host "  2. 存量服务器先停止 h2-hot2，并同时备份 custom.db、-wal、-shm。" -ForegroundColor Yellow
+Write-Host "  3. 解压到临时目录后用 rsync --delete 收敛同步；保留 .env*、db/、node_modules/。" -ForegroundColor Yellow
+Write-Host "     不要直接在应用目录执行 unzip -o，避免已删除的旧代码残留。" -ForegroundColor Red
+Write-Host "  4. 顺序执行 migrate:deploy -> generate -> optimize -> build，再以单实例启动 PM2。" -ForegroundColor Yellow
+Write-Host "  5. 已有数据库首次跨过 20260718230000 migration 时，额外执行一次 db:rebuild-public。" -ForegroundColor Yellow
+Write-Host "  6. 普通应用更新不清空全局 Nginx 缓存，也不需要 reload Nginx。" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  写入 .env(首次部署时执行,以后保留 .env 不动):" -ForegroundColor Yellow
-Write-Host "     echo 'DATABASE_URL=file:../db/custom.db' > .env" -ForegroundColor Yellow
-Write-Host '     echo "API_TOKEN=$(openssl rand -hex 32)" >> .env' -ForegroundColor Yellow
-Write-Host "     echo 'NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn' >> .env" -ForegroundColor Yellow
-Write-Host "  NEXT_PUBLIC_SITE_URL 必须在 npm run build 前设置为正式域名。" -ForegroundColor Yellow
-Write-Host "  部署后访问 /admin/login 输入 API_TOKEN，浏览器将使用 HttpOnly Cookie。" -ForegroundColor Yellow
-Write-Host "  PM2 必须保持单实例，禁止 -i max / cluster / 多个 h2-hot2 实例。" -ForegroundColor Red
-Write-Host ""
-Write-Host "  --- 分支 A:新服务器(无 db/custom.db) ---" -ForegroundColor Green
-Write-Host "  1A. mkdir -p db" -ForegroundColor Green
-Write-Host "  2A. npm run db:migrate:deploy   # 空库应用全部 migration" -ForegroundColor Green
-Write-Host "  3A. npm run db:generate" -ForegroundColor Green
-Write-Host "  4A. npm run db:seed             # 写入默认数据源与默认设置" -ForegroundColor Green
-Write-Host "  5A. npm run db:optimize         # 启用 WAL 并优化 SQLite" -ForegroundColor Green
-Write-Host "  6A. npm run build" -ForegroundColor Green
-Write-Host "  7A. pm2 start npm --name h2-hot2 -- start" -ForegroundColor Green
-Write-Host "  8A. pm2 save" -ForegroundColor Green
-Write-Host "  9A. rm -rf /www/server/nginx/proxy_cache_dir/* && nginx -s reload" -ForegroundColor Green
-Write-Host ""
-Write-Host "  --- 分支 B:存量服务器(已用 db push 维护的 db/custom.db)首次切换 ---" -ForegroundColor Magenta
-Write-Host "  1B. pm2 stop h2-hot2" -ForegroundColor Magenta
-Write-Host "  2B. cp db/custom.db db/custom.db.bak.`$(date +%Y%m%d-%H%M%S)   # 时间戳备份" -ForegroundColor Magenta
-Write-Host "  3B. npm run db:migrate:baseline   # 漂移预检 + 标记 baseline;drift 则停止" -ForegroundColor Magenta
-Write-Host "  4B. npm run db:migrate:deploy     # baseline 之后为空操作,但仍要跑以校验" -ForegroundColor Magenta
-Write-Host "  5B. npm run db:generate" -ForegroundColor Magenta
-Write-Host "  6B. npm run db:optimize           # 启用 WAL 并优化 SQLite" -ForegroundColor Magenta
-Write-Host "  7B. npm run build" -ForegroundColor Magenta
-Write-Host "  8B. pm2 start h2-hot2" -ForegroundColor Magenta
-Write-Host "  9B. npm run db:migrate:status     # 验证 _prisma_migrations 状态" -ForegroundColor Magenta
-Write-Host " 10B. rm -rf /www/server/nginx/proxy_cache_dir/* && nginx -s reload" -ForegroundColor Magenta
-Write-Host "  严禁:存量库首次切换中不要执行 db:seed(会写入重复默认源/设置)," -ForegroundColor Red
-Write-Host "       也不要先跑 db:migrate:deploy 再跑 baseline(会创建空 _prisma_migrations)。" -ForegroundColor Red
-Write-Host ""
-Write-Host "  --- 分支 C:存量服务器日常更新(已 baseline 过的库) ---" -ForegroundColor Cyan
-Write-Host "  1C. pm2 stop h2-hot2" -ForegroundColor Cyan
-Write-Host "  2C. npm run db:migrate:deploy     # 应用新 migration;无新 migration 时为空操作" -ForegroundColor Cyan
-Write-Host "  3C. npm run db:generate" -ForegroundColor Cyan
-Write-Host "  4C. npm run db:optimize           # 校验 WAL 并执行 PRAGMA optimize" -ForegroundColor Cyan
-Write-Host "  5C. npm run build" -ForegroundColor Cyan
-Write-Host "  6C. pm2 start h2-hot2" -ForegroundColor Cyan
-Write-Host "  7C. rm -rf /www/server/nginx/proxy_cache_dir/* && nginx -s reload" -ForegroundColor Cyan
-Write-Host "  8C. 可选: npm run db:cleanup-logs # 清理到期日志,不删除未完成投递事实" -ForegroundColor Cyan
-Write-Host "  严禁:日常更新不要执行 db:seed、不要执行 db:migrate:baseline。" -ForegroundColor Red
-Write-Host ""
-Write-Host "  See: bat/部署和更新方法.txt" -ForegroundColor Gray
+Write-Host "  完整可复制命令: bat/部署和更新方法.txt" -ForegroundColor Gray
 Write-Host ""
 
 Start-Process explorer.exe $ScriptDir

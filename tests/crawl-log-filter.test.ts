@@ -6,7 +6,6 @@
  * 不 mount 组件、不依赖数据库，直接断言：
  * - 每个 chip key 对 ArticleProgress 的命中逻辑
  * - 单选状态语义 + 空集 = 不过滤
- * - countMatches 在边界条件下的行为
  * - applyFilterState：source scope / 状态筛选 / includeDiscarded 切换
  * - URL 编解码：往返不变 + 防御性（未知 key / 空字符串）
  * - writeFilterToUrl 在 SSR 下安全（typeof window 判断）
@@ -16,8 +15,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { ArticleProgress, FilterState, SourceProgress } from '../src/components/crawl-log/types';
 import { EMPTY_FILTER_STATE } from '../src/components/crawl-log/types';
 import {
-  matchStepChip, articleMatchesChips, countMatches,
-  applyFilterState, encodeFilterToSearch, decodeFilterFromSearch,
+  matchStepChip, applyFilterState, encodeFilterToSearch, decodeFilterFromSearch,
   writeFilterToUrl, readFilterFromCurrentUrl,
 } from '../src/components/crawl-log/filter';
 
@@ -53,101 +51,20 @@ function source(id: string, articles: ArticleProgress[], discarded: SourceProgre
 // ── 1. 单 chip 命中逻辑 ──
 
 describe('matchStepChip 单谓词命中', () => {
-  it('ai-done / pushed 仅匹配 done', () => {
-    expect(matchStepChip(article({ ai: 'done' }), 'ai-done')).toBe(true)
-    expect(matchStepChip(article({ ai: 'pending' }), 'ai-done')).toBe(false)
-    expect(matchStepChip(article({ push: 'done' }), 'pushed')).toBe(true)
-    expect(matchStepChip(article({ push: 'pending' }), 'pushed')).toBe(false)
+  it('正常与异常一级状态保持互斥', () => {
+    expect(matchStepChip(article({ ai: 'pending' }), 'normal-ai')).toBe(true)
+    expect(matchStepChip(article({ ai: 'pending' }), 'anomaly-all')).toBe(false)
+    expect(matchStepChip(article({ crawl: 'failed' }), 'anomaly-failure')).toBe(true)
+    expect(matchStepChip(article({ crawl: 'failed' }), 'normal-all')).toBe(false)
   })
 
-  it('process-pending / ai-pending / push-pending 仅匹配 pending', () => {
-    expect(matchStepChip(article({ process: 'pending' }), 'process-pending')).toBe(true)
-    expect(matchStepChip(article({ process: 'done' }), 'process-pending')).toBe(false)
-    expect(matchStepChip(article({ ai: 'pending' }), 'ai-pending')).toBe(true)
-    expect(matchStepChip(article({ process: 'pending', ai: 'pending' }), 'ai-pending')).toBe(false)
-    expect(matchStepChip(article({ ai: 'running' }), 'ai-pending')).toBe(false)
-    expect(matchStepChip(article({ push: 'pending' }), 'push-pending')).toBe(true)
-    expect(matchStepChip(article({ ai: 'pending', push: 'blocked' }), 'push-pending')).toBe(false)
-    expect(matchStepChip(article({ ai: 'done', push: 'filtered' }), 'push-pending')).toBe(false)
-  })
-
-  it('聚类筛选区分待聚类、失败和待复核', () => {
-    expect(matchStepChip(article({ cluster: 'pending', clusterStatus: 'pending' }), 'cluster-pending')).toBe(true)
-    expect(matchStepChip(article({ cluster: 'failed', clusterStatus: 'failed' }), 'cluster-failed')).toBe(true)
-    expect(matchStepChip(article({ cluster: 'done', clusterStatus: 'needs_review' }), 'cluster-review')).toBe(true)
-    expect(matchStepChip(article({ cluster: 'done', clusterStatus: 'clustered' }), 'cluster-review')).toBe(false)
-  })
-
-  it('has-fail：任一步骤为 fail 即命中', () => {
-    expect(matchStepChip(article({ crawl: 'failed' }), 'has-fail')).toBe(true)
-    expect(matchStepChip(article({ process: 'failed' }), 'has-fail')).toBe(true)
-    expect(matchStepChip(article({ cluster: 'failed', clusterStatus: 'failed' }), 'has-fail')).toBe(true)
-    expect(matchStepChip(article({ ai: 'failed' }), 'has-fail')).toBe(true)
-    expect(matchStepChip(article({ push: 'failed' }), 'has-fail')).toBe(true)
-    expect(matchStepChip(article({
-      crawl: 'done', process: 'done', cluster: 'done', ai: 'done', push: 'done',
-    }), 'has-fail')).toBe(false)
-  })
-
-  it('ai-done 与 ai-pending 互斥', () => {
-    const a = article({ ai: 'done' })
-    expect(matchStepChip(a, 'ai-done')).toBe(true)
-    expect(matchStepChip(a, 'ai-pending')).toBe(false)
+  it('软文和重复按业务标签独立命中', () => {
+    expect(matchStepChip(article({ anomalyLabels: ['ad'] }), 'anomaly-ad')).toBe(true)
+    expect(matchStepChip(article({ anomalyLabels: ['duplicate'] }), 'anomaly-duplicate')).toBe(true)
   })
 })
 
-// ── 2. 单选状态 ──
-
-describe('articleMatchesChips 单选兼容形状', () => {
-  it('空 chips 集合 = 不过滤（命中所有）', () => {
-    const a = article({ ai: 'done' })
-    expect(articleMatchesChips(a, new Set())).toBe(true)
-    expect(articleMatchesChips(a, [])).toBe(true)
-  })
-
-  it('单 chip 命中 → true', () => {
-    const a = article({ ai: 'done' })
-    expect(articleMatchesChips(a, new Set(['ai-done']))).toBe(true)
-  })
-
-  it('单 chip 不命中 → false', () => {
-    const a = article({ ai: 'pending' })
-    expect(articleMatchesChips(a, new Set(['ai-done']))).toBe(false)
-  })
-
-  it('兼容旧多值集合时只读取第一个状态', () => {
-    const a = article({ push: 'done', ai: 'pending' })
-    expect(articleMatchesChips(a, new Set(['ai-done', 'pushed']))).toBe(false)
-  })
-
-  it('anomaly：命中业务标签、待复核、跳过和技术异常', () => {
-    expect(matchStepChip(article({ anomalyLabels: ['ad'] }), 'anomaly')).toBe(true)
-    expect(matchStepChip(article({ anomalyLabels: ['duplicate'] }), 'anomaly')).toBe(true)
-    expect(matchStepChip(article({ clusterStatus: 'needs_review' }), 'anomaly')).toBe(true)
-    expect(matchStepChip(article({ ai: 'skipped', skipReason: '内容不足' }), 'anomaly')).toBe(true)
-    expect(matchStepChip(article({ technicalIssues: ['push_failed'] }), 'anomaly')).toBe(true)
-    expect(matchStepChip(article({ technicalState: 'manual' }), 'anomaly')).toBe(true)
-    expect(matchStepChip(article({}), 'anomaly')).toBe(false)
-  })
-})
-
-// ── 3. countMatches ──
-
-describe('countMatches', () => {
-  it('空数组 → 0', () => {
-    expect(countMatches([], 'ai-done')).toBe(0)
-  })
-  it('统计命中数', () => {
-    const list = [
-      article({ ai: 'done' }),
-      article({ ai: 'pending' }),
-      article({ ai: 'done' }),
-    ]
-    expect(countMatches(list, 'ai-done')).toBe(2)
-  })
-})
-
-// ── 4. applyFilterState ──
+// ── 2. applyFilterState ──
 
 describe('applyFilterState', () => {
   const s1 = source('s1', [
@@ -176,17 +93,17 @@ describe('applyFilterState', () => {
   it('状态筛选只使用一个值', () => {
     const out = applyFilterState(allSources, {
       ...EMPTY_FILTER_STATE,
-      chips: new Set(['ai-done']),
+      chips: new Set(['normal-ai']),
     })
     const allArticles = out.flatMap(s => s.articles.map(a => a.id)).sort()
-    expect(allArticles).toEqual(['1'])
+    expect(allArticles).toEqual(['3'])
   })
 
   it('sourceId scope 与 chip 联合', () => {
     const out = applyFilterState(allSources, {
       ...EMPTY_FILTER_STATE,
       sourceId: 's2',
-      chips: new Set(['has-fail']),
+      chips: new Set(['anomaly-failure']),
     })
     expect(out).toHaveLength(1)
     expect(out[0].articles.map(a => a.id)).toEqual(['4'])
@@ -206,7 +123,7 @@ describe('applyFilterState', () => {
   it('过滤后空 source 不出现在结果里', () => {
     const out = applyFilterState(allSources, {
       ...EMPTY_FILTER_STATE,
-      chips: new Set(['pushed']),
+      chips: new Set(['normal-pushed']),
     })
     expect(out.map(s => s.id)).toEqual(['s1'])  // s2 被筛掉
   })
@@ -222,12 +139,12 @@ describe('applyFilterState', () => {
 
   it('返回新数组，不修改原 sources', () => {
     const original: SourceProgress[] = JSON.parse(JSON.stringify(allSources))
-    applyFilterState(allSources, { ...EMPTY_FILTER_STATE, chips: new Set(['has-fail']) })
+    applyFilterState(allSources, { ...EMPTY_FILTER_STATE, chips: new Set(['anomaly-failure']) })
     expect(allSources).toEqual(original)
   })
 })
 
-// ── 5. URL 编解码往返 + 防御性 ──
+// ── 3. URL 编解码往返 + 防御性 ──
 
 describe('encodeFilterToSearch ↔ decodeFilterFromSearch 往返', () => {
   it('空 state → 完全空 params（URL 干净，不残留 disc=1）', () => {
@@ -257,24 +174,24 @@ describe('encodeFilterToSearch ↔ decodeFilterFromSearch 往返', () => {
 
   it('状态参数只编码一个值', () => {
     const state: FilterState = {
-      ...EMPTY_FILTER_STATE, chips: new Set(['ai-done', 'pushed']),
+      ...EMPTY_FILTER_STATE, chips: new Set(['normal-ai', 'normal-pushed']),
     }
-    expect(encodeFilterToSearch(state).get('chips')).toBe('ai-done')
+    expect(encodeFilterToSearch(state).get('chips')).toBe('normal-ai')
   })
 
   it('完整 state（含 chips + 源，includeDiscarded=默认）→ 不写 disc', () => {
     const state: FilterState = {
-      chips: new Set(['has-fail']),
+      chips: new Set(['anomaly-failure']),
       sourceId: 'src-xyz',
       includeDiscarded: true, // 等于默认值，不写出
       publishedToday: false,
     }
-    expect(encodeFilterToSearch(state).toString()).toBe('chips=has-fail&src=src-xyz')
+    expect(encodeFilterToSearch(state).toString()).toBe('chips=anomaly-failure&src=src-xyz')
   })
 
-  it('解码旧多值参数时保留第一个有效状态', () => {
-    const s = decodeFilterFromSearch('chips=ai-done,__bogus__,has-fail')
-    expect(Array.from(s.chips)).toEqual(['ai-done'])
+  it('解码多值参数时保留第一个有效状态', () => {
+    const s = decodeFilterFromSearch('chips=normal-ai,__bogus__,anomaly-failure')
+    expect(Array.from(s.chips)).toEqual(['normal-ai'])
   })
 
   it('解码空 / 缺失的 src → 默认为 all', () => {
@@ -299,14 +216,14 @@ describe('encodeFilterToSearch ↔ decodeFilterFromSearch 往返', () => {
 
   it('encode → decode 往返：状态可重建', () => {
     const state: FilterState = {
-      chips: new Set(['has-fail']),
+      chips: new Set(['anomaly-failure']),
       sourceId: 'abc',
       includeDiscarded: true,
       publishedToday: false,
     }
     const params = encodeFilterToSearch(state).toString()
     const decoded = decodeFilterFromSearch(params)
-    expect(Array.from(decoded.chips)).toEqual(['has-fail'])
+    expect(Array.from(decoded.chips)).toEqual(['anomaly-failure'])
     expect(decoded.sourceId).toBe('abc')
     expect(decoded.includeDiscarded).toBe(true)
   })
@@ -314,14 +231,14 @@ describe('encodeFilterToSearch ↔ decodeFilterFromSearch 往返', () => {
   it('encode filter 掉不存在的 chip key（防御性写入）', () => {
     const state = {
       ...EMPTY_FILTER_STATE,
-      chips: new Set(['ai-done', '__bogus__' as never]),
+      chips: new Set(['normal-ai', '__bogus__' as never]),
     } as FilterState
     const params = encodeFilterToSearch(state)
-    expect(params.get('chips')).toBe('ai-done')
+    expect(params.get('chips')).toBe('normal-ai')
   })
 })
 
-// ── 6. writeFilterToUrl / readFilterFromCurrentUrl（浏览器侧） ──
+// ── 4. writeFilterToUrl / readFilterFromCurrentUrl（浏览器侧） ──
 
 describe('writeFilterToUrl & readFilterFromCurrentUrl', () => {
   beforeEach(() => {
@@ -334,12 +251,12 @@ describe('writeFilterToUrl & readFilterFromCurrentUrl', () => {
 
   it('写入状态后 URL 出现 chips 与 src 参数', () => {
     writeFilterToUrl({
-      chips: new Set(['ai-done']),
+      chips: new Set(['normal-ai']),
       sourceId: 'src-1',
       includeDiscarded: false,
       publishedToday: false,
     })
-    expect(window.location.search).toContain('chips=ai-done')
+    expect(window.location.search).toContain('chips=normal-ai')
     expect(window.location.search).toContain('src=src-1')
   })
 
@@ -347,17 +264,17 @@ describe('writeFilterToUrl & readFilterFromCurrentUrl', () => {
     window.history.replaceState(null, '', '/?detail=a-1&detailKind=article&tab=crawl-log')
     writeFilterToUrl({
       ...EMPTY_FILTER_STATE,
-      chips: new Set(['ai-done']),
+      chips: new Set(['normal-ai']),
     })
     expect(window.location.search).toContain('detail=a-1')
     expect(window.location.search).toContain('detailKind=article')
     expect(window.location.search).toContain('tab=crawl-log')
-    expect(window.location.search).toContain('chips=ai-done')
+    expect(window.location.search).toContain('chips=normal-ai')
   })
 
   it('空 state 写入 → URL 完全干净（无 search 参数）', () => {
     // 先污染一下 URL
-    window.history.replaceState(null, '', '/?chips=ai-done')
+    window.history.replaceState(null, '', '/?chips=normal-ai')
     writeFilterToUrl(EMPTY_FILTER_STATE)
     expect(window.location.search).toBe('')
   })
@@ -374,9 +291,9 @@ describe('writeFilterToUrl & readFilterFromCurrentUrl', () => {
   })
 
   it('readFilterFromCurrentUrl：含参数 → 解码得到状态', () => {
-    window.history.replaceState(null, '', '/?chips=has-fail&disc=1')
+    window.history.replaceState(null, '', '/?chips=anomaly-failure&disc=1')
     expect(readFilterFromCurrentUrl()).toEqual({
-      chips: new Set(['has-fail']),
+      chips: new Set(['anomaly-failure']),
       sourceId: 'all',
       includeDiscarded: true,
       publishedToday: false,
@@ -391,14 +308,14 @@ describe('writeFilterToUrl & readFilterFromCurrentUrl', () => {
 
   it('写 URL 时不污染 hash', () => {
     window.history.replaceState(null, '', '/#section')
-    writeFilterToUrl({ ...EMPTY_FILTER_STATE, chips: new Set(['ai-done']) })
+    writeFilterToUrl({ ...EMPTY_FILTER_STATE, chips: new Set(['normal-ai']) })
     expect(window.location.hash).toBe('#section')
   })
 
   it('替换写入不增加 history.length（不污染历史栈）', () => {
     const lenBefore = window.history.length
-    writeFilterToUrl({ ...EMPTY_FILTER_STATE, chips: new Set(['ai-done']) })
-    writeFilterToUrl({ ...EMPTY_FILTER_STATE, chips: new Set(['pushed']) })
+    writeFilterToUrl({ ...EMPTY_FILTER_STATE, chips: new Set(['normal-ai']) })
+    writeFilterToUrl({ ...EMPTY_FILTER_STATE, chips: new Set(['normal-pushed']) })
     writeFilterToUrl(EMPTY_FILTER_STATE)
     expect(window.history.length).toBe(lenBefore)
   })

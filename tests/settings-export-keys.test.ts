@@ -10,7 +10,7 @@ describe('EXPORTABLE_SETTING_KEYS', () => {
   it('包含 AI 模型、推送和调度的核心参数键', () => {
     for (const k of [
       'ai_provider', 'ai_temperature', 'ai_max_tokens', 'ai_system_prompt',
-      'ai_step2_content_max_chars', 'ai_weight_event', 'ai_weight_content',
+      'ai_step2_content_max_chars', 'ai_weight_event', 'ai_weight_content', 'ai_keyword_match_bonus',
       'opencode_api_key', 'opencode_base_url', 'opencode_model',
       'deepseek_api_key', 'deepseek_base_url', 'deepseek_model',
       'push_mode', 'push_min_score', 'push_min_relevance', 'push_time', 'feishu_webhook_url',

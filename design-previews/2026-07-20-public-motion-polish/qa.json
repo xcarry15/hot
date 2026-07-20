@@ -1,0 +1,73 @@
+{
+  "homeDesktop": {
+    "bodyWidth": 1425,
+    "clientWidth": 1440,
+    "height": 1569,
+    "scrollY": 0,
+    "progressTransform": "none",
+    "progressInlineTransform": null,
+    "progressWidth": null,
+    "headerReadingProgressProp": false,
+    "nextFlightScripts": 37,
+    "reactMarker": true,
+    "reducedMotionAnimation": "public-list-item-in",
+    "effectProbe": true
+  },
+  "homeMobile": {
+    "bodyWidth": 375,
+    "clientWidth": 390,
+    "height": 2403,
+    "scrollY": 0,
+    "progressTransform": "none",
+    "progressInlineTransform": null,
+    "progressWidth": null,
+    "headerReadingProgressProp": false,
+    "nextFlightScripts": 37,
+    "reactMarker": true,
+    "reducedMotionAnimation": "public-list-item-in",
+    "effectProbe": true
+  },
+  "detailDesktop": {
+    "bodyWidth": 1425,
+    "clientWidth": 1440,
+    "height": 1068,
+    "scrollY": 33,
+    "progressTransform": "matrix(0.485294, 0, 0, 1, 0, 0)",
+    "progressInlineTransform": "scaleX(0.485294)",
+    "progressWidth": 691.5440673828125,
+    "headerReadingProgressProp": true,
+    "nextFlightScripts": 38,
+    "reactMarker": true,
+    "reducedMotionAnimation": null,
+    "effectProbe": true
+  },
+  "detailMobile": {
+    "bodyWidth": 375,
+    "clientWidth": 390,
+    "height": 1441,
+    "scrollY": 191,
+    "progressTransform": "matrix(0.319933, 0, 0, 1, 0, 0)",
+    "progressInlineTransform": "scaleX(0.319933)",
+    "progressWidth": 119.9748764038086,
+    "headerReadingProgressProp": true,
+    "nextFlightScripts": 38,
+    "reactMarker": true,
+    "reducedMotionAnimation": null,
+    "effectProbe": true
+  },
+  "reducedMotion": {
+    "bodyWidth": 1265,
+    "clientWidth": 1280,
+    "height": 1569,
+    "scrollY": 0,
+    "progressTransform": "none",
+    "progressInlineTransform": null,
+    "progressWidth": null,
+    "headerReadingProgressProp": false,
+    "nextFlightScripts": 37,
+    "reactMarker": true,
+    "reducedMotionAnimation": "none",
+    "effectProbe": true
+  },
+  "consoleErrors": []
+}

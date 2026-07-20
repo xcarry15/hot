@@ -46,30 +46,32 @@ export default function PromptsTab({ settings, setSettings }: Props) {
   }
 
   const resetBlock = (blockId: PromptBlockId) => {
-    setSettings(prev => ({ ...prev, [PROMPT_BLOCK_META[blockId].key]: '' }))
+    const meta = PROMPT_BLOCK_META[blockId]
+    setSettings(prev => ({ ...prev, [meta.key]: meta.defaultBlock }))
     toast.info('已恢复为默认提示词，保存后生效')
   }
 
   const resetSystem = () => {
-    setSettings(prev => ({ ...prev, ai_system_prompt: '' }))
+    setSettings(prev => ({ ...prev, ai_system_prompt: DEFAULT_SYSTEM_PROMPT }))
     toast.info('已恢复为默认系统角色，保存后生效')
   }
 
   const resetAllPrompts = () => {
     setSettings(prev => ({
       ...prev,
-      ai_system_prompt: '',
-      ai_block_ad: '',
-      ai_block_event_score: '',
-      ai_block_category: '',
-      ai_block_relevance: '',
-      ai_block_content_score: '',
-      ai_block_key_points: '',
-      ai_block_summary: '',
-      ai_block_tags: '',
-      ai_block_brand: '',
+      ai_system_prompt: DEFAULT_SYSTEM_PROMPT,
+      ai_block_ad: PROMPT_BLOCK_META.ad.defaultBlock,
+      ai_block_event_score: PROMPT_BLOCK_META.eventScore.defaultBlock,
+      ai_block_category: PROMPT_BLOCK_META.category.defaultBlock,
+      ai_block_relevance: PROMPT_BLOCK_META.relevance.defaultBlock,
+      ai_block_content_score: PROMPT_BLOCK_META.contentScore.defaultBlock,
+      ai_block_key_points: PROMPT_BLOCK_META.keyPoints.defaultBlock,
+      ai_block_summary: PROMPT_BLOCK_META.summary.defaultBlock,
+      ai_block_tags: PROMPT_BLOCK_META.tags.defaultBlock,
+      ai_block_brand: PROMPT_BLOCK_META.brand.defaultBlock,
       ai_weight_event: String(SCORE_WEIGHT_META.event.defaultWeight),
       ai_weight_content: String(SCORE_WEIGHT_META.content.defaultWeight),
+      ai_keyword_match_bonus: '5',
       ai_step2_content_max_chars: '5000',
     }))
   }
@@ -81,6 +83,7 @@ export default function PromptsTab({ settings, setSettings }: Props) {
     (Number(settings.ai_weight_event) || 0) +
     (Number(settings.ai_weight_content) || 0)
   const weightSumInvalid = weightTotal !== 100
+  const systemIsDefault = !settings.ai_system_prompt || settings.ai_system_prompt === DEFAULT_SYSTEM_PROMPT
 
   const previewPolicy = async () => {
     setPreviewing(true)
@@ -88,6 +91,7 @@ export default function PromptsTab({ settings, setSettings }: Props) {
       const data = await previewScoreSettings({
         weightEvent: Number(settings.ai_weight_event),
         weightContent: Number(settings.ai_weight_content),
+        keywordBonus: Number(settings.ai_keyword_match_bonus),
       })
       setPreview(data)
     } catch (error) {
@@ -99,9 +103,9 @@ export default function PromptsTab({ settings, setSettings }: Props) {
 
   return (
     <>
-      <Card className="py-0">
-        <CardContent className="p-4 space-y-3">
-          <div className="flex items-center gap-2">
+      <Card className="mt-2 py-0">
+        <CardContent className="space-y-2.5 p-3">
+          <div className="flex items-center gap-2 border-b pb-2">
             <MessageSquareText className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-semibold">提示词</span>
             <span className="text-xs text-muted-foreground">— 编辑后需点底部「保存设置」生效</span>
@@ -112,7 +116,7 @@ export default function PromptsTab({ settings, setSettings }: Props) {
           </div>
 
           {/* 评分权重 */}
-          <div className="space-y-2 rounded-lg border p-3">
+          <div className="space-y-2 border p-2.5">
             <div className="flex items-center justify-between">
               <Label className="text-xs">评分权重 <span className="text-muted-foreground">(满分 100)</span></Label>
               <span className={`text-xs tabular-nums ${weightSumInvalid ? 'text-amber-600' : 'text-muted-foreground'}`}>
@@ -130,6 +134,13 @@ export default function PromptsTab({ settings, setSettings }: Props) {
                 )
               })}
             </div>
+            <div className="grid grid-cols-[1fr_120px] items-end gap-2 border-t pt-2">
+              <div>
+                <Label className="text-xs">关键词命中加分</Label>
+                <p className="mt-1 text-[11px] text-muted-foreground">命中已配置关键词时追加到最终分，不改变 AI 原始事件分和内容分。</p>
+              </div>
+              <Input type="number" value={settings.ai_keyword_match_bonus} onChange={(e) => updateSetting('ai_keyword_match_bonus', e.target.value.replace(/[^\d]/g, ''))} className="h-8 text-xs" min="0" max="20" step="1" />
+            </div>
             <div className="flex items-center gap-2">
               <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={previewPolicy} disabled={previewing || weightSumInvalid}>
                 {previewing ? '预演中…' : '预演历史文章'}
@@ -141,7 +152,7 @@ export default function PromptsTab({ settings, setSettings }: Props) {
               )}
             </div>
             {preview && preview.samples.length > 0 && (
-              <div className="space-y-1 max-h-[240px] overflow-y-auto rounded border text-xs">
+              <div className="max-h-[240px] space-y-1 overflow-y-auto border text-xs">
                 <div className="grid grid-cols-[1fr_56px_56px_56px] gap-1 px-2 py-1 bg-muted/50 text-muted-foreground font-medium">
                   <span>文章标题</span>
                   <span className="text-center">原分</span>
@@ -174,8 +185,8 @@ export default function PromptsTab({ settings, setSettings }: Props) {
             <div className="flex items-center gap-2">
               <MessageSquareText className="h-3.5 w-3.5 text-muted-foreground" />
               <Label className="text-xs">系统角色 <span className="text-muted-foreground">(System)</span></Label>
-              {!settings.ai_system_prompt && <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded-full bg-muted">默认</span>}
-              <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-[11px] ml-auto gap-1" onClick={resetSystem} disabled={!settings.ai_system_prompt}>
+              {systemIsDefault && <span className="bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">默认</span>}
+              <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-[11px] ml-auto gap-1" onClick={resetSystem} disabled={systemIsDefault}>
                 <RefreshCcw className="h-3 w-3" />恢复
               </Button>
             </div>
@@ -184,15 +195,15 @@ export default function PromptsTab({ settings, setSettings }: Props) {
 
           {/* 评判块 */}
           <div className="space-y-2">
-            <p className="text-[11px] text-muted-foreground">下列 9 个评判块控制 AI 产出。公共框架（任务说明 / 文章注入 / JSON 格式）由代码自动生成。</p>
+            <p className="text-[11px] text-muted-foreground">下列 9 个块只描述各字段的判断标准；执行顺序、证据边界和 JSON 结构由代码统一维护。</p>
             {PROMPT_BLOCK_ORDER.map((blockId) => {
               const meta = PROMPT_BLOCK_META[blockId]
-              const isCustom = !!settings[meta.key]
+              const isCustom = !!settings[meta.key] && settings[meta.key] !== meta.defaultBlock
               return (
                 <div key={blockId} className="space-y-1">
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-medium">{meta.label}</span>
-                    {!isCustom && <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded-full bg-muted">默认</span>}
+                    {!isCustom && <span className="bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">默认</span>}
                     <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-[11px] ml-auto gap-1" onClick={() => resetBlock(blockId)} disabled={!isCustom}>
                       <RefreshCcw className="h-3 w-3" />恢复
                     </Button>

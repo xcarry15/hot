@@ -9,6 +9,6 @@ function first(value: string | string[] | undefined): string {
 export default async function AdminPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams
   const tab = first(params.tab)
-  const initialTab = tab === 'crawl-log' || tab === 'settings' ? tab : 'articles'
+  const initialTab = tab === 'settings' && !first(params.articleId) && !first(params.detail) ? 'settings' : 'crawl-log'
   return <AdminShell initialTab={initialTab} />
 }

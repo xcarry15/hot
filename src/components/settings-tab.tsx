@@ -189,11 +189,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
 
   const buildSavePayload = useCallback((): Record<string, string> => {
     const payload: Record<string, string> = { ...settings }
-    // 历史:曾把「等于默认值」的提示词抹成空串,导致导出文件里整片提示词为空、
-    // UI 显示默认值而 DB 是空串,UI/DB 长期不一致。
-    // 修正:存什么就是什么。UI 在读取时已有 `value || DEFAULT_*` 兜底,
-    // 用户清空再保存会存空串(应用场景:用户主动不想用此提示词,运行期 prompts.ts
-    // 的 pickBlock 也会回退到 defaultBlock,行为不变)。
+    // 前端按当前显示值完整保存；提示词空白值由服务端统一归一化为当前默认文本。
     for (const id of Object.keys(AI_PROVIDERS) as AIProviderId[]) {
       const config = providerConfigs[id]
       if (!config) continue
@@ -255,10 +251,10 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   return (
     // 关键:min-h-0 让 flex 子项可以收缩到 0,否则 Tabs 会被超长内容
     // (如提示词的 9 个 Textarea = 1600+px)撑爆,把底部保存按钮挤出视口。
-    <div className="flex flex-col h-full min-h-0">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+    <div className="settings-surface flex h-full min-h-0 flex-col text-sm">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col overflow-hidden [&_[data-slot=button]]:rounded-none [&_[data-slot=button]]:shadow-none [&_[data-slot=input]]:rounded-none [&_[data-slot=input]]:shadow-none [&_[data-slot=textarea]]:rounded-none [&_[data-slot=textarea]]:shadow-none [&_[data-slot=select-trigger]]:rounded-none [&_[data-slot=select-trigger]]:shadow-none [&_[data-slot=badge]]:rounded-none [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:shadow-none">
         {/* 移动端横向滚动；桌面端自然展示全部 tab */}
-        <div className="overflow-x-auto mx-2 mt-2 shrink-0 [&::-webkit-scrollbar]:hidden">
+        <div className="shrink-0 overflow-x-auto border-b bg-background px-2 pt-1 [&::-webkit-scrollbar]:hidden">
           <TabsList
             className="h-8 flex-nowrap rounded-none bg-transparent p-0"
             onMouseOver={(event) => {
@@ -270,15 +266,15 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
               if (value) void sectionLoaders[value]?.()
             }}
           >
-            <TabsTrigger value="dashboard" data-value="dashboard" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">概览</TabsTrigger>
-            <TabsTrigger value="public" data-value="public" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">公开</TabsTrigger>
-            <TabsTrigger value="sources" data-value="sources" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">源管理</TabsTrigger>
-            <TabsTrigger value="keywords" data-value="keywords" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">关键词</TabsTrigger>
-            <TabsTrigger value="ai-model" data-value="ai-model" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">AI 模型</TabsTrigger>
-            <TabsTrigger value="prompts" data-value="prompts" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">提示词</TabsTrigger>
-            <TabsTrigger value="push" data-value="push" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">推送</TabsTrigger>
-            <TabsTrigger value="account" data-value="account" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">账户</TabsTrigger>
-            <TabsTrigger value="data" data-value="data" className="h-8 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">数据清理</TabsTrigger>
+            <TabsTrigger value="dashboard" data-value="dashboard" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">概览</TabsTrigger>
+            <TabsTrigger value="public" data-value="public" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">公开</TabsTrigger>
+            <TabsTrigger value="sources" data-value="sources" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">源管理</TabsTrigger>
+            <TabsTrigger value="keywords" data-value="keywords" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">关键词</TabsTrigger>
+            <TabsTrigger value="ai-model" data-value="ai-model" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">AI 模型</TabsTrigger>
+            <TabsTrigger value="prompts" data-value="prompts" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">提示词</TabsTrigger>
+            <TabsTrigger value="push" data-value="push" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">推送</TabsTrigger>
+            <TabsTrigger value="account" data-value="account" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">账户</TabsTrigger>
+            <TabsTrigger value="data" data-value="data" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">数据清理</TabsTrigger>
           </TabsList>
         </div>
 
@@ -286,11 +282,11 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
           <DashboardTab active={active && activeTab === 'dashboard'} />
         </TabsContent>
 
-        <TabsContent value="public" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="public" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
           <PublicTab settings={settings} setSettings={setSettings} />
         </TabsContent>
 
-        <TabsContent value="data" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="data" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
           <DataTab />
         </TabsContent>
 
@@ -298,7 +294,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
           <SourcesManagement />
         </TabsContent>
 
-        <TabsContent value="ai-model" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="ai-model" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
           <AiModelTab
             settings={settings}
             setSettings={setSettings}
@@ -307,25 +303,25 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
           />
         </TabsContent>
 
-        <TabsContent value="prompts" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="prompts" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
           <PromptsTab settings={settings} setSettings={setSettings} />
         </TabsContent>
 
-        <TabsContent value="push" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="push" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
           <PushTab settings={settings} setSettings={setSettings} />
         </TabsContent>
 
-        <TabsContent value="account" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="account" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
           <AccountTab />
         </TabsContent>
 
-        <TabsContent value="keywords" className="flex-1 m-0 min-h-0 overflow-auto px-3 pb-3 sm:px-4 sm:pb-4">
+        <TabsContent value="keywords" className="m-0 min-h-0 flex-1 overflow-auto">
           <KeywordsTab />
         </TabsContent>
       </Tabs>
 
       {hasUnsavedChanges && (
-        <div className="border-t p-3 sm:p-4 bg-background shrink-0 flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 border-t bg-background px-3 py-2">
           <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
             <Info className="h-3.5 w-3.5" />
             有未保存的设置变更
@@ -333,7 +329,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
           <Button
             onClick={handleSave}
             disabled={saving}
-            className="gap-1.5 w-full sm:w-auto sm:ml-auto"
+            className="ml-auto h-7 gap-1.5 px-3 text-xs"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {saving ? '保存中...' : '保存设置'}

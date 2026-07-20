@@ -3,6 +3,7 @@
 import { Menu, X } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
+import PublicReadingProgress from '@/components/public-reading-progress'
 
 export type PublicNavKey = 'articles' | 'tools'
 
@@ -17,9 +18,10 @@ const PUBLIC_NAV_ITEMS: Array<{ key: PublicNavKey; label: string; href: string }
 
 interface Props {
   active?: PublicNavKey
+  readingProgress?: boolean
 }
 
-export default function PublicHeader({ active = 'articles' }: Props) {
+export default function PublicHeader({ active = 'articles', readingProgress = false }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false)
 
   function closeMobileMenu() {
@@ -47,7 +49,7 @@ export default function PublicHeader({ active = 'articles' }: Props) {
           href={item.href}
           aria-current={isActive ? 'page' : undefined}
           onClick={mobile ? closeMobileMenu : undefined}
-          className={`${mobile ? 'block w-full px-3 py-3' : 'inline-flex h-10 w-14 shrink-0 items-center justify-center rounded-none px-3 py-2'} text-sm font-medium transition-colors ${isActive ? 'bg-[var(--public-surface-strong)] text-[var(--public-ink)]' : 'text-[var(--public-muted)] hover:bg-[var(--public-surface-soft)] hover:text-[var(--public-ink)]'}`}
+          className={`${mobile ? 'public-pressable block w-full px-3 py-3' : 'public-pressable inline-flex h-10 w-14 shrink-0 items-center justify-center rounded-none px-3 py-2'} text-sm font-medium transition-colors ${isActive ? 'bg-[var(--public-surface-strong)] text-[var(--public-ink)]' : 'text-[var(--public-muted)] hover:bg-[var(--public-surface-soft)] hover:text-[var(--public-ink)]'}`}
         >
           {item.label}
         </Link>
@@ -58,8 +60,8 @@ export default function PublicHeader({ active = 'articles' }: Props) {
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--public-hairline)] bg-[var(--public-canvas)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--public-canvas)]/85">
       <div className="mx-auto flex min-h-16 max-w-[1200px] items-center gap-4 px-4 sm:px-6 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-        <Link href="/" onClick={closeMobileMenu} className="flex min-w-0 items-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]">
-          <img src="/icon-192x192.png" alt="新闻聚合" className="h-9 w-9 rounded-none" />
+        <Link href="/" onClick={closeMobileMenu} className="public-pressable flex min-w-0 items-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]">
+          <img src="/icon-192x192.png" alt="新闻聚合" width="36" height="36" className="h-9 w-9 rounded-none" />
           <div className="min-w-0">
             <h1 className="truncate text-base font-semibold tracking-tight text-[var(--public-ink)]">行业新闻聚合</h1>
             <p className="truncate text-xs text-[var(--public-muted)]">精选行业动态与品牌资讯</p>
@@ -76,7 +78,7 @@ export default function PublicHeader({ active = 'articles' }: Props) {
             aria-label={mobileOpen ? '关闭导航菜单' : '打开导航菜单'}
             aria-expanded={mobileOpen}
             aria-controls="public-mobile-navigation"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md text-[var(--public-ink)] transition-colors hover:bg-[var(--public-surface-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] md:hidden"
+            className="public-pressable inline-flex h-10 w-10 items-center justify-center rounded-none text-[var(--public-ink)] transition-colors hover:bg-[var(--public-surface-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] md:hidden"
             onClick={() => setMobileOpen((open) => !open)}
           >
             {mobileOpen ? <X aria-hidden="true" className="h-5 w-5" /> : <Menu aria-hidden="true" className="h-5 w-5" />}
@@ -85,12 +87,13 @@ export default function PublicHeader({ active = 'articles' }: Props) {
       </div>
 
       {mobileOpen && (
-        <div id="public-mobile-navigation" className="border-t border-[var(--public-hairline)] px-4 py-3 md:hidden">
+        <div id="public-mobile-navigation" className="public-mobile-nav-enter border-t border-[var(--public-hairline)] px-4 py-3 md:hidden">
           <nav className="mx-auto max-w-[1200px] space-y-1" aria-label="移动端公开导航">
             {renderNavItems(true)}
           </nav>
         </div>
       )}
+      {readingProgress && <PublicReadingProgress />}
     </header>
   )
 }

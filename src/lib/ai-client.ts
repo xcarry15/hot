@@ -68,7 +68,7 @@ export interface AISettings {
   temperature: number;
   maxTokens: number;
   systemPrompt: string;
-  /** Step1/Step2 评判块(块化组合,空串=用默认块) */
+  /** 单次分析评判块（块化组合，空串=用默认块） */
   blockAd: string;
   blockEventScore: string;
   blockCategory: string;
@@ -81,11 +81,12 @@ export interface AISettings {
   /** 打分权重(动态可调) */
   weightEvent: number;
   weightContent: number;
+  keywordMatchBonus: number;
   /** AI 正文最大字符数 */
   step2ContentMaxChars: number;
 }
 
-// 默认打分权重：拓展情报价值为主，证据完整度负责校准可信度。
+// 默认打分权重：事件影响为主，内容可用性为辅。
 function numericSettingDefault(key: string, fallback: number): number {
   const value = Number(getSettingDefinition(key)?.defaultValue);
   return Number.isFinite(value) ? value : fallback;
@@ -124,18 +125,19 @@ export async function getAISettings(): Promise<AISettings> {
     model,
     temperature: Math.max(0, Math.min(2, parseFloat(map[SETTING_KEYS.AI_TEMPERATURE]) || DEFAULT_TEMPERATURE)),
     maxTokens: Math.max(1, Math.min(65536, parseInt(map[SETTING_KEYS.AI_MAX_TOKENS]) || DEFAULT_MAX_TOKENS)),
-    systemPrompt: map[SETTING_KEYS.AI_SYSTEM_PROMPT] || '',
-    blockAd: map.ai_block_ad || '',
-    blockEventScore: map.ai_block_event_score || '',
-    blockCategory: map.ai_block_category || '',
-    blockRelevance: map.ai_block_relevance || '',
-    blockContentScore: map.ai_block_content_score || '',
-    blockKeyPoints: map.ai_block_key_points || '',
-    blockSummary: map.ai_block_summary || '',
-    blockTags: map.ai_block_tags || '',
-    blockBrand: map.ai_block_brand || '',
+    systemPrompt: map[SETTING_KEYS.AI_SYSTEM_PROMPT],
+    blockAd: map.ai_block_ad,
+    blockEventScore: map.ai_block_event_score,
+    blockCategory: map.ai_block_category,
+    blockRelevance: map.ai_block_relevance,
+    blockContentScore: map.ai_block_content_score,
+    blockKeyPoints: map.ai_block_key_points,
+    blockSummary: map.ai_block_summary,
+    blockTags: map.ai_block_tags,
+    blockBrand: map.ai_block_brand,
     weightEvent: clampWeight(map[SETTING_KEYS.AI_WEIGHT_EVENT], DEFAULT_WEIGHT_EVENT),
     weightContent: clampWeight(map[SETTING_KEYS.AI_WEIGHT_CONTENT], DEFAULT_WEIGHT_CONTENT),
+    keywordMatchBonus: Math.max(0, Math.min(20, parseInt(map[SETTING_KEYS.AI_KEYWORD_MATCH_BONUS]) || 0)),
     step2ContentMaxChars: Math.max(500, Math.min(10000, parseInt(map[SETTING_KEYS.AI_STEP2_CONTENT_MAX_CHARS]) || DEFAULT_STEP2_CONTENT_MAX_CHARS)),
   };
   settingsCache.set(resolved);

@@ -4,12 +4,18 @@ export interface ScorePolicyResult {
   version: string;
 }
 
-export function buildScorePolicySnapshot(weightEvent: number, weightContent: number): string {
+export function buildScorePolicySnapshot(
+  weightEvent: number,
+  weightContent: number,
+  keywordBonus = 0,
+  keywordMatched = false,
+): string {
   return JSON.stringify({
-    version: 'local-v9-expansion', weightEvent, weightContent,
+    version: 'local-v10-keyword-bonus', weightEvent, weightContent,
     adFreeThreshold: 20, adPenaltyRate: 0.15, adHardThreshold: 70,
     lowEvidenceAdCap: 45, usefulAdCap: 70,
     contentBonus80: 2, contentBonus90: 4,
+    keywordBonus, keywordMatched,
   });
 }
 
@@ -21,6 +27,8 @@ export function applyScorePolicy(
   isAd: boolean,
   weightEvent: number,
   weightContent: number,
+  keywordMatched = false,
+  keywordBonus = 0,
 ): ScorePolicyResult {
   const totalWeight = weightEvent + weightContent;
   const rawScore = Math.max(0, Math.min(100, Math.round(
@@ -33,17 +41,21 @@ export function applyScorePolicy(
   const adPenalty = normalizedAdProbability <= 20
     ? 0
     : Math.round((normalizedAdProbability - 20) * 0.15);
-  // 证据完整度只做小幅修正，避免文笔/篇幅压过真正的拓展情报价值。
+  // 内容可用性只做小幅修正，避免文笔和篇幅压过事件本身的影响。
   const contentBonus = contentScore >= 90 ? 4 : contentScore >= 80 ? 2 : 0;
+  const appliedKeywordBonus = keywordMatched
+    ? Math.max(0, Math.min(100, Math.round(keywordBonus)))
+    : 0;
   const adjustedScore = Math.min(100, Math.max(0, rawScore + contentBonus - adPenalty));
   // 品牌自发信息也可能含有门店计划、人事任命等有效情报：有硬事实时允许进入关注池，
   // 纯宣传且证据薄弱时仍严格封顶。
   const adCap = eventScore >= 75 && contentScore >= 65 ? 70 : 45;
-  const finalScore = isAd || normalizedAdProbability >= 70 ? Math.min(adCap, adjustedScore) : adjustedScore;
+  const scoreAfterAdRule = isAd || normalizedAdProbability >= 70 ? Math.min(adCap, adjustedScore) : adjustedScore;
+  const finalScore = Math.min(100, scoreAfterAdRule + appliedKeywordBonus);
 
   return {
     rawScore,
     finalScore,
-    version: `local-v9-expansion:e${weightEvent}-c${weightContent}`,
+    version: `local-v10-keyword-bonus:e${weightEvent}-c${weightContent}-k${appliedKeywordBonus}`,
   };
 }
