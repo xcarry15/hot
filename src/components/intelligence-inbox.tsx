@@ -395,12 +395,10 @@ export default function IntelligenceInbox({
     setEventSearch("");
     setMergeTargetId("");
     setSelectedSplitIds(new Set());
-    setClusterAuditOpen(initialPanelRef.current === "cluster");
   }, [articleId]);
 
   useEffect(() => {
     setRequestedPanel(initialPanel);
-    setClusterAuditOpen(initialPanel === "cluster");
   }, [initialPanel]);
 
   useEffect(() => {
