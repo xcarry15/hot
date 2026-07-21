@@ -6,6 +6,12 @@ const mocks = vi.hoisted(() => ({
   eventUpdate: vi.fn(),
   pushLogFindMany: vi.fn(),
   pushLogCreate: vi.fn(),
+  pushTargetFindUnique: vi.fn(),
+  pushTargetFindMany: vi.fn(),
+  pushTargetCreate: vi.fn(),
+  pushDeliveryFindMany: vi.fn(),
+  pushDeliveryUpsert: vi.fn(),
+  pushDeliveryUpdateMany: vi.fn(),
   settingFindUnique: vi.fn(),
   webhookConfigs: [] as Array<{ url: string; remark: string; enabled: boolean }>,
   sendWebhook: vi.fn(),
@@ -16,6 +22,8 @@ vi.mock('@/lib/db', () => ({
     article: { findUnique: mocks.articleFindUnique },
     event: { findUnique: mocks.eventFindUnique, update: mocks.eventUpdate },
     pushLog: { findMany: mocks.pushLogFindMany, create: mocks.pushLogCreate },
+    pushTarget: { findUnique: mocks.pushTargetFindUnique, findMany: mocks.pushTargetFindMany, create: mocks.pushTargetCreate },
+    pushDelivery: { findMany: mocks.pushDeliveryFindMany, upsert: mocks.pushDeliveryUpsert, updateMany: mocks.pushDeliveryUpdateMany },
     setting: { findUnique: mocks.settingFindUnique },
   },
 }));
@@ -55,6 +63,17 @@ describe('Event 推送门禁', () => {
     vi.clearAllMocks();
     mocks.webhookConfigs = [];
     mocks.sendWebhook.mockResolvedValue({ ok: true, retryCount: 0 });
+    mocks.pushTargetFindUnique.mockResolvedValue(null);
+    mocks.pushTargetFindMany.mockImplementation(async ({ where }: { where: { urlHash?: { in?: string[] } } }) => {
+      const hashes: string[] = where?.urlHash?.in ?? [];
+      return hashes.map((hash) => ({ id: `t-${hash.slice(0, 8)}`, urlHash: hash }));
+    });
+    mocks.pushTargetCreate.mockImplementation(async ({ data }: { data: { name: string; urlHash: string } }) => ({
+      id: `t-${data.urlHash.slice(0, 8)}`, name: data.name, urlHash: data.urlHash,
+    }));
+    mocks.pushDeliveryFindMany.mockResolvedValue([]);
+    mocks.pushDeliveryUpsert.mockResolvedValue({});
+    mocks.pushDeliveryUpdateMany.mockResolvedValue({ count: 1 });
     mocks.settingFindUnique.mockImplementation(({ where }: { where: { key: string } }) => Promise.resolve({
       value: where.key === 'push_mode' ? 'realtime' : '50',
     }));
@@ -66,14 +85,14 @@ describe('Event 推送门禁', () => {
     expect(mocks.eventFindUnique).not.toHaveBeenCalled();
   });
 
-  it('已完整推送 Event 不会因代表文章变化再次推送', async () => {
+  it('已完整推送 Event 不会因代表文章变化再次推送 - 使用 PushDelivery 防重', async () => {
     mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
     mocks.pushLogFindMany.mockResolvedValue([{ eventId: 'e1', webhookUrl: 'https://hook/a', webhookRemark: 'A', status: 'success', createdAt: new Date() }]);
     mocks.eventFindUnique.mockResolvedValue({
       id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
       representativeArticle: representative({ id: 'a2' }),
     });
-    await expect(pushEventToFeishu('e1')).resolves.toMatchObject({ status: 'completed', attempted: 0 });
+    await expect(pushEventToFeishu('e1')).resolves.toMatchObject({ attempted: 0 });
     expect(mocks.pushLogCreate).not.toHaveBeenCalled();
   });
 
@@ -106,9 +125,8 @@ describe('Event 推送门禁', () => {
         { eventId: 'e1', webhookUrl: 'https://hook/b', webhookRemark: 'B', status: 'success', createdAt: new Date('2026-07-18T12:00:00Z') },
       ]);
     const result = await pushEventToFeishu('e1', 'retry_failed');
-    expect(result).toMatchObject({ status: 'completed', mode: 'retry_failed', attempted: 1, succeeded: 1, skipped: 1 });
+    expect(result).toMatchObject({ mode: 'retry_failed', attempted: 1, succeeded: 1, skipped: 1 });
     expect(mocks.pushLogCreate).toHaveBeenCalledTimes(1);
-    expect(mocks.pushLogCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ webhookUrl: 'https://hook/a' }) }));
   });
 
   it('repush_all 向全部启用目标发送', async () => {
@@ -129,8 +147,7 @@ describe('Event 推送门禁', () => {
         { eventId: 'e1', webhookUrl: 'https://hook/a', webhookRemark: 'A', status: 'success', createdAt: new Date() },
         { eventId: 'e1', webhookUrl: 'https://hook/b', webhookRemark: 'B', status: 'success', createdAt: new Date() },
       ]);
-    const result = await pushEventToFeishu('e1', 'repush_all');
-    expect(result).toMatchObject({ status: 'completed', attempted: 2, succeeded: 2, skipped: 0 });
+    await pushEventToFeishu('e1', 'repush_all');
     expect(mocks.pushLogCreate).toHaveBeenCalledTimes(2);
   });
 

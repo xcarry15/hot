@@ -202,13 +202,13 @@ describe('markJobCompleted / markJobFailed', () => {
     updateManyMock.mockReset();
   });
 
-  it('markJobCompleted 写 completed + result + completedAt + heartbeatAt', async () => {
+  it('markJobCompleted 写 succeeded + result + completedAt + heartbeatAt', async () => {
     updateManyMock.mockResolvedValueOnce({ count: 1 });
     await markJobCompleted('job-comp', { ok: true });
     expect(updateManyMock).toHaveBeenCalledWith({
       where: { id: 'job-comp', status: 'running' },
       data: expect.objectContaining({
-        status: 'completed',
+        status: 'succeeded',
         result: JSON.stringify({ ok: true }),
         completedAt: expect.any(Date),
         heartbeatAt: expect.any(Date),

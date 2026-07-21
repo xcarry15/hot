@@ -108,7 +108,7 @@ export async function updateSettings(input: unknown): Promise<
     return { ok: false, error: '设置值校验失败', details: ['评分权重合计必须为 100'] };
   }
   const scorePolicyChanged = updates.some(([key, value]) => {
-    if (!scoreSettingKeys.includes(key)) return false;
+    if (!(scoreSettingKeys as readonly string[]).includes(key)) return false;
     const fallback = key === SETTING_KEYS.AI_WEIGHT_EVENT
       ? SCORE_WEIGHT_META.event.defaultWeight
       : key === SETTING_KEYS.AI_WEIGHT_CONTENT

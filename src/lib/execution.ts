@@ -1,22 +1,10 @@
 /**
- * Unified job execution entry point.
+ * Unified job execution entry point with DB-backed Job Lease (P0-1).
  *
- * Replaces the polling worker + queue-claim model. Since this is a single
- * Next.js process with one in-memory worker, scheduler and API routes now
- * call runJob() directly instead of enqueueing into a DB queue and waiting
- * for a polling loop to pick it up.
- *
- * Responsibilities:
- *   - In-memory concurrency guard (one global job at a time) — replaces the
- *     DB-based hasActiveJob() check.
- *   - Still writes a Job record (running → completed/failed) so the history
- *     view (/api/jobs) and the 3s frontend sync polling keep working.
- *   - Registers the AbortController via worker-stop so /api/worker/stop can
- *     cancel a running job started from any entry point (scheduler or API).
- *   - Wraps execution in runWithJobId so progress writes keep their Job context.
- *
- * runJob() awaits only the Job-record creation (fast) so the API can return
- * the jobId synchronously; the pipeline itself runs detached.
+ * All job state is persisted in the Job table — no in-memory-only state
+ * determines correctness. runJob() creates a queued record and attempts to
+ * atomically claim and execute it. The in-memory concurrency guard still
+ * exists as a single-process optimization but correctness doesn't depend on it.
  */
 
 import { collectAllSources, crawlSource } from './pipeline/collect';
@@ -62,7 +50,10 @@ type JobExecutor = (
   jobId?: string,
 ) => Promise<Record<string, unknown>>;
 
-/** API 层使用的并发事实源：单进程内只允许一个批量 Job。 */
+const LEASE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
+
+/** API 層使用的並發事實源：單進程內只允许一个批量 Job。 */
 export function getActiveJobType(): JobType | null {
   return getReservedJobType<JobType>();
 }
@@ -77,17 +68,94 @@ export interface RunJobAccepted {
   jobId: string;
 }
 
+function computeIdempotencyKey(type: JobType, payload: Record<string, unknown>): string {
+  if (payload.idempotencyKey && typeof payload.idempotencyKey === 'string') {
+    return payload.idempotencyKey;
+  }
+  const trigger = typeof payload.trigger === 'string' ? payload.trigger : 'manual';
+  if (trigger === 'auto') {
+    const now = new Date();
+    if (type === 'push') return `daily-push:${now.toISOString().slice(0, 10)}`;
+    const hour = now.toISOString().slice(0, 13) + ':00';
+    return `crawl:${hour}`;
+  }
+  const articleId = typeof payload.articleId === 'string' ? payload.articleId : '';
+  if (articleId && typeof payload.intent === 'string' && typeof payload.startAt === 'string') {
+    return `workflow:${articleId}:${payload.intent}:${payload.startAt}`;
+  }
+  return `${type}:${trigger}:${Date.now()}`;
+}
+
+function workerId(): string {
+  const pid = typeof process !== 'undefined' && process.pid ? String(process.pid) : '0';
+  const host = typeof process !== 'undefined' && process.env?.HOSTNAME
+    ? process.env.HOSTNAME : 'local';
+  return `${host}:${pid}`;
+}
+
+async function checkJobCancellation(jobId: string): Promise<boolean> {
+  const job = await db.job.findUnique({
+    where: { id: jobId },
+    select: { status: true },
+  });
+  return job?.status === 'cancel_requested';
+}
+
+async function assertJobNotCancelled(jobId: string): Promise<void> {
+  if (await checkJobCancellation(jobId)) {
+    throw new Error('Job cancelled');
+  }
+}
+
+/** Attempt to atomically claim and start a queued job. Returns the jobId if claimed. */
+async function claimAndRunJob(jobId: string): Promise<boolean> {
+  const owner = workerId();
+  const now = new Date();
+  const leaseExpires = new Date(now.getTime() + LEASE_DURATION_MS);
+
+  try {
+    const updated = await db.job.updateMany({
+      where: {
+        id: jobId,
+        status: { in: ['queued', 'cancel_requested'] },
+        OR: [
+          { leaseExpiresAt: null },
+          { leaseExpiresAt: { lt: now } },
+        ],
+      },
+      data: {
+        status: 'running',
+        leaseOwner: owner,
+        leaseExpiresAt: leaseExpires,
+        startedAt: now,
+      },
+    });
+    return updated.count > 0;
+  } catch (error) {
+    console.error('[execution] claimAndRunJob failed:', error);
+    return false;
+  }
+}
+
+async function renewLease(jobId: string): Promise<void> {
+  const now = new Date();
+  await db.job.updateMany({
+    where: { id: jobId, status: 'running', leaseOwner: workerId() },
+    data: { leaseExpiresAt: new Date(now.getTime() + LEASE_DURATION_MS), heartbeatAt: now },
+  });
+}
+
 /**
- * Start a job. Awaits only the Job-record creation (so the caller — API or
- * scheduler — gets the jobId immediately), then runs the pipeline detached.
- *
- * Concurrency: if any background job is already running, returns
- * { queued: false, reason } without starting anything.
+ * Start a job. Creates a queued record with idempotency key, then atomically
+ * claims and executes it. Concurrency is guarded by the in-memory guard
+ * (single-process optimization) AND the DB lease (correctness guarantee).
  */
 export async function runJob(
   type: JobType,
   payload: Record<string, unknown> = {}
 ): Promise<RunJobDeclined | RunJobAccepted> {
+  const idempotencyKey = computeIdempotencyKey(type, payload);
+
   const reservation = tryReserveMutation(`${type} 任务`, type);
   if (!reservation) {
     const activeJobType = getActiveJobType();
@@ -96,29 +164,53 @@ export async function runJob(
 
   let job: { id: string };
   try {
-    // Create the running record up front (fast, one insert). This gives the API
-    // a jobId to return and lets the 3s frontend sync polling see the job.
+    const existing = await db.job.findFirst({
+      where: {
+        idempotencyKey,
+        status: { in: ['queued', 'running'] },
+        completedAt: null,
+      },
+      select: { id: true, status: true },
+    });
+    if (existing) {
+      reservation.release();
+      if (existing.status === 'running') {
+        return { queued: false, reason: `${type} job with same key already running` };
+      }
+      const claimed = await claimAndRunJob(existing.id);
+      if (claimed) {
+        void runPipeline(type, payload, existing.id, reservation);
+        return { queued: true, jobId: existing.id };
+      }
+      return { queued: false, reason: 'duplicate job already queued' };
+    }
+
     job = await db.job.create({
       data: {
         type,
         payload: JSON.stringify(payload),
-        status: 'running',
-        startedAt: new Date(),
+        status: 'queued',
+        idempotencyKey,
+        attempt: 0,
+        maxAttempts: 3,
       },
     });
   } catch (error) {
-    // Reservation must never survive a failed Job insert.
     reservation.release();
     throw error;
   }
 
-  // Detach the pipeline — caller does not wait for it.
-  void runPipeline(type, payload, job.id, reservation);
+  const claimed = await claimAndRunJob(job.id);
+  if (!claimed) {
+    reservation.release();
+    return { queued: false, reason: 'failed to claim queued job' };
+  }
 
+  void runPipeline(type, payload, job.id, reservation);
   return { queued: true, jobId: job.id };
 }
 
-/** Detached pipeline execution. Owns AbortController + Job status finalization. */
+/** Detached pipeline execution with DB lease + cancellation support. */
 async function runPipeline(
   type: JobType,
   payload: Record<string, unknown>,
@@ -127,13 +219,22 @@ async function runPipeline(
 ): Promise<void> {
   let controller: AbortController | null = null;
   let heartbeat: NodeJS.Timeout | null = null;
+  let leaseTimer: NodeJS.Timeout | null = null;
   console.log(`[execution] starting job ${jobId} (${type})`);
 
   try {
     const activeController = createJobAbortController(jobId);
     controller = activeController;
-    // 30 秒心跳——执行链路可能持续几分钟，无心跳会让快照看起来"过期"。
-    heartbeat = startJobHeartbeat(jobId, 30_000);
+    heartbeat = startJobHeartbeat(jobId, HEARTBEAT_INTERVAL_MS);
+
+    // Periodic lease renewal — if the process hangs, the lease expires and
+    // another worker can claim the job.
+    leaseTimer = setInterval(() => {
+      void renewLease(jobId).catch((err) => {
+        console.error(`[execution] lease renewal failed for ${jobId}:`, err);
+      });
+    }, 60_000);
+
     const result = await runWithJobId(jobId, () =>
       executeJob(type, payload, activeController.signal, jobId)
     );
@@ -141,22 +242,46 @@ async function runPipeline(
     console.log(`[execution] completed job ${jobId} (${type})`);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
-    const stopped = controller?.signal.aborted || msg === 'Stopped by user';
-    console.error(`[execution] ${stopped ? 'stopped' : 'failed'} job ${jobId} (${type}):`, msg);
-    await markJobFailed(jobId, stopped ? 'Stopped by user' : msg.slice(0, 2000));
+    const cancelled = msg === 'Job cancelled' || controller?.signal.aborted || msg === 'Stopped by user';
+    console.error(`[execution] ${cancelled ? 'cancelled' : 'failed'} job ${jobId} (${type}):`, msg);
+
+    if (cancelled) {
+      await markJobFailed(jobId, 'Stopped by user');
+    } else {
+      // Check remaining attempts for retry
+      const job = await db.job.findUnique({
+        where: { id: jobId },
+        select: { attempt: true, maxAttempts: true },
+      });
+      const nextAttempt = (job?.attempt ?? 0) + 1;
+      const maxAttempts = job?.maxAttempts ?? 3;
+      if (nextAttempt < maxAttempts) {
+        await db.job.updateMany({
+          where: { id: jobId, status: { in: ['running', 'cancel_requested'] } },
+          data: {
+            status: 'queued',
+            error: msg.slice(0, 2000),
+            attempt: nextAttempt,
+            leaseOwner: '',
+            leaseExpiresAt: null,
+            heartbeatAt: null,
+            availableAt: new Date(Date.now() + 30_000),
+          },
+        });
+      } else {
+        await markJobFailed(jobId, msg.slice(0, 2000));
+      }
+    }
   } finally {
     invalidateTechnicalWorkQueueCache();
     invalidateDashboardAnalyticsCache();
     stopJobHeartbeat(heartbeat);
+    if (leaseTimer) clearInterval(leaseTimer);
     reservation.release();
     clearJobAbortController(jobId);
   }
 }
 
-/**
- * Execute a single job by type. Extracted so it can be called directly by
- * runPipeline without the queue layer.
- */
 async function executeJob(
   type: JobType,
   payload: Record<string, unknown> = {},
@@ -183,32 +308,28 @@ async function executeFullJob(
   jobId?: string,
 ): Promise<Record<string, unknown>> {
   assertNotAborted(signal);
-  // 调度策略（重构 #3）：
-  //  - Scheduler 触发：在 maybeEnqueueCrawl 中检查 lastCrawlAt + crawl_interval_min，
-  //    到期才调用 runJob('full', { trigger: 'auto' })。
-  //  - 手动触发（API / 前端按钮）：直接调用 runJob('full', { trigger: 'manual' })，
-  //    跳过 scheduler 间隔；trigger 只记录来源，不改变流水线语义。
-  //  - collectAllSources 不再接收 force 参数，差异由调用方（scheduler vs API）
-  //    在所有到达本函数的路径上完成。
-  //
-  // 重构 #4：每个阶段调用都把 jobId 传进去，让 job-progress 模块持久化阶段进度。
+  if (jobId) await assertJobNotCancelled(jobId);
+
   const collectResult = await collectAllSources(signal, jobId);
 
   assertNotAborted(signal);
+  if (jobId) await assertJobNotCancelled(jobId);
   const processResult = await processAllPending(signal, jobId);
 
   assertNotAborted(signal);
+  if (jobId) await assertJobNotCancelled(jobId);
   let aiResult: Awaited<ReturnType<typeof analyzeAllPending>>;
   try {
     aiResult = await analyzeAllPending(signal, jobId);
   } catch (error) {
-    // Provider 全局故障时，仍归类本轮已经成功完成 AI 的文章，避免有效结果长期悬空。
     if (!signal?.aborted) await clusterAllPending(signal, jobId);
     throw error;
   }
   assertNotAborted(signal);
+  if (jobId) await assertJobNotCancelled(jobId);
   const clusterResult = await clusterAllPending(signal, jobId);
   assertNotAborted(signal);
+  if (jobId) await assertJobNotCancelled(jobId);
 
   const result: Record<string, unknown> = {
     stages: {
@@ -244,6 +365,7 @@ async function executeCollectJob(
     if (jobId) await startJobStage(jobId, { stage: 'collect', total: sourceIds.length });
     for (const id of sourceIds) {
       assertNotAborted(signal);
+      if (jobId) await assertJobNotCancelled(jobId);
       if (payload.resetSourceHealth === true) {
         await db.source.updateMany({
           where: { id },
@@ -330,6 +452,7 @@ async function executeAiJob(
     const analyzedIds: string[] = [];
     for (const id of articleIds) {
       assertNotAborted(signal);
+      if (jobId) await assertJobNotCancelled(jobId);
       try {
         await prepareArticleForAiRegeneration(id);
         const result = await reprocessWithAI(id, signal);
@@ -350,6 +473,7 @@ async function executeAiJob(
     if (analyzedIds.length > 0 && jobId) await startJobStage(jobId, { stage: 'cluster', total: analyzedIds.length });
     for (const id of analyzedIds) {
       assertNotAborted(signal);
+      if (jobId) await assertJobNotCancelled(jobId);
       let failed = false;
       try {
         await clusterSingleArticle(id, signal);
@@ -474,12 +598,14 @@ async function executeSingleArticleWorkflow(
 
   if (startAt === 'process' || startAt === 'ai') {
     assertNotAborted(signal);
+    if (jobId) await assertJobNotCancelled(jobId);
     result.ai = await reprocessWithAI(articleId, signal, jobId);
     stages.push('ai');
   }
 
   if (startAt === 'process' || startAt === 'cluster' || startAt === 'ai') {
     assertNotAborted(signal);
+    if (jobId) await assertJobNotCancelled(jobId);
     const aiResult = result.ai as Awaited<ReturnType<typeof reprocessWithAI>> | undefined;
     if (startAt === 'cluster' || aiResult?.status === 'done') {
       if (jobId) await startJobStage(jobId, { stage: 'cluster', total: 1, currentItemLabel: article.title });
@@ -525,11 +651,6 @@ async function clusterSingleArticle(articleId: string, signal?: AbortSignal) {
   }
 }
 
-/**
- * Collect a single source — used by the source retry flow.
- * Returns the same shape as collectAllSources so summarizeCollectResult can be reused.
- * Job progress is persisted through job-progress.
- */
 async function collectSingleSource(
   sourceId: string,
   signal?: AbortSignal,
@@ -563,10 +684,6 @@ async function collectSingleSource(
   };
 }
 
-/**
- * Summarize a collect result so it can be stored in the Job table without
- * bloating the JSON payload with every parsed item.
- */
 function summarizeCollectResult(
   result: Awaited<ReturnType<typeof collectAllSources>>
 ): Record<string, unknown> {
@@ -585,40 +702,57 @@ function summarizeCollectResult(
 }
 
 /**
- * Abort the currently running job (called by /api/worker/stop).
- * Also marks any DB running jobs as failed to clean up orphan records.
+ * Abort the currently running job. Sets cancel_requested in DB so the worker
+ * can cooperatively stop at the next stage boundary, then aborts the
+ * in-memory AbortController for the current process.
  */
 export async function abortRunningJob(): Promise<{ resetCount: number }> {
   const jobId = abortCurrentJob();
   if (jobId) {
-    // The detached pipeline owns final status. Marking it failed here races
-    // with cooperative cancellation and can be overwritten by a late success.
+    await db.job.updateMany({
+      where: { id: jobId, status: 'running' },
+      data: { status: 'cancel_requested', cancelRequestedAt: new Date() },
+    });
     return { resetCount: 0 };
   }
 
-  // No in-process owner means any running rows are orphaned historical state.
+  // No in-process owner — only reset orphaned running jobs with expired leases
+  const now = new Date();
   const reset = await db.job.updateMany({
-    where: { status: 'running' },
-    data: { status: 'failed', error: 'Stopped orphaned job', completedAt: new Date() },
+    where: {
+      status: { in: ['running', 'cancel_requested'] },
+      OR: [
+        { leaseExpiresAt: null },
+        { leaseExpiresAt: { lt: now } },
+      ],
+    },
+    data: { status: 'cancelled', error: 'Stopped by admin (expired lease)', completedAt: now },
   });
   return { resetCount: reset.count };
 }
 
 /**
- * Reset orphaned 'running' jobs left from a previous process crash / HMR.
- * Called once at scheduler startup.
+ * Reset orphaned jobs whose lease has expired. Does NOT touch running jobs
+ * with active leases — those belong to another instance.
  */
 export async function resetOrphanedJobs(): Promise<void> {
   try {
+    const now = new Date();
     const result = await db.job.updateMany({
-      where: { status: 'running' },
-      data: { status: 'failed', error: 'Worker restarted while job was running', completedAt: new Date() },
+      where: {
+        status: { in: ['running', 'cancel_requested'] },
+        OR: [
+          { leaseExpiresAt: null },
+          { leaseExpiresAt: { lt: now } },
+        ],
+      },
+      data: { status: 'cancelled', error: 'Worker restarted (expired lease)', completedAt: now },
     });
     if (result.count > 0) {
-      console.log(`[execution] reset ${result.count} orphaned running job(s)`);
+      console.log(`[execution] reset ${result.count} orphaned job(s) with expired leases`);
     }
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error('[execution] failed to reset orphaned running jobs:', msg);
+    console.error('[execution] failed to reset orphaned jobs:', msg);
   }
 }

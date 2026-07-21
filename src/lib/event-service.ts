@@ -469,17 +469,30 @@ export async function confirmIndependentArticle(eventId: string, articleId: stri
 export async function moveArticleToEvent(articleId: string, targetEventId: string): Promise<boolean> {
   const result = await db.$transaction(async (tx) => {
     const [article, target] = await Promise.all([
-      tx.article.findUnique({ where: { id: articleId }, select: { id: true, eventId: true } }),
+      tx.article.findUnique({ where: { id: articleId }, select: { id: true, eventId: true, aiStatus: true, clusterStatus: true } }),
       tx.event.findUnique({ where: { id: targetEventId }, select: { id: true, status: true } }),
     ]);
     if (!article?.eventId || article.eventId === targetEventId || target?.status !== 'active') return null;
     const sourceEventId = article.eventId;
+    // P1-7: 不得通过移动隐式绕过技术门禁
+    const canCluster = article.aiStatus === 'done';
     await tx.article.update({
       where: { id: articleId },
-      data: { eventId: targetEventId, clusterStatus: 'clustered', clusteredAt: new Date(), clusterError: null },
+      data: {
+        eventId: targetEventId,
+        clusterStatus: canCluster ? 'clustered' : article.clusterStatus,
+        clusteredAt: canCluster ? new Date() : undefined,
+        clusterError: null,
+      },
     });
     await recalculateEvent(tx, sourceEventId);
     await recalculateEvent(tx, targetEventId);
+    await tx.eventDirty.createMany({
+      data: [
+        { eventId: sourceEventId, reason: `article ${articleId} moved out to ${targetEventId}` },
+        { eventId: targetEventId, reason: `article ${articleId} moved in from ${sourceEventId}` },
+      ],
+    });
     await tx.eventClusterAudit.create({
       data: {
         articleId,
@@ -620,10 +633,12 @@ export async function mergeEvents(sourceEventId: string, targetEventId: string):
         publicSortAt: null,
       },
     });
-    if (source.pushedAt && !target.pushedAt) {
-      await tx.event.update({ where: { id: targetEventId }, data: { pushedAt: source.pushedAt } });
-    }
+    // P0-5: 禁止复制 pushedAt — 合并后重新计算投递状态
     await recalculateEvent(tx, targetEventId);
+    // 源 Event 合并后标记为脏，使 Reconciler 处理投递状态对齐
+    await tx.eventDirty.create({
+      data: { eventId: targetEventId, reason: `merged from ${sourceEventId}` },
+    });
     return true;
   });
   if (result) {
@@ -641,7 +656,7 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
     if (!sourceEvent || sourceEvent.status !== 'active') return null;
     const articles = await tx.article.findMany({
       where: { id: { in: ids }, eventId },
-      select: { id: true, publishedAt: true, createdAt: true },
+      select: { id: true, publishedAt: true, createdAt: true, aiStatus: true, clusterStatus: true },
     });
     const total = await tx.article.count({ where: { eventId } });
     if (articles.length !== ids.length || articles.length >= total) return null;
@@ -657,8 +672,17 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
     });
     await tx.article.updateMany({
       where: { id: { in: ids }, eventId },
-      data: { eventId: created.id, clusterStatus: 'clustered', clusteredAt: new Date() },
+      data: { eventId: created.id },
     });
+    // P1-7: 只把 AI 完成的文章设为 clustered，不绕过技术门禁
+    for (const article of articles) {
+      if (article.aiStatus === 'done') {
+        await tx.article.update({
+          where: { id: article.id },
+          data: { clusterStatus: 'clustered', clusteredAt: new Date() },
+        });
+      }
+    }
     await recalculateEvent(tx, created.id);
     for (const article of articles) {
       await tx.eventClusterAudit.create({
@@ -675,6 +699,12 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
       });
     }
     await recalculateEvent(tx, eventId);
+    await tx.eventDirty.createMany({
+      data: [
+        { eventId: created.id, reason: `split from ${eventId}` },
+        { eventId, reason: `split to ${created.id}` },
+      ],
+    });
     return created.id;
   });
   if (newEventId) {
@@ -683,4 +713,136 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
     invalidatePublicArticleCache();
   }
   return newEventId;
+}
+
+export interface ConsistencyViolation {
+  eventId: string;
+  issue: string;
+  severity: 'error' | 'warning';
+}
+
+/**
+ * Event 一致性扫描器 (P0). 检查所有 Event 的派生状态是否与基础事实一致。
+ * 返回违规列表；空数组表示完全一致。
+ */
+export async function scanEventConsistency(): Promise<ConsistencyViolation[]> {
+  const violations: ConsistencyViolation[] = [];
+  const events = await db.event.findMany({
+    where: { status: 'active' },
+    select: {
+      id: true,
+      articleCount: true,
+      representativeArticleId: true,
+      representativeManual: true,
+      publicStatus: true,
+      clusterReviewStatus: true,
+      pushedAt: true,
+      representativeArticle: { select: { id: true, clusterStatus: true, aiStatus: true, eventId: true } },
+      articles: { select: { id: true, clusterStatus: true } },
+    },
+  });
+
+  for (const event of events) {
+    // articleCount 与实际成员数不一致
+    const actualCount = event.articles.length;
+    if (event.articleCount !== actualCount) {
+      violations.push({
+        eventId: event.id,
+        issue: `articleCount=${event.articleCount} 实际=${actualCount}`,
+        severity: 'error',
+      });
+    }
+
+    // representativeArticle 不属于当前 Event
+    if (event.representativeArticleId && event.representativeArticle?.eventId !== event.id) {
+      violations.push({
+        eventId: event.id,
+        issue: `代表文章 ${event.representativeArticleId} 不属于当前 Event`,
+        severity: 'error',
+      });
+    }
+
+    // 非代表 Article 处于 published 状态
+    // (handled by public-publication-service, but check here)
+
+    // pending Event 有代表文章
+    if (event.clusterReviewStatus === 'pending' && event.representativeArticleId) {
+      violations.push({
+        eventId: event.id,
+        issue: '待复核 Event 不应有代表文章',
+        severity: 'warning',
+      });
+    }
+
+    // 空 Event 仍为 active
+    if (actualCount === 0) {
+      violations.push({
+        eventId: event.id,
+        issue: '空 Event 仍保持 active',
+        severity: 'error',
+      });
+    }
+
+    // representativeArticle 不可用
+    if (event.representativeArticleId && event.representativeArticle) {
+      const rep = event.representativeArticle;
+      if (rep.clusterStatus !== 'clustered' || rep.aiStatus !== 'done') {
+        violations.push({
+          eventId: event.id,
+          issue: `代表文章 ${rep.id} 不可用 (cluster=${rep.clusterStatus}, ai=${rep.aiStatus})`,
+          severity: 'warning',
+        });
+      }
+    }
+  }
+
+  // Check merged Events that should be cleaned
+  const mergedEvents = await db.event.findMany({
+    where: {
+      status: 'merged',
+      articles: { some: {} },
+    },
+    select: { id: true },
+  });
+  for (const event of mergedEvents) {
+    violations.push({
+      eventId: event.id,
+      issue: '已合并 Event 仍有成员文章',
+      severity: 'error',
+    });
+  }
+
+  // Check for orphaned EventDirty records
+  const dirtyCount = await db.eventDirty.count();
+  if (dirtyCount > 0) {
+    violations.push({
+      eventId: '(system)',
+      issue: `${dirtyCount} 个 Event 标记为脏，等待 Reconcile`,
+      severity: 'warning',
+    });
+  }
+
+  return violations;
+}
+
+/**
+ * 自动修复已知的不一致。批处理，不中断。
+ */
+export async function autoRepairEventConsistency(): Promise<number> {
+  let repairs = 0;
+
+  // Fix: articleCount mismatches
+  const events = await db.event.findMany({
+    where: { status: 'active' },
+    select: { id: true },
+  });
+  for (const { id } of events) {
+    await recalculateEventById(id);
+    repairs++;
+  }
+
+  // Cleanup: remove stale EventDirty entries for repaired Events
+  await db.eventDirty.deleteMany();
+
+  return repairs;
 }

@@ -116,10 +116,12 @@ export function markJobCompleted(jobId: string, result: Record<string, unknown>)
     await db.job.updateMany({
       where: { id: jobId, status: 'running' },
       data: {
-        status: 'completed',
+        status: 'succeeded',
         result: JSON.stringify(result),
         completedAt: new Date(),
         heartbeatAt: new Date(),
+        leaseOwner: '',
+        leaseExpiresAt: null,
       },
     });
   });
@@ -134,6 +136,8 @@ export function markJobFailed(jobId: string, errorMessage: string): Promise<void
         error: errorMessage.slice(0, 2000),
         completedAt: new Date(),
         heartbeatAt: new Date(),
+        leaseOwner: '',
+        leaseExpiresAt: null,
       },
     });
   });

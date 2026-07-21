@@ -39,7 +39,7 @@ describe('轻量事件聚类规则', () => {
   it('转载改写正文仍能形成强内容证据', () => {
     const left = 'Popeyes与淘宝闪购加速战略合作，首次在中国推出小店模型。'.repeat(20);
     const right = 'Popeyes联合淘宝闪购深化战略合作，首次在中国探索小店模型。'.repeat(20);
-    expect(contentShingleSimilarity(left, right).overlap).toBeGreaterThan(0.7);
+    expect(contentShingleSimilarity(left, right).tokenOverlap).toBeGreaterThan(0.55);
   });
 
   it('正文快速召回能识别共享长片段', () => {
@@ -94,36 +94,41 @@ describe('轻量事件聚类规则', () => {
 });
 
 describe('聚类 AI 候选审计', () => {
-  const baseEvidence: AiCandidateAudit['ruleEvidence'] = {
-    exactTitle: false,
-    fingerprint: false,
-    eventKeyMatch: false,
-    subjectOverlap: 0,
-    actionOverlap: 0,
-    objectOverlap: 0,
-    identityScore: 0,
-    identityConfidence: 0,
-    qualifierConflict: false,
-    identityConflict: false,
-    titleOverlap: 0,
-    contentOverlap: 0,
-    contentJaccard: 0,
-    daysApart: 1,
-    phaseConflict: false,
-    multiTopic: false,
-    sharedAnchors: [],
-  };
-
   it('正文覆盖率高但交并比低时不进入人工复核灰区', () => {
     expect(isAmbiguousEventCandidate({
-      ...baseEvidence,
-      contentOverlap: 0.6,
-      contentJaccard: 0.08,
+      eventKeyMatch: false,
+      identityConfidence: 0,
+      identityScore: 0,
+      subjectSimilarity: 0,
+      actionSimilarity: 0,
+      objectSimilarity: 0,
+      titleOverlap: 0,
+      charContentOverlap: 0.6,
+      charContentJaccard: 0.08,
+      tokenContentOverlap: 0,
+      tokenContentJaccard: 0,
+      daysApart: 1,
+      phaseConflict: false,
+      identityConflict: false,
+      multiTopic: false,
+      sharedAnchors: [],
     })).toBe(false);
     expect(isAmbiguousEventCandidate({
-      ...baseEvidence,
-      contentOverlap: 0.6,
-      contentJaccard: 0.22,
+      eventKeyMatch: false,
+      identityConfidence: 0,
+      identityScore: 0,
+      subjectSimilarity: 0,
+      actionSimilarity: 0,
+      objectSimilarity: 0,
+      titleOverlap: 0,
+      charContentOverlap: 0.6,
+      charContentJaccard: 0.22,
+      tokenContentOverlap: 0,
+      tokenContentJaccard: 0,
+      daysApart: 1,
+      phaseConflict: false,
+      identityConflict: false,
+      multiTopic: false,
       sharedAnchors: ['品牌A'],
     })).toBe(true);
   });
@@ -138,8 +143,8 @@ describe('聚类 AI 候选审计', () => {
     identityConflict: false,
   };
   const candidates: AiCandidateAudit[] = [
-    { candidateEventId: 'A', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, ...identityEvidence, titleOverlap: 0.5, contentOverlap: 0.3, contentJaccard: 0.2, daysApart: 1, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌A'] }, aiDecision: { sameEvent: false, confidence: 58, reason: '周期不同' } },
-    { candidateEventId: 'B', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, ...identityEvidence, titleOverlap: 0.7, contentOverlap: 0.8, contentJaccard: 0.6, daysApart: 0, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌B'] }, aiDecision: { sameEvent: true, confidence: 82, reason: '事项一致' } },
+    { candidateEventId: 'A', matchedMemberArticleId: 'member1', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, ...identityEvidence, titleOverlap: 0.5, charContentOverlap: 0.3, charContentJaccard: 0.2, tokenContentOverlap: 0, tokenContentJaccard: 0, daysApart: 1, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌A'] }, aiDecision: { sameEvent: false, confidence: 58, reason: '周期不同' } },
+    { candidateEventId: 'B', matchedMemberArticleId: 'member2', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, ...identityEvidence, titleOverlap: 0.7, charContentOverlap: 0.8, charContentJaccard: 0.6, tokenContentOverlap: 0, tokenContentJaccard: 0, daysApart: 0, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌B'] }, aiDecision: { sameEvent: true, confidence: 82, reason: '事项一致' } },
   ];
 
   it('先拒绝 A、再接受 B 时保存全部候选并标记 B', () => {

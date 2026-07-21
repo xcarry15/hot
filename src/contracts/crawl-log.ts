@@ -72,7 +72,7 @@ export interface SourceProgress {
 }
 
 export type JobType = 'full' | 'collect' | 'process' | 'ai' | 'cluster' | 'push' | 'fastProcess';
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type JobStatus = 'queued' | 'running' | 'cancel_requested' | 'succeeded' | 'failed' | 'cancelled' | 'completed';
 export type JobStage = 'collect' | 'process' | 'ai' | 'cluster' | 'push';
 
 export interface JobSnapshot {

@@ -26,6 +26,7 @@ import {
   normalizeEventText,
   overlapCoefficient,
   sharedEventAnchors,
+  type ContentShingleResult,
 } from '@/contracts/event-clustering';
 import { parseEventSubjects } from '@/contracts/event-identity';
 import { createChatCompletion } from '@/lib/ai-client';
@@ -74,49 +75,82 @@ const candidateArticleSelect = {
   createdAt: true,
 } as const;
 
+/** P0-2: 每对成员独立的聚类证据——禁止跨成员拼接各维度最大值。 */
+export interface PairEvidence {
+  candidateEventId: string;
+  matchedMemberArticleId: string;
+
+  fingerprintMatch: boolean;
+  eventKeyMatch: boolean;
+
+  subjectSimilarity: number;
+  actionSimilarity: number;
+  objectSimilarity: number;
+  identityScore: number;
+  identityConfidence: number;
+  identityConflict: boolean;
+  qualifierConflict: boolean;
+
+  titleOverlap: number;
+  exactTitle: boolean;
+
+  charContentOverlap: number;
+  charContentJaccard: number;
+  tokenContentOverlap: number;
+  tokenContentJaccard: number;
+
+  daysApart: number;
+  phaseConflict: boolean;
+  qualifierConflictOnPair: boolean;
+  sharedAnchors: string[];
+
+  /** P0-2: 该 pair 独立的判断：exact | strong | ambiguous | reject */
+  decision: 'exact' | 'strong' | 'ambiguous' | 'reject';
+}
+
 export interface AiCandidateAudit {
   candidateEventId: string;
-  ruleEvidence: {
-    exactTitle: boolean;
-    fingerprint: boolean;
-    eventKeyMatch: boolean;
-    subjectOverlap: number;
-    actionOverlap: number;
-    objectOverlap: number;
-    identityScore: number;
-    identityConfidence: number;
-    qualifierConflict: boolean;
-    identityConflict: boolean;
-    titleOverlap: number;
-    contentOverlap: number;
-    contentJaccard: number;
-    daysApart: number;
-    phaseConflict: boolean;
-    multiTopic: boolean;
-    sharedAnchors: string[];
-  };
+  matchedMemberArticleId: string;
+  ruleEvidence: Record<string, unknown>;
   aiDecision: { sameEvent: boolean; confidence: number; reason: string };
 }
 
-/**
- * 只有同时具备“可能是同一具体事件”的证据才进入 AI 灰区。
- * 单纯正文词汇重合或品牌/行业词相同，不足以占用人工复核队列。
- */
-export function isAmbiguousEventCandidate(evidence: AiCandidateAudit['ruleEvidence']): boolean {
+export function isAmbiguousEventCandidate(evidence: {
+  eventKeyMatch: boolean;
+  identityConfidence: number;
+  identityScore: number;
+  subjectSimilarity: number;
+  actionSimilarity: number;
+  objectSimilarity: number;
+  titleOverlap: number;
+  daysApart: number;
+  sharedAnchors: string[];
+  charContentOverlap: number;
+  charContentJaccard: number;
+  tokenContentOverlap: number;
+  tokenContentJaccard: number;
+  phaseConflict: boolean;
+  identityConflict: boolean;
+  multiTopic: boolean;
+}): boolean {
   if (evidence.multiTopic || evidence.phaseConflict || evidence.identityConflict) return false;
 
   const keySignal = evidence.eventKeyMatch
     && evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE;
   const identitySignal = evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
     && evidence.identityScore >= EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE
-    && evidence.subjectOverlap >= 0.5
-    && (evidence.actionOverlap >= 0.4 || evidence.objectOverlap >= 0.5);
+    && evidence.subjectSimilarity >= 0.5
+    && (evidence.actionSimilarity >= 0.4 || evidence.objectSimilarity >= 0.5);
   const titleSignal = evidence.sharedAnchors.length > 0
     && evidence.titleOverlap >= EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP
     && evidence.daysApart <= EVENT_CLUSTER_WINDOW_DAYS
     && evidence.identityScore >= 0.35;
-  const contentSignal = evidence.contentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
-    && evidence.contentJaccard >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD
+  // P0-3: 要求同一表示空间中的指标同时成立
+  const charContentSignal = evidence.charContentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
+    && evidence.charContentJaccard >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD;
+  const tokenContentSignal = evidence.tokenContentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
+    && evidence.tokenContentJaccard >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD;
+  const contentSignal = (charContentSignal || tokenContentSignal)
     && (evidence.sharedAnchors.length > 0 || evidence.identityScore >= 0.4);
 
   return keySignal || identitySignal || titleSignal || contentSignal;
@@ -165,7 +199,6 @@ function subjectSimilarity(left: string, right: string): number {
   const directionalAverage = (from: string[], to: string[]) => from.reduce((sum, subject) => (
     sum + Math.max(...to.map((candidate) => componentSimilarity(subject, candidate)))
   ), 0) / from.length;
-  // 联合事件必须覆盖双方主体；只共享一个品牌不能把不同合作方的事件合并。
   return Math.min(
     directionalAverage(leftSubjects, rightSubjects),
     directionalAverage(rightSubjects, leftSubjects),
@@ -191,104 +224,191 @@ function compareIdentity(left: IdentityArticle, right: IdentityArticle) {
   };
 }
 
-function candidateEvidence(
-  article: { title: string; cleanContent: string; contentHash: string; eventSubjects: string; eventAction: string; eventObject: string; eventKey: string; eventKeyConfidence: number | null; publishedAt: Date | null; createdAt: Date },
-  candidate: Candidate,
+/**
+ * P0-2: 计算新文章与候选 Event 单个成员的 PairEvidence。
+ * 不再跨成员取各维度最大值——每个 PairEvidence 独立评估。
+ */
+function computePairEvidence(
+  article: { id: string; title: string; cleanContent: string; contentHash: string; eventSubjects: string; eventAction: string; eventObject: string; eventKey: string; eventKeyConfidence: number | null; publishedAt: Date | null; createdAt: Date },
+  member: { id: string; title: string; cleanContent: string; contentHash: string; eventSubjects: string; eventAction: string; eventObject: string; eventKey: string; eventKeyConfidence: number | null; publishedAt: Date | null; createdAt: Date },
+  candidateEventId: string,
   includeContent = true,
-) {
+): PairEvidence {
   const normalizedTitle = normalizeEventText(article.title);
-  let exactTitle = false;
-  let fingerprint = false;
-  let eventKeyMatch = false;
-  let subjectOverlap = 0;
-  let actionOverlap = 0;
-  let objectOverlap = 0;
-  let identityScore = 0;
-  let identityConfidence = 0;
-  let qualifierConflict = false;
-  let identityConflict = false;
-  let titleOverlap = 0;
-  let contentOverlap = 0;
-  let contentJaccard = 0;
-  let daysApart = Number.POSITIVE_INFINITY;
-  let phaseConflict = false;
-  let multiTopic = isMultiTopicTitle(article.title);
-  let sharedAnchors: string[] = [];
-  for (const member of candidate.articles) {
-    exactTitle ||= normalizedTitle.length > 0 && normalizedTitle === normalizeEventText(member.title);
-    fingerprint ||= article.contentHash.length > 0 && article.contentHash === member.contentHash;
-    eventKeyMatch ||= article.eventKey.length > 0 && article.eventKey === member.eventKey;
-    const identity = compareIdentity(article, member);
-    if (identity.identityScore > identityScore) {
-      subjectOverlap = identity.subjectOverlap;
-      actionOverlap = identity.actionOverlap;
-      objectOverlap = identity.objectOverlap;
-      identityScore = identity.identityScore;
-      identityConfidence = identity.identityConfidence;
-      qualifierConflict = identity.qualifierConflict;
-      identityConflict = identity.identityConflict;
-    }
-    titleOverlap = Math.max(titleOverlap, overlapCoefficient(article.title, member.title));
-    if (includeContent) {
-      const content = contentShingleSimilarity(article.cleanContent, member.cleanContent);
-      contentOverlap = Math.max(contentOverlap, content.overlap);
-      contentJaccard = Math.max(contentJaccard, content.jaccard);
-    }
-    daysApart = Math.min(daysApart, Math.abs(articleDate(article).getTime() - articleDate(member).getTime()) / 86_400_000);
-    phaseConflict ||= hasEventPhaseConflict(
-      `${article.title} ${article.eventAction} ${article.eventObject}`,
-      `${member.title} ${member.eventAction} ${member.eventObject}`,
-    );
-    multiTopic ||= isMultiTopicTitle(member.title);
-    const anchors = sharedEventAnchors(article.title, member.title);
-    if (anchors.length > sharedAnchors.length) sharedAnchors = anchors;
+  const memberNormalizedTitle = normalizeEventText(member.title);
+
+  const fingerprintMatch = article.contentHash.length > 0 && article.contentHash === member.contentHash;
+  const eventKeyMatch = article.eventKey.length > 0 && article.eventKey === member.eventKey;
+  const exactTitle = normalizedTitle.length > 0 && normalizedTitle === memberNormalizedTitle;
+
+  const identity = compareIdentity(article, member);
+
+  const titleOverlap = overlapCoefficient(article.title, member.title);
+
+  let contentSimilarity: ContentShingleResult = {
+    charOverlap: 0, charJaccard: 0, tokenOverlap: 0, tokenJaccard: 0,
+  };
+  if (includeContent) {
+    contentSimilarity = contentShingleSimilarity(article.cleanContent, member.cleanContent);
   }
+
+  const daysApart = Math.abs(articleDate(article).getTime() - articleDate(member).getTime()) / 86_400_000;
+
+  const phaseConflict = hasEventPhaseConflict(
+    `${article.title} ${article.eventAction} ${article.eventObject}`,
+    `${member.title} ${member.eventAction} ${member.eventObject}`,
+  );
+
+  const multiTopic = isMultiTopicTitle(article.title) || isMultiTopicTitle(member.title);
+
+  const sharedAnchors = sharedEventAnchors(article.title, member.title);
+
+  const qualifierConflictOnPair = hasEventIdentityQualifierConflict(
+    article.eventObject, member.eventObject,
+  );
+
+  // P0-2: 每个 pair 独立决策
+  let decision: PairEvidence['decision'] = 'reject';
+
+  const isExact = fingerprintMatch || (
+    exactTitle
+    && !phaseConflict
+    && !identity.identityConflict
+    && (eventKeyMatch || identity.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE)
+  );
+  if (isExact) {
+    decision = 'exact';
+  } else if (!phaseConflict && !identity.identityConflict && !multiTopic) {
+    const keyConfirmed = eventKeyMatch
+      && identity.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE;
+    const identityConfirmed = identity.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
+      && identity.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE
+      && identity.subjectOverlap >= 0.6
+      && identity.actionOverlap >= 0.5
+      && identity.objectOverlap >= 0.45;
+    // P0-3: 要求同一表示空间的指标同时成立
+    const charContentConfirmed = contentSimilarity.charOverlap >= EVENT_CLUSTER_STRONG_CONTENT_OVERLAP
+      && contentSimilarity.charJaccard >= EVENT_CLUSTER_STRONG_CONTENT_JACCARD;
+    const tokenContentConfirmed = contentSimilarity.tokenOverlap >= EVENT_CLUSTER_STRONG_CONTENT_OVERLAP
+      && contentSimilarity.tokenJaccard >= EVENT_CLUSTER_STRONG_CONTENT_JACCARD;
+    const titleConfirmed = sharedAnchors.length > 0
+      && titleOverlap >= EVENT_CLUSTER_STRONG_TITLE_OVERLAP
+      && daysApart <= EVENT_CLUSTER_STRONG_TITLE_DAYS
+      && identity.identityScore >= 0.6
+      && identity.actionOverlap >= 0.45
+      && identity.objectOverlap >= 0.65;
+
+    if (keyConfirmed || identityConfirmed || charContentConfirmed || tokenContentConfirmed || titleConfirmed) {
+      decision = 'strong';
+    } else if (isAmbiguousEventCandidate({
+      eventKeyMatch,
+      identityConfidence: identity.identityConfidence,
+      identityScore: identity.identityScore,
+      subjectSimilarity: identity.subjectOverlap,
+      actionSimilarity: identity.actionOverlap,
+      objectSimilarity: identity.objectOverlap,
+      titleOverlap,
+      daysApart: Number.isFinite(daysApart) ? daysApart : EVENT_CLUSTER_WINDOW_DAYS,
+      sharedAnchors,
+      charContentOverlap: contentSimilarity.charOverlap,
+      charContentJaccard: contentSimilarity.charJaccard,
+      tokenContentOverlap: contentSimilarity.tokenOverlap,
+      tokenContentJaccard: contentSimilarity.tokenJaccard,
+      phaseConflict,
+      identityConflict: identity.identityConflict,
+      multiTopic,
+    })) {
+      decision = 'ambiguous';
+    }
+  }
+
   return {
-    exactTitle,
-    fingerprint,
+    candidateEventId,
+    matchedMemberArticleId: member.id,
+    fingerprintMatch,
     eventKeyMatch,
-    subjectOverlap,
-    actionOverlap,
-    objectOverlap,
-    identityScore,
-    identityConfidence,
-    qualifierConflict,
-    identityConflict,
+    subjectSimilarity: identity.subjectOverlap,
+    actionSimilarity: identity.actionOverlap,
+    objectSimilarity: identity.objectOverlap,
+    identityScore: identity.identityScore,
+    identityConfidence: identity.identityConfidence,
+    identityConflict: identity.identityConflict,
+    qualifierConflict: identity.qualifierConflict,
     titleOverlap,
-    contentOverlap,
-    contentJaccard,
+    exactTitle,
+    charContentOverlap: contentSimilarity.charOverlap,
+    charContentJaccard: contentSimilarity.charJaccard,
+    tokenContentOverlap: contentSimilarity.tokenOverlap,
+    tokenContentJaccard: contentSimilarity.tokenJaccard,
     daysApart: Number.isFinite(daysApart) ? daysApart : EVENT_CLUSTER_WINDOW_DAYS,
     phaseConflict,
-    multiTopic,
+    qualifierConflictOnPair,
     sharedAnchors,
+    decision,
   };
 }
 
-function hasCandidateContentHint(article: { cleanContent: string }, candidate: Candidate): boolean {
-  return candidate.articles.some((member) => hasLiteralContentOverlap(article.cleanContent, member.cleanContent));
-}
-
-function isStrongPushedDuplicate(evidence: ReturnType<typeof candidateEvidence>): boolean {
-  if (evidence.fingerprint) return true;
-  if (evidence.phaseConflict || evidence.identityConflict) return false;
-  if (evidence.eventKeyMatch && evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE) return true;
-  if (evidence.identityScore >= 0.84
-    && evidence.subjectOverlap >= 0.75
-    && evidence.actionOverlap >= 0.6
-    && evidence.objectOverlap >= 0.7) return true;
-  return evidence.sharedAnchors.length > 0
-    && evidence.titleOverlap >= 0.9
-    && evidence.contentOverlap >= 0.78
-    && evidence.contentJaccard >= 0.5;
-}
-
 /**
- * 推送前的跨 Event 最后防线。它只拦截高置信的已推送重复，不参与正常聚类，
- * 也不改变 Event 归属；人工强制推送仍由调用方明确绕过。
+ * P0-2: 从候选 Event 的所有成员中计算 PairEvidence，选择最佳成员证据。
  */
+function bestPairEvidenceForCandidate(
+  article: Parameters<typeof computePairEvidence>[0],
+  candidate: Candidate,
+  includeContent = true,
+): PairEvidence | null {
+  let best: PairEvidence | null = null;
+
+  for (const member of candidate.articles) {
+    const evidence = computePairEvidence(article, member, candidate.id, includeContent);
+
+    if (!best) { best = evidence; continue; }
+
+    // 决策优先级：exact > strong > ambiguous > reject
+    const decisionRank: Record<string, number> = { exact: 3, strong: 2, ambiguous: 1, reject: 0 };
+    const currentRank = decisionRank[evidence.decision] ?? 0;
+    const bestRank = decisionRank[best.decision] ?? 0;
+
+    if (currentRank > bestRank) { best = evidence; continue; }
+    if (currentRank < bestRank) continue;
+
+    // 同级时按分数排序
+    const score = (e: PairEvidence) =>
+      Number(e.fingerprintMatch) * 10
+      + Number(e.eventKeyMatch) * 8
+      + Number(e.exactTitle) * 6
+      + e.identityScore * 5
+      + e.titleOverlap * 2
+      + Math.max(e.charContentOverlap, e.tokenContentOverlap) * 2
+      + Math.max(e.charContentJaccard, e.tokenContentJaccard) * 1.5
+      - Number(e.phaseConflict) * 4
+      - Number(e.identityConflict) * 5
+      - e.daysApart / EVENT_CLUSTER_WINDOW_DAYS * 2;
+
+    if (score(evidence) > score(best)) best = evidence;
+  }
+
+  return best;
+}
+
+function isStrongPushedDuplicate(pair: PairEvidence): boolean {
+  if (pair.fingerprintMatch) return true;
+  if (pair.phaseConflict || pair.identityConflict) return false;
+  if (pair.eventKeyMatch && pair.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE) return true;
+  if (pair.identityScore >= 0.84
+    && pair.subjectSimilarity >= 0.75
+    && pair.actionSimilarity >= 0.6
+    && pair.objectSimilarity >= 0.7) return true;
+  // P0-3: 要求同一表示空间的指标同时成立
+  const charConfirmed = pair.charContentOverlap >= 0.78 && pair.charContentJaccard >= 0.5;
+  const tokenConfirmed = pair.tokenContentOverlap >= 0.78 && pair.tokenContentJaccard >= 0.5;
+  return pair.sharedAnchors.length > 0
+    && pair.titleOverlap >= 0.9
+    && (charConfirmed || tokenConfirmed);
+}
+
 export async function findRecentPushedEventDuplicate(articleId: string, eventId: string): Promise<{
   eventId: string;
-  evidence: ReturnType<typeof candidateEvidence>;
+  evidence: PairEvidence;
 } | null> {
   const article = await db.article.findUnique({
     where: { id: articleId },
@@ -336,15 +456,17 @@ export async function findRecentPushedEventDuplicate(articleId: string, eventId:
           ...articles,
         ].filter((member, index, all) => all.findIndex((item) => item.id === member.id) === index),
       };
-      return { eventId: event.id, evidence: candidateEvidence(article, candidate) };
+      const best = bestPairEvidenceForCandidate(article, candidate);
+      return best ? { eventId: event.id, evidence: best } : null;
     })
-    .filter((match) => isStrongPushedDuplicate(match.evidence))
+    .filter((match): match is { eventId: string; evidence: PairEvidence } =>
+      match !== null && isStrongPushedDuplicate(match.evidence))
     .sort((left, right) => {
-      const score = (evidence: ReturnType<typeof candidateEvidence>) => Number(evidence.fingerprint) * 10
-        + Number(evidence.eventKeyMatch) * 8
-        + evidence.identityScore * 6
-        + evidence.contentOverlap * 3
-        + evidence.titleOverlap * 2;
+      const score = (e: PairEvidence) => Number(e.fingerprintMatch) * 10
+        + Number(e.eventKeyMatch) * 8
+        + e.identityScore * 6
+        + Math.max(e.charContentOverlap, e.tokenContentOverlap) * 3
+        + e.titleOverlap * 2;
       return score(right.evidence) - score(left.evidence);
     });
   return matches[0] ?? null;
@@ -353,7 +475,7 @@ export async function findRecentPushedEventDuplicate(articleId: string, eventId:
 async function createEventForArticle(
   client: ClusterClient,
   article: { id: string; title: string; publishedAt: Date | null; createdAt: Date; eventKey: string },
-  input: { action: 'create' | 'fallback_create'; decisionSource: 'rule' | 'ai'; confidence?: number; evidence: object; needsReview?: boolean; candidateEventId?: string },
+  input: { action: 'create' | 'fallback_create'; decisionSource: 'rule' | 'ai'; confidence?: number; evidence: object; needsReview?: boolean; candidateEventId?: string; matchedMemberArticleId?: string },
 ): Promise<string> {
   const seenAt = articleDate(article);
   const event = await client.event.create({
@@ -362,7 +484,6 @@ async function createEventForArticle(
       lastSeenAt: seenAt,
       articleCount: 1,
       clusterReviewStatus: input.needsReview ? 'pending' : 'confirmed',
-      // AI 已完成；事务结束后由 event-service 统一选择代表文章并刷新公开状态。
       representativeArticleId: null,
     },
     select: { id: true },
@@ -387,7 +508,11 @@ async function createEventForArticle(
       action: input.action,
       decisionSource: input.decisionSource,
       confidence: input.confidence,
-      evidence: JSON.stringify({ ruleVersion: EVENT_CLUSTER_RULE_VERSION, ...input.evidence }),
+      evidence: JSON.stringify({
+        ruleVersion: EVENT_CLUSTER_RULE_VERSION,
+        matchedMemberArticleId: input.matchedMemberArticleId,
+        ...input.evidence,
+      }),
     },
   });
   return event.id;
@@ -397,9 +522,9 @@ async function attachArticle(
   client: ClusterClient,
   article: { id: string; publishedAt: Date | null; createdAt: Date },
   candidate: Candidate,
+  pair: PairEvidence,
   decisionSource: 'exact' | 'rule' | 'ai',
   confidence: number,
-  evidence: object,
 ): Promise<string> {
   const seenAt = articleDate(article);
   const currentEvent = await client.event.findUnique({
@@ -437,7 +562,12 @@ async function attachArticle(
       action: 'attach',
       decisionSource,
       confidence,
-      evidence: JSON.stringify({ ruleVersion: EVENT_CLUSTER_RULE_VERSION, ...evidence }),
+      evidence: JSON.stringify({
+        ruleVersion: EVENT_CLUSTER_RULE_VERSION,
+        matchedMemberArticleId: pair.matchedMemberArticleId,
+        decision: pair.decision,
+        pair,
+      }),
     },
   });
   return candidate.id;
@@ -445,10 +575,11 @@ async function attachArticle(
 
 async function askAiSameEvent(
   article: { title: string; cleanContent: string; eventKey: string; eventKeyConfidence: number | null },
+  pair: PairEvidence,
   candidate: Candidate,
   signal?: AbortSignal,
 ) {
-  const candidateArticles = candidate.articles.slice(0, 3).map((item) => `- 事件键：${item.eventKey}（置信度 ${item.eventKeyConfidence ?? 0}）\n  标题：${item.title}\n  正文：${item.cleanContent.slice(0, 600)}`).join('\n');
+  const member = candidate.articles.find((item) => item.id === pair.matchedMemberArticleId) ?? candidate.articles[0];
   const prompt = `判断是否是同一个具体新闻事件。
 同一事件必须同时满足：核心主体相同、具体动作/结果相同、时间阶段一致。
 以下均不算同一事件：只有品牌/地点/奖项/话题相同；预告与事后结果；聚合快讯仅有一个子项重合。
@@ -458,8 +589,9 @@ async function askAiSameEvent(
 新文章：${article.title}
 正文：${article.cleanContent.slice(0, 1_200)}
 
-候选报道：
-${candidateArticles}
+匹配成员事件键：${member.eventKey}（置信度 ${member.eventKeyConfidence ?? 0}）
+匹配成员标题：${member.title}
+匹配成员正文：${member.cleanContent.slice(0, 600)}
 
 只返回 JSON：{"same_event":false,"confidence":0,"reason":"不超过50字"}`;
   const result = await createChatCompletion([
@@ -550,105 +682,105 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       ...articles,
     ].filter((member, index, all) => all.findIndex((item) => item.id === member.id) === index),
   }));
+
+  // P0-2: 每个候选 Event 只保留一个最佳成员证据
+  const bestEvidenceByEvent = new Map<string, PairEvidence>();
+  for (const candidate of candidates) {
+    const best = bestPairEvidenceForCandidate(article, candidate, false);
+    if (best) bestEvidenceByEvent.set(candidate.id, best);
+  }
+
+  // Content recall: sort by composite score
   const recalled = candidates
-    .map((candidate) => ({
-      candidate,
-      evidence: candidateEvidence(article, candidate, false),
-      contentHint: hasCandidateContentHint(article, candidate),
-    }))
+    .filter((candidate) => bestEvidenceByEvent.has(candidate.id))
+    .map((candidate) => {
+      const evidence = bestEvidenceByEvent.get(candidate.id)!;
+      return {
+        candidate,
+        evidence,
+        contentHint: candidate.articles.some((member) => hasLiteralContentOverlap(article.cleanContent, member.cleanContent)),
+      };
+    })
     .sort((left, right) => {
-      const score = (value: typeof left.evidence) => Number(value.fingerprint) * 5
-        + Number(value.exactTitle) * 4
-        + Number(value.eventKeyMatch) * 8
-        + value.identityScore * 6
-        + value.subjectOverlap * 2
-        + value.titleOverlap * 1.5
-        + Math.min(value.sharedAnchors.length, 3)
-        - Number(value.phaseConflict) * 3
-        - Number(value.identityConflict) * 5
-        - Number(value.multiTopic) * 1.5
-        - Math.min(value.daysApart, EVENT_CLUSTER_WINDOW_DAYS) / EVENT_CLUSTER_WINDOW_DAYS;
+      const score = (e: PairEvidence) => Number(e.fingerprintMatch) * 5
+        + Number(e.exactTitle) * 4
+        + Number(e.eventKeyMatch) * 8
+        + e.identityScore * 6
+        + e.subjectSimilarity * 2
+        + e.titleOverlap * 1.5
+        + Math.min(e.sharedAnchors.length, 3)
+        - Number(e.phaseConflict) * 3
+        - Number(e.identityConflict) * 5
+        - Math.min(e.daysApart, EVENT_CLUSTER_WINDOW_DAYS) / EVENT_CLUSTER_WINDOW_DAYS;
       return Number(right.contentHint) * 4 + score(right.evidence)
         - (Number(left.contentHint) * 4 + score(left.evidence));
     })
     .slice(0, EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES);
+
+  // Full ranking with content
   const ranked = recalled
-    .map(({ candidate }) => ({ candidate, evidence: candidateEvidence(article, candidate) }))
+    .map(({ candidate }) => {
+      const evidence = bestPairEvidenceForCandidate(article, candidate);
+      return evidence ? { candidate, evidence } : null;
+    })
+    .filter((item): item is { candidate: Candidate; evidence: PairEvidence } => item !== null)
     .sort((left, right) => {
-      const score = (value: typeof left.evidence) => Number(value.fingerprint) * 5
-        + Number(value.exactTitle) * 4
-        + Number(value.eventKeyMatch) * 8
-        + value.identityScore * 6
-        + value.contentOverlap * 3
-        + value.contentJaccard * 2
-        + value.titleOverlap
-        - Number(value.phaseConflict) * 3
-        - Number(value.identityConflict) * 5
-        - Number(value.multiTopic) * 1.5;
+      const score = (e: PairEvidence) => Number(e.fingerprintMatch) * 5
+        + Number(e.exactTitle) * 4
+        + Number(e.eventKeyMatch) * 8
+        + e.identityScore * 6
+        + Math.max(e.charContentOverlap, e.tokenContentOverlap) * 3
+        + Math.max(e.charContentJaccard, e.tokenContentJaccard) * 2
+        + e.titleOverlap
+        - Number(e.phaseConflict) * 3
+        - Number(e.identityConflict) * 5;
       return score(right.evidence) - score(left.evidence);
     })
     .slice(0, EVENT_CLUSTER_MAX_CANDIDATES);
 
-  const exact = ranked.find(({ evidence }) => evidence.fingerprint || (
-    evidence.exactTitle
-    && !evidence.phaseConflict
-    && !evidence.identityConflict
-    && (evidence.eventKeyMatch || evidence.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE)
-  ));
+  // P0-2: 每位候选使用其最佳成员证据的决策
+  const exact = ranked.find(({ evidence }) => evidence.decision === 'exact');
   if (exact) {
-    const eventId = await db.$transaction((tx) => attachArticle(tx, article, exact.candidate, 'exact', 100, exact.evidence));
+    const eventId = await db.$transaction((tx) => attachArticle(tx, article, exact.candidate, exact.evidence, 'exact', 100));
     await recalculateEventById(eventId);
     return { eventId, action: 'attach' };
   }
-  const strong = ranked.find(({ evidence }) => {
-    if (evidence.phaseConflict || evidence.identityConflict || evidence.multiTopic) return false;
-    const keyConfirmed = evidence.eventKeyMatch
-      && evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE;
-    const identityConfirmed = evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
-      && evidence.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE
-      && evidence.subjectOverlap >= 0.6
-      && evidence.actionOverlap >= 0.5
-      && evidence.objectOverlap >= 0.45;
-    const contentConfirmed = evidence.contentOverlap >= EVENT_CLUSTER_STRONG_CONTENT_OVERLAP
-      && evidence.contentJaccard >= EVENT_CLUSTER_STRONG_CONTENT_JACCARD;
-    const titleConfirmed = evidence.sharedAnchors.length > 0
-      && evidence.titleOverlap >= EVENT_CLUSTER_STRONG_TITLE_OVERLAP
-      && evidence.daysApart <= EVENT_CLUSTER_STRONG_TITLE_DAYS
-      && evidence.identityScore >= 0.6
-      && evidence.actionOverlap >= 0.45
-      && evidence.objectOverlap >= 0.65;
-    return keyConfirmed || identityConfirmed || contentConfirmed || titleConfirmed;
-  });
+
+  const strong = ranked.find(({ evidence }) => evidence.decision === 'strong');
   if (strong) {
     const confidence = Math.min(99, Math.round(65
       + Number(strong.evidence.eventKeyMatch) * 20
       + strong.evidence.identityScore * 12
       + strong.evidence.titleOverlap * 6
-      + strong.evidence.contentOverlap * 5));
-    const eventId = await db.$transaction((tx) => attachArticle(tx, article, strong.candidate, 'rule', confidence, strong.evidence));
+      + Math.max(strong.evidence.charContentOverlap, strong.evidence.tokenContentOverlap) * 5));
+    const eventId = await db.$transaction((tx) => attachArticle(tx, article, strong.candidate, strong.evidence, 'rule', confidence));
     await recalculateEventById(eventId);
     return { eventId, action: 'attach' };
   }
+
   const ambiguous = ranked
-    .filter(({ evidence }) => isAmbiguousEventCandidate(evidence))
+    .filter(({ evidence }) => evidence.decision === 'ambiguous')
     .slice(0, EVENT_CLUSTER_MAX_AI_CANDIDATES);
+
   const aiCandidates: AiCandidateAudit[] = [];
   for (const item of ambiguous) {
     let decision;
     try {
-      decision = await askAiSameEvent(article, item.candidate, signal);
+      decision = await askAiSameEvent(article, item.evidence, item.candidate, signal);
     } catch (error) {
       console.warn('[event-clustering] candidate decision failed:', error);
       aiCandidates.push({
         candidateEventId: item.candidate.id,
-        ruleEvidence: item.evidence,
+        matchedMemberArticleId: item.evidence.matchedMemberArticleId,
+        ruleEvidence: item.evidence as unknown as Record<string, unknown>,
         aiDecision: { sameEvent: false, confidence: 0, reason: 'AI 判断失败，已保守分开' },
       });
       continue;
     }
-    const auditDecision = {
+    const auditDecision: AiCandidateAudit = {
       candidateEventId: item.candidate.id,
-      ruleEvidence: item.evidence,
+      matchedMemberArticleId: item.evidence.matchedMemberArticleId,
+      ruleEvidence: item.evidence as unknown as Record<string, unknown>,
       aiDecision: {
         sameEvent: decision.same_event,
         confidence: decision.confidence,
@@ -657,13 +789,12 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     };
     aiCandidates.push(auditDecision);
     if (decision.same_event && decision.confidence >= 70) {
-      const eventId = await db.$transaction((tx) => attachArticle(tx, article, item.candidate, 'ai', decision.confidence, buildAiClusterAuditEvidence(aiCandidates, item.candidate.id)));
+      const eventId = await db.$transaction((tx) => attachArticle(tx, article, item.candidate, item.evidence, 'ai', decision.confidence));
       await recalculateEventById(eventId);
       return { eventId, action: 'attach' };
     }
   }
-  // 灰区只有在每个候选都得到高置信“不同事件”结论时才允许新建正常 Event。
-  // AI 超时、格式错误或低置信结论必须进入待复核，不能降级成可推送事件。
+
   const needsReview = shouldCreateClusterReview(ambiguous.length, aiCandidates);
   const eventId = await db.$transaction((tx) => createEventForArticle(tx, article, {
     action: needsReview ? 'fallback_create' : 'create',

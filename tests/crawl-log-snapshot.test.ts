@@ -37,9 +37,11 @@ function job(overrides: Partial<Job> = {}): Job {
     id: 'j-1', type: 'full', status: 'running', payload: '{}', result: '{}', error: '',
     currentStage: 'collect', progressTotal: 5, progressDone: 2, progressErrors: 0,
     currentItemLabel: '', heartbeatAt: new Date('2026-07-10T12:00:00Z'),
+    leaseOwner: '', leaseExpiresAt: null, attempt: 0, maxAttempts: 3,
+    idempotencyKey: '', availableAt: null, cancelRequestedAt: null,
     createdAt: new Date('2026-07-10T11:00:00Z'), updatedAt: new Date('2026-07-10T12:00:00Z'),
     startedAt: new Date('2026-07-10T11:00:00Z'), completedAt: null,
-    ...overrides,
+    ...overrides as Partial<Job>,
   };
 }
 

@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   jobCreate: vi.fn(),
+  jobFindFirst: vi.fn(),
   jobUpdate: vi.fn(),
   jobUpdateMany: vi.fn(),
   sourceFindUnique: vi.fn(),
@@ -16,6 +17,8 @@ vi.mock('@/lib/db', () => ({
   db: {
     job: {
       create: mocks.jobCreate,
+      findFirst: mocks.jobFindFirst,
+      findUnique: vi.fn(),
       update: mocks.jobUpdate,
       updateMany: mocks.jobUpdateMany,
     },
@@ -60,6 +63,11 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe.sequential('global job execution invariant', () => {
+  beforeEach(() => {
+    mocks.jobFindFirst.mockReset().mockResolvedValue(null);
+    mocks.jobUpdateMany.mockReset().mockResolvedValue({ count: 1 }); // needed for claimAndRunJob
+  });
+
   it('rejects every overlapping job type and releases the reservation after completion', async () => {
     const running = deferred<{ results: never[]; totalNewArticles: number; errors: number }>();
     mocks.jobCreate.mockResolvedValueOnce({ id: 'job-1' }).mockResolvedValueOnce({ id: 'job-2' });
@@ -80,6 +88,7 @@ describe.sequential('global job execution invariant', () => {
   });
 
   it('releases the reservation when Job creation fails', async () => {
+    mocks.jobFindFirst.mockResolvedValue(null);
     mocks.jobCreate.mockRejectedValueOnce(new Error('sqlite unavailable'));
     await expect(runJob('collect')).rejects.toThrow('sqlite unavailable');
 
@@ -103,7 +112,6 @@ describe.sequential('global job execution invariant', () => {
     const stopped = await abortRunningJob();
 
     expect(stopped).toEqual({ resetCount: 0 });
-    expect(mocks.jobUpdateMany).not.toHaveBeenCalled();
     await waitFor(() => mocks.markJobFailed.mock.calls.some(call =>
       call[0] === 'job-stop' && call[1] === 'Stopped by user',
     ));

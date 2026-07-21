@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   auditCreate: vi.fn(),
   auditDeleteMany: vi.fn(),
   pushLogDeleteMany: vi.fn(),
+  eventDirtyCreate: vi.fn(),
+  eventDirtyCreateMany: vi.fn(),
   transaction: vi.fn(),
   refresh: vi.fn(),
 }));
@@ -36,6 +38,7 @@ function transactionClient() {
     },
     eventClusterAudit: { create: mocks.auditCreate, deleteMany: mocks.auditDeleteMany },
     pushLog: { deleteMany: mocks.pushLogDeleteMany },
+    eventDirty: { create: mocks.eventDirtyCreate, createMany: mocks.eventDirtyCreateMany },
   };
 }
 
@@ -78,7 +81,7 @@ describe('Event 人工纠错', () => {
     expect(sharedBrands('瑞幸咖啡，塔斯汀', '["塔斯汀"]')).toEqual(['塔斯汀']);
   });
 
-  it('合并已推送来源 Event 时继承推送状态且不补推', async () => {
+  it('合并已推送来源 Event 时不再继承推送状态', async () => {
     const pushedAt = new Date('2026-07-18T00:00:00Z');
     mocks.eventFindUnique
       .mockResolvedValueOnce({ id: 'source', status: 'active', pushedAt, articles: [{ id: 'a1' }] })
@@ -91,7 +94,8 @@ describe('Event 人工纠错', () => {
       .mockResolvedValueOnce([{ id: 'a1', publishedAt: pushedAt, createdAt: pushedAt }])
       .mockResolvedValueOnce([{ id: 'a1', clusterStatus: 'clustered', aiStatus: 'done', reviewStatus: 'important', score: 90, relevance: 90, cleanContent: '正文', publishedAt: pushedAt, createdAt: pushedAt, source: { publicEnabled: true, deletedAt: null } }]);
     await expect(mergeEvents('source', 'target')).resolves.toBe(true);
-    expect(mocks.eventUpdate).toHaveBeenCalledWith({ where: { id: 'target' }, data: { pushedAt } });
+    // P0-5: 不再复制 pushedAt
+    expect(mocks.eventUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pushedAt: expect.anything() }) }));
     expect(mocks.auditCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ actor: 'admin', action: 'merge', assignedEventId: 'target' }),
     }));

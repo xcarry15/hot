@@ -1,13 +1,14 @@
 /**
- * Event 级 push delivery。
+ * Event 级 push delivery with PushDelivery Ledger (P0-4).
  *
  * 职责：
- *   - 同一 eventId 同一时刻只允许一次推送（inFlightPushes 锁）
- *   - 在 PushLog 中按目标级记录成功/失败事实；部分成功重试只补未成功 URL
- *   - 推送结束后根据全部目标结果更新 Event.pushedAt / nextPushRetryAt
- *
- * 不依赖 Next.js / Route，调用方为批量推送、单篇工作流与 Event 级人工推送。
+ *   - 使用 PushDelivery 记录作为持久化防重依据（替代 inFlightPushes Map）
+ *   - 发送前创建 sending Delivery，发送后更新为 succeeded/failed
+ *   - 发送结果未知（HTTP ok 但 DB 写入失败）标记为 unknown，禁止自动重发
+ *   - PushTarget 通过 urlHash 解析，不再在 PushLog 中保留明文 Webhook URL
  */
+
+import { createHash } from 'node:crypto';
 import { db } from '@/lib/db';
 import { assertNotAborted } from '@/lib/worker-stop';
 import { getRelatedArticles } from '@/lib/article-related-service';
@@ -17,19 +18,15 @@ import { PUSH_MAX_RETRIES, PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/p
 import { getPushUrgency, buildFeishuCard } from '@/lib/push/feishu-card';
 import { sendFeishuWebhook } from '@/lib/push/feishu-transport';
 
-/** 同 eventId 并发防重；同一时刻只允许一次推送尝试。 */
-const inFlightPushes = new Map<string, Promise<PushArticleResult>>();
-
 export type PushDeliveryMode = 'normal' | 'retry_failed' | 'manual_force' | 'repush_all';
 
 export interface PushTargetState {
   webhookUrl: string;
   webhookRemark: string;
-  latestStatus: 'success' | 'failure' | 'never_attempted';
+  latestStatus: 'success' | 'failure' | 'never_attempted' | 'unknown';
   latestCreatedAt: Date | null;
 }
 
-/** 推送结果：区分全部成功/部分成功/全部失败/无 Webhook */
 export interface PushArticleResult {
   status: 'completed' | 'partial' | 'failed' | 'no_webhooks';
   mode: PushDeliveryMode;
@@ -40,32 +37,101 @@ export interface PushArticleResult {
   message: string;
 }
 
+function computeUrlHash(url: string): string {
+  return createHash('sha256').update(url.trim()).digest('hex').slice(0, 16);
+}
+
+/** Find or create a PushTarget for a given webhook config. */
+async function resolvePushTarget(config: WebhookConfig): Promise<{ id: string; name: string; urlHash: string }> {
+  const urlHash = computeUrlHash(config.url);
+  const existing = await db.pushTarget.findUnique({ where: { urlHash }, select: { id: true, name: true, urlHash: true } });
+  if (existing) {
+    if (existing.name !== (config.remark || config.url)) {
+      await db.pushTarget.update({ where: { id: existing.id }, data: { name: config.remark || config.url } });
+    }
+    return existing;
+  }
+  return db.pushTarget.create({
+    data: { name: config.remark || config.url, urlHash, enabled: config.enabled },
+    select: { id: true, name: true, urlHash: true },
+  });
+}
+
+function contentVersion(article: { id: string; title: string; updatedAt?: Date | null }): string {
+  return createHash('sha256').update(`${article.id}|${article.title}`).digest('hex').slice(0, 12);
+}
+
 export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<Map<string, PushTargetState[]>> {
   const uniqueEventIds = [...new Set(eventIds.filter(Boolean))];
   const result = new Map(uniqueEventIds.map((eventId) => [eventId, [] as PushTargetState[]]));
   if (uniqueEventIds.length === 0) return result;
+
   const enabled = Array.from(new Map((await getWebhookConfigs())
     .filter((config) => config.enabled && config.url.trim())
     .map((config) => [config.url.trim(), { ...config, url: config.url.trim() }])).values());
   if (enabled.length === 0) return result;
-  const logs = await db.pushLog.findMany({
-    where: { eventId: { in: uniqueEventIds }, webhookUrl: { in: enabled.map((config) => config.url) } },
-    orderBy: { createdAt: 'desc' },
-    select: { eventId: true, webhookUrl: true, webhookRemark: true, status: true, createdAt: true },
+
+  const urlHashes = enabled.map((config) => computeUrlHash(config.url));
+  const targets = await db.pushTarget.findMany({
+    where: { urlHash: { in: urlHashes } },
+    select: { id: true, urlHash: true },
   });
-  const latest = new Map<string, typeof logs[number]>();
-  for (const log of logs) {
-    const key = `${log.eventId}\u0000${log.webhookUrl}`;
-    if (!latest.has(key)) latest.set(key, log);
+  const targetByHash = new Map(targets.map((target) => [target.urlHash, target.id]));
+
+  // Use PushDelivery for latest per-target state
+  const deliveries = await db.pushDelivery.findMany({
+    where: { eventId: { in: uniqueEventIds }, targetId: { in: targets.map((target) => target.id) } },
+    orderBy: { createdAt: 'desc' },
+    select: { eventId: true, targetId: true, status: true, createdAt: true },
+  });
+
+  const latest = new Map<string, typeof deliveries[number]>();
+  for (const delivery of deliveries) {
+    const key = `${delivery.eventId}\u0000${delivery.targetId}`;
+    if (!latest.has(key)) latest.set(key, delivery);
   }
+
+  // Also check legacy PushLog for backward compat (by targetId or webhookUrl)
+  const targetIds = targets.map((target) => target.id);
+  const enabledUrls = enabled.map((config) => config.url.trim());
+  const pushLogs = await db.pushLog.findMany({
+    where: {
+      eventId: { in: uniqueEventIds },
+      OR: targetIds.length > 0
+        ? [{ targetId: { in: targetIds } }, { webhookUrl: { in: enabledUrls } }]
+        : [{ webhookUrl: { in: enabledUrls } }],
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { eventId: true, targetId: true, webhookUrl: true, status: true, createdAt: true },
+  });
+  const targetByUrl = new Map(enabled.map((config) => {
+    const hash = computeUrlHash(config.url);
+    return [config.url.trim(), targetByHash.get(hash)];
+  }));
+  for (const log of pushLogs) {
+    const tid = log.targetId || targetByUrl.get(log.webhookUrl);
+    if (!tid) continue;
+    const key = `${log.eventId}\u0000${tid}`;
+    if (!latest.has(key)) {
+      latest.set(key, { ...log, targetId: tid } as typeof deliveries[number]);
+    }
+  }
+
   for (const eventId of uniqueEventIds) {
     result.set(eventId, enabled.map((config) => {
-      const log = latest.get(`${eventId}\u0000${config.url}`);
+      const targetId = targetByHash.get(computeUrlHash(config.url));
+      const delivery = targetId ? latest.get(`${eventId}\u0000${targetId}`) : undefined;
+      let latestStatus: PushTargetState['latestStatus'] = 'never_attempted';
+      if (delivery) {
+        if (delivery.status === 'succeeded') latestStatus = 'success';
+        else if (delivery.status === 'unknown') latestStatus = 'unknown';
+        else latestStatus = 'failure';
+      }
       return {
         webhookUrl: config.url,
-        webhookRemark: config.remark || log?.webhookRemark || '',
-        latestStatus: log?.status === 'success' ? 'success' : log?.status === 'failure' ? 'failure' : 'never_attempted',
-        latestCreatedAt: log?.createdAt ?? null,
+        webhookRemark: config.remark || '',
+        latestStatus,
+        latestCreatedAt: delivery?.createdAt ?? null,
       };
     }));
   }
@@ -77,13 +143,12 @@ export async function getPushTargetStates(eventId: string): Promise<PushTargetSt
 }
 
 export async function getFailedPushTargets(eventId: string): Promise<PushTargetState[]> {
-  return (await getPushTargetStates(eventId)).filter((target) => target.latestStatus === 'failure');
+  return (await getPushTargetStates(eventId)).filter(
+    (target) => target.latestStatus === 'failure' || target.latestStatus === 'unknown',
+  );
 }
 
-/** Push a single article to all enabled Feishu webhooks.
- *  Each webhook gets its own PushLog entry (with webhookUrl + webhookRemark).
- *  @returns PushArticleResult with detailed status
- */
+/** Push a single article to all enabled Feishu webhooks. */
 export function pushArticleToFeishu(
   articleId: string,
   mode: PushDeliveryMode = 'normal',
@@ -100,19 +165,7 @@ export function pushEventToFeishu(
   mode: PushDeliveryMode = 'normal',
   signal?: AbortSignal,
 ): Promise<PushArticleResult> {
-  const existing = inFlightPushes.get(eventId);
-  if (existing) return existing;
-
-  const task = pushEventToFeishuInternal(eventId, mode, signal).finally(() => {
-    if (inFlightPushes.get(eventId) === task) inFlightPushes.delete(eventId);
-  });
-  inFlightPushes.set(eventId, task);
-  return task;
-}
-
-/** 暴露给其他模块/测试读取当前 in-flight 状态。 */
-export function getInFlightPushes(): ReadonlyMap<string, Promise<PushArticleResult>> {
-  return inFlightPushes;
+  return pushEventToFeishuInternal(eventId, mode, signal);
 }
 
 async function pushEventToFeishuInternal(
@@ -151,11 +204,7 @@ async function pushEventToFeishuInternal(
     }
   }
 
-  // 读取所有启用的 webhook 配置
   const configs = await getWebhookConfigs();
-  // URL is the stable destination identity in the current settings model.
-  // Deduplicate accidental duplicate entries so one article is never sent
-  // twice to the same webhook in a single attempt.
   const enabled = Array.from(
     new Map(
       configs
@@ -170,7 +219,6 @@ async function pushEventToFeishuInternal(
   if (mode === 'normal' && !event.pushedAt) {
     const duplicate = await findRecentPushedEventDuplicate(article.id, eventId);
     if (duplicate) {
-      // 防止同一疑似重复 Event 在每轮批量推送中反复消耗资源，转为人工决定。
       await db.event.update({
         where: { id: eventId },
         data: { pushRetryCount: PUSH_MAX_RETRIES, nextPushRetryAt: null },
@@ -179,9 +227,33 @@ async function pushEventToFeishuInternal(
     }
   }
 
+  // Resolve all PushTargets
+  const targets = await Promise.all(enabled.map((config) => resolvePushTarget(config)));
+  const targetByUrl = new Map(targets.map((target, index) => [enabled[index].url, target]));
+
+  // P0-4: Check existing deliveries before pushing — DB-level dedup
+  const cVersion = contentVersion(article);
+  const existingDeliveries = await db.pushDelivery.findMany({
+    where: { eventId, targetId: { in: targets.map((target) => target.id) }, contentVersion: cVersion, mode },
+    select: { targetId: true, status: true },
+  });
+  const succeededTargets = new Set(
+    existingDeliveries.filter((del) => del.status === 'succeeded').map((del) => del.targetId),
+  );
+  const unknownTargets = new Set(
+    existingDeliveries.filter((del) => del.status === 'unknown').map((del) => del.targetId),
+  );
+
+  // Determine which targets to actually send to
   const targetStates = await getPushTargetStates(eventId);
-  const selectedUrls = new Set(targetStates.filter((target) => mode === 'repush_all'
-    || (mode === 'retry_failed' ? target.latestStatus === 'failure' : target.latestStatus !== 'success')).map((target) => target.webhookUrl));
+  const selectedUrls = new Set(targetStates.filter((target) => {
+    if (mode === 'repush_all') return true;
+    if (mode === 'retry_failed') return target.latestStatus === 'failure';
+    // P0-4: unknown 状态不得自动重新发送
+    if (target.latestStatus === 'unknown' && mode !== 'manual_force') return false;
+    return target.latestStatus !== 'success';
+  }).map((target) => target.webhookUrl));
+
   if (mode === 'retry_failed' && selectedUrls.size === 0) {
     return emptyPushResult(mode, 'failed', '当前没有失败的推送目标', enabled.length);
   }
@@ -189,11 +261,7 @@ async function pushEventToFeishuInternal(
     return emptyPushResult(mode, 'completed', '该事件已完整推送', enabled.length);
   }
 
-  // Determine push urgency
   const urgency = getPushUrgency(article);
-
-  // Build Feishu card message（只需构建一次，所有 webhook 共用）
-  // 与文章详情页采用同一套双向关联规则；推送场景额外只引用已成功推送的文章。
   const relatedArticles = (await getRelatedArticles(article.id, 3, { onlyPushed: true })) ?? [];
   const card = buildFeishuCard(article, urgency, { relatedArticles });
 
@@ -201,17 +269,30 @@ async function pushEventToFeishuInternal(
   for (const config of enabled) {
     assertNotAborted(signal);
     if (!selectedUrls.has(config.url)) continue;
-    const ok = await pushToSingleWebhook(eventId, article.id, config, card, signal);
+
+    const target = targetByUrl.get(config.url);
+    if (!target) continue;
+
+    // Skip already-succeeded deliveries for normal/retry_failed mode
+    if (mode !== 'manual_force' && mode !== 'repush_all' && succeededTargets.has(target.id)) continue;
+
+    // P0-4: Don't auto-retry unknown deliveries
+    if (mode !== 'manual_force' && unknownTargets.has(target.id)) continue;
+
+    const ok = await pushToSingleTarget(
+      eventId, article.id, target.id, config, cVersion, mode, card, signal,
+    );
     if (ok) attemptSucceeded++;
   }
 
   const finalStates = await getPushTargetStates(eventId);
-  const allSucceeded = finalStates.length > 0 && finalStates.every((target) => target.latestStatus === 'success');
+  const allSucceeded = finalStates.length > 0 && finalStates.every(
+    (target) => target.latestStatus === 'success',
+  );
   const failedCount = selectedUrls.size - attemptSucceeded;
   const skipped = enabled.length - selectedUrls.size;
 
   if (allSucceeded) {
-    // 全部成功：标记已推送
     await db.event.update({
       where: { id: eventId },
       data: { pushedAt: new Date(), nextPushRetryAt: null, pushRetryCount: 0 },
@@ -219,7 +300,6 @@ async function pushEventToFeishuInternal(
     return { status: 'completed', mode, attempted: selectedUrls.size, succeeded: attemptSucceeded, failed: 0, skipped, message: `已完成 ${selectedUrls.size} 个目标投递` };
   }
 
-  // 部分或全部失败：有限次数自动重试，耗尽后转人工处理。
   const nextRetryCount = event.pushRetryCount + 1;
   await db.event.update({
     where: { id: eventId },
@@ -240,40 +320,128 @@ function emptyPushResult(mode: PushDeliveryMode, status: PushArticleResult['stat
 }
 
 /**
- * 向单个 webhook 发送推送（含 PushLog 写入）；失败/成功都记目标级日志。
+ * P0-4: Push to a single target using the PushDelivery ledger.
+ * Creates a sending delivery before the webhook call, then updates to succeeded/failed/unknown.
  */
-async function pushToSingleWebhook(
+async function pushToSingleTarget(
   eventId: string,
   representativeArticleId: string,
+  targetId: string,
   config: WebhookConfig,
+  contentVersionStr: string,
+  mode: PushDeliveryMode,
   card: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<boolean> {
+  const idempotencyKey = `${eventId}:${targetId}:${contentVersionStr}:${mode}`;
+
+  // Create or reset the delivery record to sending
+  await db.pushDelivery.upsert({
+    where: { eventId_targetId_contentVersion_mode: { eventId, targetId, contentVersion: contentVersionStr, mode } },
+    create: {
+      eventId,
+      targetId,
+      representativeArticleId,
+      contentVersion: contentVersionStr,
+      mode,
+      status: 'sending',
+      idempotencyKey,
+      attempt: 1,
+    },
+    update: {
+      status: 'sending',
+      representativeArticleId,
+      attempt: { increment: 1 },
+      lastError: '',
+      leaseExpiresAt: new Date(Date.now() + 120_000),
+    },
+  });
+
+  // Send to webhook
   const result = await sendFeishuWebhook(config, card, signal);
-  if (result.ok) {
+
+  try {
+    if (result.ok) {
+      await db.pushDelivery.updateMany({
+        where: { idempotencyKey, status: 'sending' },
+        data: { status: 'succeeded', sentAt: new Date(), completedAt: new Date(), leaseExpiresAt: null },
+      });
+      // Also write PushLog for backward compatibility
+      await db.pushLog.create({
+        data: {
+          eventId,
+          representativeArticleId,
+          targetId,
+          status: 'success',
+          retryCount: result.retryCount,
+          webhookRemark: config.remark,
+        },
+      });
+      return true;
+    }
+
+    await db.pushDelivery.updateMany({
+      where: { idempotencyKey, status: 'sending' },
+      data: {
+        status: 'failed',
+        lastError: (result.errorMessage ?? 'Push request failed').slice(0, 1000),
+        completedAt: new Date(),
+        leaseExpiresAt: null,
+      },
+    });
     await db.pushLog.create({
       data: {
         eventId,
         representativeArticleId,
-        status: 'success',
+        targetId,
+        status: 'failure',
+        errorMessage: result.errorMessage ?? 'Push request failed',
         retryCount: result.retryCount,
-        webhookUrl: config.url,
         webhookRemark: config.remark,
       },
     });
-    return true;
-  }
+    return false;
+  } catch (error) {
+    // P0-4: HTTP succeeded but DB write failed — mark as unknown
+    // We know the webhook was sent successfully (result.ok is true)
+    // but we can't confirm the delivery record was written.
+    // Don't auto-retry unknown deliveries.
+    if (result.ok) {
+      try {
+        await db.pushDelivery.updateMany({
+          where: { idempotencyKey },
+          data: {
+            status: 'unknown',
+            lastError: 'DB write failed after successful webhook delivery',
+            completedAt: new Date(),
+            leaseExpiresAt: null,
+          },
+        });
+        await db.pushLog.create({
+          data: {
+            eventId,
+            representativeArticleId,
+            targetId,
+            status: 'success',
+            retryCount: result.retryCount,
+            webhookRemark: config.remark,
+          },
+        });
+      } catch {
+        console.error('[push] failed to mark delivery as unknown:', error);
+      }
+      return true;
+    }
 
-  await db.pushLog.create({
-    data: {
-      eventId,
-      representativeArticleId,
-      status: 'failure',
-      errorMessage: result.errorMessage ?? 'Push request failed',
-      retryCount: result.retryCount,
-      webhookUrl: config.url,
-      webhookRemark: config.remark,
-    },
-  });
-  return false;
+    await db.pushDelivery.updateMany({
+      where: { idempotencyKey, status: 'sending' },
+      data: {
+        status: 'failed',
+        lastError: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
+        completedAt: new Date(),
+        leaseExpiresAt: null,
+      },
+    });
+    return false;
+  }
 }

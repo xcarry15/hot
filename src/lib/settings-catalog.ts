@@ -113,7 +113,7 @@ const prompt = (key: string, defaultValue: string): SettingDefinition => ({
 const AI_PROVIDER_IDS = Object.keys(AI_PROVIDERS) as [AIProviderId, ...AIProviderId[]];
 
 const providerSettingDefinitions: SettingDefinition[] = Object.values(AI_PROVIDERS).flatMap((provider) => [
-  { key: providerSettingKey(provider.id, 'api_key'), defaultValue: '', schema: text, sensitive: true, exportable: true, frontend: false, seed: false },
+  { key: providerSettingKey(provider.id, 'api_key'), defaultValue: '', schema: text, sensitive: true, exportable: false, frontend: false, seed: false },
   { key: providerSettingKey(provider.id, 'base_url'), defaultValue: provider.baseUrl, schema: text, sensitive: false, exportable: true, frontend: false, seed: false },
   { key: providerSettingKey(provider.id, 'model'), defaultValue: provider.defaultModel, schema: text, sensitive: false, exportable: true, frontend: false, seed: false },
 ]);
@@ -124,7 +124,7 @@ const definitions: SettingDefinition[] = [
     defaultValue: '[]',
     schema: text,
     sensitive: true,
-    exportable: true,
+    exportable: false,
     frontend: true,
     seed: true,
   },

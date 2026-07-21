@@ -159,6 +159,7 @@ model Event {
   representativeArticle   Article?  @relation("EventRepresentative", fields: [representativeArticleId], references: [id])
   articles                Article[] @relation("EventArticles")
   pushLogs                PushLog[]
+  deliveries              PushDelivery[]
   assignedAudits          EventClusterAudit[] @relation("AssignedEventAudits")
   candidateAudits         EventClusterAudit[] @relation("CandidateEventAudits")
 
@@ -256,19 +257,73 @@ model PushLog {
   id            String   @id @default(cuid())
   eventId       String
   representativeArticleId String?
+  targetId      String?
   status        String   // success, failure
   errorMessage  String   @default("")
   retryCount    Int      @default(0)
-  webhookUrl    String   @default("")
+  webhookUrl    String   @default("") // @deprecated: 使用 targetId 替代，仅用于历史数据迁移兼容
   webhookRemark String   @default("")
   createdAt     DateTime @default(now())
 
-  event Event @relation(fields: [eventId], references: [id])
+  event  Event      @relation(fields: [eventId], references: [id])
+  target PushTarget? @relation(fields: [targetId], references: [id])
 
-  @@index([eventId, status, webhookUrl])
+  @@index([eventId, targetId, status])
+  @@index([eventId, status])
   @@index([status, webhookRemark, createdAt])
   @@index([createdAt])
   @@map("push_logs")
+}
+
+model PushTarget {
+  id          String   @id @default(cuid())
+  name        String
+  urlHash     String   @unique
+  secretRef   String   @default("") // 加密引用或环境变量名
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  deliveries  PushDelivery[]
+  pushLogs    PushLog[]
+
+  @@map("push_targets")
+}
+
+model PushDelivery {
+  id                    String    @id @default(cuid())
+  eventId               String
+  targetId              String
+  representativeArticleId String?
+  contentVersion        String    @default("")
+  mode                  String    @default("normal")
+  status                String    @default("pending") // pending, sending, succeeded, failed, unknown, cancelled
+  idempotencyKey        String    @default("")
+  attempt               Int       @default(0)
+  lastError             String    @default("")
+  leaseOwner            String    @default("")
+  leaseExpiresAt        DateTime?
+  createdAt             DateTime  @default(now())
+  sentAt                DateTime?
+  completedAt           DateTime?
+
+  event  Event      @relation(fields: [eventId], references: [id])
+  target PushTarget @relation(fields: [targetId], references: [id])
+
+  @@unique([eventId, targetId, contentVersion, mode])
+  @@index([status, leaseExpiresAt])
+  @@index([idempotencyKey])
+  @@map("push_deliveries")
+}
+
+model EventDirty {
+  id        String   @id @default(cuid())
+  eventId   String
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+  @@map("event_dirty")
 }
 
 model Setting {
@@ -336,10 +391,13 @@ enum JobType {
 }
 
 enum JobStatus {
-  pending
+  queued
   running
-  completed
+  cancel_requested
+  succeeded
   failed
+  cancelled
+  completed
 }
 
 enum JobStage {
@@ -353,7 +411,7 @@ enum JobStage {
 model Job {
   id          String    @id @default(cuid())
   type        JobType
-  status      JobStatus @default(pending)
+  status      JobStatus @default(queued)
   payload     String    @default("{}") // JSON string
   result      String    @default("{}") // JSON string
   error       String    @default("")
@@ -365,11 +423,21 @@ model Job {
   progressErrors   Int       @default(0)
   currentItemLabel String    @default("")
   heartbeatAt      DateTime?
+  // P0-1: 持久化 Job Lease — Worker 原子领取任务 + 续租
+  leaseOwner       String    @default("")
+  leaseExpiresAt   DateTime?
+  attempt          Int       @default(0)
+  maxAttempts      Int       @default(3)
+  idempotencyKey   String    @default("")
+  availableAt      DateTime?
+  cancelRequestedAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   startedAt   DateTime?
   completedAt DateTime?
 
   @@index([status, createdAt])
+  @@index([status, availableAt, leaseExpiresAt])
+  @@index([idempotencyKey])
   @@map("jobs")
 }

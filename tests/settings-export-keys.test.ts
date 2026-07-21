@@ -11,9 +11,9 @@ describe('EXPORTABLE_SETTING_KEYS', () => {
     for (const k of [
       'ai_provider', 'ai_temperature', 'ai_max_tokens', 'ai_system_prompt',
       'ai_step2_content_max_chars', 'ai_weight_event', 'ai_weight_content', 'ai_keyword_match_bonus',
-      'opencode_api_key', 'opencode_base_url', 'opencode_model',
-      'deepseek_api_key', 'deepseek_base_url', 'deepseek_model',
-      'push_mode', 'push_min_score', 'push_min_relevance', 'push_time', 'feishu_webhook_url',
+      'opencode_base_url', 'opencode_model',
+      'deepseek_base_url', 'deepseek_model',
+      'push_mode', 'push_min_score', 'push_min_relevance', 'push_time',
       'auto_crawl_enabled', 'crawl_interval_min',
     ]) {
       expect(set.has(k), `缺少键 ${k}`).toBe(true);
@@ -30,8 +30,9 @@ describe('EXPORTABLE_SETTING_KEYS', () => {
     }
   });
 
-  it('排除运行态与账户 token', () => {
-    for (const k of ['scheduler_last_crawl_at', 'scheduler_last_push_date', 'api_token']) {
+  it('排除运行态与敏感凭证', () => {
+    for (const k of ['scheduler_last_crawl_at', 'scheduler_last_push_date', 'api_token',
+      'opencode_api_key', 'deepseek_api_key', 'feishu_webhook_url']) {
       expect(set.has(k), `不应包含 ${k}`).toBe(false);
     }
   });
