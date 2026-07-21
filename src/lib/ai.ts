@@ -28,8 +28,8 @@ import {
 } from './article-calibration';
 import { parseAiAnalysisOutput } from './ai-output';
 
-// v11：提高重要人事变动和有实质规模的开关店新闻评分。
-const PROMPT_VERSION = 'v12';
+// v13：收紧事件身份，使用原子动作和最小辨识事项提高跨媒体召回。
+const PROMPT_VERSION = 'v13';
 
 // AI 失败最大重试次数。超过后标 skipped 放弃，防止 provider 持续故障时无限重试烧 token。
 const AI_MAX_RETRIES = 5;

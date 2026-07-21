@@ -55,6 +55,10 @@ describe('buildStep2Prompt', () => {
     expect(prompt).toContain('event_subjects');
     expect(prompt).toContain('event_action');
     expect(prompt).toContain('event_object');
+    expect(prompt).toContain('只写一个原子动作');
+    expect(prompt).toContain('最多 48 个汉字');
+    expect(prompt).toContain('不得高于 60');
+    expect(prompt).toContain('事件身份硬约束（不可被评判块覆盖）');
   });
 
   it('提高重要人事变动和规模化开关店的事件分', () => {

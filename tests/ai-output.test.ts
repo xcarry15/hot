@@ -12,7 +12,7 @@ const validOutput = {
   summary: '这是一段长度达到约束的测试洞察。'.repeat(7),
   brand: ['测试品牌'],
   event_subjects: ['测试品牌'],
-  event_action: '正式开业',
+  event_action: '正式开店',
   event_object: '上海首店',
   event_key_confidence: 88,
   key_points: ['测试品牌新增门店并公布经营计划'],
@@ -41,7 +41,7 @@ describe('parseAiAnalysisOutput', () => {
       key_points: ['一条超过四十字但包含完整事实、主体、动作、时间和结果的要点'],
     })}\n\`\`\``);
     expect(parsed.event_subjects).toEqual(['测试品牌']);
-    expect(parsed.event_key).toBe('测试品牌/正式开业/上海首店');
+    expect(parsed.event_key).toBe('测试品牌/正式开店/上海首店');
     expect(parsed.event_key_confidence).toBe(91);
     expect(parsed.summary.length).toBe(600);
     expect(parsed.key_points).toHaveLength(1);
@@ -67,5 +67,15 @@ describe('parseAiAnalysisOutput', () => {
       ...validOutput,
       event_object: '',
     }))).toThrow('完整事件身份');
+  });
+
+  it('宽泛或多动作身份会自动降级置信度', () => {
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      event_action: '推进战略升级并调整经营重心',
+      event_object: '行业趋势',
+      event_key_confidence: 95,
+    }));
+    expect(parsed.event_key_confidence).toBe(60);
   });
 });

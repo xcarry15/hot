@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors } from '@/contracts/event-clustering';
-import { buildCanonicalEventKey, normalizeEventIdentity } from '@/contracts/event-identity';
+import { buildCanonicalEventKey, normalizeEventAction, normalizeEventIdentity } from '@/contracts/event-identity';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
 import { buildAiClusterAuditEvidence, type AiCandidateAudit } from '@/lib/event-clustering-service';
 
@@ -28,6 +28,12 @@ describe('轻量事件聚类规则', () => {
     expect(buildCanonicalEventKey(identity)).toBe('胖东来+郑州文和友/联合调改/郑州门店项目');
     expect(buildCanonicalEventKey({ ...identity, subjects: [...identity.subjects].reverse() }))
       .toBe('胖东来+郑州文和友/联合调改/郑州门店项目');
+  });
+
+  it('将同义长动作压缩为稳定的原子动作', () => {
+    expect(normalizeEventAction('发布Q1业绩前瞻')).toBe('发布业绩');
+    expect(normalizeEventAction('共同推进卫星店项目并计划新增门店')).toBe('计划开店');
+    expect(normalizeEventAction('正式开业')).toBe('正式开店');
   });
 
   it('转载改写正文仍能形成强内容证据', () => {

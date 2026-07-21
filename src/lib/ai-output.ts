@@ -1,4 +1,4 @@
-import { buildCanonicalEventKey, isCompleteEventIdentity, normalizeEventIdentity } from '@/contracts/event-identity';
+import { buildCanonicalEventKey, capEventIdentityConfidence, isCompleteEventIdentity, normalizeEventIdentity } from '@/contracts/event-identity';
 import { extractJsonObject } from './ai-helpers';
 
 const CATEGORIES = new Set([
@@ -137,6 +137,13 @@ export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
   if (!isCompleteEventIdentity(identity)) {
     throw new Error('LLM 响应缺少完整事件身份（主体/行为/具体事项）');
   }
+  const eventKeyConfidence = capEventIdentityConfidence(
+    identity,
+    clampScore(raw.event_key_confidence
+      ?? raw.eventKeyConfidence
+      ?? nestedIdentity.confidence,
+      confidence),
+  );
 
   return {
     event_score: clampScore(raw.event_score ?? raw.eventScore),
@@ -157,12 +164,7 @@ export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
     event_action: identity.action,
     event_object: identity.object,
     event_key: buildCanonicalEventKey(identity),
-    event_key_confidence: clampScore(
-      raw.event_key_confidence
-        ?? raw.eventKeyConfidence
-        ?? nestedIdentity.confidence,
-      confidence,
-    ),
+    event_key_confidence: eventKeyConfidence,
     key_points: keyPoints,
   };
 }
