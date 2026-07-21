@@ -48,7 +48,7 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/public-publication-service', () => ({ refreshEventPublicPublication: mocks.refresh }));
 
-import { deriveEventClusterReviewStatus, mergeEvents, reconcileEventAfterArticleDeletion, selectRepresentativeCandidate, setEventRepresentative, splitEventArticles } from '@/lib/event-service';
+import { deriveEventClusterReviewStatus, mergeEvents, reconcileEventAfterArticleDeletion, selectRepresentativeCandidate, setEventRepresentative, sharedBrands, splitEventArticles } from '@/lib/event-service';
 
 describe('Event 人工纠错', () => {
   beforeEach(() => {
@@ -70,6 +70,12 @@ describe('Event 人工纠错', () => {
   it('Event 只要仍有待复核成员就保持 pending', () => {
     expect(deriveEventClusterReviewStatus(['clustered', 'needs_review'])).toBe('pending');
     expect(deriveEventClusterReviewStatus(['clustered', 'clustered'])).toBe('confirmed');
+  });
+
+  it('同品牌候选按规范化品牌数组做精确交集，不误命中品牌片段', () => {
+    expect(sharedBrands('["肯德基"]', '["肯德基", "麦当劳"]')).toEqual(['肯德基']);
+    expect(sharedBrands('["肯德基"]', '["肯德基中国"]')).toEqual([]);
+    expect(sharedBrands('瑞幸咖啡，塔斯汀', '["塔斯汀"]')).toEqual(['塔斯汀']);
   });
 
   it('合并已推送来源 Event 时继承推送状态且不补推', async () => {

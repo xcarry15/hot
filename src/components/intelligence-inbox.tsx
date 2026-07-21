@@ -108,6 +108,20 @@ type EventDetail = {
     createdAt: string;
     source: { name: string; type: string; publicEnabled: boolean; deleted: boolean };
   }>;
+  brandCandidates: Array<{
+    id: string;
+    eventId: string;
+    title: string;
+    url: string;
+    score: number;
+    relevance: number;
+    brand: string;
+    matchedBrands: string[];
+    publicStatus: string;
+    publishedAt: string | null;
+    createdAt: string;
+    source: { name: string; type: string; publicEnabled: boolean };
+  }>;
 };
 
 const REASONS = [
@@ -423,8 +437,10 @@ export default function IntelligenceInbox({
         return;
       }
       try {
+        const query = new URLSearchParams();
+        if (detail?.id) query.set("articleId", detail.id);
         const response = await fetch(
-          `/api/events/${encodeURIComponent(eventId)}`,
+          `/api/events/${encodeURIComponent(eventId)}${query.size > 0 ? `?${query.toString()}` : ""}`,
           { signal },
         );
         if (!response.ok) throw new Error("事件详情加载失败");
@@ -442,7 +458,7 @@ export default function IntelligenceInbox({
         toast.error(errorMessage(error, "事件详情加载失败"));
       }
     },
-    [],
+    [detail?.id],
   );
 
   const refreshArticleDetail = useCallback(async (articleId: string) => {
@@ -466,7 +482,7 @@ export default function IntelligenceInbox({
     const controller = new AbortController();
     void loadEventDetail(detail?.eventId, controller.signal);
     return () => controller.abort();
-  }, [detail?.eventId, loadEventDetail]);
+  }, [detail?.eventId, detail?.id, loadEventDetail]);
 
   useEffect(() => {
     eventSearchRequestRef.current += 1;
@@ -623,6 +639,35 @@ export default function IntelligenceInbox({
       toast.success("文章已移入目标事件");
     } catch (error) {
       toast.error(errorMessage(error, "移动文章失败"));
+    } finally {
+      setEventAction(null);
+    }
+  };
+
+  const moveBrandCandidate = async (candidate: EventDetail["brandCandidates"][number]) => {
+    if (!detail?.eventId || !eventDetail || eventAction) return;
+    if (!window.confirm(`将文章移入当前 Event：\n${candidate.title}\n\n当前 Event 将新增 1 篇成员，代表文章和公开状态会自动重新计算。确认继续吗？`)) return;
+    setEventAction(`move-candidate:${candidate.id}`);
+    try {
+      const response = await fetch(
+        `/api/events/${encodeURIComponent(eventDetail.id)}/move`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ articleId: candidate.id, targetEventId: eventDetail.id }),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          ((await response.json().catch(() => ({}))) as { error?: string })
+            .error || "移动同品牌候选失败",
+        );
+      const updated = await refreshArticleDetail(detail.id);
+      await refreshSelectedEvent(updated);
+      refreshAfterMutation();
+      toast.success("同品牌候选已移入当前 Event");
+    } catch (error) {
+      toast.error(errorMessage(error, "移动同品牌候选失败"));
     } finally {
       setEventAction(null);
     }
@@ -925,6 +970,7 @@ export default function IntelligenceInbox({
       return rightTime - leftTime;
     });
   }, [eventDetail]);
+  const brandCandidates = eventDetail?.brandCandidates ?? [];
   const representativeMember = eventMembers.find((article) => article.id === eventDetail?.representativeArticleId) ?? null;
   const eventSourceCount = new Set(eventMembers.map((article) => article.source.name)).size;
   const eventBlockedCount = eventMembers.filter((article) => article.aiStatus !== "done" || article.clusterStatus !== "clustered" || article.source.deleted).length;
@@ -1176,6 +1222,39 @@ export default function IntelligenceInbox({
                           })}
                         </tbody>
                       </table>
+                    </div>
+
+                    <div className="mt-2 border-t pt-2">
+                      <div className="mb-1.5 flex items-start gap-2">
+                        <div>
+                          <p className="text-xs font-semibold">同品牌候选</p>
+                          <p className="text-xs text-muted-foreground">当前品牌：{brands.join("、") || "无"} · 展示近 30 天内尚未归入当前 Event 的已完成 AI 文章。</p>
+                        </div>
+                        <span className="ml-auto shrink-0 border bg-amber-50 px-1.5 py-0.5 text-xs text-amber-800">{brandCandidates.length} 篇</span>
+                      </div>
+                      {brandCandidates.length > 0 ? (
+                        <div className="max-h-[280px] divide-y overflow-auto border border-amber-200 bg-amber-50/30">
+                          {brandCandidates.map((candidate) => (
+                            <div key={candidate.id} className="flex min-w-0 items-center gap-2 p-1.5 text-xs">
+                              <div className="min-w-0 flex-1">
+                                <button type="button" onClick={() => selectArticle(candidate.id, "cluster")} className="block max-w-full truncate text-left font-medium hover:underline" title={candidate.title}>{candidate.title}</button>
+                                <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground">
+                                  <span>同品牌：{candidate.matchedBrands.join("、")}</span>
+                                  <span>{candidate.source.name}</span>
+                                  <span>{timeLabel(candidate.publishedAt || candidate.createdAt)}</span>
+                                  <span>{candidate.score} 分 / 相关 {candidate.relevance}</span>
+                                </div>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs" disabled={eventAction !== null} onClick={() => selectArticle(candidate.id, "cluster")}>查看</Button>
+                                <Button size="sm" variant="outline" className="h-6 rounded-none border-amber-400 px-1.5 text-xs text-amber-800 hover:bg-amber-100" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>移入当前 Event</Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="border border-dashed p-2 text-xs text-muted-foreground">当前文章没有可用于召回的品牌，或近 30 天内暂无同品牌候选。</p>
+                      )}
                     </div>
                   </div>
 

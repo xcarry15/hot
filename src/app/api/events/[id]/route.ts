@@ -3,10 +3,11 @@ import { apiError } from '@/lib/api-helpers';
 import { getEventArticles, setEventRepresentative } from '@/lib/event-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params;
-    const event = await getEventArticles(id);
+    const articleId = new URL(request.url).searchParams.get('articleId') ?? undefined;
+    const event = await getEventArticles(id, articleId);
     return event ? NextResponse.json(event) : NextResponse.json({ error: '事件不存在' }, { status: 404 });
   } catch (error) {
     return apiError(error, '读取事件失败');

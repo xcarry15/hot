@@ -7,6 +7,7 @@ import {
   EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES,
   EVENT_CLUSTER_MAX_RETRIES,
   EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP,
+  EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD,
   EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE,
   EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP,
   EVENT_CLUSTER_MIN_KEY_CONFIDENCE,
@@ -95,6 +96,30 @@ export interface AiCandidateAudit {
     sharedAnchors: string[];
   };
   aiDecision: { sameEvent: boolean; confidence: number; reason: string };
+}
+
+/**
+ * 只有同时具备“可能是同一具体事件”的证据才进入 AI 灰区。
+ * 单纯正文词汇重合或品牌/行业词相同，不足以占用人工复核队列。
+ */
+export function isAmbiguousEventCandidate(evidence: AiCandidateAudit['ruleEvidence']): boolean {
+  if (evidence.multiTopic || evidence.phaseConflict || evidence.identityConflict) return false;
+
+  const keySignal = evidence.eventKeyMatch
+    && evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE;
+  const identitySignal = evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
+    && evidence.identityScore >= EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE
+    && evidence.subjectOverlap >= 0.5
+    && (evidence.actionOverlap >= 0.4 || evidence.objectOverlap >= 0.5);
+  const titleSignal = evidence.sharedAnchors.length > 0
+    && evidence.titleOverlap >= EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP
+    && evidence.daysApart <= EVENT_CLUSTER_WINDOW_DAYS
+    && evidence.identityScore >= 0.35;
+  const contentSignal = evidence.contentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
+    && evidence.contentJaccard >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD
+    && (evidence.sharedAnchors.length > 0 || evidence.identityScore >= 0.4);
+
+  return keySignal || identitySignal || titleSignal || contentSignal;
 }
 
 export function shouldCreateClusterReview(
@@ -604,15 +629,9 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     await recalculateEventById(eventId);
     return { eventId, action: 'attach' };
   }
-  const ambiguous = ranked.filter(({ evidence }) => !evidence.multiTopic
-    && !evidence.phaseConflict
-    && !evidence.identityConflict
-    && (
-      evidence.eventKeyMatch
-      || evidence.identityScore >= EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE
-      || (evidence.sharedAnchors.length > 0 && evidence.titleOverlap >= EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP)
-      || evidence.contentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
-    )).slice(0, EVENT_CLUSTER_MAX_AI_CANDIDATES);
+  const ambiguous = ranked
+    .filter(({ evidence }) => isAmbiguousEventCandidate(evidence))
+    .slice(0, EVENT_CLUSTER_MAX_AI_CANDIDATES);
   const aiCandidates: AiCandidateAudit[] = [];
   for (const item of ambiguous) {
     let decision;

@@ -55,8 +55,9 @@ describe('buildStep2Prompt', () => {
     expect(prompt).toContain('event_subjects');
     expect(prompt).toContain('event_action');
     expect(prompt).toContain('event_object');
-    expect(prompt).toContain('只写一个原子动作');
-    expect(prompt).toContain('最多 48 个汉字');
+    expect(prompt).toContain('原子动作词');
+    expect(prompt).toContain('最多 16 个汉字');
+    expect(prompt).toContain('一个辨识词或短语');
     expect(prompt).toContain('不得高于 60');
     expect(prompt).toContain('事件身份硬约束（不可被评判块覆盖）');
   });

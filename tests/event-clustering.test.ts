@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors } from '@/contracts/event-clustering';
 import { buildCanonicalEventKey, normalizeEventAction, normalizeEventIdentity } from '@/contracts/event-identity';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
-import { buildAiClusterAuditEvidence, shouldCreateClusterReview, type AiCandidateAudit } from '@/lib/event-clustering-service';
+import { buildAiClusterAuditEvidence, isAmbiguousEventCandidate, shouldCreateClusterReview, type AiCandidateAudit } from '@/lib/event-clustering-service';
 
 describe('轻量事件聚类规则', () => {
   it('统一标题中的空白、标点和大小写', () => {
@@ -94,6 +94,40 @@ describe('轻量事件聚类规则', () => {
 });
 
 describe('聚类 AI 候选审计', () => {
+  const baseEvidence: AiCandidateAudit['ruleEvidence'] = {
+    exactTitle: false,
+    fingerprint: false,
+    eventKeyMatch: false,
+    subjectOverlap: 0,
+    actionOverlap: 0,
+    objectOverlap: 0,
+    identityScore: 0,
+    identityConfidence: 0,
+    qualifierConflict: false,
+    identityConflict: false,
+    titleOverlap: 0,
+    contentOverlap: 0,
+    contentJaccard: 0,
+    daysApart: 1,
+    phaseConflict: false,
+    multiTopic: false,
+    sharedAnchors: [],
+  };
+
+  it('正文覆盖率高但交并比低时不进入人工复核灰区', () => {
+    expect(isAmbiguousEventCandidate({
+      ...baseEvidence,
+      contentOverlap: 0.6,
+      contentJaccard: 0.08,
+    })).toBe(false);
+    expect(isAmbiguousEventCandidate({
+      ...baseEvidence,
+      contentOverlap: 0.6,
+      contentJaccard: 0.22,
+      sharedAnchors: ['品牌A'],
+    })).toBe(true);
+  });
+
   const identityEvidence = {
     subjectOverlap: 1,
     actionOverlap: 0.8,

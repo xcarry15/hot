@@ -2,6 +2,10 @@ import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshEventPublicPublication } from '@/lib/public-publication-service';
+import { splitBrands } from '@/lib/shared/article-codecs';
+
+const SAME_BRAND_CANDIDATE_TAKE = 30;
+const SAME_BRAND_CANDIDATE_WINDOW_DAYS = 30;
 
 type EventTransaction = Prisma.TransactionClient;
 
@@ -20,6 +24,90 @@ export type RepresentativeCandidate = {
 
 function eventDate(article: { publishedAt: Date | null; createdAt: Date }): Date {
   return article.publishedAt ?? article.createdAt;
+}
+
+export function sharedBrands(left: string, right: string): string[] {
+  const rightBrands = new Set(splitBrands(right));
+  return splitBrands(left).filter((brand) => rightBrands.has(brand));
+}
+
+function compareArticleTime(
+  left: { publishedAt: Date | null; createdAt: Date },
+  right: { publishedAt: Date | null; createdAt: Date },
+): number {
+  const timeDiff = eventDate(right).getTime() - eventDate(left).getTime();
+  if (timeDiff !== 0) return timeDiff;
+  return right.createdAt.getTime() - left.createdAt.getTime();
+}
+
+async function getSameBrandCandidates(eventId: string, brand: string) {
+  const brands = splitBrands(brand);
+  if (brands.length === 0) return [];
+
+  const cutoff = new Date(Date.now() - SAME_BRAND_CANDIDATE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const timeWindow = {
+    OR: [
+      { publishedAt: { gte: cutoff } },
+      { publishedAt: null, createdAt: { gte: cutoff } },
+    ],
+  };
+  const baseWhere = {
+    eventId: { not: eventId },
+    aiStatus: 'done',
+    event: { is: { status: 'active' } },
+    source: { deletedAt: null },
+  } as const;
+  const select = {
+    id: true,
+    eventId: true,
+    title: true,
+    url: true,
+    score: true,
+    relevance: true,
+    brand: true,
+    publicStatus: true,
+    publishedAt: true,
+    createdAt: true,
+    source: { select: { name: true, type: true, publicEnabled: true } },
+  } as const;
+
+  // 先命中完全相同的品牌字段，再用品牌片段补齐多品牌/历史格式数据。
+  const exact = await db.article.findMany({
+    where: { ...baseWhere, ...timeWindow, brand: { equals: brand } },
+    orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+    take: SAME_BRAND_CANDIDATE_TAKE * 2,
+    select,
+  });
+  const broad = exact.length >= SAME_BRAND_CANDIDATE_TAKE
+    ? []
+    : await db.article.findMany({
+        where: {
+          ...baseWhere,
+          AND: [
+            timeWindow,
+            { OR: brands.map((item) => ({ brand: { contains: item } })) },
+          ],
+        },
+        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+        take: SAME_BRAND_CANDIDATE_TAKE * 4,
+        select,
+      });
+
+  const candidates = [...exact, ...broad]
+    .filter((article, index, all) => all.findIndex((item) => item.id === article.id) === index)
+    .map((article) => ({
+      ...article,
+      matchedBrands: sharedBrands(brand, article.brand),
+    }))
+    .filter((article) => article.matchedBrands.length > 0)
+    .sort(compareArticleTime)
+    .slice(0, SAME_BRAND_CANDIDATE_TAKE);
+
+  return candidates.map((article) => ({
+    ...article,
+    publishedAt: article.publishedAt?.toISOString() ?? null,
+    createdAt: article.createdAt.toISOString(),
+  }));
 }
 
 export function deriveEventClusterReviewStatus(clusterStatuses: readonly string[]): 'confirmed' | 'pending' {
@@ -168,7 +256,7 @@ export async function reconcileEventAfterArticleDeletion(eventId: string): Promi
   return { pushLogsDeleted: result.pushLogsDeleted };
 }
 
-export async function getEventArticles(eventId: string) {
+export async function getEventArticles(eventId: string, articleId?: string) {
   const event = await db.event.findUnique({
     where: { id: eventId },
     select: {
@@ -232,6 +320,12 @@ export async function getEventArticles(eventId: string) {
     },
   });
   if (!event) return null;
+  const focusArticle = event.articles.find((article) => article.id === articleId)
+    ?? event.articles.find((article) => article.id === event.representativeArticleId)
+    ?? event.articles[0];
+  const brandCandidates = focusArticle
+    ? await getSameBrandCandidates(eventId, focusArticle.brand)
+    : [];
   const parsedAudits = event.assignedAudits.map((audit) => ({ ...audit, evidence: parseAuditEvidence(audit.evidence) }));
   const candidateIds = [...new Set(parsedAudits.flatMap((audit) => {
     const candidates = audit.evidence.candidates;
@@ -278,6 +372,7 @@ export async function getEventArticles(eventId: string) {
       publishedAt: article.publishedAt?.toISOString() ?? null,
       createdAt: article.createdAt.toISOString(),
     })),
+    brandCandidates,
   };
 }
 

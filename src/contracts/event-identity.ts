@@ -1,7 +1,7 @@
 export const EVENT_SUBJECT_MAX_ITEMS = 3;
-export const EVENT_SUBJECT_MAX_LENGTH = 32;
-export const EVENT_ACTION_MAX_LENGTH = 24;
-export const EVENT_OBJECT_MAX_LENGTH = 80;
+export const EVENT_SUBJECT_MAX_LENGTH = 16;
+export const EVENT_ACTION_MAX_LENGTH = 8;
+export const EVENT_OBJECT_MAX_LENGTH = 16;
 export const EVENT_KEY_MAX_LENGTH = 256;
 
 export interface EventIdentity {
