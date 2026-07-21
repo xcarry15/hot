@@ -342,7 +342,6 @@ export default function IntelligenceInbox({
   const [editing, setEditing] = useState(false);
   const [showFullContent, setShowFullContent] = useState(false);
   const [requestedPanel, setRequestedPanel] = useState<DetailPanel | null>(null);
-  const [clusterAuditOpen, setClusterAuditOpen] = useState(false);
   const [eventDetail, setEventDetail] = useState<EventDetail | null>(null);
   const [eventAction, setEventAction] = useState<string | null>(null);
   const [selectedSplitIds, setSelectedSplitIds] = useState<Set<string>>(() => new Set());
@@ -1008,15 +1007,19 @@ export default function IntelligenceInbox({
     });
   }, [eventDetail]);
   const brandCandidates = eventDetail?.brandCandidates ?? [];
-  const representativeMember = eventMembers.find((article) => article.id === eventDetail?.representativeArticleId) ?? null;
   const eventSourceCount = new Set(eventMembers.map((article) => article.source.name)).size;
-  const eventBlockedCount = eventMembers.filter((article) => article.aiStatus !== "done" || article.clusterStatus !== "clustered" || article.source.deleted).length;
-  const successfulPushTargets = latestPushLogs.filter(
-    (log) => log.status === "success",
+  const pushTargetStates: { latestStatus: string }[] = eventDetail
+    ? ((eventDetail as Record<string, unknown>).pushTargetStates as { latestStatus: string }[] ?? [])
+    : [];
+  const enabledPushTargets = pushTargetStates.length;
+  const successfulPushTargets = pushTargetStates.filter(
+    (s) => s.latestStatus === "success",
   ).length;
-  const failedPushTargets = latestPushLogs.filter(
-    (log) => log.status !== "success",
+  const failedPushTargets = pushTargetStates.filter(
+    (s) => s.latestStatus !== "success",
   ).length;
+  const allTargetsPushed = enabledPushTargets > 0 && successfulPushTargets === enabledPushTargets;
+  const anyTargetFailed = failedPushTargets > 0;
   const clickRate = detail && detail.viewCount > 0
     ? Math.round((detail.originalClickCount / detail.viewCount) * 100)
     : 0;
@@ -1121,7 +1124,7 @@ export default function IntelligenceInbox({
             <MetricCell label="人工归类" value={reviewLabel(detail.reviewStatus)} warning={detail.reviewStatus === "unreviewed"} />
             <MetricCell label="公开状态" value={publicResultLabel(detail)} success={detail.publicStatus === "published"} />
             <MetricCell label="事件来源" value={`${eventDetail?.articleCount ?? detail.event?.articleCount ?? 1} 个`} />
-            <MetricCell label="推送目标" value={latestPushLogs.length === 0 ? (eventDetail?.pushedAt ? "已推送" : "未推送") : `${successfulPushTargets}/${latestPushLogs.length} 成功`} warning={failedPushTargets > 0} success={successfulPushTargets > 0 && failedPushTargets === 0} last />
+            <MetricCell label="推送目标" value={enabledPushTargets === 0 ? (eventDetail?.pushedAt ? "已推送" : "未推送") : `${successfulPushTargets}/${enabledPushTargets} 成功`} warning={anyTargetFailed} success={allTargetsPushed} last />
           </div>
         </header>
 
@@ -1180,26 +1183,10 @@ export default function IntelligenceInbox({
               <section ref={clusterPanelRef} className="scroll-mt-3 border bg-background">
                 <SectionHeader title="Event 校准" meta={`${eventDetail.articleCount} 篇 · ${eventSourceCount} 个来源`} />
                 <div className="space-y-2 p-2.5">
-                  <div className="border bg-muted/20 text-xs">
-                    <div className="flex min-w-0 items-start gap-2 p-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-medium text-muted-foreground">当前代表文章</p>
-                        <p className="mt-0.5 line-clamp-2 font-medium">{representativeMember?.title || "尚无可用代表文章"}</p>
-                        {representativeMember && <p className="mt-0.5 truncate text-xs text-muted-foreground">{representativeMember.source.name} · {representativeMember.score} 分 · 相关度 {representativeMember.relevance} · {reviewLabel(representativeMember.reviewStatus)}</p>}
-                      </div>
-                      <span className="shrink-0 border bg-background px-1.5 py-0.5 text-xs text-muted-foreground">{eventDetail.representativeManual ? "人工代表" : "自动代表"}</span>
-                    </div>
-                    {eventBlockedCount > 0 && <p className="border-t bg-background p-2 text-xs text-amber-700">{eventBlockedCount} 篇成员暂不具备代表资格：可能未完成 AI/聚类，或来源已删除。</p>}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-1">
-                    <Button size="sm" className="h-7 rounded-none px-1.5 text-xs" disabled={!canForcePush || eventAction !== null} onClick={() => void pushCurrentEvent(eventDetail.pushedAt ? "repush" : "manual")}><Send className="h-3 w-3" />{eventDetail.pushedAt ? "完整重推 Event" : "强制推送 Event"}</Button>
-                    <Button size="sm" variant="outline" className="h-7 rounded-none px-1.5 text-xs" onClick={() => { const query = detail.title.slice(0, 30); setEventSearch(query); void searchEvents(query); }}><Search className="h-3 w-3" />查找相似 Event</Button>
-                  </div>
 
                   {detail.clusterStatus === "needs_review" && <div className="grid gap-1.5 border border-amber-300 bg-amber-50 p-2"><p className="text-xs font-medium text-amber-950">当前聚类存在歧义。完成复核前，本篇不能成为代表、公开或推送。</p><div className="flex flex-wrap gap-1"><Button size="sm" className="h-7 rounded-none px-1.5 text-xs" disabled={eventAction !== null} onClick={() => void confirmIndependent()}>确认独立事件</Button>{recommendedEventId && <Button size="sm" variant="outline" className="h-7 rounded-none px-1.5 text-xs" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(recommendedEventId)}>并入系统推荐 Event</Button>}</div></div>}
 
-                  <div className="border-t pt-2">
+                  <div className="pt-2">
                     <div className="mb-1.5 flex items-center gap-2">
                       <div><p className="text-xs font-semibold">事件成员对比</p><p className="text-xs text-muted-foreground">勾选成员可批量拆分；至少保留一篇在当前 Event。</p></div>
                       {selectedSplitIds.size > 0 && <Button size="sm" variant="outline" className="ml-auto h-7 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticles([...selectedSplitIds])}><Split className="h-3 w-3" />拆分所选 {selectedSplitIds.size} 篇</Button>}
@@ -1253,7 +1240,7 @@ export default function IntelligenceInbox({
                                 <td className={`border-r px-2 py-1.5 align-middle ${article.source.deleted ? "text-red-700" : article.source.publicEnabled ? "text-emerald-700" : "text-muted-foreground"}`}>{sourceStatus}</td>
                                 <td className={`border-r px-2 py-1.5 align-middle ${article.publicStatus === "published" ? "text-emerald-700" : "text-muted-foreground"}`}>{article.publicStatus === "published" ? "已公开" : "未公开"}</td>
                                 <td className={`border-r px-2 py-1.5 align-middle ${article.pushStatus === "success" ? "text-emerald-700" : article.pushStatus === "failure" ? "text-red-700" : article.pushStatus === "partial" ? "text-amber-700" : "text-muted-foreground"}`}>{articlePushStatusLabel(article.pushStatus)}</td>
-                                <td className={`sticky right-0 z-[2] px-1 py-1 align-middle ${rowBackground}`}><div className="flex items-center gap-1 whitespace-nowrap">{!representative && <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs" disabled={eventAction !== null || article.clusterStatus !== "clustered" || article.aiStatus !== "done" || article.source.deleted} onClick={() => void setRepresentative(article.id)}>设为代表</Button>}{!representative && eventDetail.articleCount > 1 && <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticle(article.id)}>单独拆分</Button>}</div></td>
+                                <td className={`sticky right-0 z-[2] px-1 py-1 align-middle ${rowBackground}`}><div className="flex items-center gap-1 whitespace-nowrap">{representative && canForcePush && <Button size="sm" className="h-6 rounded-none px-1.5 text-xs border-amber-500 text-amber-700 hover:bg-amber-50" disabled={eventAction !== null} onClick={() => void pushCurrentEvent(eventDetail.pushedAt ? "repush" : "manual")}><Send className="h-3 w-3" /></Button>}{!representative && <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs" disabled={eventAction !== null || article.clusterStatus !== "clustered" || article.aiStatus !== "done" || article.source.deleted} onClick={() => void setRepresentative(article.id)}>设为代表</Button>}{!representative && eventDetail.articleCount > 1 && <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticle(article.id)}>单独拆分</Button>}</div></td>
                               </tr>
                             );
                           })}
@@ -1294,9 +1281,9 @@ export default function IntelligenceInbox({
                     </div>
                   </div>
 
-                  <details open={clusterAuditOpen || detail.clusterStatus === "needs_review"} onToggle={(event) => { const nextOpen = event.currentTarget.open; setClusterAuditOpen(nextOpen); if (nextOpen) { setRequestedPanel("cluster"); updateDetailUrl(detail.id, "cluster"); } }}><summary className="flex cursor-pointer items-center justify-between border-t py-1.5 text-xs font-semibold"><span>聚类记录</span><span className="font-normal text-muted-foreground">{currentEventAudits.length} 条</span></summary><div className="max-h-[260px] overflow-y-auto border-t"><div className="divide-y">{currentEventAudits.slice(0, 8).map((audit) => { const reason = clusterAuditReason(audit); return <div key={audit.id} className={`flex gap-2 border-l-2 px-2.5 py-2 text-xs leading-4 ${audit.actor === "admin" ? "border-sky-400" : "border-muted-foreground/30"}`}><div className="min-w-0 flex-1"><p className="flex flex-wrap items-center gap-x-2 gap-y-0.5"><span className="font-medium">{clusterAuditActionLabel(audit.action)}</span><span className="text-muted-foreground">{audit.actor === "admin" ? "人工" : "系统"}</span>{audit.confidence != null && <span className="text-muted-foreground">置信度 {audit.confidence}%</span>}<time className="text-muted-foreground">{fullTimeLabel(audit.createdAt)}</time></p>{reason && <p className="mt-0.5 text-muted-foreground">{reason}</p>}{audit.candidateEvent?.representativeArticle?.title && <p className="mt-0.5 truncate text-muted-foreground" title={audit.candidateEvent.representativeArticle.title}>关联：{audit.candidateEvent.representativeArticle.title}</p>}</div></div>; })}{currentEventAudits.length === 0 && <p className="px-2.5 py-2 text-xs text-muted-foreground">暂无聚类记录</p>}</div></div></details>
+                  <details open><summary className="flex cursor-pointer items-center justify-between border-t py-1.5 text-xs font-semibold"><span>聚类记录</span><span className="font-normal text-muted-foreground">{currentEventAudits.length} 条</span></summary><div className="max-h-[260px] overflow-y-auto border-t"><div className="divide-y">{currentEventAudits.slice(0, 8).map((audit) => { const reason = clusterAuditReason(audit); return <div key={audit.id} className={`flex gap-2 border-l-2 px-2.5 py-2 text-xs leading-4 ${audit.actor === "admin" ? "border-sky-400" : "border-muted-foreground/30"}`}><div className="min-w-0 flex-1"><p className="flex flex-wrap items-center gap-x-2 gap-y-0.5"><span className="font-medium">{clusterAuditActionLabel(audit.action)}</span><span className="text-muted-foreground">{audit.actor === "admin" ? "人工" : "系统"}</span>{audit.confidence != null && <span className="text-muted-foreground">置信度 {audit.confidence}%</span>}<time className="text-muted-foreground">{fullTimeLabel(audit.createdAt)}</time></p>{reason && <p className="mt-0.5 text-muted-foreground">{reason}</p>}{audit.candidateEvent?.representativeArticle?.title && <p className="mt-0.5 truncate text-muted-foreground" title={audit.candidateEvent.representativeArticle.title}>关联：{audit.candidateEvent.representativeArticle.title}</p>}</div></div>; })}{currentEventAudits.length === 0 && <p className="px-2.5 py-2 text-xs text-muted-foreground">暂无聚类记录</p>}</div></div></details>
 
-                  <details open={detail.clusterStatus === "needs_review" || eventOptions.length > 0}><summary className="flex cursor-pointer items-center justify-between border-t py-1.5 text-xs font-semibold"><span>调整事件归属</span><span className="font-normal text-muted-foreground">移动当前文章或合并整组</span></summary><div className="space-y-2 border-t p-2"><div className="flex gap-1"><Input value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void searchEvents(); }} placeholder="搜索标题、品牌或事件键" className="h-7 rounded-none text-xs" /><Button size="sm" variant="outline" className="h-7 shrink-0 rounded-none px-1.5 text-xs" onClick={() => void searchEvents()}><Search className="h-3 w-3" />搜索</Button></div>{eventOptions.length > 0 ? <div className="max-h-56 divide-y overflow-y-auto border">{eventOptions.map((event) => <div key={event.id} className={`p-2 text-xs ${mergeTargetId === event.id ? "bg-sky-50" : ""}`}><p className="line-clamp-2 font-medium">{event.representativeArticle?.title || `Event ${event.id.slice(-8)}`}</p><div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground"><span>{event.articleCount} 篇</span><span>{event.representativeArticle?.source.name || "未知来源"}</span><span>{event.publicStatus === "published" ? "已公开" : "未公开"}</span><span>{event.pushedAt ? "已推送" : "未推送"}</span><span>{fullTimeLabel(event.lastSeenAt)}</span></div><div className="mt-1 flex gap-1"><Button size="sm" variant="outline" className="h-7 rounded-none px-1 text-xs" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(event.id)}>仅移动当前文章</Button><Button size="sm" variant="ghost" className="h-7 rounded-none px-1 text-xs" disabled={eventAction !== null} onClick={() => setMergeTargetId(event.id)}>选为整组目标</Button></div></div>)}</div> : <p className="border border-dashed px-2.5 py-2 text-xs text-muted-foreground">{eventSearch.trim() ? "未找到匹配的目标 Event。" : "输入关键词搜索目标 Event。"}</p>}{mergeTargetId && <div className="flex items-center gap-2 border bg-sky-50 px-2 py-1.5 text-xs"><span className="min-w-0 flex-1 truncate">整组目标：{eventOptions.find((event) => event.id === mergeTargetId)?.representativeArticle?.title || mergeTargetId}</span><Button size="sm" variant="ghost" className="h-6 shrink-0 rounded-none px-1.5 text-xs" disabled={eventAction !== null} onClick={() => setMergeTargetId("")}>取消</Button><Button size="sm" variant="outline" className="h-6 shrink-0 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void mergeCurrentEvent()}><Merge className="h-3 w-3" />整组并入</Button></div>}</div></details>
+                  <details open><summary className="flex cursor-pointer items-center justify-between border-t py-1.5 text-xs font-semibold"><span>调整事件归属</span><span className="font-normal text-muted-foreground">移动当前文章或合并整组</span></summary><div className="space-y-2 border-t p-2"><div className="flex gap-1"><Input value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void searchEvents(); }} placeholder="搜索标题、品牌或事件键" className="h-7 rounded-none text-xs" /><Button size="sm" variant="outline" className="h-7 shrink-0 rounded-none px-1.5 text-xs" onClick={() => void searchEvents()}><Search className="h-3 w-3" />搜索</Button></div><button type="button" className="text-xs text-muted-foreground hover:text-foreground pb-0.5" onClick={() => { const query = detail.title.slice(0, 30); setEventSearch(query); void searchEvents(query); }}>用当前标题搜索相似事件</button>{eventOptions.length > 0 ? <div className="max-h-56 divide-y overflow-y-auto border">{eventOptions.map((event) => <div key={event.id} className={`p-2 text-xs ${mergeTargetId === event.id ? "bg-sky-50" : ""}`}><p className="line-clamp-2 font-medium">{event.representativeArticle?.title || `Event ${event.id.slice(-8)}`}</p><div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground"><span>{event.articleCount} 篇</span><span>{event.representativeArticle?.source.name || "未知来源"}</span><span>{event.publicStatus === "published" ? "已公开" : "未公开"}</span><span>{event.pushedAt ? "已推送" : "未推送"}</span><span>{fullTimeLabel(event.lastSeenAt)}</span></div><div className="mt-1 flex gap-1"><Button size="sm" variant="outline" className="h-7 rounded-none px-1 text-xs" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(event.id)}>仅移动当前文章</Button><Button size="sm" variant="ghost" className="h-7 rounded-none px-1 text-xs" disabled={eventAction !== null} onClick={() => setMergeTargetId(event.id)}>选为整组目标</Button></div></div>)}</div> : <p className="border border-dashed px-2.5 py-2 text-xs text-muted-foreground">{eventSearch.trim() ? "未找到匹配的目标 Event。" : "输入关键词搜索目标 Event。"}</p>}{mergeTargetId && <div className="flex items-center gap-2 border bg-sky-50 px-2 py-1.5 text-xs"><span className="min-w-0 flex-1 truncate">整组目标：{eventOptions.find((event) => event.id === mergeTargetId)?.representativeArticle?.title || mergeTargetId}</span><Button size="sm" variant="ghost" className="h-6 shrink-0 rounded-none px-1.5 text-xs" disabled={eventAction !== null} onClick={() => setMergeTargetId("")}>取消</Button><Button size="sm" variant="outline" className="h-6 shrink-0 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void mergeCurrentEvent()}><Merge className="h-3 w-3" />整组并入</Button></div>}</div></details>
                 </div>
               </section>
             )}

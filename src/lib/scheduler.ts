@@ -13,6 +13,7 @@ import nodeCron from 'node-cron';
 import { runJob, resetOrphanedJobs } from './execution';
 import { getSetting, setSetting, readAllSettings, SETTING_KEYS } from './settings';
 import { parsePushMode } from '@/contracts/push';
+import { cleanupExpiredSendingDeliveries } from './push/delivery';
 
 // HMR-safe guard: only start one scheduler per process. State itself is persisted in DB.
 declare global {
@@ -112,6 +113,8 @@ export function startScheduler(): void {
 
   // Reset orphaned 'running' jobs left by a previous process crash / HMR.
   void resetOrphanedJobs();
+  // P2: 每分钟清理过期的 sending Delivery，不阻塞。
+  void cleanupExpiredSendingDeliveries();
 
   // Crawl: 1-minute tick with interval check
   nodeCron.schedule('* * * * *', async () => {

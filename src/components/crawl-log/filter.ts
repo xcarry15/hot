@@ -60,6 +60,8 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
       return article.anomalyLabels?.includes('ad') ?? false
     case 'anomaly-duplicate':
       return article.anomalyLabels?.includes('duplicate') ?? false
+    case 'anomaly-low-confidence':
+      return article.anomalyLabels?.includes('low-confidence') ?? false
     case 'ignored':
       return bucket === 'ignored'
     default:

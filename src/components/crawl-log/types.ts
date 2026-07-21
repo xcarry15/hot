@@ -32,11 +32,13 @@ export type StepFilterKey =
   | 'anomaly-ad'
   | 'anomaly-duplicate'
   | 'anomaly-failure'
+  | 'anomaly-low-confidence'
   | 'ignored'
 
 export const ALL_STEP_FILTER_KEYS: readonly StepFilterKey[] = [
   'normal-all', 'normal-processing', 'normal-ai', 'normal-cluster', 'normal-push', 'normal-pushed',
   'anomaly-all', 'anomaly-manual', 'anomaly-review', 'anomaly-ad', 'anomaly-duplicate', 'anomaly-failure',
+  'anomaly-low-confidence',
   'ignored',
 ] as const
 

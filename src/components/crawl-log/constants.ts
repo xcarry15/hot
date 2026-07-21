@@ -34,9 +34,10 @@ export const ANOMALY_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'anomaly-all', label: '全部异常', description: '全部需要关注的文章' },
   { key: 'anomaly-manual', label: '需处理', description: '自动重试耗尽，需要人工处理' },
   { key: 'anomaly-review', label: '待复核', description: '聚类结果存在歧义，需要人工判断' },
+  { key: 'anomaly-failure', label: '流程失败', description: '流程失败、跳过或自动恢复中' },
   { key: 'anomaly-ad', label: '软文', description: 'AI 判定为广告或软文的文章' },
   { key: 'anomaly-duplicate', label: '重复', description: '同一事件中的非代表报道' },
-  { key: 'anomaly-failure', label: '流程失败', description: '流程失败、跳过或自动恢复中' },
+  { key: 'anomaly-low-confidence', label: '低置信', description: 'AI 对分析结果把握不足，建议人工复核' },
 ] as const
 
 export const STEP_FILTER_CHIPS: readonly StepFilterChip[] = [

@@ -80,27 +80,6 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
   });
   const targetByHash = new Map(targets.map((target) => [target.urlHash, target.id]));
   const targetIds = targets.map((target) => target.id);
-  const now = new Date();
-  if (targetIds.length > 0) {
-    await db.pushDelivery.updateMany({
-      where: {
-        eventId: { in: uniqueEventIds },
-        targetId: { in: targetIds },
-        status: 'sending',
-        OR: [
-          { leaseExpiresAt: null },
-          { leaseExpiresAt: { lt: now } },
-        ],
-      },
-      data: {
-        status: 'unknown',
-        lastError: '投递租约已过期，结果未知；需要人工强制推送确认',
-        completedAt: now,
-        leaseOwner: '',
-        leaseExpiresAt: null,
-      },
-    });
-  }
 
   // Use PushDelivery for latest per-target state
   const deliveries = await db.pushDelivery.findMany({
@@ -172,8 +151,36 @@ export async function getPushTargetStates(eventId: string): Promise<PushTargetSt
 
 export async function getFailedPushTargets(eventId: string): Promise<PushTargetState[]> {
   return (await getPushTargetStates(eventId)).filter(
-    (target) => target.latestStatus === 'failure',
+    (target) => target.latestStatus === 'failure' || target.latestStatus === 'unknown',
   );
+}
+
+/**
+ * P2: 将过期 sending Delivery 标记为 unknown。
+ * 只能由定时维护、Job 启动前、人工推送前调用，读取路径不触发写操作。
+ */
+export async function cleanupExpiredSendingDeliveries(): Promise<number> {
+  const now = new Date();
+  const result = await db.pushDelivery.updateMany({
+    where: {
+      status: 'sending',
+      OR: [
+        { leaseExpiresAt: null },
+        { leaseExpiresAt: { lt: now } },
+      ],
+    },
+    data: {
+      status: 'unknown',
+      lastError: '投递租约已过期，结果未知；需要人工强制推送确认',
+      completedAt: now,
+      leaseOwner: '',
+      leaseExpiresAt: null,
+    },
+  });
+  if (result.count > 0) {
+    console.log(`[push] cleaned up ${result.count} expired sending deliveries`);
+  }
+  return result.count;
 }
 
 /** Push a single article to all enabled Feishu webhooks. */
@@ -314,9 +321,11 @@ async function pushEventToFeishuInternal(
   }
 
   const finalStates = await getPushTargetStates(eventId);
-  const allSucceeded = finalStates.length > 0 && finalStates.every(
-    (target) => target.latestStatus === 'success',
-  );
+  const allSucceeded = mode === 'repush_all'
+    ? attemptSucceeded > 0 && attemptSucceeded === enabled.length
+    : finalStates.length > 0 && finalStates.every(
+        (target) => target.latestStatus === 'success',
+      );
   const failedCount = selectedUrls.size - attemptSucceeded;
   const skipped = enabled.length - selectedUrls.size;
 
@@ -385,6 +394,12 @@ async function pushToSingleTarget(
 
   const ownsCreatedDelivery = delivery.status === 'sending' && delivery.leaseOwner === leaseOwner;
   if (!ownsCreatedDelivery) {
+    const retryableStatuses =
+      mode === 'repush_all'
+        ? ['pending', 'failed', 'unknown', 'succeeded']
+        : mode === 'manual_force'
+          ? ['pending', 'failed', 'unknown']
+          : ['pending', 'failed'];
     const claimed = await db.pushDelivery.updateMany({
       where: {
         eventId,
@@ -392,8 +407,7 @@ async function pushToSingleTarget(
         contentVersion: contentVersionStr,
         mode,
         OR: [
-          { status: { in: ['pending', 'failed'] } },
-          ...(mode === 'manual_force' ? [{ status: 'unknown' }] : []),
+          { status: { in: retryableStatuses } },
           {
             status: 'sending',
             OR: [

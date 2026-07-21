@@ -24,7 +24,7 @@ export interface ArticleProgress {
   /** AI 完成后的最终有效评分；未完成时为 null。 */
   score: number | null;
   /** 仅用于列表标题后的轻量异常标签，不暴露 AI 分析明细。 */
-  anomalyLabels: Array<'ad' | 'duplicate'>;
+  anomalyLabels: Array<'ad' | 'duplicate' | 'low-confidence'>;
   push: StepStatus;
   skipReason?: string;
   lastTime: number;

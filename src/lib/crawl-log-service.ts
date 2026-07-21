@@ -48,6 +48,7 @@ const crawlLogArticleSelect = {
   clusterStatus: true,
   nextClusterRetryAt: true,
   aiStatus: true,
+  aiConfidence: true,
   score: true,
   isAd: true,
   eventId: true,
@@ -331,6 +332,7 @@ export async function getCrawlLogSnapshot(
       anomalyLabels: [
         ...(a.isAd ? ['ad' as const] : []),
         ...(a.event && a.event.articleCount > 1 && !isRepresentative ? ['duplicate' as const] : []),
+        ...(a.aiStatus === 'done' && a.aiConfidence != null && a.aiConfidence < 70 ? ['low-confidence' as const] : []),
       ],
       push: projection.push,
       skipReason: deriveSkipReason({

@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshEventPublicPublication } from '@/lib/public-publication-service';
 import { splitBrands } from '@/lib/shared/article-codecs';
+import { getPushTargetStates } from '@/lib/push/delivery';
 
 const SAME_BRAND_CANDIDATE_TAKE = 30;
 const SAME_BRAND_CANDIDATE_WINDOW_DAYS = 30;
@@ -399,11 +400,16 @@ export async function getEventArticles(eventId: string, articleId?: string) {
     select: { id: true, representativeArticle: { select: { title: true } } },
   });
   const candidateTitles = new Map(candidateEvents.map((candidate) => [candidate.id, candidate.representativeArticle?.title ?? '']));
+  const pushTargetStates = await getPushTargetStates(eventId);
   return {
     ...eventData,
     pushedAt: event.pushedAt?.toISOString() ?? null,
     firstSeenAt: event.firstSeenAt.toISOString(),
     lastSeenAt: event.lastSeenAt.toISOString(),
+    pushTargetStates: pushTargetStates.map((s) => ({
+      ...s,
+      latestCreatedAt: s.latestCreatedAt?.toISOString() ?? null,
+    })),
     audits: parsedAudits.map((audit) => ({
       ...audit,
       evidence: {
