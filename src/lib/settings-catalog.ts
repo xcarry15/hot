@@ -187,6 +187,14 @@ export const EXPORTABLE_SETTING_KEYS = SETTING_DEFINITIONS
   .filter((definition) => definition.exportable)
   .map((definition) => definition.key);
 
+/** 允许通过 API 写入的配置键。排除纯运行态键（scheduler 状态）。 */
+export const WRITABLE_SETTING_KEYS: readonly string[] = SETTING_DEFINITIONS
+  .filter((definition) => ![
+    SETTING_KEYS.SCHEDULER_LAST_CRAWL_AT,
+    SETTING_KEYS.SCHEDULER_LAST_PUSH_DATE,
+  ].includes(definition.key))
+  .map((definition) => definition.key);
+
 export const SENSITIVE_SETTING_KEYS = new Set(
   SETTING_DEFINITIONS.filter((definition) => definition.sensitive).map((definition) => definition.key),
 );

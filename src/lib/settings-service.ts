@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { invalidateAISettingsCache } from '@/lib/ai-client';
 import {
-  EXPORTABLE_SETTING_KEYS, SETTING_DEFINITION_MAP, SENSITIVE_SETTING_KEYS, getSettingDefaults, getExportableSettingDefaults,
+  EXPORTABLE_SETTING_KEYS, WRITABLE_SETTING_KEYS, SETTING_DEFINITION_MAP, SENSITIVE_SETTING_KEYS, getSettingDefaults, getExportableSettingDefaults,
 } from '@/lib/settings';
 import { SETTING_KEYS } from '@/lib/settings-catalog';
 import { applyScorePolicy, buildScorePolicySnapshot } from '@/lib/score-policy';
@@ -58,9 +58,9 @@ export async function updateSettings(input: unknown): Promise<
   )));
   const validationErrors: string[] = [];
   for (const [key, value] of Object.entries(normalizedData)) {
-    if (!EXPORTABLE_SETTING_KEYS.includes(key)) { validationErrors.push(`${key}: 不可写(不在允许的配置键清单内)`); continue; }
+    if (!WRITABLE_SETTING_KEYS.includes(key)) { validationErrors.push(`${key}: 不可写(不在允许的配置键清单内)`); continue; }
     const definition = SETTING_DEFINITION_MAP.get(key);
-    if (!definition || !definition.exportable) { validationErrors.push(`${key}: 不可写(未在配置目录中声明)`); continue; }
+    if (!definition) { validationErrors.push(`${key}: 不可写(未在配置目录中声明)`); continue; }
     const result = definition.schema.safeParse(value);
     if (!result.success) validationErrors.push(`${key}: ${result.error.issues[0].message}`);
   }

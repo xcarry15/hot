@@ -18,6 +18,7 @@ import { getScoreStyle } from '@/lib/shared/score-style';
 export type PushUrgency = 'urgent' | 'normal';
 
 export interface FeishuCardArticleInput {
+  id: string;
   title: string;
   summary: string;
   brand: string;
@@ -151,7 +152,7 @@ export function buildFeishuCard(
           tag: 'button',
           text: { tag: 'plain_text', content: '查看原文' },
           type: 'primary',
-          url: article.url,
+          url: `${process.env.NEXT_PUBLIC_SITE_URL || ''}/news/${article.id}`,
         },
       ],
     },

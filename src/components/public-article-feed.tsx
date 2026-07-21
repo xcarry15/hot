@@ -202,15 +202,20 @@ export default function PublicArticleFeed({
       )}
 
       {state.groups.length > 0 && (
-        <div className="mt-10 flex justify-center">
-          {state.hasMore ? (
-            <button type="button" onClick={loadMore} disabled={loading} className="public-pressable h-10 rounded-none border border-[var(--public-hairline-strong)] px-5 text-sm font-medium text-[var(--public-ink)] transition-colors hover:border-[var(--public-primary)] hover:text-[var(--public-primary)] disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">
-              {loading ? '加载中…' : loadError ? '加载失败，点击重试' : '加载更多'}
-            </button>
-          ) : (
-            <span className="sr-only" role="status">已全部加载</span>
-          )}
-        </div>
+        <>
+          <div className="mt-10 flex justify-center">
+            {state.hasMore ? (
+              <button type="button" onClick={loadMore} disabled={loading} className="public-pressable h-10 rounded-none border border-[var(--public-hairline-strong)] px-5 text-sm font-medium text-[var(--public-ink)] transition-colors hover:border-[var(--public-primary)] hover:text-[var(--public-primary)] disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">
+                {loading ? '加载中…' : loadError ? '加载失败，点击重试' : '加载更多'}
+              </button>
+            ) : (
+              <span className="sr-only" role="status">已全部加载</span>
+            )}
+          </div>
+          <p className="mt-4 text-center text-sm text-[var(--public-muted)]">
+            共 {state.total} 篇文章
+          </p>
+        </>
       )}
     </>
   )
