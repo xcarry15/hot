@@ -99,6 +99,7 @@ type EventDetail = {
     aiStatus: string;
     publicStatus: string;
     publicOverride: string;
+    pushStatus: string;
     isAd: boolean;
     brand: string;
     category: string;
@@ -234,6 +235,42 @@ function pushStatusLabel(status: string): string {
     : status === "failed" || status === "failure"
       ? "失败"
       : status;
+}
+
+function articlePushStatusLabel(status: string): string {
+  return status === "success"
+    ? "已推送"
+    : status === "partial"
+      ? "部分推送"
+      : status === "failure"
+        ? "推送失败"
+        : "未推送";
+}
+
+function clusterAuditActionLabel(action: string): string {
+  return ({
+    create: "创建事件",
+    attach: "并入事件",
+    fallback_create: "创建待复核事件",
+    representative_change: "调整代表文章",
+    split: "拆分文章",
+    merge: "合并事件",
+    manual_create: "创建独立事件",
+    confirm_independent: "确认独立事件",
+  } as Record<string, string>)[action] ?? action;
+}
+
+function clusterAuditReason(audit: {
+  evidence: Record<string, unknown>;
+}): string {
+  const aiDecision = audit.evidence.aiDecision;
+  const aiReason = aiDecision && typeof aiDecision === "object"
+    ? (aiDecision as { reason?: unknown }).reason
+    : undefined;
+  const reason = aiReason ?? audit.evidence.reason ?? audit.evidence.aiReason;
+  return typeof reason === "string" && reason.trim() && reason !== "无补充理由"
+    ? reason
+    : "";
 }
 
 function stageStatusLabel(stage: "fetch" | "cluster" | "ai", status: string): string {
@@ -1172,17 +1209,17 @@ export default function IntelligenceInbox({
                         <thead className="sticky top-0 z-[1] bg-muted/60 text-muted-foreground">
                           <tr>
                             <th className="sticky left-0 z-[3] w-[52px] border-b border-r bg-muted px-1 py-1.5 text-center font-medium">序号</th>
-                            <th className="sticky left-[52px] z-[3] min-w-[220px] max-w-[360px] border-b border-r bg-muted px-2 py-1.5 text-left font-medium">标题</th>
+                            <th className="sticky left-[52px] z-[3] w-[124px] min-w-[124px] border-b border-r bg-muted px-2 py-1.5 text-left font-medium">发布时间</th>
+                            <th className="sticky left-[176px] z-[3] min-w-[220px] max-w-[360px] border-b border-r bg-muted px-2 py-1.5 text-left font-medium">标题</th>
                             <th className="border-b border-r px-1 py-1.5 text-center font-medium">代表</th>
                             <th className="border-b border-r px-2 py-1.5 text-left font-medium">品牌</th>
-                            <th className="border-b border-r px-2 py-1.5 text-left font-medium">来源 / 状态 / 公开</th>
-                            <th className="border-b border-r px-2 py-1.5 text-left font-medium">发布时间</th>
                             <th className="border-b border-r px-2 py-1.5 text-left font-medium">事件键</th>
                             <th className="border-b border-r px-1 py-1.5 text-center font-medium">总分</th>
-                            <th className="border-b border-r px-1 py-1.5 text-center font-medium">AI</th>
-                            <th className="border-b border-r px-1 py-1.5 text-center font-medium">聚类</th>
                             <th className="border-b border-r px-1 py-1.5 text-center font-medium">审核</th>
-                            <th className="border-b border-r px-2 py-1.5 text-left font-medium">分类 / 内容</th>
+                            <th className="border-b border-r px-2 py-1.5 text-left font-medium">来源</th>
+                            <th className="border-b border-r px-2 py-1.5 text-left font-medium">状态</th>
+                            <th className="border-b border-r px-2 py-1.5 text-left font-medium">公开</th>
+                            <th className="border-b border-r px-2 py-1.5 text-left font-medium">推送</th>
                             <th className="sticky right-0 z-[3] border-b bg-muted px-2 py-1.5 text-left font-medium">操作</th>
                           </tr>
                         </thead>
@@ -1205,18 +1242,18 @@ export default function IntelligenceInbox({
                             return (
                               <tr key={article.id} className={`group whitespace-nowrap border-b last:border-b-0 ${rowBackground}`}>
                                 <td className={`sticky left-0 z-[2] border-r px-1 py-1.5 align-middle ${rowBackground}`}><div className="flex items-center justify-center gap-1"><input type="checkbox" aria-label={`选择拆分 ${article.title}`} checked={selected} disabled={eventDetail.articleCount <= 1 || eventAction !== null} onChange={() => toggleSplitSelection(article.id)} /><span className="tabular-nums text-muted-foreground">{index + 1}</span></div></td>
-                                <td className={`sticky left-[52px] z-[2] min-w-[220px] border-r px-2 py-1.5 align-middle ${rowBackground}`}><button type="button" onClick={() => selectArticle(article.id, "cluster")} className="block max-w-[360px] truncate text-left font-medium hover:underline" title={article.title}>{article.title}</button></td>
+                                <td className={`sticky left-[52px] z-[2] w-[124px] min-w-[124px] border-r px-2 py-1.5 font-mono tabular-nums align-middle text-muted-foreground ${rowBackground}`}>{timeLabel(article.publishedAt || article.createdAt)}</td>
+                                <td className={`sticky left-[176px] z-[2] min-w-[220px] border-r px-2 py-1.5 align-middle ${rowBackground}`}><button type="button" onClick={() => selectArticle(article.id, "cluster")} className="block max-w-[360px] truncate text-left font-medium hover:underline" title={article.title}>{article.title}</button></td>
                                 <td className="border-r px-1 py-1.5 text-center align-middle">{representative ? <span className="bg-foreground px-1.5 py-0.5 text-background">代表</span> : "—"}</td>
                                 <td className="border-r px-2 py-1.5 align-middle text-muted-foreground" title={article.brand ? splitBrands(article.brand).join(" / ") : "无"}><div className="max-w-[160px] truncate">{article.brand ? splitBrands(article.brand).join(" / ") : "—"}</div></td>
-                                <td className="border-r px-2 py-1.5 align-middle" title={`${article.source.name} / ${sourceStatus} / ${article.publicStatus === "published" ? "已公开" : "未公开"}`}><div className="max-w-[260px] truncate"><span>{article.source.name}</span><span className="text-muted-foreground"> / </span><span className={article.source.deleted ? "text-red-700" : article.source.publicEnabled ? "text-emerald-700" : "text-muted-foreground"}>{sourceStatus}</span><span className="text-muted-foreground"> / </span><span className={article.publicStatus === "published" ? "text-emerald-700" : "text-muted-foreground"}>{article.publicStatus === "published" ? "已公开" : "未公开"}</span></div></td>
-                                <td className="border-r px-2 py-1.5 font-mono tabular-nums align-middle text-muted-foreground">{timeLabel(article.publishedAt || article.createdAt)}</td>
                                 <td className="border-r px-2 py-1.5 font-mono align-middle text-muted-foreground" title={article.eventKey || "未生成"}><div className="max-w-[260px] truncate">{article.eventKey || "—"}</div></td>
                                 <td className="border-r px-1 py-1.5 text-center font-semibold tabular-nums align-middle">{article.score}</td>
-                                <td className={`border-r px-1 py-1.5 text-center align-middle ${article.aiStatus === "done" ? "text-emerald-700" : "text-amber-700"}`}>{stageStatusLabel("ai", article.aiStatus)}</td>
-                                <td className={`border-r px-1 py-1.5 text-center align-middle ${article.clusterStatus === "needs_review" ? "text-amber-700" : "text-muted-foreground"}`}>{stageStatusLabel("cluster", article.clusterStatus)}</td>
                                 <td className={`border-r px-1 py-1.5 text-center align-middle ${article.reviewStatus === "unreviewed" ? "text-red-700" : "text-muted-foreground"}`}>{reviewLabel(article.reviewStatus)}</td>
-                                <td className="border-r px-2 py-1.5 align-middle" title={`${article.category || "未分类"} / ${article.isAd ? "软文" : "正常"}`}><div className="max-w-[160px] truncate"><span>{article.category || "未分类"}</span><span className="text-muted-foreground"> / </span><span className={article.isAd ? "text-slate-700" : "text-muted-foreground"}>{article.isAd ? "软文" : "正常"}</span></div></td>
-                                <td className={`sticky right-0 z-[2] px-1 py-1 align-middle ${rowBackground}`}><div className="flex items-center gap-1 whitespace-nowrap">{!representative && <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs" disabled={eventAction !== null || article.clusterStatus !== "clustered" || article.aiStatus !== "done" || article.source.deleted} onClick={() => void setRepresentative(article.id)}>设为代表</Button>}{eventDetail.articleCount > 1 && <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticle(article.id)}>单独拆分</Button>}</div></td>
+                                <td className="border-r px-2 py-1.5 align-middle" title={article.source.name}><div className="max-w-[180px] truncate">{article.source.name}</div></td>
+                                <td className={`border-r px-2 py-1.5 align-middle ${article.source.deleted ? "text-red-700" : article.source.publicEnabled ? "text-emerald-700" : "text-muted-foreground"}`}>{sourceStatus}</td>
+                                <td className={`border-r px-2 py-1.5 align-middle ${article.publicStatus === "published" ? "text-emerald-700" : "text-muted-foreground"}`}>{article.publicStatus === "published" ? "已公开" : "未公开"}</td>
+                                <td className={`border-r px-2 py-1.5 align-middle ${article.pushStatus === "success" ? "text-emerald-700" : article.pushStatus === "failure" ? "text-red-700" : article.pushStatus === "partial" ? "text-amber-700" : "text-muted-foreground"}`}>{articlePushStatusLabel(article.pushStatus)}</td>
+                                <td className={`sticky right-0 z-[2] px-1 py-1 align-middle ${rowBackground}`}><div className="flex items-center gap-1 whitespace-nowrap">{!representative && <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs" disabled={eventAction !== null || article.clusterStatus !== "clustered" || article.aiStatus !== "done" || article.source.deleted} onClick={() => void setRepresentative(article.id)}>设为代表</Button>}{!representative && eventDetail.articleCount > 1 && <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticle(article.id)}>单独拆分</Button>}</div></td>
                               </tr>
                             );
                           })}
@@ -1225,42 +1262,41 @@ export default function IntelligenceInbox({
                     </div>
 
                     <div className="mt-2 border-t pt-2">
-                      <div className="mb-1.5 flex items-start gap-2">
+                      <div className="mb-1.5 flex items-center gap-2">
                         <div>
                           <p className="text-xs font-semibold">同品牌候选</p>
-                          <p className="text-xs text-muted-foreground">当前品牌：{brands.join("、") || "无"} · 展示近 30 天内尚未归入当前 Event 的已完成 AI 文章。</p>
+                          <p className="text-xs text-muted-foreground">{brands.length > 0 ? `基于 ${brands.join("、")}，最近 30 天` : "当前文章未识别品牌"}</p>
                         </div>
-                        <span className="ml-auto shrink-0 border bg-amber-50 px-1.5 py-0.5 text-xs text-amber-800">{brandCandidates.length} 篇</span>
+                        {brands.length > 0 && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{brandCandidates.length} 篇</span>}
                       </div>
-                      {brandCandidates.length > 0 ? (
+                      {brands.length === 0 ? (
+                        <p className="border border-dashed px-2.5 py-2 text-xs text-muted-foreground">补充品牌后，系统会自动召回同品牌文章。</p>
+                      ) : brandCandidates.length === 0 ? (
+                        <p className="border border-dashed px-2.5 py-2 text-xs text-muted-foreground">最近 30 天没有未归入当前 Event 的同品牌文章。</p>
+                      ) : (
                         <div className="max-h-[280px] divide-y overflow-auto border border-amber-200 bg-amber-50/30">
                           {brandCandidates.map((candidate) => (
-                            <div key={candidate.id} className="flex min-w-0 items-center gap-2 p-1.5 text-xs">
+                            <div key={candidate.id} className="flex min-w-0 items-center gap-2 px-2.5 py-2 text-xs">
                               <div className="min-w-0 flex-1">
                                 <button type="button" onClick={() => selectArticle(candidate.id, "cluster")} className="block max-w-full truncate text-left font-medium hover:underline" title={candidate.title}>{candidate.title}</button>
                                 <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground">
-                                  <span>同品牌：{candidate.matchedBrands.join("、")}</span>
+                                  <span>{candidate.matchedBrands.join("、")}</span>
                                   <span>{candidate.source.name}</span>
                                   <span>{timeLabel(candidate.publishedAt || candidate.createdAt)}</span>
-                                  <span>{candidate.score} 分 / 相关 {candidate.relevance}</span>
+                                  <span>{candidate.score} 分</span>
                                 </div>
                               </div>
-                              <div className="flex shrink-0 items-center gap-1">
-                                <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs" disabled={eventAction !== null} onClick={() => selectArticle(candidate.id, "cluster")}>查看</Button>
-                                <Button size="sm" variant="outline" className="h-6 rounded-none border-amber-400 px-1.5 text-xs text-amber-800 hover:bg-amber-100" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>移入当前 Event</Button>
-                              </div>
+                              <Button size="sm" variant="outline" className="h-6 shrink-0 rounded-none border-amber-400 px-1.5 text-xs text-amber-800 hover:bg-amber-100" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>移入 Event</Button>
                             </div>
                           ))}
                         </div>
-                      ) : (
-                        <p className="border border-dashed p-2 text-xs text-muted-foreground">当前文章没有可用于召回的品牌，或近 30 天内暂无同品牌候选。</p>
                       )}
                     </div>
                   </div>
 
-                  <details open={clusterAuditOpen || detail.clusterStatus === "needs_review"} onToggle={(event) => { const nextOpen = event.currentTarget.open; setClusterAuditOpen(nextOpen); if (nextOpen) { setRequestedPanel("cluster"); updateDetailUrl(detail.id, "cluster"); } }}><summary className="cursor-pointer border-t py-1.5 text-xs font-semibold">聚类依据与操作历史 · {currentEventAudits.length} 条</summary><div className="space-y-1.5">{currentEventAudits.slice(0, 8).map((audit) => <div key={audit.id} className="grid grid-cols-[54px_minmax(0,1fr)] border-l-2 border-muted-foreground/30 pl-1.5 text-xs leading-4"><span className="text-muted-foreground">{audit.actor === "admin" ? "人工操作" : "系统判断"}</span><div><p className="font-medium">{audit.action} · {audit.decisionSource}{audit.confidence == null ? "" : ` · 置信度 ${audit.confidence}%`}</p><p className="text-muted-foreground">{String((audit.evidence.aiDecision as { reason?: unknown } | undefined)?.reason ?? audit.evidence.reason ?? audit.evidence.aiReason ?? "无补充理由")}</p>{audit.candidateEvent?.representativeArticle?.title && <p className="text-muted-foreground">关联候选：{audit.candidateEvent.representativeArticle.title}</p>}<p className="text-xs text-muted-foreground">{fullTimeLabel(audit.createdAt)}</p></div></div>)}{currentEventAudits.length === 0 && <p className="text-xs text-muted-foreground">暂无聚类审计记录</p>}</div></details>
+                  <details open={clusterAuditOpen || detail.clusterStatus === "needs_review"} onToggle={(event) => { const nextOpen = event.currentTarget.open; setClusterAuditOpen(nextOpen); if (nextOpen) { setRequestedPanel("cluster"); updateDetailUrl(detail.id, "cluster"); } }}><summary className="flex cursor-pointer items-center justify-between border-t py-1.5 text-xs font-semibold"><span>聚类记录</span><span className="font-normal text-muted-foreground">{currentEventAudits.length} 条</span></summary><div className="max-h-[260px] overflow-y-auto border-t"><div className="divide-y">{currentEventAudits.slice(0, 8).map((audit) => { const reason = clusterAuditReason(audit); return <div key={audit.id} className={`flex gap-2 border-l-2 px-2.5 py-2 text-xs leading-4 ${audit.actor === "admin" ? "border-sky-400" : "border-muted-foreground/30"}`}><div className="min-w-0 flex-1"><p className="flex flex-wrap items-center gap-x-2 gap-y-0.5"><span className="font-medium">{clusterAuditActionLabel(audit.action)}</span><span className="text-muted-foreground">{audit.actor === "admin" ? "人工" : "系统"}</span>{audit.confidence != null && <span className="text-muted-foreground">置信度 {audit.confidence}%</span>}<time className="text-muted-foreground">{fullTimeLabel(audit.createdAt)}</time></p>{reason && <p className="mt-0.5 text-muted-foreground">{reason}</p>}{audit.candidateEvent?.representativeArticle?.title && <p className="mt-0.5 truncate text-muted-foreground" title={audit.candidateEvent.representativeArticle.title}>关联：{audit.candidateEvent.representativeArticle.title}</p>}</div></div>; })}{currentEventAudits.length === 0 && <p className="px-2.5 py-2 text-xs text-muted-foreground">暂无聚类记录</p>}</div></div></details>
 
-                  <details open={detail.clusterStatus === "needs_review" || eventOptions.length > 0}><summary className="cursor-pointer border-t py-1.5 text-xs font-semibold">移动文章或合并 Event</summary><div className="space-y-1.5"><div className="flex gap-1"><Input value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void searchEvents(); }} placeholder="输入标题、品牌、事件键；留空显示最近 Event" className="h-7 rounded-none text-xs" /><Button size="sm" variant="outline" className="h-7 shrink-0 rounded-none px-1.5 text-xs" onClick={() => void searchEvents()}><Search className="h-3 w-3" />搜索</Button></div>{eventOptions.length > 0 ? <div className="max-h-56 divide-y overflow-y-auto border">{eventOptions.map((event) => <div key={event.id} className={`p-1.5 text-xs ${mergeTargetId === event.id ? "bg-sky-50" : ""}`}><p className="line-clamp-2 font-medium">{event.representativeArticle?.title || `Event ${event.id.slice(-8)}`}</p><div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground"><span>{event.articleCount} 篇</span><span>{event.representativeArticle?.source.name || "未知来源"}</span><span>{event.representativeArticle ? `${event.representativeArticle.score} 分 / 相关 ${event.representativeArticle.relevance}` : "无代表"}</span><span>{event.publicStatus === "published" ? "已公开" : "未公开"}</span><span>{event.pushedAt ? "已推送" : "未推送"}</span><span>{fullTimeLabel(event.lastSeenAt)}</span></div><div className="mt-1 flex gap-1"><Button size="sm" variant="outline" className="h-7 rounded-none px-1 text-xs" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(event.id)}>仅移动当前文章</Button><Button size="sm" variant="ghost" className="h-7 rounded-none px-1 text-xs" onClick={() => setMergeTargetId(event.id)}>选择为整组目标</Button></div></div>)}</div> : <p className="text-xs text-muted-foreground">搜索后可比较目标 Event，再决定仅移动当前文章，或把当前整个 Event 合并过去。</p>}<div className="flex gap-1"><Input value={mergeTargetId} readOnly placeholder="尚未选择整组合并目标" className="h-7 rounded-none text-xs" /><Button size="sm" variant="outline" className="h-7 shrink-0 rounded-none px-1.5 text-xs text-amber-700" disabled={!mergeTargetId || eventAction !== null} onClick={() => void mergeCurrentEvent()}><Merge className="h-3 w-3" />整组并入</Button></div></div></details>
+                  <details open={detail.clusterStatus === "needs_review" || eventOptions.length > 0}><summary className="flex cursor-pointer items-center justify-between border-t py-1.5 text-xs font-semibold"><span>调整事件归属</span><span className="font-normal text-muted-foreground">移动当前文章或合并整组</span></summary><div className="space-y-2 border-t p-2"><div className="flex gap-1"><Input value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void searchEvents(); }} placeholder="搜索标题、品牌或事件键" className="h-7 rounded-none text-xs" /><Button size="sm" variant="outline" className="h-7 shrink-0 rounded-none px-1.5 text-xs" onClick={() => void searchEvents()}><Search className="h-3 w-3" />搜索</Button></div>{eventOptions.length > 0 ? <div className="max-h-56 divide-y overflow-y-auto border">{eventOptions.map((event) => <div key={event.id} className={`p-2 text-xs ${mergeTargetId === event.id ? "bg-sky-50" : ""}`}><p className="line-clamp-2 font-medium">{event.representativeArticle?.title || `Event ${event.id.slice(-8)}`}</p><div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground"><span>{event.articleCount} 篇</span><span>{event.representativeArticle?.source.name || "未知来源"}</span><span>{event.publicStatus === "published" ? "已公开" : "未公开"}</span><span>{event.pushedAt ? "已推送" : "未推送"}</span><span>{fullTimeLabel(event.lastSeenAt)}</span></div><div className="mt-1 flex gap-1"><Button size="sm" variant="outline" className="h-7 rounded-none px-1 text-xs" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(event.id)}>仅移动当前文章</Button><Button size="sm" variant="ghost" className="h-7 rounded-none px-1 text-xs" disabled={eventAction !== null} onClick={() => setMergeTargetId(event.id)}>选为整组目标</Button></div></div>)}</div> : <p className="border border-dashed px-2.5 py-2 text-xs text-muted-foreground">{eventSearch.trim() ? "未找到匹配的目标 Event。" : "输入关键词搜索目标 Event。"}</p>}{mergeTargetId && <div className="flex items-center gap-2 border bg-sky-50 px-2 py-1.5 text-xs"><span className="min-w-0 flex-1 truncate">整组目标：{eventOptions.find((event) => event.id === mergeTargetId)?.representativeArticle?.title || mergeTargetId}</span><Button size="sm" variant="ghost" className="h-6 shrink-0 rounded-none px-1.5 text-xs" disabled={eventAction !== null} onClick={() => setMergeTargetId("")}>取消</Button><Button size="sm" variant="outline" className="h-6 shrink-0 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void mergeCurrentEvent()}><Merge className="h-3 w-3" />整组并入</Button></div>}</div></details>
                 </div>
               </section>
             )}

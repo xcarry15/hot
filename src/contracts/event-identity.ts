@@ -109,6 +109,15 @@ export function normalizeEventSubjects(value: unknown): string[] {
   return result;
 }
 
+/**
+ * 连锁消费场景优先使用已提取的品牌作为事件主体，保证品牌字段与事件键只有一套真相。
+ * 无明确品牌的事件（如监管、人事或行业事件）才退回模型提取的直接主体。
+ */
+export function resolveEventKeySubjects(brand: unknown, fallback: unknown): string[] {
+  const brandSubjects = normalizeEventSubjects(brand);
+  return brandSubjects.length > 0 ? brandSubjects : normalizeEventSubjects(fallback);
+}
+
 export function normalizeEventIdentity(input: {
   subjects: unknown;
   action: unknown;

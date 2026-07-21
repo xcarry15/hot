@@ -270,6 +270,16 @@ export async function getEventArticles(eventId: string, articleId?: string) {
       pushedAt: true,
       firstSeenAt: true,
       lastSeenAt: true,
+      pushLogs: {
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          representativeArticleId: true,
+          status: true,
+          webhookUrl: true,
+          webhookRemark: true,
+        },
+      },
       articles: {
         orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
         select: {
@@ -320,6 +330,8 @@ export async function getEventArticles(eventId: string, articleId?: string) {
     },
   });
   if (!event) return null;
+  const { pushLogs, ...eventData } = event;
+  const articlePushStatuses = getLatestArticlePushStatuses(pushLogs);
   const focusArticle = event.articles.find((article) => article.id === articleId)
     ?? event.articles.find((article) => article.id === event.representativeArticleId)
     ?? event.articles[0];
@@ -342,7 +354,7 @@ export async function getEventArticles(eventId: string, articleId?: string) {
   });
   const candidateTitles = new Map(candidateEvents.map((candidate) => [candidate.id, candidate.representativeArticle?.title ?? '']));
   return {
-    ...event,
+    ...eventData,
     pushedAt: event.pushedAt?.toISOString() ?? null,
     firstSeenAt: event.firstSeenAt.toISOString(),
     lastSeenAt: event.lastSeenAt.toISOString(),
@@ -363,6 +375,7 @@ export async function getEventArticles(eventId: string, articleId?: string) {
     })),
     articles: event.articles.map((article) => ({
       ...article,
+      pushStatus: articlePushStatuses.get(article.id) ?? 'none',
       source: {
         name: article.source.name,
         type: article.source.type,
@@ -383,6 +396,40 @@ function parseAuditEvidence(value: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+type ArticlePushStatus = 'success' | 'partial' | 'failure' | 'none';
+
+function getLatestArticlePushStatuses(logs: Array<{
+  id: string;
+  representativeArticleId: string | null;
+  status: string;
+  webhookUrl: string;
+  webhookRemark: string;
+}>): Map<string, ArticlePushStatus> {
+  const latestByTarget = new Map<string, (typeof logs)[number]>();
+  for (const log of logs) {
+    const target = log.webhookRemark || log.webhookUrl || log.id;
+    if (!latestByTarget.has(target)) latestByTarget.set(target, log);
+  }
+
+  const statuses = new Map<string, { success: boolean; failure: boolean }>();
+  for (const log of latestByTarget.values()) {
+    if (!log.representativeArticleId) continue;
+    const current = statuses.get(log.representativeArticleId) ?? { success: false, failure: false };
+    if (log.status === 'success') current.success = true;
+    else current.failure = true;
+    statuses.set(log.representativeArticleId, current);
+  }
+
+  return new Map([...statuses].map(([articleId, status]) => [
+    articleId,
+    status.success && status.failure
+      ? 'partial'
+      : status.success
+        ? 'success'
+        : 'failure',
+  ]));
 }
 
 async function refreshEventRepresentatives(eventIds: string[]): Promise<void> {

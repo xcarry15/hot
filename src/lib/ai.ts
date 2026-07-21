@@ -11,6 +11,7 @@ import { buildSystemContent } from './ai-helpers';
 import {
   buildCanonicalEventKey,
   normalizeEventIdentity,
+  resolveEventKeySubjects,
   serializeEventSubjects,
 } from '@/contracts/event-identity';
 import { assertNotAborted } from './worker-stop';
@@ -28,8 +29,8 @@ import {
 } from './article-calibration';
 import { parseAiAnalysisOutput } from './ai-output';
 
-// v14：事件身份改为主体/动作/事项短词，减少事件键漂移。
-const PROMPT_VERSION = 'v14';
+// v15：事件键优先复用品牌字段，避免品牌与事件主体重复提取后产生漂移。
+const PROMPT_VERSION = 'v15';
 
 // AI 失败最大重试次数。超过后标 skipped 放弃，防止 provider 持续故障时无限重试烧 token。
 const AI_MAX_RETRIES = 5;
@@ -200,7 +201,7 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       summary: step2.summary,
       brand: step2.brand,
       category: step2.category,
-      eventSubjects: serializeEventSubjects(step2.eventSubjects),
+      eventSubjects: serializeEventSubjects(resolveEventKeySubjects(step2.brand, step2.eventSubjects)),
       eventAction: step2.eventAction,
       eventObject: step2.eventObject,
       eventKey: step2.eventKey,
@@ -224,12 +225,12 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       article.manualOverrides,
     );
     const effectiveIdentity = normalizeEventIdentity({
-      subjects: effective.eventSubjects,
+      subjects: resolveEventKeySubjects(effective.brand, effective.eventSubjects),
       action: effective.eventAction,
       object: effective.eventObject,
     });
     const identityManuallyOverridden = parseManualOverrides(article.manualOverrides).some((field) => (
-      field === 'eventSubjects' || field === 'eventAction' || field === 'eventObject'
+      field === 'brand' || field === 'eventSubjects' || field === 'eventAction' || field === 'eventObject'
     ));
     const effectiveScore = buildEffectiveScoreUpdate({
       eventScore: effective.eventScore,

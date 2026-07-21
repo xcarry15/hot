@@ -37,6 +37,7 @@ import {
   buildCanonicalEventKey,
   isCompleteEventIdentity,
   normalizeEventIdentity,
+  resolveEventKeySubjects,
   serializeEventSubjects,
 } from '@/contracts/event-identity';
 import { clusterArticle, markClusterFailure } from '@/lib/event-clustering-service';
@@ -318,11 +319,15 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
     const value = snapshot[field];
     data[field] = value as never;
   }
-  const identityChanged = touched.some((field) => identityFields.includes(field))
+  const identityChanged = touched.includes('brand')
+    || touched.some((field) => identityFields.includes(field))
     || validRestored.some((field) => identityFields.includes(field));
   if (identityChanged) {
     const identity = normalizeEventIdentity({
-      subjects: typeof data.eventSubjects === 'string' ? data.eventSubjects : current.eventSubjects,
+      subjects: resolveEventKeySubjects(
+        typeof data.brand === 'string' ? data.brand : current.brand,
+        typeof data.eventSubjects === 'string' ? data.eventSubjects : current.eventSubjects,
+      ),
       action: typeof data.eventAction === 'string' ? data.eventAction : current.eventAction,
       object: typeof data.eventObject === 'string' ? data.eventObject : current.eventObject,
     });
