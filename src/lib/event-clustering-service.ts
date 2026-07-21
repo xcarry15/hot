@@ -209,7 +209,11 @@ function compareIdentity(left: IdentityArticle, right: IdentityArticle) {
   const subjectOverlap = subjectSimilarity(left.eventSubjects, right.eventSubjects);
   const actionOverlap = componentSimilarity(left.eventAction, right.eventAction);
   const objectOverlap = componentSimilarity(left.eventObject, right.eventObject);
-  const identityConfidence = Math.min(left.eventKeyConfidence ?? 0, right.eventKeyConfidence ?? 0);
+  const leftConf = left.eventKeyConfidence;
+  const rightConf = right.eventKeyConfidence;
+  const identityConfidence = leftConf != null && rightConf != null
+    ? Math.min(leftConf, rightConf)
+    : leftConf ?? rightConf ?? 0;
   const identityScore = subjectOverlap * 0.45 + actionOverlap * 0.25 + objectOverlap * 0.3;
   const qualifierConflict = hasEventIdentityQualifierConflict(left.eventObject, right.eventObject);
   return {
@@ -601,6 +605,24 @@ async function askAiSameEvent(
   return aiDecisionSchema.parse(parseStrictJsonObject(result.content));
 }
 
+/**
+ * AI 聚类判决后处理。提示词要求：
+ * - same_event=true 时 confidence 应 ≥70（低置信不能自动归入）
+ * - same_event=false 时 confidence 应 ≤60（除非有明确冲突，此时 ≥85）
+ * 如果 AI 返回违反这些约束的组合，保守纠正。
+ */
+function validateAiClusterDecision(raw: { same_event: boolean; confidence: number; reason: string }): {
+  sameEvent: boolean; confidence: number; reason: string;
+} {
+  if (raw.same_event && raw.confidence < 70) {
+    return { sameEvent: false, confidence: 0, reason: `AI 判断矛盾（sameEvent=true 但 confidence=${raw.confidence}<70），已保守分开` };
+  }
+  if (!raw.same_event && raw.confidence > 70) {
+    return { sameEvent: false, confidence: Math.min(raw.confidence, 60), reason: raw.reason };
+  }
+  return { sameEvent: raw.same_event, confidence: raw.confidence, reason: raw.reason };
+}
+
 export async function clusterArticle(articleId: string, signal?: AbortSignal): Promise<{ eventId: string; action: string }> {
   const article = await db.article.findUnique({
     where: { id: articleId },
@@ -764,9 +786,9 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
 
   const aiCandidates: AiCandidateAudit[] = [];
   for (const item of ambiguous) {
-    let decision;
+    let rawDecision;
     try {
-      decision = await askAiSameEvent(article, item.evidence, item.candidate, signal);
+      rawDecision = await askAiSameEvent(article, item.evidence, item.candidate, signal);
     } catch (error) {
       console.warn('[event-clustering] candidate decision failed:', error);
       aiCandidates.push({
@@ -777,18 +799,19 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       });
       continue;
     }
+    const decision = validateAiClusterDecision(rawDecision);
     const auditDecision: AiCandidateAudit = {
       candidateEventId: item.candidate.id,
       matchedMemberArticleId: item.evidence.matchedMemberArticleId,
       ruleEvidence: item.evidence as unknown as Record<string, unknown>,
       aiDecision: {
-        sameEvent: decision.same_event,
+        sameEvent: decision.sameEvent,
         confidence: decision.confidence,
         reason: decision.reason,
       },
     };
     aiCandidates.push(auditDecision);
-    if (decision.same_event && decision.confidence >= 70) {
+    if (decision.sameEvent && decision.confidence >= 70) {
       const eventId = await db.$transaction((tx) => attachArticle(tx, article, item.candidate, item.evidence, 'ai', decision.confidence));
       await recalculateEventById(eventId);
       return { eventId, action: 'attach' };

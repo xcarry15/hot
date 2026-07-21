@@ -10,6 +10,7 @@ import { buildStep2Prompt } from './prompts';
 import { buildSystemContent } from './ai-helpers';
 import {
   buildCanonicalEventKey,
+  capEventIdentityConfidence,
   normalizeEventIdentity,
   resolveEventKeySubjects,
   serializeEventSubjects,
@@ -255,7 +256,9 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         eventAction: effectiveIdentity.action,
         eventObject: effectiveIdentity.object,
         eventKey: buildCanonicalEventKey(effectiveIdentity),
-        eventKeyConfidence: identityManuallyOverridden ? 100 : step2.eventKeyConfidence,
+        eventKeyConfidence: identityManuallyOverridden
+          ? capEventIdentityConfidence(effectiveIdentity, 100)
+          : step2.eventKeyConfidence,
         keyPoints: effective.keyPoints,
         ...effectiveScore,
         eventScore: effective.eventScore,
