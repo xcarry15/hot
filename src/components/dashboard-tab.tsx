@@ -94,8 +94,10 @@ function crawlTriggerLabel(trigger: DashboardAnalytics['crawlRecords'][number]['
 }
 
 function crawlStatusLabel(status: DashboardAnalytics['crawlRecords'][number]['status']): string {
-  if (status === 'completed') return '完成'
+  if (status === 'succeeded' || status === 'completed') return '完成'
   if (status === 'failed') return '失败'
+  if (status === 'cancelled') return '已停止'
+  if (status === 'cancel_requested') return '停止中'
   if (status === 'running') return '运行中'
   return '等待中'
 }
@@ -236,10 +238,13 @@ function CrawlTimeCard({
             <SelectTrigger className="h-7 w-[88px] rounded-none border-border bg-transparent text-[11px] shadow-none focus:ring-1"><SelectValue placeholder="结果" /></SelectTrigger>
             <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部结果</SelectItem>
-              <SelectItem value="completed">完成</SelectItem>
+              <SelectItem value="succeeded">完成</SelectItem>
+              <SelectItem value="completed">历史完成</SelectItem>
               <SelectItem value="running">运行中</SelectItem>
+              <SelectItem value="cancel_requested">停止中</SelectItem>
+              <SelectItem value="cancelled">已停止</SelectItem>
               <SelectItem value="failed">失败</SelectItem>
-              <SelectItem value="pending">等待中</SelectItem>
+              <SelectItem value="queued">等待中</SelectItem>
             </SelectContent>
           </Select>
           <Select value={filters.type} onValueChange={(value) => onTypeChange(value as CrawlTypeFilter)}>
@@ -290,7 +295,7 @@ function CrawlTimeCard({
                       <div className="max-w-[260px] truncate font-medium" title={record.sourceLabel}>{record.type === 'full' ? '全流程' : '采集'} · <span className="font-normal text-muted-foreground">{record.sourceLabel}</span></div>
                     </td>
                     <td className="px-1.5 py-1">
-                      <Badge variant={record.status === 'failed' ? 'destructive' : record.status === 'completed' ? 'secondary' : 'outline'} className="px-1.5 py-0 text-[10px]">
+                      <Badge variant={record.status === 'failed' ? 'destructive' : record.status === 'succeeded' || record.status === 'completed' ? 'secondary' : 'outline'} className="px-1.5 py-0 text-[10px]">
                         {crawlStatusLabel(record.status)}
                       </Badge>
                     </td>

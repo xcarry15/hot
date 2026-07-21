@@ -32,7 +32,7 @@ describe('log retention', () => {
     });
     expect(db.job.deleteMany).toHaveBeenCalledWith({
       where: {
-        status: { in: ['completed', 'failed'] },
+        status: { in: ['succeeded', 'completed', 'failed', 'cancelled'] },
         createdAt: { lt: new Date('2026-06-11T00:00:00.000Z') },
       },
     });

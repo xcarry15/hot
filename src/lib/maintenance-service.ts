@@ -196,8 +196,9 @@ export async function deleteAllArticles() {
   const { prevWasEnabled } = await pauseAutoCrawlForWindow();
   invalidatePublicArticleCache();
   try {
-    const [pushResult, articleResult] = await db.$transaction([
+    const [pushResult, , , articleResult] = await db.$transaction([
       db.pushLog.deleteMany(),
+      db.pushDelivery.deleteMany(),
       db.eventClusterAudit.deleteMany(),
       db.article.deleteMany(),
       db.event.deleteMany(),
@@ -230,9 +231,10 @@ export async function purgeAllData(): Promise<{ deleted: PurgeAllDeleted }> {
   const { prevWasEnabled } = await pauseAutoCrawlForWindow();
   invalidatePublicArticleCache();
   try {
-    const [pushResult, eventAuditResult, articleResult, eventResult, discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
+  const [pushResult, , eventAuditResult, articleResult, eventResult, discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
       await db.$transaction([
         db.pushLog.deleteMany(),
+        db.pushDelivery.deleteMany(),
         db.eventClusterAudit.deleteMany(),
         db.article.deleteMany(),
         db.event.deleteMany(),

@@ -30,6 +30,7 @@ import type {
   SourceProgress,
 } from '@/contracts/crawl-log';
 import { getTechnicalWorkQueue } from '@/lib/technical-work-queue-service';
+import { ACTIVE_JOB_STATUSES, TERMINAL_JOB_STATUSES } from '@/lib/job-status';
 
 const DEFAULT_LIMIT = 500;
 const MAX_LIMIT = 500;
@@ -113,12 +114,12 @@ export interface GetCrawlLogSnapshotParams {
 export async function getCrawlLogJobStatus(): Promise<CrawlLogJobStatusSnapshot> {
   const [activeJobs, latestJobs] = await Promise.all([
     db.job.findMany({
-      where: { status: 'running' },
+      where: { status: { in: [...ACTIVE_JOB_STATUSES] } },
       orderBy: { createdAt: 'desc' },
       take: ACTIVE_JOBS_LIMIT,
     }),
     db.job.findMany({
-      where: { status: { in: ['completed', 'failed'] } },
+      where: { status: { in: [...TERMINAL_JOB_STATUSES] } },
       orderBy: { completedAt: 'desc' },
       take: 1,
     }),
@@ -153,12 +154,12 @@ export async function getCrawlLogSnapshot(
   const [[activeJobs, latestJobs, recentArticles, discarded, configuredSources = []], technicalArticles] = await Promise.all([
     db.$transaction([
       db.job.findMany({
-        where: { status: 'running' },
+        where: { status: { in: [...ACTIVE_JOB_STATUSES] } },
         orderBy: { createdAt: 'desc' },
         take: ACTIVE_JOBS_LIMIT,
       }),
       db.job.findMany({
-        where: { status: { in: ['completed', 'failed'] } },
+        where: { status: { in: [...TERMINAL_JOB_STATUSES] } },
         orderBy: { completedAt: 'desc' },
         take: LATEST_JOBS_LIMIT,
       }),

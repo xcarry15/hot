@@ -20,6 +20,8 @@ import { sendFeishuWebhook } from '@/lib/push/feishu-transport';
 
 export type PushDeliveryMode = 'normal' | 'retry_failed' | 'manual_force' | 'repush_all';
 
+const DELIVERY_LEASE_DURATION_MS = 120_000;
+
 export interface PushTargetState {
   webhookUrl: string;
   webhookRemark: string;
@@ -77,12 +79,34 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
     select: { id: true, urlHash: true },
   });
   const targetByHash = new Map(targets.map((target) => [target.urlHash, target.id]));
+  const targetIds = targets.map((target) => target.id);
+  const now = new Date();
+  if (targetIds.length > 0) {
+    await db.pushDelivery.updateMany({
+      where: {
+        eventId: { in: uniqueEventIds },
+        targetId: { in: targetIds },
+        status: 'sending',
+        OR: [
+          { leaseExpiresAt: null },
+          { leaseExpiresAt: { lt: now } },
+        ],
+      },
+      data: {
+        status: 'unknown',
+        lastError: '投递租约已过期，结果未知；需要人工强制推送确认',
+        completedAt: now,
+        leaseOwner: '',
+        leaseExpiresAt: null,
+      },
+    });
+  }
 
   // Use PushDelivery for latest per-target state
   const deliveries = await db.pushDelivery.findMany({
     where: { eventId: { in: uniqueEventIds }, targetId: { in: targets.map((target) => target.id) } },
     orderBy: { createdAt: 'desc' },
-    select: { eventId: true, targetId: true, status: true, createdAt: true },
+    select: { eventId: true, targetId: true, status: true, createdAt: true, leaseExpiresAt: true },
   });
 
   const latest = new Map<string, typeof deliveries[number]>();
@@ -92,7 +116,6 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
   }
 
   // Also check legacy PushLog for backward compat (by targetId or webhookUrl)
-  const targetIds = targets.map((target) => target.id);
   const enabledUrls = enabled.map((config) => config.url.trim());
   const pushLogs = await db.pushLog.findMany({
     where: {
@@ -113,7 +136,12 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
     if (!tid) continue;
     const key = `${log.eventId}\u0000${tid}`;
     if (!latest.has(key)) {
-      latest.set(key, { ...log, targetId: tid } as typeof deliveries[number]);
+      latest.set(key, {
+        ...log,
+        targetId: tid,
+        status: log.status === 'success' ? 'succeeded' : 'failed',
+        leaseExpiresAt: null,
+      } as typeof deliveries[number]);
     }
   }
 
@@ -124,7 +152,7 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
       let latestStatus: PushTargetState['latestStatus'] = 'never_attempted';
       if (delivery) {
         if (delivery.status === 'succeeded') latestStatus = 'success';
-        else if (delivery.status === 'unknown') latestStatus = 'unknown';
+        else if (delivery.status === 'unknown' || delivery.status === 'sending') latestStatus = 'unknown';
         else latestStatus = 'failure';
       }
       return {
@@ -144,7 +172,7 @@ export async function getPushTargetStates(eventId: string): Promise<PushTargetSt
 
 export async function getFailedPushTargets(eventId: string): Promise<PushTargetState[]> {
   return (await getPushTargetStates(eventId)).filter(
-    (target) => target.latestStatus === 'failure' || target.latestStatus === 'unknown',
+    (target) => target.latestStatus === 'failure',
   );
 }
 
@@ -334,9 +362,11 @@ async function pushToSingleTarget(
   signal?: AbortSignal,
 ): Promise<boolean> {
   const idempotencyKey = `${eventId}:${targetId}:${contentVersionStr}:${mode}`;
+  const leaseOwner = getDeliveryLeaseOwner();
+  const leaseExpiresAt = new Date(Date.now() + DELIVERY_LEASE_DURATION_MS);
 
-  // Create or reset the delivery record to sending
-  await db.pushDelivery.upsert({
+  // Ensure the unique ledger row exists without overwriting an active owner.
+  const delivery = await db.pushDelivery.upsert({
     where: { eventId_targetId_contentVersion_mode: { eventId, targetId, contentVersion: contentVersionStr, mode } },
     create: {
       eventId,
@@ -347,26 +377,60 @@ async function pushToSingleTarget(
       status: 'sending',
       idempotencyKey,
       attempt: 1,
+      leaseOwner,
+      leaseExpiresAt,
     },
-    update: {
-      status: 'sending',
-      representativeArticleId,
-      attempt: { increment: 1 },
-      lastError: '',
-      leaseExpiresAt: new Date(Date.now() + 120_000),
-    },
+    update: {},
   });
+
+  const ownsCreatedDelivery = delivery.status === 'sending' && delivery.leaseOwner === leaseOwner;
+  if (!ownsCreatedDelivery) {
+    const claimed = await db.pushDelivery.updateMany({
+      where: {
+        eventId,
+        targetId,
+        contentVersion: contentVersionStr,
+        mode,
+        OR: [
+          { status: { in: ['pending', 'failed'] } },
+          ...(mode === 'manual_force' ? [{ status: 'unknown' }] : []),
+          {
+            status: 'sending',
+            OR: [
+              { leaseExpiresAt: null },
+              { leaseExpiresAt: { lt: new Date() } },
+            ],
+          },
+        ],
+      },
+      data: {
+        status: 'sending',
+        representativeArticleId,
+        attempt: { increment: 1 },
+        lastError: '',
+        leaseOwner,
+        leaseExpiresAt,
+        completedAt: null,
+      },
+    });
+    if (claimed.count === 0) return false;
+  }
 
   // Send to webhook
   const result = await sendFeishuWebhook(config, card, signal);
 
-  try {
-    if (result.ok) {
-      await db.pushDelivery.updateMany({
-        where: { idempotencyKey, status: 'sending' },
-        data: { status: 'succeeded', sentAt: new Date(), completedAt: new Date(), leaseExpiresAt: null },
+  if (result.ok) {
+    try {
+      const settled = await db.pushDelivery.updateMany({
+        where: { idempotencyKey, status: 'sending', leaseOwner },
+        data: { status: 'succeeded', sentAt: new Date(), completedAt: new Date(), leaseOwner: '', leaseExpiresAt: null },
       });
-      // Also write PushLog for backward compatibility
+      if (settled.count === 0) return false;
+    } catch (error) {
+      await markDeliveryUnknown(idempotencyKey, leaseOwner, error);
+      return true;
+    }
+    try {
       await db.pushLog.create({
         data: {
           eventId,
@@ -377,18 +441,28 @@ async function pushToSingleTarget(
           webhookRemark: config.remark,
         },
       });
-      return true;
+    } catch (error) {
+      // PushDelivery 已经是当前状态事实源，历史日志写失败不能把成功降级为 unknown。
+      console.error('[push] failed to write success PushLog:', error);
     }
+    return true;
+  }
 
+  try {
     await db.pushDelivery.updateMany({
-      where: { idempotencyKey, status: 'sending' },
+      where: { idempotencyKey, status: 'sending', leaseOwner },
       data: {
         status: 'failed',
         lastError: (result.errorMessage ?? 'Push request failed').slice(0, 1000),
         completedAt: new Date(),
+        leaseOwner: '',
         leaseExpiresAt: null,
       },
     });
+  } catch (error) {
+    console.error('[push] failed to record failed delivery:', error);
+  }
+  try {
     await db.pushLog.create({
       data: {
         eventId,
@@ -400,48 +474,31 @@ async function pushToSingleTarget(
         webhookRemark: config.remark,
       },
     });
-    return false;
   } catch (error) {
-    // P0-4: HTTP succeeded but DB write failed — mark as unknown
-    // We know the webhook was sent successfully (result.ok is true)
-    // but we can't confirm the delivery record was written.
-    // Don't auto-retry unknown deliveries.
-    if (result.ok) {
-      try {
-        await db.pushDelivery.updateMany({
-          where: { idempotencyKey },
-          data: {
-            status: 'unknown',
-            lastError: 'DB write failed after successful webhook delivery',
-            completedAt: new Date(),
-            leaseExpiresAt: null,
-          },
-        });
-        await db.pushLog.create({
-          data: {
-            eventId,
-            representativeArticleId,
-            targetId,
-            status: 'success',
-            retryCount: result.retryCount,
-            webhookRemark: config.remark,
-          },
-        });
-      } catch {
-        console.error('[push] failed to mark delivery as unknown:', error);
-      }
-      return true;
-    }
+    console.error('[push] failed to write failure PushLog:', error);
+  }
+  return false;
+}
 
+function getDeliveryLeaseOwner(): string {
+  const host = typeof process !== 'undefined' && process.env?.HOSTNAME ? process.env.HOSTNAME : 'local';
+  const pid = typeof process !== 'undefined' && process.pid ? process.pid : 0;
+  return `push:${host}:${pid}:${Math.random().toString(36).slice(2)}`;
+}
+
+async function markDeliveryUnknown(idempotencyKey: string, leaseOwner: string, error: unknown): Promise<void> {
+  try {
     await db.pushDelivery.updateMany({
-      where: { idempotencyKey, status: 'sending' },
+      where: { idempotencyKey, status: 'sending', leaseOwner },
       data: {
-        status: 'failed',
-        lastError: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
+        status: 'unknown',
+        lastError: 'DB write failed after successful webhook delivery',
         completedAt: new Date(),
+        leaseOwner: '',
         leaseExpiresAt: null,
       },
     });
-    return false;
+  } catch (markError) {
+    console.error('[push] failed to mark delivery as unknown:', error, markError);
   }
 }

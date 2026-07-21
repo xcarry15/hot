@@ -71,7 +71,7 @@ db/                   本地 SQLite 数据（不进入部署包）
 ## 当前架构与数据事实
 
 - Next.js 16 App Router + React 19 + TypeScript；Prisma 6 + SQLite；单进程模块化单体，生产只运行一个 PM2 实例。
-- `src/lib/execution.ts` 是唯一批量 Job 编排入口，内存互斥保证同时只有一个批量任务。process、AI、cluster 阶段会按固定大小分批消费本次符合条件的全部积压，不会因单批上限而把未处理完的任务标记为成功。Job 表的阶段、进度、错误数和 heartbeat 是任务状态事实源；停止通过 `AbortSignal` 协作式取消。
+- `src/lib/execution.ts` 是唯一批量 Job 编排入口，内存互斥保证同时只有一个批量任务。process、AI、cluster 阶段会按固定大小分批消费本次符合条件的全部积压，不会因单批上限而把未处理完的任务标记为成功。Job 表的阶段、进度、错误数和 heartbeat 是任务状态事实源；Job 失败直接进入 `failed`，不在没有独立 Worker 的前提下自动重新入队；停止通过 `AbortSignal` 协作式取消并最终写入 `cancelled`。
 - 调度器每分钟 tick；自动抓取默认关闭。普通批量任务使用 `/api/crawl` 的 `all` 阶段，分阶段入口 `collect / process / cluster / ai / push` 仅供管理员运维。
 
 | 阶段 | 入口代码 | 作用 |
@@ -82,13 +82,13 @@ db/                   本地 SQLite 数据（不进入部署包）
 | cluster | `src/lib/pipeline/cluster.ts` | 使用 AI 事件身份将 Article 归入 Event，记录失败重试与待复核状态 |
 | push | `src/lib/pipeline/push-bridge.ts` | 按统一条件投递未推送文章 |
 
-关键 API 约束：`POST /api/crawl` 是批量任务主入口；`POST /api/articles/[id]/workflow` 是单篇处理、聚类、AI 和普通推送恢复/重跑的唯一入口，其中 `retry` 只允许当前可恢复失败步骤，`regenerate` 会按起点重置并重算，且不能用于完整重推；`POST /api/articles/[id]/technical-status` 仅负责忽略或恢复技术待办，不删除 Article。推送服务使用 `normal`、`retry_failed`、`manual_force`、`repush_all` 四种明确模式：流水线普通推送、最新失败目标恢复、人工绕过阈值推送、Event 级完整重推。`manual_force` 与 `repush_all` 仍要求 active Event、有效代表文章、聚类完成和 AI 完成。`GET /api/crawl-log/status` 与 `GET /api/admin/work-queue-summary` 共同复用唯一技术待办事实源；推送失败只映射到代表 Article，并按当前启用目标的最新 PushLog 判断。旧 `/api/articles/refetch`、`/api/articles/reprocess` 和 Article 级 `/api/push` 已删除。Route Handler 只做适配，事务和业务规则由 Service 负责。
+关键 API 约束：`POST /api/crawl` 是批量任务主入口；`POST /api/articles/[id]/workflow` 是单篇处理、聚类、AI 和普通推送恢复/重跑的唯一入口，其中 `retry` 只允许当前可恢复失败步骤，`regenerate` 会按起点重置并重算，且不能用于完整重推；`POST /api/articles/[id]/technical-status` 仅负责忽略或恢复技术待办，不删除 Article。推送服务使用 `normal`、`retry_failed`、`manual_force`、`repush_all` 四种明确模式：流水线普通推送、最新失败目标恢复、人工绕过阈值推送、Event 级完整重推。`manual_force` 与 `repush_all` 仍要求 active Event、有效代表文章、聚类完成和 AI 完成。`GET /api/crawl-log/status` 与 `GET /api/admin/work-queue-summary` 共同复用唯一技术待办事实源；推送失败只映射到代表 Article，并按当前启用目标的最新 PushDelivery 判断，PushLog 仅作为历史审计。旧 `/api/articles/refetch`、`/api/articles/reprocess` 和 Article 级 `/api/push` 已删除。Route Handler 只做适配，事务和业务规则由 Service 负责。
 
 `InboxSnapshot` 保存近 90 天的待归类积压快照，概览以此展示积压趋势；快照是派生指标，不改变文章流水线事实。
 
 详情处理的筛选契约是“品牌白名单命中，或标题具有明确餐饮/零售业态信号”。后者只包含餐饮、餐厅、便利店、超市、百货、购物中心等少量强信号，用于避免“便利店行业报告、餐厅闭店、超市首店”因未提及已知品牌而在 AI 前被误删；不使用“商业、公司”等泛化词放大噪声。关键词未命中候选只从标题本地提取，不调用 AI：数字及数字混合片段不进入候选，中文片段按较长词优先并移除被长词覆盖的短片段，每个标题最多记录 12 个。候选列表优先展示跨来源出现的词，再按出现次数和最近更新时间排序；人工采用后统一写入“提取”分类，并恢复最近最多 50 篇对应的未命中文章重新处理。
 
-`Job`、`FetchLog`、`PushLog`、`DiscardedItem` 和 `EventClusterAudit` 分别记录任务、采集、事件目标级推送、未入库条目和聚类/人工纠错事实。`Article` 记录全文、AI 与人工校准、归类和事件归属；`Event` 记录代表文章、来源数量、`clusterReviewStatus`、公开状态和唯一推送状态。`clusterReviewStatus=pending` 时整个 Event 不得选代表、公开或推送，所有待复核成员确认后才恢复为 `confirmed`。PushLog 关联 Event，并保存投递时的代表 Article；历史展示与来源统计使用该发送时快照，不跟随当前代表文章变化。未配置可用 Webhook 时，批量推送直接跳过，不为每个 Event 重复写失败日志。
+`Job`、`FetchLog`、`PushLog`、`PushTarget`、`PushDelivery`、`DiscardedItem` 和 `EventClusterAudit` 分别记录任务、采集、目标配置、当前目标级投递账本、未入库条目和聚类/人工纠错事实。`Article` 记录全文、AI 与人工校准、归类和事件归属；`Event` 记录代表文章、来源数量、`clusterReviewStatus` 和公开状态。`clusterReviewStatus=pending` 时整个 Event 不得选代表、公开或推送，所有待复核成员确认后才恢复为 `confirmed`。PushDelivery 以 Event、目标、内容版本和模式做幂等，并使用租约防止并发发送；未知结果不得自动重发，只能人工强制确认。PushLog 关联 Event，并保存投递时的代表 Article，作为历史审计，不跟随当前代表文章变化。删除最后一篇 Article 时空 Event 归档而不物理删除，以保留投递审计和外键一致性。未配置可用 Webhook 时，批量推送直接跳过，不为每个 Event 重复写失败日志。
 
 设置默认值、校验、敏感性和导出策略集中在 `src/lib/settings-catalog.ts`；AI Provider 定义在 `src/contracts/ai-provider.ts`。AI 先提取“品牌/主体（最多 3 个）/动作词/事项词”三段式事件身份；有明确品牌时事件键主体直接复用 `brand`，无品牌时才使用其他直接参与主体。主体单项不超过 16 个汉字，动作不超过 8 个字符，事项不超过 16 个汉字；`src/contracts/event-identity.ts` 会将常见同义动作压缩为稳定短语，再确定性生成事件键，模型不直接决定最终键字符串。事件身份提示词禁止行业趋势、战略概括和多动作长句；事项只保留一个地点、季度、数量、金额或对象词，身份宽泛时降低置信度。事件聚类在 AI 完成后执行，规则集中在 `src/contracts/event-clustering.ts`：只比较最近 7 天 active Event，先以 48 个高召回候选扩大覆盖，再以最多 15 个候选做完整排序；只有事件键/结构化身份、带交并比确认的正文相似度，或带主体锚点的标题相似度达到灰区门槛时，才把最多 5 个候选交给 AI，避免仅因品牌、行业词或正文覆盖率偏高制造待复核。规范事件键精确一致和结构化身份相似度是主证据，内容指纹、标准化标题、正文 8 字片段重合、发布时间距离与共享主体锚点作为辅助证据，“即将发生/已经发生”阶段冲突、主体冲突以及不同年份/季度/届次作为反证。候选成员保留代表文章和最近 12 篇已完成分析的报道，避免只比较最新 8 篇造成事件表征漂移。内容指纹一致可直接归入；标题完全一致仍须事件身份一致或高度相似，避免周期性同标题误并。聚合快讯或高证据灰区文章进入 `needs_review`，待复核 Event 仍参与后续候选召回，但 Event 级 `clusterReviewStatus=pending` 时不产生代表文章、公开或推送；只有所有灰区候选均以至少 85 置信度判定为不同事件时，才允许新建普通 Event。AI 超时、格式错误或低置信度结论一律进入待复核，不能降级成可推送事件。推送前还会对最近 14 天已推送 Event 做一次高置信重复拦截；人工强制推送仍由明确模式绕过。当前仍不引入 Embedding。
 
@@ -119,7 +119,7 @@ npm run build
 pm2 delete h2-hot2 && pm2 start npm --name h2-hot2 -- start
 ```
 
-日常运维：`npm run db:migrate:status`、`npm run db:optimize`、`npm run db:cleanup-logs`、`npm run db:rebuild-public`、`pm2 status`、`pm2 logs h2-hot2`。日志保留周期由 `src/lib/log-retention.ts` 统一负责：FetchLog 30 天，PushLog 90 天但保留未完成全部投递的记录，已完成/失败 Job 30 天；不会删除 Article、Source、DiscardedItem 或 pending/running Job。`db:reset`、`db:push` 仅限明确的本地重建或应急场景。
+日常运维：`npm run db:migrate:status`、`npm run db:optimize`、`npm run db:cleanup-logs`、`npm run db:rebuild-public`、`pm2 status`、`pm2 logs h2-hot2`。日志保留周期由 `src/lib/log-retention.ts` 统一负责：FetchLog 30 天，PushLog 90 天但保留未完成全部投递的记录，成功/失败/取消 Job 30 天；不会删除 Article、Source、DiscardedItem 或 pending/running Job。`db:reset`、`db:push` 仅限明确的本地重建或应急场景。
 
 ## 开发、验证与防漂移规则
 

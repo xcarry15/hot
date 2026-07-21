@@ -9,7 +9,7 @@
  * 设计约束：
  *   - 不依赖 Next.js Request / Response；
  *   - 不修改 endpoint、字段名、分页或排序；
- *   - 删除事务顺序与原 Route 完全一致（pushLog → article）；
+ *   - Article 删除、Event 重算与公开状态撤回在同一个事务中完成；
  *   - 不建立通用 Repository；与 maintenance-service 各保留本地事务 helper。
  */
 import { Prisma } from '@prisma/client';
@@ -23,7 +23,7 @@ import {
   type ArticleListResponseDto,
 } from '@/contracts/articles';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
-import { refreshPublicPublication } from '@/lib/public-publication-service';
+import { refreshEventPublicPublication, refreshPublicPublication } from '@/lib/public-publication-service';
 import { getAISettings } from '@/lib/ai-client';
 import {
   buildEffectiveScoreUpdate,
@@ -31,7 +31,11 @@ import {
   parseArticleAiSnapshot,
   type ManualOverrideField,
 } from '@/lib/article-calibration';
-import { recalculateArticleEvent, recalculateEventById, reconcileEventAfterArticleDeletion } from '@/lib/event-service';
+import {
+  recalculateArticleEvent,
+  recalculateEventById,
+  reconcileEventAfterArticleDeletionInTransaction,
+} from '@/lib/event-service';
 import { splitBrands } from '@/lib/shared/article-codecs';
 import {
   buildCanonicalEventKey,
@@ -436,30 +440,30 @@ export async function deleteArticlesByIds(ids: string[]): Promise<ArticleDeleteR
   if (cleaned.length === 0) {
     return { deleted: 0, pushLogsDeleted: 0 };
   }
-  const eventIds = (await db.article.findMany({ where: { id: { in: cleaned } }, select: { eventId: true } }))
-    .flatMap((article) => article.eventId ? [article.eventId] : []);
   const result = await db.$transaction(async tx => {
+    const eventIds = (await tx.article.findMany({
+      where: { id: { in: cleaned } },
+      select: { eventId: true },
+    })).flatMap((article) => article.eventId ? [article.eventId] : []);
     const articleResult = await tx.article.deleteMany({ where: { id: { in: cleaned } } });
-    return { deleted: articleResult.count, pushLogsDeleted: 0 };
+    let pushLogsDeleted = 0;
+    for (const eventId of new Set(eventIds)) {
+      const reconciled = await reconcileEventAfterArticleDeletionInTransaction(tx, eventId);
+      pushLogsDeleted += reconciled.pushLogsDeleted;
+      await refreshEventPublicPublication(eventId, tx);
+    }
+    return { deleted: articleResult.count, pushLogsDeleted };
   });
-  for (const eventId of new Set(eventIds)) {
-    const reconciled = await reconcileEventAfterArticleDeletion(eventId);
-    result.pushLogsDeleted += reconciled.pushLogsDeleted;
-  }
   if (result.deleted > 0) invalidatePublicArticleCache();
   return result;
 }
 
 /**
- * 单篇删除：先删推送日志（外键约束），再删文章。
+ * 单篇删除：复用批量删除事务，保留 Event 投递审计并原子重算。
  */
 export async function deleteArticleById(id: string): Promise<void> {
-  const article = await db.article.findUnique({ where: { id }, select: { eventId: true } });
-  await db.$transaction(async tx => {
-    await tx.article.delete({ where: { id } });
-  });
-  if (article?.eventId) await reconcileEventAfterArticleDeletion(article.eventId);
-  invalidatePublicArticleCache();
+  const result = await deleteArticlesByIds([id]);
+  if (result.deleted === 0) throw new Error('Article not found');
 }
 
 /**

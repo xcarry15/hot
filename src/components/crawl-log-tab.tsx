@@ -235,7 +235,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     fetchSettings()
       .then((data: Record<string, string>) => {
         if (cancelled) return
-        setAutoCrawl(data.auto_crawl_enabled !== 'false')
+        setAutoCrawl(data.auto_crawl_enabled === 'true')
       })
       .catch(() => { /* keep null = unknown */ })
     return () => { cancelled = true }
@@ -342,14 +342,19 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   // ── 任务头部徽标：activeJob 优先；否则根据 latestJob 显示结果；都没有显示"空闲"。
   const headerBadge = useMemo(() => {
     if (activeJob) {
-      return { label: '运行中', variant: 'outline' as const, spinning: true }
+      return activeJob.status === 'cancel_requested'
+        ? { label: '停止中', variant: 'outline' as const, spinning: false }
+        : { label: '运行中', variant: 'outline' as const, spinning: true }
     }
     if (latestJob) {
-      if (latestJob.status === 'completed') {
+      if (latestJob.status === 'succeeded' || latestJob.status === 'completed') {
         return { label: '已完成', variant: 'secondary' as const, spinning: false }
       }
       if (latestJob.status === 'failed') {
         return { label: '失败', variant: 'destructive' as const, spinning: false }
+      }
+      if (latestJob.status === 'cancelled') {
+        return { label: '已停止', variant: 'outline' as const, spinning: false }
       }
     }
     return { label: '空闲', variant: 'outline' as const, spinning: false }

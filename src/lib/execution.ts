@@ -37,11 +37,13 @@ import {
 import {
   markJobCompleted,
   markJobFailed,
+  markJobCancelled,
   startJobHeartbeat,
   stopJobHeartbeat,
   startJobStage,
   advanceJobProgress,
 } from './job-progress';
+import { ACTIVE_JOB_STATUSES, CLAIMABLE_JOB_STATUSES } from './job-status';
 
 export type JobType = 'full' | 'collect' | 'process' | 'ai' | 'cluster' | 'push';
 type JobExecutor = (
@@ -117,7 +119,7 @@ async function claimAndRunJob(jobId: string): Promise<boolean> {
     const updated = await db.job.updateMany({
       where: {
         id: jobId,
-        status: { in: ['queued', 'cancel_requested'] },
+        status: { in: [...CLAIMABLE_JOB_STATUSES] },
         OR: [
           { leaseExpiresAt: null },
           { leaseExpiresAt: { lt: now } },
@@ -173,8 +175,8 @@ export async function runJob(
       select: { id: true, status: true },
     });
     if (existing) {
-      reservation.release();
       if (existing.status === 'running') {
+        reservation.release();
         return { queued: false, reason: `${type} job with same key already running` };
       }
       const claimed = await claimAndRunJob(existing.id);
@@ -182,6 +184,7 @@ export async function runJob(
         void runPipeline(type, payload, existing.id, reservation);
         return { queued: true, jobId: existing.id };
       }
+      reservation.release();
       return { queued: false, reason: 'duplicate job already queued' };
     }
 
@@ -192,7 +195,7 @@ export async function runJob(
         status: 'queued',
         idempotencyKey,
         attempt: 0,
-        maxAttempts: 3,
+        maxAttempts: 1,
       },
     });
   } catch (error) {
@@ -238,6 +241,7 @@ async function runPipeline(
     const result = await runWithJobId(jobId, () =>
       executeJob(type, payload, activeController.signal, jobId)
     );
+    await assertJobNotCancelled(jobId);
     await markJobCompleted(jobId, result);
     console.log(`[execution] completed job ${jobId} (${type})`);
   } catch (error: unknown) {
@@ -245,33 +249,8 @@ async function runPipeline(
     const cancelled = msg === 'Job cancelled' || controller?.signal.aborted || msg === 'Stopped by user';
     console.error(`[execution] ${cancelled ? 'cancelled' : 'failed'} job ${jobId} (${type}):`, msg);
 
-    if (cancelled) {
-      await markJobFailed(jobId, 'Stopped by user');
-    } else {
-      // Check remaining attempts for retry
-      const job = await db.job.findUnique({
-        where: { id: jobId },
-        select: { attempt: true, maxAttempts: true },
-      });
-      const nextAttempt = (job?.attempt ?? 0) + 1;
-      const maxAttempts = job?.maxAttempts ?? 3;
-      if (nextAttempt < maxAttempts) {
-        await db.job.updateMany({
-          where: { id: jobId, status: { in: ['running', 'cancel_requested'] } },
-          data: {
-            status: 'queued',
-            error: msg.slice(0, 2000),
-            attempt: nextAttempt,
-            leaseOwner: '',
-            leaseExpiresAt: null,
-            heartbeatAt: null,
-            availableAt: new Date(Date.now() + 30_000),
-          },
-        });
-      } else {
-        await markJobFailed(jobId, msg.slice(0, 2000));
-      }
-    }
+    if (cancelled) await markJobCancelled(jobId, 'Stopped by user');
+    else await markJobFailed(jobId, msg.slice(0, 2000));
   } finally {
     invalidateTechnicalWorkQueueCache();
     invalidateDashboardAnalyticsCache();
@@ -720,13 +699,20 @@ export async function abortRunningJob(): Promise<{ resetCount: number }> {
   const now = new Date();
   const reset = await db.job.updateMany({
     where: {
-      status: { in: ['running', 'cancel_requested'] },
+      status: { in: [...ACTIVE_JOB_STATUSES] },
       OR: [
         { leaseExpiresAt: null },
         { leaseExpiresAt: { lt: now } },
       ],
     },
-    data: { status: 'cancelled', error: 'Stopped by admin (expired lease)', completedAt: now },
+    data: {
+      status: 'cancelled',
+      error: 'Stopped by admin (expired lease)',
+      completedAt: now,
+      heartbeatAt: now,
+      leaseOwner: '',
+      leaseExpiresAt: null,
+    },
   });
   return { resetCount: reset.count };
 }
@@ -740,13 +726,20 @@ export async function resetOrphanedJobs(): Promise<void> {
     const now = new Date();
     const result = await db.job.updateMany({
       where: {
-        status: { in: ['running', 'cancel_requested'] },
+        status: { in: [...ACTIVE_JOB_STATUSES] },
         OR: [
           { leaseExpiresAt: null },
           { leaseExpiresAt: { lt: now } },
         ],
       },
-      data: { status: 'cancelled', error: 'Worker restarted (expired lease)', completedAt: now },
+      data: {
+        status: 'cancelled',
+        error: 'Worker restarted (expired lease)',
+        completedAt: now,
+        heartbeatAt: now,
+        leaseOwner: '',
+        leaseExpiresAt: null,
+      },
     });
     if (result.count > 0) {
       console.log(`[execution] reset ${result.count} orphaned job(s) with expired leases`);

@@ -23,7 +23,7 @@ export async function updateFeedbackSuggestion(id: string, action: 'apply' | 'di
 export type DashboardAnalyticsRange = 'today' | '3d' | '7d' | '30d';
 
 export type DashboardCrawlTrigger = 'auto' | 'manual' | 'unknown';
-export type DashboardCrawlStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type DashboardCrawlStatus = 'queued' | 'running' | 'cancel_requested' | 'succeeded' | 'completed' | 'failed' | 'cancelled';
 export type DashboardCrawlType = 'full' | 'collect';
 
 export interface DashboardCrawlQuery {
@@ -145,7 +145,7 @@ export interface DashboardAnalytics {
     id: string;
     type: 'full' | 'collect';
     trigger: 'auto' | 'manual' | 'unknown';
-    status: 'pending' | 'running' | 'completed' | 'failed';
+    status: DashboardCrawlStatus;
     sourceLabel: string;
     startedAt: string;
     completedAt: string | null;

@@ -137,14 +137,16 @@ describe('Event 人工纠错', () => {
     expect(mocks.refresh).toHaveBeenCalledWith('new-event');
   });
 
-  it('删除最后一篇 Article 后清理空 Event 及关联记录', async () => {
+  it('删除最后一篇 Article 后归档空 Event 并保留投递审计', async () => {
     mocks.eventFindUnique.mockResolvedValueOnce({ id: 'e1' });
     mocks.articleCount.mockResolvedValue(0);
-    await expect(reconcileEventAfterArticleDeletion('e1')).resolves.toEqual({ pushLogsDeleted: 2 });
-    expect(mocks.auditDeleteMany).toHaveBeenCalledWith({
-      where: { OR: [{ assignedEventId: 'e1' }, { candidateEventId: 'e1' }] },
-    });
-    expect(mocks.eventDelete).toHaveBeenCalledWith({ where: { id: 'e1' } });
+    await expect(reconcileEventAfterArticleDeletion('e1')).resolves.toEqual({ pushLogsDeleted: 0 });
+    expect(mocks.pushLogDeleteMany).not.toHaveBeenCalled();
+    expect(mocks.eventDelete).not.toHaveBeenCalled();
+    expect(mocks.eventUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'e1' },
+      data: expect.objectContaining({ status: 'merged', articleCount: 0, publicStatus: 'revoked' }),
+    }));
   });
 
   it('已合并 Event 不能继续拆分', async () => {

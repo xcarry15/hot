@@ -216,6 +216,15 @@ async function recalculateEvent(client: EventTransaction, eventId: string): Prom
   });
 }
 
+export async function recalculateEventsInTransaction(
+  client: EventTransaction,
+  eventIds: string[],
+): Promise<void> {
+  for (const eventId of [...new Set(eventIds.filter(Boolean))]) {
+    await recalculateEvent(client, eventId);
+  }
+}
+
 export async function recalculateArticleEvent(articleId: string): Promise<void> {
   const article = await db.article.findUnique({ where: { id: articleId }, select: { eventId: true } });
   if (!article?.eventId) return;
@@ -230,28 +239,54 @@ export async function recalculateEventById(eventId: string): Promise<void> {
   invalidatePublicArticleCache();
 }
 
-export async function reconcileEventAfterArticleDeletion(eventId: string): Promise<{ pushLogsDeleted: number }> {
-  const result = await db.$transaction(async (tx) => {
-    const event = await tx.event.findUnique({ where: { id: eventId }, select: { id: true } });
-    if (!event) return { pushLogsDeleted: 0, representativeArticleId: null as string | null };
-    const articleCount = await tx.article.count({ where: { eventId } });
-    if (articleCount === 0) {
-      const pushLogs = await tx.pushLog.deleteMany({ where: { eventId } });
-      await tx.eventClusterAudit.deleteMany({
-        where: { OR: [{ assignedEventId: eventId }, { candidateEventId: eventId }] },
-      });
-      await tx.event.updateMany({
-        where: { mergedIntoId: eventId },
-        data: { mergedIntoId: null },
-      });
-      await tx.event.delete({ where: { id: eventId } });
-      return { pushLogsDeleted: pushLogs.count, representativeArticleId: null as string | null };
-    }
-    await recalculateEvent(tx, eventId);
-    const updated = await tx.event.findUnique({ where: { id: eventId }, select: { representativeArticleId: true } });
-    return { pushLogsDeleted: 0, representativeArticleId: updated?.representativeArticleId ?? null };
+export interface ArticleDeletionEventResult {
+  eventExists: boolean;
+  pushLogsDeleted: number;
+  representativeArticleId: string | null;
+}
+
+export async function reconcileEventAfterArticleDeletionInTransaction(
+  client: EventTransaction,
+  eventId: string,
+): Promise<ArticleDeletionEventResult> {
+  const event = await client.event.findUnique({ where: { id: eventId }, select: { id: true } });
+  if (!event) return { eventExists: false, pushLogsDeleted: 0, representativeArticleId: null };
+
+  const articleCount = await client.article.count({ where: { eventId } });
+  if (articleCount === 0) {
+    // Event 保留为归档记录，PushLog/PushDelivery 才能继续承担历史审计职责。
+    await client.event.update({
+      where: { id: eventId },
+      data: {
+        status: 'merged',
+        clusterReviewStatus: 'confirmed',
+        representativeArticleId: null,
+        representativeManual: false,
+        articleCount: 0,
+        publicStatus: 'revoked',
+        publicRevokedAt: new Date(),
+        publicDateKey: '',
+        publicSortAt: null,
+        nextPushRetryAt: null,
+        pushRetryCount: 0,
+      },
+    });
+    return { eventExists: true, pushLogsDeleted: 0, representativeArticleId: null };
+  }
+
+  await recalculateEvent(client, eventId);
+  const updated = await client.event.findUnique({
+    where: { id: eventId },
+    select: { representativeArticleId: true },
   });
-  if (result.representativeArticleId) await refreshEventPublicPublication(eventId);
+  return { eventExists: true, pushLogsDeleted: 0, representativeArticleId: updated?.representativeArticleId ?? null };
+}
+
+export async function reconcileEventAfterArticleDeletion(eventId: string): Promise<{ pushLogsDeleted: number }> {
+  const result = await db.$transaction((tx) => reconcileEventAfterArticleDeletionInTransaction(tx, eventId));
+  if (result.eventExists) {
+    await refreshEventPublicPublication(eventId);
+  }
   invalidatePublicArticleCache();
   return { pushLogsDeleted: result.pushLogsDeleted };
 }
@@ -272,9 +307,11 @@ export async function getEventArticles(eventId: string, articleId?: string) {
       lastSeenAt: true,
       pushLogs: {
         orderBy: { createdAt: 'desc' },
+        take: 50,
         select: {
           id: true,
           representativeArticleId: true,
+          targetId: true,
           status: true,
           webhookUrl: true,
           webhookRemark: true,
@@ -332,6 +369,15 @@ export async function getEventArticles(eventId: string, articleId?: string) {
   if (!event) return null;
   const { pushLogs, ...eventData } = event;
   const articlePushStatuses = getLatestArticlePushStatuses(pushLogs);
+  const currentDeliveries = await db.pushDelivery.findMany({
+    where: { eventId },
+    orderBy: { createdAt: 'desc' },
+    select: { targetId: true, status: true },
+  });
+  const currentRepresentativeStatus = getPushStatusFromDeliveries(currentDeliveries);
+  if (event.representativeArticleId && currentRepresentativeStatus !== 'none') {
+    articlePushStatuses.set(event.representativeArticleId, currentRepresentativeStatus);
+  }
   const focusArticle = event.articles.find((article) => article.id === articleId)
     ?? event.articles.find((article) => article.id === event.representativeArticleId)
     ?? event.articles[0];
@@ -403,13 +449,14 @@ type ArticlePushStatus = 'success' | 'partial' | 'failure' | 'none';
 function getLatestArticlePushStatuses(logs: Array<{
   id: string;
   representativeArticleId: string | null;
+  targetId: string | null;
   status: string;
   webhookUrl: string;
   webhookRemark: string;
 }>): Map<string, ArticlePushStatus> {
   const latestByTarget = new Map<string, (typeof logs)[number]>();
   for (const log of logs) {
-    const target = log.webhookRemark || log.webhookUrl || log.id;
+    const target = log.targetId || log.webhookRemark || log.webhookUrl || log.id;
     if (!latestByTarget.has(target)) latestByTarget.set(target, log);
   }
 
@@ -430,6 +477,21 @@ function getLatestArticlePushStatuses(logs: Array<{
         ? 'success'
         : 'failure',
   ]));
+}
+
+function getPushStatusFromDeliveries(deliveries: Array<{ targetId: string; status: string }>): ArticlePushStatus {
+  const latestByTarget = new Map<string, (typeof deliveries)[number]>();
+  for (const delivery of deliveries) {
+    if (!latestByTarget.has(delivery.targetId)) latestByTarget.set(delivery.targetId, delivery);
+  }
+  const latest = [...latestByTarget.values()];
+  if (latest.length === 0) return 'none';
+  const successCount = latest.filter((delivery) => delivery.status === 'succeeded').length;
+  const attemptedCount = latest.filter((delivery) => delivery.status !== 'pending').length;
+  if (attemptedCount === 0) return 'none';
+  if (successCount === latest.length) return 'success';
+  if (successCount > 0) return 'partial';
+  return 'failure';
 }
 
 async function refreshEventRepresentatives(eventIds: string[]): Promise<void> {
@@ -603,7 +665,7 @@ export async function mergeEvents(sourceEventId: string, targetEventId: string):
       tx.event.findUnique({ where: { id: targetEventId }, select: { id: true, status: true, pushedAt: true } }),
     ]);
     if (!source || !target || source.status !== 'active' || target.status !== 'active') return false;
-    await tx.article.updateMany({ where: { eventId: sourceEventId }, data: { eventId: targetEventId, clusterStatus: 'clustered', clusteredAt: new Date() } });
+    await tx.article.updateMany({ where: { eventId: sourceEventId }, data: { eventId: targetEventId } });
     for (const article of source.articles) {
       await tx.eventClusterAudit.create({
         data: {

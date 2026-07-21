@@ -92,7 +92,7 @@ describe('crawl-log-service', () => {
       const latest = {
         id: 'jd',
         type: 'full',
-        status: 'completed',
+        status: 'succeeded',
         currentStage: null,
         progressTotal: 0,
         progressDone: 0,

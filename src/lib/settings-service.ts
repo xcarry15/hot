@@ -10,7 +10,7 @@ import { parseWebhookConfigs, serializeWebhookConfigsForServer } from '@/contrac
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { PUBLIC_PUBLICATION_REBUILD_KEYS, rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
 import { DEFAULT_PROMPT_SETTINGS, SCORE_WEIGHT_META } from '@/lib/prompts';
-import { recalculateEventById } from '@/lib/event-service';
+import { recalculateEventsInTransaction } from '@/lib/event-service';
 
 const settingsUpdateSchema = z.record(z.string(), z.string());
 
@@ -157,17 +157,17 @@ export async function updateSettings(input: unknown): Promise<
         if (article.eventId) affectedEventIds.add(article.eventId);
         recomputed++;
       }
+      await recalculateEventsInTransaction(tx, [...affectedEventIds]);
     }
     if (publicationNeedsRebuild) {
       await rebuildPublicPublicationSnapshot(tx, { contentChanged: scorePolicyChanged });
     }
-    return { recomputed, eventIds: [...affectedEventIds] };
+    return { recomputed };
   }, { maxWait: 10_000, timeout: 120_000 }) : await db.$transaction(async tx => {
     for (const [key, value] of updates) await tx.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
     if (publicationNeedsRebuild) await rebuildPublicPublicationSnapshot(tx, { contentChanged: false });
-    return { recomputed: 0, eventIds: [] as string[] };
+    return { recomputed: 0 };
   }, { maxWait: 10_000, timeout: 120_000 });
-  for (const eventId of scoreRecomputed.eventIds) await recalculateEventById(eventId);
   invalidateAISettingsCache();
   invalidatePublicArticleCache();
   return { ok: true, success: true, scoreRecomputed: scoreRecomputed.recomputed, publicationRebuilt: publicationNeedsRebuild };

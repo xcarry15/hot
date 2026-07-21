@@ -38,6 +38,7 @@ import {
   stopJobHeartbeat,
   markJobCompleted,
   markJobFailed,
+  markJobCancelled,
 } from '@/lib/job-progress';
 
 describe('startJobStage', () => {
@@ -237,6 +238,19 @@ describe('markJobCompleted / markJobFailed', () => {
       where: { id: 'job-long', status: 'running' },
       data: expect.objectContaining({
         error: 'x'.repeat(2000),
+      }),
+    });
+  });
+
+  it('markJobCancelled 允许 running/cancel_requested 进入 cancelled', async () => {
+    updateManyMock.mockResolvedValueOnce({ count: 1 });
+    await markJobCancelled('job-cancel', 'Stopped by user');
+    expect(updateManyMock).toHaveBeenCalledWith({
+      where: { id: 'job-cancel', status: { in: ['running', 'cancel_requested'] } },
+      data: expect.objectContaining({
+        status: 'cancelled',
+        error: 'Stopped by user',
+        completedAt: expect.any(Date),
       }),
     });
   });

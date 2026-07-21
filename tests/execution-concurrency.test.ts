@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   sourceFindUnique: vi.fn(),
   markJobCompleted: vi.fn(),
   markJobFailed: vi.fn(),
+  markJobCancelled: vi.fn(),
   collectAllSources: vi.fn(),
   crawlSource: vi.fn(),
   pushAllPendingArticles: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/lib/push/policy', () => ({ shouldPushAtPipelineEnd: vi.fn().mockResol
 vi.mock('@/lib/job-progress', () => ({
   markJobCompleted: mocks.markJobCompleted,
   markJobFailed: mocks.markJobFailed,
+  markJobCancelled: mocks.markJobCancelled,
   startJobHeartbeat: vi.fn(() => null),
   stopJobHeartbeat: vi.fn(),
   startJobStage: vi.fn().mockResolvedValue(undefined),
@@ -112,7 +114,7 @@ describe.sequential('global job execution invariant', () => {
     const stopped = await abortRunningJob();
 
     expect(stopped).toEqual({ resetCount: 0 });
-    await waitFor(() => mocks.markJobFailed.mock.calls.some(call =>
+    await waitFor(() => mocks.markJobCancelled.mock.calls.some(call =>
       call[0] === 'job-stop' && call[1] === 'Stopped by user',
     ));
   });

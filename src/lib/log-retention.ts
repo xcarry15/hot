@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { TERMINAL_JOB_STATUSES } from './job-status';
 
 /**
  * 日志保留周期：按表的业务用途区分，不通过删除 Article 影响业务数据。
@@ -40,7 +41,7 @@ export async function purgeExpiredLogs(db: LogRetentionDb, now = new Date()) {
     }),
     db.job.deleteMany({
       where: {
-        status: { in: ['completed', 'failed'] },
+        status: { in: [...TERMINAL_JOB_STATUSES] },
         createdAt: { lt: cutoffs.completedJobsBefore },
       },
     }),

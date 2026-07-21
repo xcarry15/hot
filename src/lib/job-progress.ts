@@ -3,7 +3,7 @@
  *
  * 设计约束（来自重构报告 12.4）：
  * - Job 表是任务级状态的唯一事实源。所有 Job 进度更新必须经过这里。
- * - 所有 updateMany / update 都加 where: status='running' 保护，已经 completed/failed 的
+ * - 所有 updateMany / update 都加 where: status='running' 保护，已经进入终态的
  *   Job 不会被心跳覆盖。
  * - 进度值不允许超过 total（total=0 的未知进度除外——保留 done 计数用于不确定进度）。
  * - 心跳定时器在 finally 中清理；Job 完成/失败时也要更新 heartbeatAt 与 completedAt
@@ -92,7 +92,7 @@ export function touchJobHeartbeat(jobId: string): Promise<void> {
 /**
  * 心跳定时器。
  * - 30 秒间隔刷新 heartbeatAt；
- * - Job 已 completed/failed 时跳过（updateMany where status=running 会 no-op）；
+ * - Job 已进入终态时跳过（updateMany where status=running 会 no-op）；
  * - 必须配合 stopJobHeartbeat(timer) 在 finally 中清理，避免 HMR / Job 结束后残留。
  */
 export function startJobHeartbeat(jobId: string, intervalMs: number = 30_000): NodeJS.Timeout {
@@ -134,6 +134,22 @@ export function markJobFailed(jobId: string, errorMessage: string): Promise<void
       data: {
         status: 'failed',
         error: errorMessage.slice(0, 2000),
+        completedAt: new Date(),
+        heartbeatAt: new Date(),
+        leaseOwner: '',
+        leaseExpiresAt: null,
+      },
+    });
+  });
+}
+
+export function markJobCancelled(jobId: string, reason: string): Promise<void> {
+  return runWithJobId(jobId, async () => {
+    await db.job.updateMany({
+      where: { id: jobId, status: { in: ['running', 'cancel_requested'] } },
+      data: {
+        status: 'cancelled',
+        error: reason.slice(0, 2000),
         completedAt: new Date(),
         heartbeatAt: new Date(),
         leaseOwner: '',
