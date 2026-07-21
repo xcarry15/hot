@@ -45,6 +45,7 @@ export function pushableWhere(settings: PushSettings) {
     pushedAt: null,
     pushRetryCount: { lt: PUSH_MAX_RETRIES },
     status: 'active' as const,
+    clusterReviewStatus: 'confirmed' as const,
     representativeArticle: {
       is: {
         score: { gte: settings.minScore },

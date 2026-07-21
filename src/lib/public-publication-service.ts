@@ -104,9 +104,16 @@ async function syncCandidate(
 
   const event = article.eventId ? await client.event.findUnique({
     where: { id: article.eventId },
-    select: { representativeArticleId: true, publicStatus: true, publicPublishedAt: true, firstSeenAt: true },
+    select: {
+      representativeArticleId: true,
+      clusterReviewStatus: true,
+      publicStatus: true,
+      publicPublishedAt: true,
+      firstSeenAt: true,
+    },
   }) : null
-  const isRepresentative = event?.representativeArticleId === article.id
+  const isRepresentative = event?.clusterReviewStatus === 'confirmed'
+    && event.representativeArticleId === article.id
 
   await client.article.update({
     where: { id: article.id },

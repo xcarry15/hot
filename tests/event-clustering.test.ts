@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors } from '@/contracts/event-clustering';
 import { buildCanonicalEventKey, normalizeEventAction, normalizeEventIdentity } from '@/contracts/event-identity';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
-import { buildAiClusterAuditEvidence, type AiCandidateAudit } from '@/lib/event-clustering-service';
+import { buildAiClusterAuditEvidence, shouldCreateClusterReview, type AiCandidateAudit } from '@/lib/event-clustering-service';
 
 describe('轻量事件聚类规则', () => {
   it('统一标题中的空白、标点和大小写', () => {
@@ -114,5 +114,21 @@ describe('聚类 AI 候选审计', () => {
 
   it('全部拒绝时 fallback evidence 保留全部候选且无采用项', () => {
     expect(buildAiClusterAuditEvidence(candidates.slice(0, 1), null)).toEqual({ selectedCandidateEventId: null, candidates: candidates.slice(0, 1) });
+  });
+
+  it('AI 判断失败不能降级成普通可推送 Event', () => {
+    expect(shouldCreateClusterReview(1, [
+      { aiDecision: { sameEvent: false, confidence: 0, reason: 'AI 判断失败' } },
+    ])).toBe(true);
+  });
+
+  it('只有全部高置信判定为不同事件时才允许正常新建 Event', () => {
+    expect(shouldCreateClusterReview(2, [
+      { aiDecision: { sameEvent: false, confidence: 90, reason: '主体不同' } },
+      { aiDecision: { sameEvent: false, confidence: 86, reason: '事项不同' } },
+    ])).toBe(false);
+    expect(shouldCreateClusterReview(2, [
+      { aiDecision: { sameEvent: false, confidence: 90, reason: '主体不同' } },
+    ])).toBe(true);
   });
 });

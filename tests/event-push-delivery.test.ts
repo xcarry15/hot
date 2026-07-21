@@ -70,7 +70,7 @@ describe('Event 推送门禁', () => {
     mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
     mocks.pushLogFindMany.mockResolvedValue([{ eventId: 'e1', webhookUrl: 'https://hook/a', webhookRemark: 'A', status: 'success', createdAt: new Date() }]);
     mocks.eventFindUnique.mockResolvedValue({
-      id: 'e1', status: 'active', pushedAt: new Date(), nextPushRetryAt: null,
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
       representativeArticle: representative({ id: 'a2' }),
     });
     await expect(pushEventToFeishu('e1')).resolves.toMatchObject({ status: 'completed', attempted: 0 });
@@ -79,7 +79,7 @@ describe('Event 推送门禁', () => {
 
   it('强制推送也不能绕过聚类状态', async () => {
     mocks.eventFindUnique.mockResolvedValue({
-      id: 'e1', status: 'active', pushedAt: null, nextPushRetryAt: null,
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null, nextPushRetryAt: null,
       representativeArticle: representative({ clusterStatus: 'failed' }),
     });
     await expect(pushEventToFeishu('e1', 'repush_all')).resolves.toMatchObject({ status: 'failed' });
@@ -92,7 +92,7 @@ describe('Event 推送门禁', () => {
       { url: 'https://hook/b', remark: 'B', enabled: true },
     ];
     mocks.eventFindUnique.mockResolvedValue({
-      id: 'e1', status: 'active', pushedAt: new Date(), nextPushRetryAt: null,
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
       representativeArticle: representative(),
     });
     mocks.pushLogFindMany
@@ -117,7 +117,7 @@ describe('Event 推送门禁', () => {
       { url: 'https://hook/b', remark: 'B', enabled: true },
     ];
     mocks.eventFindUnique.mockResolvedValue({
-      id: 'e1', status: 'active', pushedAt: new Date(), nextPushRetryAt: null,
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
       representativeArticle: representative(),
     });
     mocks.pushLogFindMany
@@ -136,7 +136,7 @@ describe('Event 推送门禁', () => {
 
   it('未配置 Webhook 时不为每个 Event 重复制造失败日志', async () => {
     mocks.eventFindUnique.mockResolvedValue({
-      id: 'e1', status: 'active', pushedAt: null, nextPushRetryAt: null,
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null, nextPushRetryAt: null,
       representativeArticle: representative(),
     });
     await expect(pushEventToFeishu('e1')).resolves.toMatchObject({ status: 'no_webhooks' });

@@ -2,6 +2,9 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import {
   EVENT_CLUSTER_MAX_CANDIDATES,
+  EVENT_CLUSTER_MAX_AI_CANDIDATES,
+  EVENT_CLUSTER_MAX_MEMBER_ARTICLES,
+  EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES,
   EVENT_CLUSTER_MAX_RETRIES,
   EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP,
   EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE,
@@ -36,11 +39,11 @@ const aiDecisionSchema = z.object({
 }).strict();
 
 type ClusterClient = Pick<Prisma.TransactionClient, 'article' | 'event' | 'eventClusterAudit'>;
-const CONTENT_RECALL_CANDIDATES = 12;
 
 type Candidate = {
   id: string;
   representativeArticleId: string | null;
+  clusterReviewStatus: string;
   articles: Array<{
     id: string;
     title: string;
@@ -55,6 +58,20 @@ type Candidate = {
     createdAt: Date;
   }>;
 };
+
+const candidateArticleSelect = {
+  id: true,
+  title: true,
+  cleanContent: true,
+  contentHash: true,
+  eventSubjects: true,
+  eventAction: true,
+  eventObject: true,
+  eventKey: true,
+  eventKeyConfidence: true,
+  publishedAt: true,
+  createdAt: true,
+} as const;
 
 export interface AiCandidateAudit {
   candidateEventId: string;
@@ -78,6 +95,19 @@ export interface AiCandidateAudit {
     sharedAnchors: string[];
   };
   aiDecision: { sameEvent: boolean; confidence: number; reason: string };
+}
+
+export function shouldCreateClusterReview(
+  ambiguousCount: number,
+  aiCandidates: Pick<AiCandidateAudit, 'aiDecision'>[],
+): boolean {
+  if (ambiguousCount === 0) return false;
+  const hasAiFailure = aiCandidates.some((candidate) => candidate.aiDecision.confidence === 0);
+  const allAmbiguousConfidentlyDifferent = aiCandidates.length === ambiguousCount
+    && aiCandidates.every((candidate) => (
+      !candidate.aiDecision.sameEvent && candidate.aiDecision.confidence >= 85
+    ));
+  return hasAiFailure || !allAmbiguousConfidentlyDifferent;
 }
 
 export function buildAiClusterAuditEvidence(candidates: AiCandidateAudit[], selectedCandidateEventId: string | null) {
@@ -213,6 +243,88 @@ function hasCandidateContentHint(article: { cleanContent: string }, candidate: C
   return candidate.articles.some((member) => hasLiteralContentOverlap(article.cleanContent, member.cleanContent));
 }
 
+function isStrongPushedDuplicate(evidence: ReturnType<typeof candidateEvidence>): boolean {
+  if (evidence.fingerprint) return true;
+  if (evidence.phaseConflict || evidence.identityConflict) return false;
+  if (evidence.eventKeyMatch && evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE) return true;
+  if (evidence.identityScore >= 0.84
+    && evidence.subjectOverlap >= 0.75
+    && evidence.actionOverlap >= 0.6
+    && evidence.objectOverlap >= 0.7) return true;
+  return evidence.sharedAnchors.length > 0
+    && evidence.titleOverlap >= 0.9
+    && evidence.contentOverlap >= 0.78
+    && evidence.contentJaccard >= 0.5;
+}
+
+/**
+ * 推送前的跨 Event 最后防线。它只拦截高置信的已推送重复，不参与正常聚类，
+ * 也不改变 Event 归属；人工强制推送仍由调用方明确绕过。
+ */
+export async function findRecentPushedEventDuplicate(articleId: string, eventId: string): Promise<{
+  eventId: string;
+  evidence: ReturnType<typeof candidateEvidence>;
+} | null> {
+  const article = await db.article.findUnique({
+    where: { id: articleId },
+    select: {
+      id: true,
+      title: true,
+      cleanContent: true,
+      contentHash: true,
+      eventSubjects: true,
+      eventAction: true,
+      eventObject: true,
+      eventKey: true,
+      eventKeyConfidence: true,
+      publishedAt: true,
+      createdAt: true,
+    },
+  });
+  if (!article) return null;
+  const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  const rows = await db.event.findMany({
+    where: {
+      id: { not: eventId },
+      status: 'active',
+      pushedAt: { not: null, gte: cutoff },
+    },
+    select: {
+      id: true,
+      representativeArticleId: true,
+      clusterReviewStatus: true,
+      representativeArticle: { select: candidateArticleSelect },
+      articles: {
+        where: { clusterStatus: { in: ['clustered', 'needs_review'] }, aiStatus: 'done' },
+        orderBy: { createdAt: 'desc' },
+        take: EVENT_CLUSTER_MAX_MEMBER_ARTICLES,
+        select: candidateArticleSelect,
+      },
+    },
+  });
+  const matches = rows
+    .map(({ representativeArticle, articles, ...event }) => {
+      const candidate: Candidate = {
+        ...event,
+        articles: [
+          ...(representativeArticle ? [representativeArticle] : []),
+          ...articles,
+        ].filter((member, index, all) => all.findIndex((item) => item.id === member.id) === index),
+      };
+      return { eventId: event.id, evidence: candidateEvidence(article, candidate) };
+    })
+    .filter((match) => isStrongPushedDuplicate(match.evidence))
+    .sort((left, right) => {
+      const score = (evidence: ReturnType<typeof candidateEvidence>) => Number(evidence.fingerprint) * 10
+        + Number(evidence.eventKeyMatch) * 8
+        + evidence.identityScore * 6
+        + evidence.contentOverlap * 3
+        + evidence.titleOverlap * 2;
+      return score(right.evidence) - score(left.evidence);
+    });
+  return matches[0] ?? null;
+}
+
 async function createEventForArticle(
   client: ClusterClient,
   article: { id: string; title: string; publishedAt: Date | null; createdAt: Date; eventKey: string },
@@ -224,6 +336,7 @@ async function createEventForArticle(
       firstSeenAt: seenAt,
       lastSeenAt: seenAt,
       articleCount: 1,
+      clusterReviewStatus: input.needsReview ? 'pending' : 'confirmed',
       // AI 已完成；事务结束后由 event-service 统一选择代表文章并刷新公开状态。
       representativeArticleId: null,
     },
@@ -269,11 +382,12 @@ async function attachArticle(
     select: { firstSeenAt: true, lastSeenAt: true },
   });
   if (!currentEvent) throw new Error('候选事件不存在');
+  const clusterReviewStatus = candidate.clusterReviewStatus === 'pending' ? 'pending' : 'confirmed';
   await client.article.update({
     where: { id: article.id },
     data: {
       eventId: candidate.id,
-      clusterStatus: 'clustered',
+      clusterStatus: clusterReviewStatus === 'pending' ? 'needs_review' : 'clustered',
       clusteredAt: new Date(),
       clusterError: null,
       clusterRetryCount: 0,
@@ -284,6 +398,7 @@ async function attachArticle(
     where: { id: candidate.id },
     data: {
       articleCount: { increment: 1 },
+      clusterReviewStatus,
       firstSeenAt: seenAt < currentEvent.firstSeenAt ? seenAt : currentEvent.firstSeenAt,
       lastSeenAt: seenAt > currentEvent.lastSeenAt ? seenAt : currentEvent.lastSeenAt,
     },
@@ -308,15 +423,15 @@ async function askAiSameEvent(
   candidate: Candidate,
   signal?: AbortSignal,
 ) {
-  const candidateArticles = candidate.articles.slice(0, 3).map((item) => `- 事件键：${item.eventKey}（置信度 ${item.eventKeyConfidence ?? 0}）\n  标题：${item.title}\n  正文：${item.cleanContent.slice(0, 500)}`).join('\n');
+  const candidateArticles = candidate.articles.slice(0, 3).map((item) => `- 事件键：${item.eventKey}（置信度 ${item.eventKeyConfidence ?? 0}）\n  标题：${item.title}\n  正文：${item.cleanContent.slice(0, 600)}`).join('\n');
   const prompt = `判断是否是同一个具体新闻事件。
 同一事件必须同时满足：核心主体相同、具体动作/结果相同、时间阶段一致。
 以下均不算同一事件：只有品牌/地点/奖项/话题相同；预告与事后结果；聚合快讯仅有一个子项重合。
-证据不足时返回 false。
+证据不足时返回 false 且 confidence 不超过 60；只有存在明确冲突时才返回 false 且 confidence 至少 85。
 
 新文章事件键：${article.eventKey}（置信度 ${article.eventKeyConfidence ?? 0}）
 新文章：${article.title}
-正文：${article.cleanContent.slice(0, 900)}
+正文：${article.cleanContent.slice(0, 1_200)}
 
 候选报道：
 ${candidateArticles}
@@ -376,37 +491,40 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
   const windowMs = EVENT_CLUSTER_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   const windowStart = new Date(referenceAt.getTime() - windowMs);
   const windowEnd = new Date(referenceAt.getTime() + windowMs);
-  const candidates = await db.event.findMany({
+  const candidateRows = await db.event.findMany({
     where: {
       status: 'active',
       firstSeenAt: { lte: windowEnd },
       lastSeenAt: { gte: windowStart },
-      articles: { some: { clusterStatus: 'clustered', aiStatus: 'done' } },
+      articles: { some: {
+        clusterStatus: { in: ['clustered', 'needs_review'] },
+        aiStatus: 'done',
+      } },
     },
     select: {
       id: true,
       representativeArticleId: true,
+      clusterReviewStatus: true,
+      representativeArticle: { select: candidateArticleSelect },
       articles: {
-        where: { clusterStatus: 'clustered', aiStatus: 'done' },
-        orderBy: { createdAt: 'desc' },
-        take: 8,
-        select: {
-          id: true,
-          title: true,
-          cleanContent: true,
-          contentHash: true,
-          eventSubjects: true,
-          eventAction: true,
-          eventObject: true,
-          eventKey: true,
-          eventKeyConfidence: true,
-          publishedAt: true,
-          createdAt: true,
+        where: {
+          clusterStatus: { in: ['clustered', 'needs_review'] },
+          aiStatus: 'done',
         },
+        orderBy: { createdAt: 'desc' },
+        take: EVENT_CLUSTER_MAX_MEMBER_ARTICLES,
+        select: candidateArticleSelect,
       },
     },
     orderBy: { lastSeenAt: 'desc' },
   });
+  const candidates: Candidate[] = candidateRows.map(({ representativeArticle, articles, ...candidate }) => ({
+    ...candidate,
+    articles: [
+      ...(representativeArticle ? [representativeArticle] : []),
+      ...articles,
+    ].filter((member, index, all) => all.findIndex((item) => item.id === member.id) === index),
+  }));
   const recalled = candidates
     .map((candidate) => ({
       candidate,
@@ -428,7 +546,7 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       return Number(right.contentHint) * 4 + score(right.evidence)
         - (Number(left.contentHint) * 4 + score(left.evidence));
     })
-    .slice(0, CONTENT_RECALL_CANDIDATES);
+    .slice(0, EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES);
   const ranked = recalled
     .map(({ candidate }) => ({ candidate, evidence: candidateEvidence(article, candidate) }))
     .sort((left, right) => {
@@ -494,7 +612,7 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       || evidence.identityScore >= EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE
       || (evidence.sharedAnchors.length > 0 && evidence.titleOverlap >= EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP)
       || evidence.contentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
-    )).slice(0, 2);
+    )).slice(0, EVENT_CLUSTER_MAX_AI_CANDIDATES);
   const aiCandidates: AiCandidateAudit[] = [];
   for (const item of ambiguous) {
     let decision;
@@ -525,9 +643,9 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       return { eventId, action: 'attach' };
     }
   }
-  const needsReview = ambiguous.length > 0 && aiCandidates.some((candidate) => (
-    candidate.aiDecision.confidence > 0 && candidate.aiDecision.confidence < 75
-  ));
+  // 灰区只有在每个候选都得到高置信“不同事件”结论时才允许新建正常 Event。
+  // AI 超时、格式错误或低置信结论必须进入待复核，不能降级成可推送事件。
+  const needsReview = shouldCreateClusterReview(ambiguous.length, aiCandidates);
   const eventId = await db.$transaction((tx) => createEventForArticle(tx, article, {
     action: needsReview ? 'fallback_create' : 'create',
     decisionSource: needsReview ? 'ai' : 'rule',

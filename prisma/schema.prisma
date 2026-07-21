@@ -136,6 +136,7 @@ model Article {
 model Event {
   id                      String    @id @default(cuid())
   status                  String    @default("active") // active, merged
+  clusterReviewStatus     String    @default("confirmed") // confirmed, pending；待复核成员存在时整个 Event 不得公开/推送
   mergedIntoId            String?
   representativeArticleId String?   @unique
   representativeManual    Boolean   @default(false)
@@ -161,7 +162,7 @@ model Event {
   assignedAudits          EventClusterAudit[] @relation("AssignedEventAudits")
   candidateAudits         EventClusterAudit[] @relation("CandidateEventAudits")
 
-  @@index([status, lastSeenAt])
+  @@index([status, clusterReviewStatus, lastSeenAt])
   @@index([publicStatus, firstSeenAt])
   @@index([status, publicStatus, publicDateKey, publicSortAt])
   @@index([pushedAt, nextPushRetryAt])

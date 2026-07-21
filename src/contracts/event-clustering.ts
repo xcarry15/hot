@@ -1,7 +1,11 @@
 export const EVENT_CLUSTER_WINDOW_DAYS = 7;
-export const EVENT_CLUSTER_MAX_CANDIDATES = 5;
+// 候选召回优先保证覆盖率，最终只把少量高相关候选交给 AI。
+export const EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES = 48;
+export const EVENT_CLUSTER_MAX_CANDIDATES = 15;
+export const EVENT_CLUSTER_MAX_AI_CANDIDATES = 5;
+export const EVENT_CLUSTER_MAX_MEMBER_ARTICLES = 12;
 export const EVENT_CLUSTER_MAX_RETRIES = 5;
-export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v3';
+export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v4';
 export const EVENT_CLUSTER_STRONG_TITLE_OVERLAP = 0.66;
 export const EVENT_CLUSTER_STRONG_TITLE_DAYS = 2;
 export const EVENT_CLUSTER_STRONG_CONTENT_OVERLAP = 0.72;
@@ -55,12 +59,41 @@ export function contentShingleSimilarity(
 ): { overlap: number; jaccard: number } {
   const a = buildCharacterNgrams(left.slice(0, maxChars), [size]);
   const b = buildCharacterNgrams(right.slice(0, maxChars), [size]);
-  if (a.size === 0 || b.size === 0) return { overlap: 0, jaccard: 0 };
-  let intersection = 0;
-  for (const gram of a) if (b.has(gram)) intersection++;
+  const characterSimilarity = a.size === 0 || b.size === 0
+    ? { overlap: 0, jaccard: 0 }
+    : (() => {
+        let intersection = 0;
+        for (const gram of a) if (b.has(gram)) intersection++;
+        return {
+          overlap: intersection / Math.min(a.size, b.size),
+          jaccard: intersection / (a.size + b.size - intersection),
+        };
+      })();
+
+  // 字符片段对“同义改写”过于敏感；补充词级证据扩大召回，但仍要求词级
+  // 交并比同时成立，避免只共享一个品牌名就被视为同文。
+  const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' });
+  const buildTokens = (value: string) => new Set(
+    [...segmenter.segment(value.slice(0, maxChars))]
+      .filter((part) => part.isWordLike)
+      .map((part) => normalizeEventText(part.segment))
+      .filter((token) => token.length >= 2),
+  );
+  const leftTokens = buildTokens(left);
+  const rightTokens = buildTokens(right);
+  const tokenSimilarity = leftTokens.size === 0 || rightTokens.size === 0
+    ? { overlap: 0, jaccard: 0 }
+    : (() => {
+        let intersection = 0;
+        for (const token of leftTokens) if (rightTokens.has(token)) intersection++;
+        return {
+          overlap: intersection / Math.min(leftTokens.size, rightTokens.size),
+          jaccard: intersection / (leftTokens.size + rightTokens.size - intersection),
+        };
+      })();
   return {
-    overlap: intersection / Math.min(a.size, b.size),
-    jaccard: intersection / (a.size + b.size - intersection),
+    overlap: Math.max(characterSimilarity.overlap, tokenSimilarity.overlap),
+    jaccard: Math.max(characterSimilarity.jaccard, tokenSimilarity.jaccard),
   };
 }
 

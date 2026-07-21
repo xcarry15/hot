@@ -33,6 +33,7 @@ export async function previewPublicPublication(minScore: number, minRelevance: n
   } as const;
   const eventBase = {
     status: 'active' as const,
+    clusterReviewStatus: 'confirmed' as const,
     representativeArticleId: { not: null },
   } as const;
   const eligible = await db.event.count({
@@ -60,6 +61,7 @@ export async function previewPushDelivery(minScore: number, minRelevance: number
     where: {
       pushedAt: null,
       status: 'active',
+      clusterReviewStatus: 'confirmed',
       representativeArticle: { is: { aiStatus: 'done', clusterStatus: 'clustered', score: { gte: minScore }, relevance: { gte: minRelevance } } },
       OR: [{ nextPushRetryAt: null }, { nextPushRetryAt: { lte: new Date() } }],
     },

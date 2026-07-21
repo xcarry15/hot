@@ -48,7 +48,7 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/public-publication-service', () => ({ refreshEventPublicPublication: mocks.refresh }));
 
-import { mergeEvents, reconcileEventAfterArticleDeletion, selectRepresentativeCandidate, setEventRepresentative, splitEventArticles } from '@/lib/event-service';
+import { deriveEventClusterReviewStatus, mergeEvents, reconcileEventAfterArticleDeletion, selectRepresentativeCandidate, setEventRepresentative, splitEventArticles } from '@/lib/event-service';
 
 describe('Event 人工纠错', () => {
   beforeEach(() => {
@@ -65,6 +65,11 @@ describe('Event 人工纠错', () => {
     mocks.auditDeleteMany.mockResolvedValue({ count: 0 });
     mocks.pushLogDeleteMany.mockResolvedValue({ count: 2 });
     mocks.refresh.mockResolvedValue(true);
+  });
+
+  it('Event 只要仍有待复核成员就保持 pending', () => {
+    expect(deriveEventClusterReviewStatus(['clustered', 'needs_review'])).toBe('pending');
+    expect(deriveEventClusterReviewStatus(['clustered', 'clustered'])).toBe('confirmed');
   });
 
   it('合并已推送来源 Event 时继承推送状态且不补推', async () => {

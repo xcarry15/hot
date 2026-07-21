@@ -22,6 +22,10 @@ function eventDate(article: { publishedAt: Date | null; createdAt: Date }): Date
   return article.publishedAt ?? article.createdAt;
 }
 
+export function deriveEventClusterReviewStatus(clusterStatuses: readonly string[]): 'confirmed' | 'pending' {
+  return clusterStatuses.some((status) => status === 'needs_review') ? 'pending' : 'confirmed';
+}
+
 function representativeReady(article: RepresentativeCandidate): boolean {
   return article.clusterStatus === 'clustered'
     && article.aiStatus === 'done'
@@ -87,21 +91,34 @@ async function chooseRepresentative(client: EventTransaction, eventId: string): 
 async function recalculateEvent(client: EventTransaction, eventId: string): Promise<void> {
   const articles = await client.article.findMany({
     where: { eventId },
-    select: { id: true, publishedAt: true, createdAt: true },
+    select: { id: true, publishedAt: true, createdAt: true, clusterStatus: true },
   });
   if (articles.length === 0) {
     await client.event.update({
       where: { id: eventId },
-      data: { status: 'merged', representativeArticleId: null, representativeManual: false, articleCount: 0, publicStatus: 'revoked', publicDateKey: '', publicSortAt: null },
+      data: {
+        status: 'merged',
+        clusterReviewStatus: 'confirmed',
+        representativeArticleId: null,
+        representativeManual: false,
+        articleCount: 0,
+        publicStatus: 'revoked',
+        publicDateKey: '',
+        publicSortAt: null,
+      },
     });
     return;
   }
   const dates = articles.map(eventDate);
-  const representative = await chooseRepresentative(client, eventId);
+  const clusterReviewStatus = deriveEventClusterReviewStatus(articles.map((article) => article.clusterStatus));
+  const representative = clusterReviewStatus === 'confirmed'
+    ? await chooseRepresentative(client, eventId)
+    : { id: null, manual: false };
   await client.event.update({
     where: { id: eventId },
     data: {
       status: 'active',
+      clusterReviewStatus,
       articleCount: articles.length,
       firstSeenAt: new Date(Math.min(...dates.map((date) => date.getTime()))),
       lastSeenAt: new Date(Math.max(...dates.map((date) => date.getTime()))),
@@ -157,6 +174,7 @@ export async function getEventArticles(eventId: string) {
     select: {
       id: true,
       status: true,
+      clusterReviewStatus: true,
       representativeArticleId: true,
       representativeManual: true,
       articleCount: true,
@@ -389,7 +407,7 @@ export async function searchActiveEvents(query: string, excludeEventId?: string)
 
 export async function setEventRepresentative(eventId: string, articleId: string): Promise<boolean> {
   const [event, member] = await Promise.all([
-    db.event.findUnique({ where: { id: eventId }, select: { status: true } }),
+    db.event.findUnique({ where: { id: eventId }, select: { status: true, clusterReviewStatus: true } }),
     db.article.findFirst({
       where: { id: articleId, eventId },
       select: {
@@ -399,7 +417,7 @@ export async function setEventRepresentative(eventId: string, articleId: string)
       },
     }),
   ]);
-  if (event?.status !== 'active' || !member || !representativeReady(member)) return false;
+  if (event?.status !== 'active' || event.clusterReviewStatus !== 'confirmed' || !member || !representativeReady(member)) return false;
   await db.$transaction(async (tx) => {
     await tx.event.update({
       where: { id: eventId },
@@ -449,6 +467,7 @@ export async function mergeEvents(sourceEventId: string, targetEventId: string):
       where: { id: sourceEventId },
       data: {
         status: 'merged',
+        clusterReviewStatus: 'confirmed',
         mergedIntoId: targetEventId,
         representativeArticleId: null,
         representativeManual: false,

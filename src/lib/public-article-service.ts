@@ -63,6 +63,7 @@ type PublicEventListRow = Prisma.EventGetPayload<{
 
 const publicEventWhere = {
   status: 'active',
+  clusterReviewStatus: 'confirmed',
   publicStatus: 'published',
   representativeArticleId: { not: null },
   representativeArticle: { is: { aiStatus: 'done', clusterStatus: 'clustered' } },

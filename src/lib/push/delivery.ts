@@ -12,6 +12,7 @@ import { db } from '@/lib/db';
 import { assertNotAborted } from '@/lib/worker-stop';
 import { getRelatedArticles } from '@/lib/article-related-service';
 import { getWebhookConfigs, type WebhookConfig } from '@/lib/settings';
+import { findRecentPushedEventDuplicate } from '@/lib/event-clustering-service';
 import { PUSH_MAX_RETRIES, PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/push/policy';
 import { getPushUrgency, buildFeishuCard } from '@/lib/push/feishu-card';
 import { sendFeishuWebhook } from '@/lib/push/feishu-transport';
@@ -125,6 +126,9 @@ async function pushEventToFeishuInternal(
     include: { representativeArticle: { include: { source: { select: { name: true } } } } },
   });
   if (!event || event.status !== 'active' || !event.representativeArticle) return emptyPushResult(mode, 'failed', '事件或代表文章不存在');
+  if (event.clusterReviewStatus !== 'confirmed') {
+    return emptyPushResult(mode, 'failed', '事件仍待聚类复核，不能推送');
+  }
   const article = event.representativeArticle;
   if (article.clusterStatus !== 'clustered') {
     return emptyPushResult(mode, 'failed', '文章尚未完成事件聚类，不能推送');
@@ -161,6 +165,18 @@ async function pushEventToFeishuInternal(
   );
   if (enabled.length === 0) {
     return emptyPushResult(mode, 'no_webhooks', '没有配置启用的 Feishu Webhook URL');
+  }
+
+  if (mode === 'normal' && !event.pushedAt) {
+    const duplicate = await findRecentPushedEventDuplicate(article.id, eventId);
+    if (duplicate) {
+      // 防止同一疑似重复 Event 在每轮批量推送中反复消耗资源，转为人工决定。
+      await db.event.update({
+        where: { id: eventId },
+        data: { pushRetryCount: PUSH_MAX_RETRIES, nextPushRetryAt: null },
+      });
+      return emptyPushResult(mode, 'failed', `疑似与最近已推送 Event 重复，已阻止推送（${duplicate.eventId}）`);
+    }
   }
 
   const targetStates = await getPushTargetStates(eventId);
