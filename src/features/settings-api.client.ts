@@ -17,6 +17,14 @@ export async function fetchSettings(signal?: AbortSignal): Promise<SettingsMap> 
   return requestJson<SettingsMap>('GET', '/api/settings', { signal });
 }
 
+export interface OpenCodeModelsResult {
+  models: string[];
+}
+
+export async function fetchOpenCodeModels(signal?: AbortSignal): Promise<OpenCodeModelsResult> {
+  return requestJson<OpenCodeModelsResult>('GET', '/api/settings/opencode-models', { signal });
+}
+
 export async function saveSettings(
   patch: SettingsMap,
   signal?: AbortSignal,

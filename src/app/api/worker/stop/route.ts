@@ -7,7 +7,7 @@ import { abortRunningJob } from '@/lib/execution';
  *
  * 请求停止当前正在执行的后台任务。
  *   - abort 当前 job 的 AbortController（进程内立即生效）
- *   - 把所有处于 running 状态的 Job 记录标记为 failed（清理孤儿）
+ *   - 把所有处于 running 状态的 Job 记录标记为 cancel_requested
  */
 export async function POST() {
   try {

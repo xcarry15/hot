@@ -114,6 +114,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string): P
         `AI分析超时 "${a.title}"`,
         signal,
       )));
+      assertNotAborted(signal);
       for (const r of results) {
         if (r.status === 'rejected' || r.value.status === 'failed') errors++;
         else processed++;

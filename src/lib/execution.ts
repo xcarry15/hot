@@ -54,6 +54,7 @@ type JobExecutor = (
 
 const LEASE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
+const CANCELLATION_POLL_INTERVAL_MS = 1_000; // 1 second
 
 /** API 層使用的並發事實源：單進程內只允许一个批量 Job。 */
 export function getActiveJobType(): JobType | null {
@@ -148,6 +149,29 @@ async function renewLease(jobId: string): Promise<void> {
 }
 
 /**
+ * Stop routes can be compiled into a different module instance from the
+ * detached executor. Poll the persisted state so a DB-only cancellation also
+ * reaches the executor's AbortSignal while a stage is still running.
+ */
+function startJobCancellationWatcher(jobId: string, controller: AbortController): NodeJS.Timeout {
+  return setInterval(() => {
+    void (async () => {
+      try {
+        const job = await db.job.findUnique({
+          where: { id: jobId },
+          select: { status: true },
+        });
+        if ((job?.status === 'cancel_requested' || job?.status === 'cancelled') && !controller.signal.aborted) {
+          controller.abort();
+        }
+      } catch (error) {
+        console.error(`[execution] cancellation check failed for ${jobId}:`, error);
+      }
+    })();
+  }, CANCELLATION_POLL_INTERVAL_MS);
+}
+
+/**
  * Start a job. Creates a queued record with idempotency key, then atomically
  * claims and executes it. Concurrency is guarded by the in-memory guard
  * (single-process optimization) AND the DB lease (correctness guarantee).
@@ -223,11 +247,13 @@ async function runPipeline(
   let controller: AbortController | null = null;
   let heartbeat: NodeJS.Timeout | null = null;
   let leaseTimer: NodeJS.Timeout | null = null;
+  let cancellationTimer: NodeJS.Timeout | null = null;
   console.log(`[execution] starting job ${jobId} (${type})`);
 
   try {
     const activeController = createJobAbortController(jobId);
     controller = activeController;
+    cancellationTimer = startJobCancellationWatcher(jobId, activeController);
     heartbeat = startJobHeartbeat(jobId, HEARTBEAT_INTERVAL_MS);
 
     // Periodic lease renewal — if the process hangs, the lease expires and
@@ -256,6 +282,7 @@ async function runPipeline(
     invalidateDashboardAnalyticsCache();
     stopJobHeartbeat(heartbeat);
     if (leaseTimer) clearInterval(leaseTimer);
+    if (cancellationTimer) clearInterval(cancellationTimer);
     reservation.release();
     clearJobAbortController(jobId);
   }
@@ -681,21 +708,22 @@ function summarizeCollectResult(
 }
 
 /**
- * Abort the currently running job. Sets cancel_requested in DB so the worker
- * can cooperatively stop at the next stage boundary, then aborts the
- * in-memory AbortController for the current process.
+ * Request cancellation for every running job. The database write must happen
+ * even when the stop route and the executor do not share the same module
+ * instance; the in-memory controller only provides faster cancellation in the
+ * current process.
  */
 export async function abortRunningJob(): Promise<{ resetCount: number }> {
   const jobId = abortCurrentJob();
-  if (jobId) {
-    await db.job.updateMany({
-      where: { id: jobId, status: 'running' },
-      data: { status: 'cancel_requested', cancelRequestedAt: new Date() },
-    });
+  const requested = await db.job.updateMany({
+    where: { status: 'running' },
+    data: { status: 'cancel_requested', cancelRequestedAt: new Date() },
+  });
+  if (jobId || requested.count > 0) {
     return { resetCount: 0 };
   }
 
-  // No in-process owner — only reset orphaned running jobs with expired leases
+  // No active running job — reset only already-requested orphaned jobs.
   const now = new Date();
   const reset = await db.job.updateMany({
     where: {

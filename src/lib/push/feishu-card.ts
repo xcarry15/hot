@@ -19,6 +19,7 @@ export type PushUrgency = 'urgent' | 'normal';
 
 export interface FeishuCardArticleInput {
   id: string;
+  publicEventId: string;
   title: string;
   summary: string;
   brand: string;
@@ -152,7 +153,7 @@ export function buildFeishuCard(
           tag: 'button',
           text: { tag: 'plain_text', content: '查看原文' },
           type: 'primary',
-          url: `${process.env.NEXT_PUBLIC_SITE_URL || ''}/news/${article.id}`,
+          url: `${process.env.NEXT_PUBLIC_SITE_URL || ''}/news/${article.publicEventId}`,
         },
       ],
     },

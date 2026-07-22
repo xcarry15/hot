@@ -51,6 +51,7 @@ export async function clusterAllPending(signal?: AbortSignal, jobId?: string): P
         await clusterArticle(article.id, signal);
         processed++;
       } catch (error) {
+        if (signal?.aborted) throw error;
         failed = true;
         errors++;
         await markClusterFailure(article.id, error);

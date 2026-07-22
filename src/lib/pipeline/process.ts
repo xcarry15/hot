@@ -106,6 +106,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
               try {
                 await recordKeywordCandidates(article.title);
               } catch (candidateError) {
+                if (signal?.aborted) throw candidateError;
                 console.error('[processAllPending] keyword candidate recording failed:', candidateError);
               }
               const recorded = await recordDiscardedItem({
@@ -127,6 +128,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
             }
           } catch (err) {
             // 关键字 DB 异常时不应阻塞 process —— 宁可放过不可误杀
+            if (signal?.aborted) throw err;
             const errMsg = err instanceof Error ? err.message : String(err);
             console.error(`[processAllPending] keyword check failed for article=${article.id}:`, errMsg);
           }
@@ -209,12 +211,14 @@ export async function repairPublishedDates(signal?: AbortSignal): Promise<void> 
               console.log(`[repairPublishedDates] fixed article=${article.id} title="${article.title}" → ${detailDate.toISOString()}`);
             }
           } catch (err) {
+            if (signal?.aborted) throw err;
             console.error(`[repairPublishedDates] failed for article=${article.id}:`, err);
           }
         })
       );
     }
   } catch (err) {
+    if (signal?.aborted) throw err;
     console.error('[repairPublishedDates] error:', err);
   }
 }

@@ -20,9 +20,10 @@ npm run db:optimize
 npm run dev
 ```
 
-开发地址：`http://localhost:3011`。根路径 `/` 是公开新闻卡片页，文章详情使用 `/news/[id]`；后台位于 `/admin`，左侧导航收敛为“工作台”和“设置”。生产环境必须在 `.env` 设置 `API_TOKEN`，首次访问后台时输入该 token 建立临时 HttpOnly 会话；Cookie 保存由 Token 派生的会话值，不直接保存可调用 API 的原始 Token，旧版原始 Token Cookie 不再兼容。公开端保持匿名访问。生产部署还应将 `NEXT_PUBLIC_SITE_URL` 设置为正式访问地址，用于 canonical、Open Graph 和 sitemap。公开导航中的“工具”“数据”目前是占位入口，暂未提供实际页面。
+开发地址：`http://localhost:3011`。根路径 `/` 是公开新闻卡片页，文章详情使用 `/news/[id]`；后台位于 `/admin`，左侧导航收敛为“工作台”和“设置”。生产环境必须在 `.env` 设置 `API_TOKEN`，首次访问后台时输入该 token 建立临时 HttpOnly 会话；Cookie 保存由 Token 派生的会话值，不直接保存可调用 API 的原始 Token，旧版原始 Token Cookie 不再兼容。公开端保持匿名访问。生产部署还应将 `NEXT_PUBLIC_SITE_URL` 设置为正式访问地址，用于 canonical、Open Graph 和 sitemap。公开导航中的"工具"目前为占位页面，"数据"暂未提供实际页面。
 
-交互性能采用轻量策略：后台工作台与设置页按访问动态加载，设置标签悬停、聚焦或触摸时预加载目标代码块；文章详情工作台只在首次打开时加载，标题悬停 120ms 后同时预加载工作台代码与文章详情，快速划过会取消详情请求，并在 15 秒内合并/复用详情结果。分享海报组件和二维码依赖只在用户点击分享后挂载。公开 Event 持久化 `publicDateKey/publicSortAt`，公开列表先读取有限日期键，再只查询这些日期的文章，每个日期保留 250 篇硬上限，不再以全库正文扫描支撑分页；公开总数与刷新探测共享 60 秒短缓存，翻页不重复执行相同全量计数。文章详情的 metadata 与页面渲染复用同一次详情读取，服务端详情结果使用最多 100 个 key、30 秒的有界短缓存，上一篇/下一篇只读取当前日期组和相邻日期边界，其他来源读取由 `eventId/publishedAt/createdAt` 联合索引支撑；公开列表短缓存限制为最多 50 个 key。工作台按项目日处理量读取最近 250 篇 Article 和 250 条未入库记录，并额外补齐不在该窗口内的全部技术待办 Article；“全部文章”和人工待办使用独立服务端分页列表，不扩大任务快照。任务运行时每 3 秒只读取轻量 Job 进度，阶段变化或任务结束才刷新完整文章记录，空闲时每 15 秒刷新，页面不可见时暂停周期请求。技术工作队列使用 5 秒短缓存合并导航计数和工作台的重复扫描，Job 完成后立即失效，人工待办数由数据库直接唯一计数。数据看板统计使用 15 秒短缓存合并重复请求，隐藏时暂停 30 秒自动刷新，Job 历史查询限制为最近 500 条；Job 完成后统计缓存立即失效。采集阶段按数据源批量预取本轮 URL 对应的 Article 和 DiscardedItem，关键词候选一次批量预取并在短事务中写入，浏览量和原文点击统一聚合到单个短事务落库。
+
+交互性能采用轻量策略：后台工作台与设置页按访问动态加载，设置标签悬停、聚焦或触摸时预加载目标代码块；文章详情工作台只在首次打开时加载，标题悬停 120ms 后同时预加载工作台代码与文章详情，快速划过会取消详情请求，并在 15 秒内合并/复用详情结果。分享海报组件和二维码依赖只在用户点击分享后挂载。公开 Event 持久化 `publicDateKey/publicSortAt`，公开首页按文章数量分页，首批和每次"加载更多"均读取 12 篇；分页使用 `publicSortAt + Event.id` 稳定游标，不再按日期批量查询，也不设单日截断上限；公开总数与刷新探测共享 60 秒短缓存，翻页不重复执行相同全量计数。文章详情的 metadata 与页面渲染复用同一次详情读取，服务端详情结果使用最多 100 个 key、30 秒的有界短缓存，上一篇/下一篇只读取当前日期组和相邻日期边界，其他来源读取由 `eventId/publishedAt/createdAt` 联合索引支撑；公开列表短缓存限制为最多 50 个 key。工作台按项目日处理量读取最近 250 篇 Article 和 250 条未入库记录，并额外补齐不在该窗口内的全部技术待办 Article；“全部文章”和人工待办使用独立服务端分页列表，不扩大任务快照。任务运行时每 3 秒只读取轻量 Job 进度，阶段变化或任务结束才刷新完整文章记录，空闲时每 15 秒刷新，页面不可见时暂停周期请求。技术工作队列使用 5 秒短缓存合并导航计数和工作台的重复扫描，Job 完成后立即失效，人工待办数由数据库直接唯一计数。数据看板统计使用 15 秒短缓存合并重复请求，隐藏时暂停 30 秒自动刷新，Job 历史查询限制为最近 500 条；Job 完成后统计缓存立即失效。采集阶段按数据源批量预取本轮 URL 对应的 Article 和 DiscardedItem，关键词候选一次批量预取并在短事务中写入，浏览量和原文点击统一聚合到单个短事务落库。
 
 公开首页按文章数量分页，首批和每次“加载更多”均读取 12 篇；分页使用 `publicSortAt + Event.id` 稳定游标，允许同一日期跨批加载并在前端合并为同一日期组。首页只保留单层日期标题，不再使用月份与日期折叠，使单次查询和 DOM 增量保持有界。
 公开列表不再按日期批量查询，也不设单日截断上限；即使单日文章量很大，也可通过数量游标继续完整加载。
@@ -58,7 +59,7 @@ src/app/sitemap.ts    公开首页和文章详情 sitemap
 src/components/       工作台、文章详情抽屉、设置、数据源和公开端 UI 组件
 src/features/         前端 API 客户端
 src/contracts/        API、AI、文章、推送等共享契约
-src/lib/              execution、pipeline、AI、推送、去重、设置等核心模块
+src/lib/              execution、pipeline、AI、Event 聚类、推送、设置等核心模块
 prisma/               schema、seed、migration 历史
 tests/                Vitest 测试
 scripts/              migration baseline 与维护脚本
@@ -71,7 +72,7 @@ db/                   本地 SQLite 数据（不进入部署包）
 ## 当前架构与数据事实
 
 - Next.js 16 App Router + React 19 + TypeScript；Prisma 6 + SQLite；单进程模块化单体，生产只运行一个 PM2 实例。
-- `src/lib/execution.ts` 是唯一批量 Job 编排入口，内存互斥保证同时只有一个批量任务。process、AI、cluster 阶段会按固定大小分批消费本次符合条件的全部积压，不会因单批上限而把未处理完的任务标记为成功。Job 表的阶段、进度、错误数和 heartbeat 是任务状态事实源；Job 失败直接进入 `failed`，不在没有独立 Worker 的前提下自动重新入队；停止通过 `AbortSignal` 协作式取消并最终写入 `cancelled`。
+- `src/lib/execution.ts` 是唯一批量 Job 编排入口，内存互斥保证同时只有一个批量任务。process、AI、cluster 阶段会按固定大小分批消费本次符合条件的全部积压，不会因单批上限而把未处理完的任务标记为成功。Job 表的阶段、进度、错误数和 heartbeat 是任务状态事实源；Job 失败直接进入 `failed`，不在没有独立 Worker 的前提下自动重新入队；停止请求会先把 `running` 写为 `cancel_requested`，再通过 `AbortSignal` 协作式取消并最终写入 `cancelled`，因此停止 API 与执行器不共享模块实例时也能生效。
 - 调度器每分钟 tick；自动抓取默认关闭。普通批量任务使用 `/api/crawl` 的 `all` 阶段，分阶段入口 `collect / process / cluster / ai / push` 仅供管理员运维。
 
 | 阶段 | 入口代码 | 作用 |
@@ -82,6 +83,8 @@ db/                   本地 SQLite 数据（不进入部署包）
 | cluster | `src/lib/pipeline/cluster.ts` | 使用 AI 事件身份将 Article 归入 Event，记录失败重试与待复核状态 |
 | push | `src/lib/pipeline/push-bridge.ts` | 按统一条件投递未推送文章 |
 
+Event 对外释放的基础完整性门禁统一收敛在 `src/lib/event-release-policy.ts`：Event 必须为 active 且已确认，Article 必须是当前代表、已完成聚类与 AI、来源未删除。代表选择、公开快照和所有推送模式共同复用该规则；公开来源开关、评分、相关度、软文和自动推送开关仍分别属于 Publication / Delivery 的渠道策略。公开快照批量刷新会一次预取涉及的 Event，避免按 Article 重复查询 Event。
+
 关键 API 约束：`POST /api/crawl` 是批量任务主入口；`POST /api/articles/[id]/workflow` 是单篇处理、聚类、AI 和普通推送恢复/重跑的唯一入口，其中 `retry` 只允许当前可恢复失败步骤，`regenerate` 会按起点重置并重算，且不能用于完整重推；`POST /api/articles/[id]/technical-status` 仅负责忽略或恢复技术待办，不删除 Article。推送服务使用 `normal`、`retry_failed`、`manual_force`、`repush_all` 四种明确模式：流水线普通推送、最新失败目标恢复、人工绕过阈值推送、Event 级完整重推。`manual_force` 与 `repush_all` 仍要求 active Event、有效代表文章、聚类完成和 AI 完成。`GET /api/crawl-log/status` 与 `GET /api/admin/work-queue-summary` 共同复用唯一技术待办事实源；推送失败只映射到代表 Article，并按当前启用目标的最新 PushDelivery 判断，PushLog 仅作为历史审计。旧 `/api/articles/refetch`、`/api/articles/reprocess` 和 Article 级 `/api/push` 已删除。Route Handler 只做适配，事务和业务规则由 Service 负责。
 
 `InboxSnapshot` 保存近 90 天的待归类积压快照，概览以此展示积压趋势；快照是派生指标，不改变文章流水线事实。
@@ -90,7 +93,7 @@ db/                   本地 SQLite 数据（不进入部署包）
 
 `Job`、`FetchLog`、`PushLog`、`PushTarget`、`PushDelivery`、`DiscardedItem` 和 `EventClusterAudit` 分别记录任务、采集、目标配置、当前目标级投递账本、未入库条目和聚类/人工纠错事实。`Article` 记录全文、AI 与人工校准、归类和事件归属；`Event` 记录代表文章、来源数量、`clusterReviewStatus` 和公开状态。`clusterReviewStatus=pending` 时整个 Event 不得选代表、公开或推送，所有待复核成员确认后才恢复为 `confirmed`。PushDelivery 以 Event、目标、内容版本和模式做幂等，并使用租约防止并发发送；未知结果不得自动重发，只能人工强制确认。PushLog 关联 Event，并保存投递时的代表 Article，作为历史审计，不跟随当前代表文章变化。删除最后一篇 Article 时空 Event 归档而不物理删除，以保留投递审计和外键一致性。未配置可用 Webhook 时，批量推送直接跳过，不为每个 Event 重复写失败日志。
 
-设置默认值、校验、敏感性和导出策略集中在 `src/lib/settings-catalog.ts`；AI Provider 定义在 `src/contracts/ai-provider.ts`。AI 先提取“品牌/主体（最多 3 个）/动作词/事项词”三段式事件身份；有明确品牌时事件键主体直接复用 `brand`，无品牌时才使用其他直接参与主体。主体单项不超过 16 个汉字，动作不超过 8 个字符，事项不超过 16 个汉字；`src/contracts/event-identity.ts` 会将常见同义动作压缩为稳定短语，再确定性生成事件键，模型不直接决定最终键字符串。事件身份提示词禁止行业趋势、战略概括和多动作长句；事项只保留一个地点、季度、数量、金额或对象词，身份宽泛时降低置信度。事件聚类在 AI 完成后执行，规则集中在 `src/contracts/event-clustering.ts`：只比较最近 7 天 active Event，先以 48 个高召回候选扩大覆盖，再以最多 15 个候选做完整排序；只有事件键/结构化身份、带交并比确认的正文相似度，或带主体锚点的标题相似度达到灰区门槛时，才把最多 5 个候选交给 AI，避免仅因品牌、行业词或正文覆盖率偏高制造待复核。规范事件键精确一致和结构化身份相似度是主证据，内容指纹、标准化标题、正文 8 字片段重合、发布时间距离与共享主体锚点作为辅助证据，“即将发生/已经发生”阶段冲突、主体冲突以及不同年份/季度/届次作为反证。候选成员保留代表文章和最近 12 篇已完成分析的报道，避免只比较最新 8 篇造成事件表征漂移。内容指纹一致可直接归入；标题完全一致仍须事件身份一致或高度相似，避免周期性同标题误并。聚合快讯或高证据灰区文章进入 `needs_review`，待复核 Event 仍参与后续候选召回，但 Event 级 `clusterReviewStatus=pending` 时不产生代表文章、公开或推送；只有所有灰区候选均以至少 85 置信度判定为不同事件时，才允许新建普通 Event。AI 超时、格式错误或低置信度结论一律进入待复核，不能降级成可推送事件。推送前还会对最近 14 天已推送 Event 做一次高置信重复拦截；人工强制推送仍由明确模式绕过。当前仍不引入 Embedding。
+设置默认值、校验、敏感性和导出策略集中在 `src/lib/settings-catalog.ts`；AI Provider 定义在 `src/contracts/ai-provider.ts`。OpenCode 设置页的推荐模型通过“刷新推荐”按钮调用 `/api/settings/opencode-models`，服务端实时读取 `https://opencode.ai/zen/v1/models`，只保留免费模型；读取失败时使用本地免费模型兜底。AI 先提取“品牌/主体（最多 3 个）/动作词/事项词”三段式事件身份；有明确品牌时事件键主体直接复用 `brand`，无品牌时才使用其他直接参与主体。主体单项不超过 16 个汉字，动作不超过 8 个字符，事项不超过 16 个汉字；`src/contracts/event-identity.ts` 会将常见同义动作压缩为稳定短语，再确定性生成事件键，模型不直接决定最终键字符串。事件身份提示词禁止行业趋势、战略概括和多动作长句；事项只保留一个地点、季度、数量、金额或对象词，身份宽泛时降低置信度。事件聚类在 AI 完成后执行，规则集中在 `src/contracts/event-clustering.ts`：只比较最近 7 天 active Event，先以 48 个高召回候选扩大覆盖，再以最多 15 个候选做完整排序；只有事件键/结构化身份、带交并比确认的正文相似度，或带主体锚点的标题相似度达到灰区门槛时，才把最多 5 个候选交给 AI，避免仅因品牌、行业词或正文覆盖率偏高制造待复核。规范事件键精确一致和结构化身份相似度是主证据，内容指纹、标准化标题、正文 8 字片段重合、发布时间距离与共享主体锚点作为辅助证据，“即将发生/已经发生”阶段冲突、主体冲突以及不同年份/季度/届次作为反证。候选成员保留代表文章和最近 12 篇已完成分析的报道，避免只比较最新 8 篇造成事件表征漂移。内容指纹一致可直接归入；标题完全一致仍须事件身份一致或高度相似，避免周期性同标题误并。聚合快讯或高证据灰区文章进入 `needs_review`，待复核 Event 仍参与后续候选召回，但 Event 级 `clusterReviewStatus=pending` 时不产生代表文章、公开或推送；只有所有灰区候选均以至少 85 置信度判定为不同事件时，才允许新建普通 Event。AI 超时、格式错误或低置信度结论一律进入待复核，不能降级成可推送事件。推送前还会对最近 14 天已推送 Event 做一次高置信重复拦截；人工强制推送仍由明确模式绕过。当前仍不引入 Embedding。
 
 AI 重置由 `src/lib/article-ai-reset.ts` 中的重置 helper 统一生成，重新分析继续保留人工覆盖。旧 Article duplicate 状态和“取消重复并分析”入口已经删除；内容指纹只作为 Event 聚类证据。
 
@@ -138,3 +141,4 @@ npm run build
 ## 安全与发布文件
 
 不要提交 `.env`、API key、Webhook URL、SQLite 数据或部署压缩包。部署包不包含 `.env*`、`db/`、测试、设计预览、根目录 Markdown、本地工具配置或旧压缩包；`bat/` 中的部署/Nginx 文档会随包保留。完整现场流程见 `bat/部署和更新方法.txt`，Nginx 模板见 `bat/本项目的nginx.txt`。
+

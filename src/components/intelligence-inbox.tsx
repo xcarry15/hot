@@ -491,7 +491,7 @@ export default function IntelligenceInbox({
         toast.error(errorMessage(error, "事件详情加载失败"));
       }
     },
-    [detail?.id],
+    [detail],
   );
 
   const refreshArticleDetail = useCallback(async (articleId: string) => {

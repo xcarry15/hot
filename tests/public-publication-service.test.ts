@@ -21,7 +21,9 @@ describe('public-publication-service', () => {
     mocks.article.update.mockResolvedValue({});
     mocks.article.updateMany.mockResolvedValue({ count: 0 });
     mocks.event.findUnique.mockResolvedValue({
+      status: 'active',
       representativeArticleId: 'a1',
+      clusterReviewStatus: 'confirmed',
       publicStatus: 'unpublished',
       publicPublishedAt: null,
       firstSeenAt: new Date('2026-07-15T00:00:00.000Z'),
@@ -189,7 +191,9 @@ describe('public-publication-service', () => {
       .mockReset()
       .mockResolvedValueOnce({ representativeArticleId: 'a1' })
       .mockResolvedValueOnce({
+        status: 'active',
         representativeArticleId: 'a1',
+        clusterReviewStatus: 'confirmed',
         publicStatus: 'published',
         publicPublishedAt: new Date('2026-07-15T00:00:00.000Z'),
         firstSeenAt: new Date('2026-07-15T00:00:00.000Z'),

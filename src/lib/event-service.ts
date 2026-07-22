@@ -4,6 +4,7 @@ import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshEventPublicPublication } from '@/lib/public-publication-service';
 import { splitBrands } from '@/lib/shared/article-codecs';
 import { getPushTargetStates } from '@/lib/push/delivery';
+import { isRepresentativeEligible as isReleaseRepresentativeEligible } from '@/lib/event-release-policy';
 
 const SAME_BRAND_CANDIDATE_TAKE = 30;
 const SAME_BRAND_CANDIDATE_WINDOW_DAYS = 30;
@@ -115,24 +116,18 @@ export function deriveEventClusterReviewStatus(clusterStatuses: readonly string[
   return clusterStatuses.some((status) => status === 'needs_review') ? 'pending' : 'confirmed';
 }
 
-function representativeReady(article: RepresentativeCandidate): boolean {
-  return article.clusterStatus === 'clustered'
-    && article.aiStatus === 'done'
-    && article.source.deletedAt === null;
-}
-
 export function isRepresentativeEligible(article: RepresentativeCandidate): boolean {
-  return representativeReady(article);
+  return isReleaseRepresentativeEligible(article);
 }
 
 export function selectRepresentativeCandidate(articles: RepresentativeCandidate[]): string | null {
-  const ready = articles.filter(representativeReady);
+  const ready = articles.filter(isReleaseRepresentativeEligible);
   ready.sort(compareRepresentative);
   return ready[0]?.id ?? null;
 }
 
 function compareRepresentative(left: RepresentativeCandidate, right: RepresentativeCandidate): number {
-  const ready = Number(representativeReady(right)) - Number(representativeReady(left));
+  const ready = Number(isReleaseRepresentativeEligible(right)) - Number(isReleaseRepresentativeEligible(left));
   if (ready !== 0) return ready;
   const important = Number(right.reviewStatus === 'important') - Number(left.reviewStatus === 'important');
   if (important !== 0) return important;
@@ -157,7 +152,7 @@ async function chooseRepresentative(client: EventTransaction, eventId: string): 
         source: { select: { publicEnabled: true, deletedAt: true } },
       },
     });
-    if (manual && representativeReady(manual)) return { id: manual.id, manual: true };
+    if (manual && isReleaseRepresentativeEligible(manual)) return { id: manual.id, manual: true };
   }
   const articles = await client.article.findMany({
     where: { eventId },
@@ -640,7 +635,7 @@ export async function setEventRepresentative(eventId: string, articleId: string)
       },
     }),
   ]);
-  if (event?.status !== 'active' || event.clusterReviewStatus !== 'confirmed' || !member || !representativeReady(member)) return false;
+  if (event?.status !== 'active' || event.clusterReviewStatus !== 'confirmed' || !member || !isReleaseRepresentativeEligible(member)) return false;
   await db.$transaction(async (tx) => {
     await tx.event.update({
       where: { id: eventId },

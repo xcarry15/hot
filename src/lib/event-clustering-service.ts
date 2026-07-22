@@ -790,6 +790,7 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     try {
       rawDecision = await askAiSameEvent(article, item.evidence, item.candidate, signal);
     } catch (error) {
+      if (signal?.aborted) throw error;
       console.warn('[event-clustering] candidate decision failed:', error);
       aiCandidates.push({
         candidateEventId: item.candidate.id,

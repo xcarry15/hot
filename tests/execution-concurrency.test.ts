@@ -70,6 +70,19 @@ describe.sequential('global job execution invariant', () => {
     mocks.jobUpdateMany.mockReset().mockResolvedValue({ count: 1 }); // needed for claimAndRunJob
   });
 
+  it('persists a stop request when the executor is in another module instance', async () => {
+    const stopped = await abortRunningJob();
+
+    expect(stopped).toEqual({ resetCount: 0 });
+    expect(mocks.jobUpdateMany).toHaveBeenCalledWith({
+      where: { status: 'running' },
+      data: {
+        status: 'cancel_requested',
+        cancelRequestedAt: expect.any(Date),
+      },
+    });
+  });
+
   it('rejects every overlapping job type and releases the reservation after completion', async () => {
     const running = deferred<{ results: never[]; totalNewArticles: number; errors: number }>();
     mocks.jobCreate.mockResolvedValueOnce({ id: 'job-1' }).mockResolvedValueOnce({ id: 'job-2' });

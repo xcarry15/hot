@@ -1,12 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ComponentType } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { useTheme } from '@/components/theme-provider'
 import { Activity, ExternalLink, Settings, Sun, Moon } from 'lucide-react'
 import { URL_PARAM_DETAIL, URL_PARAM_TAB } from '@/components/crawl-log/constants'
+import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
+import { APP_VERSION } from '@/contracts/app'
 
 type TabKey = 'crawl-log' | 'settings'
 
@@ -55,7 +57,6 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
   const [mounted, setMounted] = useState(false)
   const router = useRouter()
   const [queueCounts, setQueueCounts] = useState({ human: 0, technical: 0 })
-  const lastQueueFetchAt = useRef(0)
 
   useEffect(() => {
     setMounted(true)
@@ -73,12 +74,9 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
   }, [])
 
   const refreshQueueCounts = useCallback((force = false) => {
-    if (!force && Date.now() - lastQueueFetchAt.current < 10_000) return
-    lastQueueFetchAt.current = Date.now()
-    fetch('/api/admin/work-queue-summary')
-      .then((response) => response.ok ? response.json() : null)
-      .then((data) => data && setQueueCounts({ human: data.human.total, technical: data.technical.total }))
-      .catch(() => undefined)
+    fetchWorkQueueSummary(force).then((data) => {
+      setQueueCounts({ human: data.human.total, technical: data.technical.total })
+    }).catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -173,7 +171,7 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
                 <span>{resolvedTheme === 'dark' ? '亮色模式' : '暗色模式'}</span>
               </button>
             ) : <div className="w-full h-9" />}
-            <p className="mt-2 px-2.5 font-mono text-[10px] tracking-[0.08em] text-muted-foreground/70">v1.0.0</p>
+            <p className="mt-2 px-2.5 font-mono text-[10px] tracking-[0.08em] text-muted-foreground/70">v{APP_VERSION}</p>
           </div>
         </aside>
 

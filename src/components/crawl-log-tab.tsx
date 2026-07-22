@@ -37,6 +37,7 @@ import DiscardedDetailSheet from './article-detail-sheet'
 import ArticleWorkspaceDrawer from './article-workspace-drawer'
 import ArticleLibrarySheet from './article-library-sheet'
 import { fetchSettings, saveSettings } from '@/features/settings-api.client'
+import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
 import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
 import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
 import { retrySource, retrySources } from '@/features/sources-api.client'
@@ -69,10 +70,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const [humanQueue, setHumanQueue] = useState({ total: 0, clusterReview: 0, unreviewed: 0, lowConfidence: 0 })
 
   const refreshHumanQueue = useCallback(() => {
-    fetch('/api/admin/work-queue-summary')
-      .then((response) => response.ok ? response.json() : null)
-      .then((data) => data?.human && setHumanQueue(data.human))
-      .catch(() => undefined)
+    fetchWorkQueueSummary(true).then((data) => setHumanQueue(data.human)).catch(() => undefined)
   }, [])
 
   useEffect(() => {

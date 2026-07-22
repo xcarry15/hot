@@ -10,7 +10,15 @@ export const AI_PROVIDERS = {
     name: 'OpenCode (免费)',
     baseUrl: 'https://opencode.ai/zen/v1',
     defaultModel: 'big-pickle',
-    models: ['big-pickle', 'deepseek-v4-flash-free', 'mimo-v2.5-free', 'nemotron-3-super-free'],
+    // OpenCode 推荐模型由 /api/settings/opencode-models 动态刷新；这里仅作为接口不可用时的兜底。
+    models: [
+      'big-pickle',
+      'deepseek-v4-flash-free',
+      'mimo-v2.5-free',
+      'nemotron-3-ultra-free',
+      'north-mini-code-free',
+      'laguna-s-2.1-free',
+    ],
     needsApiKey: true,
   },
   deepseek: {

@@ -17,6 +17,7 @@ import { findRecentPushedEventDuplicate } from '@/lib/event-clustering-service';
 import { PUSH_MAX_RETRIES, PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/push/policy';
 import { getPushUrgency, buildFeishuCard } from '@/lib/push/feishu-card';
 import { sendFeishuWebhook } from '@/lib/push/feishu-transport';
+import { getEventReleaseBlockReason, type EventReleaseBlockReason } from '@/lib/event-release-policy';
 
 export type PushDeliveryMode = 'normal' | 'retry_failed' | 'manual_force' | 'repush_all';
 
@@ -59,8 +60,24 @@ async function resolvePushTarget(config: WebhookConfig): Promise<{ id: string; n
   });
 }
 
-function contentVersion(article: { id: string; title: string; updatedAt?: Date | null }): string {
-  return createHash('sha256').update(`${article.id}|${article.title}`).digest('hex').slice(0, 12);
+function contentVersion(article: {
+  id: string;
+  title: string;
+  summary?: string;
+  brand?: string;
+  category?: string;
+  score: number;
+  relevance: number;
+  keyPoints?: string;
+  isAd: boolean;
+  originalSource?: string | null;
+  source?: { name: string } | null;
+  updatedAt?: Date | null;
+}): string {
+  const sourceName = article.originalSource || article.source?.name || '';
+  return createHash('sha256')
+    .update(`${article.id}|${article.title}|${article.summary || ''}|${article.brand || ''}|${article.category || ''}|${article.score}|${article.relevance}|${article.keyPoints || ''}|${article.isAd ? '1' : '0'}|${sourceName}`)
+    .digest('hex').slice(0, 12);
 }
 
 export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<Map<string, PushTargetState[]>> {
@@ -79,7 +96,6 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
     select: { id: true, urlHash: true },
   });
   const targetByHash = new Map(targets.map((target) => [target.urlHash, target.id]));
-  const targetIds = targets.map((target) => target.id);
 
   // Use PushDelivery for latest per-target state
   const deliveries = await db.pushDelivery.findMany({
@@ -92,36 +108,6 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
   for (const delivery of deliveries) {
     const key = `${delivery.eventId}\u0000${delivery.targetId}`;
     if (!latest.has(key)) latest.set(key, delivery);
-  }
-
-  // Also check legacy PushLog for backward compat (by targetId or webhookUrl)
-  const enabledUrls = enabled.map((config) => config.url.trim());
-  const pushLogs = await db.pushLog.findMany({
-    where: {
-      eventId: { in: uniqueEventIds },
-      OR: targetIds.length > 0
-        ? [{ targetId: { in: targetIds } }, { webhookUrl: { in: enabledUrls } }]
-        : [{ webhookUrl: { in: enabledUrls } }],
-    },
-    orderBy: { createdAt: 'desc' },
-    select: { eventId: true, targetId: true, webhookUrl: true, status: true, createdAt: true },
-  });
-  const targetByUrl = new Map(enabled.map((config) => {
-    const hash = computeUrlHash(config.url);
-    return [config.url.trim(), targetByHash.get(hash)];
-  }));
-  for (const log of pushLogs) {
-    const tid = log.targetId || targetByUrl.get(log.webhookUrl);
-    if (!tid) continue;
-    const key = `${log.eventId}\u0000${tid}`;
-    if (!latest.has(key)) {
-      latest.set(key, {
-        ...log,
-        targetId: tid,
-        status: log.status === 'success' ? 'succeeded' : 'failed',
-        leaseExpiresAt: null,
-      } as typeof deliveries[number]);
-    }
   }
 
   for (const eventId of uniqueEventIds) {
@@ -211,18 +197,22 @@ async function pushEventToFeishuInternal(
   assertNotAborted(signal);
   const event = await db.event.findUnique({
     where: { id: eventId },
-    include: { representativeArticle: { include: { source: { select: { name: true } } } } },
+    include: { representativeArticle: { include: { source: { select: { name: true, deletedAt: true } } } } },
   });
-  if (!event || event.status !== 'active' || !event.representativeArticle) return emptyPushResult(mode, 'failed', '事件或代表文章不存在');
-  if (event.clusterReviewStatus !== 'confirmed') {
-    return emptyPushResult(mode, 'failed', '事件仍待聚类复核，不能推送');
-  }
+  if (!event || !event.representativeArticle) return emptyPushResult(mode, 'failed', '事件或代表文章不存在');
   const article = event.representativeArticle;
-  if (article.clusterStatus !== 'clustered') {
-    return emptyPushResult(mode, 'failed', '文章尚未完成事件聚类，不能推送');
-  }
-  if (article.aiStatus !== 'done') {
-    return emptyPushResult(mode, 'failed', '代表文章尚未完成 AI 分析，不能推送');
+  const releaseBlock = getEventReleaseBlockReason(event, article.id, article);
+  if (releaseBlock) {
+    const messages: Record<EventReleaseBlockReason, string> = {
+      'event-not-active': '事件不是 active 状态，不能推送',
+      'event-needs-review': '事件仍待聚类复核，不能推送',
+      'representative-missing': '事件缺少代表文章，不能推送',
+      'article-not-representative': '当前文章不是事件代表文章，不能推送',
+      'cluster-not-done': '文章尚未完成事件聚类，不能推送',
+      'ai-not-done': '代表文章尚未完成 AI 分析，不能推送',
+      'source-deleted': '代表文章来源已删除，不能推送',
+    };
+    return emptyPushResult(mode, 'failed', messages[releaseBlock]);
   }
 
   if (mode === 'retry_failed' && event.nextPushRetryAt && event.nextPushRetryAt > new Date()) {
@@ -298,7 +288,11 @@ async function pushEventToFeishuInternal(
 
   const urgency = getPushUrgency(article);
   const relatedArticles = (await getRelatedArticles(article.id, 3, { onlyPushed: true })) ?? [];
-  const card = buildFeishuCard(article, urgency, { relatedArticles });
+  const card = buildFeishuCard(
+    { ...article, publicEventId: eventId },
+    urgency,
+    { relatedArticles },
+  );
 
   let attemptSucceeded = 0;
   for (const config of enabled) {

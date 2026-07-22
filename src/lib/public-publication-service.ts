@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { SETTING_KEYS } from '@/lib/settings-catalog'
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache'
 import { getPublicDateKey } from '@/lib/shared/public-date'
+import { getEventReleaseBlockReason } from '@/lib/event-release-policy'
 
 const PUBLIC_MIN_SCORE_KEY = SETTING_KEYS.PUBLIC_MIN_SCORE
 const PUBLIC_MIN_RELEVANCE_KEY = SETTING_KEYS.PUBLIC_MIN_RELEVANCE
@@ -48,6 +49,39 @@ type PublicPublicationCandidate = {
   }
 }
 
+type PublicPublicationEvent = {
+  id: string
+  status: string
+  representativeArticleId: string | null
+  clusterReviewStatus: string
+  publicStatus: string
+  publicPublishedAt: Date | null
+  firstSeenAt: Date
+}
+
+const publicationEventSelect = {
+  id: true,
+  status: true,
+  representativeArticleId: true,
+  clusterReviewStatus: true,
+  publicStatus: true,
+  publicPublishedAt: true,
+  firstSeenAt: true,
+} as const
+
+async function getPublicationEventMap(
+  client: PublicPublicationDb,
+  articles: PublicPublicationCandidate[],
+): Promise<Map<string, PublicPublicationEvent>> {
+  const eventIds = [...new Set(articles.flatMap((article) => article.eventId ? [article.eventId] : []))]
+  if (eventIds.length === 0) return new Map()
+  const events = await client.event.findMany({
+    where: { id: { in: eventIds } },
+    select: publicationEventSelect,
+  })
+  return new Map(events.map((event) => [event.id, event]))
+}
+
 async function getPublicPublicationConfig(client: PublicPublicationDb = db): Promise<PublicPublicationConfig> {
   const [minScore, minRelevance, hideAds] = await Promise.all([
     client.setting.findUnique({ where: { key: PUBLIC_MIN_SCORE_KEY }, select: { value: true } }),
@@ -63,10 +97,11 @@ async function getPublicPublicationConfig(client: PublicPublicationDb = db): Pro
   }
 }
 
-function getRevokeReason(article: PublicPublicationCandidate, config: PublicPublicationConfig): string {
-  if (!article.eventId || article.clusterStatus !== 'clustered') return 'event-not-ready'
-  if (article.aiStatus !== 'done') return 'ai-not-done'
-  if (article.source.deletedAt || !article.source.publicEnabled) return 'source-disabled'
+function getRevokeReason(article: PublicPublicationCandidate, event: PublicPublicationEvent | null, config: PublicPublicationConfig): string {
+  if (!article.eventId || !event) return 'event-not-ready'
+  const releaseBlock = getEventReleaseBlockReason(event, article.id, article)
+  if (releaseBlock) return releaseBlock === 'ai-not-done' ? 'ai-not-done' : 'event-not-ready'
+  if (!article.source.publicEnabled) return 'source-disabled'
   if (article.publicOverride === 'hidden') return 'manual-hidden'
   if (article.publicOverride === 'auto' && article.score < config.minScore) return 'score-below-threshold'
   if (article.publicOverride === 'auto' && article.relevance < config.minRelevance) return 'relevance-below-threshold'
@@ -74,10 +109,9 @@ function getRevokeReason(article: PublicPublicationCandidate, config: PublicPubl
   return 'not-publicly-eligible'
 }
 
-function isPubliclyEligible(article: PublicPublicationCandidate, config: PublicPublicationConfig): boolean {
-  if (!article.eventId || article.clusterStatus !== 'clustered') return false
-  if (article.aiStatus !== 'done') return false
-  if (article.source.deletedAt || !article.source.publicEnabled) return false
+function isPubliclyEligible(article: PublicPublicationCandidate, event: PublicPublicationEvent | null, config: PublicPublicationConfig): boolean {
+  if (!article.eventId || !event || getEventReleaseBlockReason(event, article.id, article)) return false
+  if (!article.source.publicEnabled) return false
   if (article.publicOverride !== 'public' && article.publicOverride !== 'auto') return false
   if (article.publicOverride === 'auto' && article.score < config.minScore) return false
   if (article.publicOverride === 'auto' && article.relevance < config.minRelevance) return false
@@ -90,30 +124,26 @@ async function syncCandidate(
   config: PublicPublicationConfig,
   client: PublicPublicationDb = db,
   options: { contentChanged?: boolean } = {},
+  prefetchedEvent?: PublicPublicationEvent | null,
 ): Promise<void> {
   const now = new Date()
-  const published = isPubliclyEligible(article, config)
   const wasPublished = article.publicStatus === PUBLIC_PUBLICATION_STATUS.published
   const wasEverPublished = article.publicStatus === PUBLIC_PUBLICATION_STATUS.published
     || article.publicPublishedAt !== null
+
+  const event: PublicPublicationEvent | null = prefetchedEvent !== undefined
+    ? prefetchedEvent
+    : article.eventId ? await client.event.findUnique({
+    where: { id: article.eventId },
+    select: publicationEventSelect,
+  }) : null
+  const published = isPubliclyEligible(article, event, config)
   const nextStatus = published
     ? PUBLIC_PUBLICATION_STATUS.published
     : wasEverPublished
       ? PUBLIC_PUBLICATION_STATUS.revoked
       : PUBLIC_PUBLICATION_STATUS.unpublished
-
-  const event = article.eventId ? await client.event.findUnique({
-    where: { id: article.eventId },
-    select: {
-      representativeArticleId: true,
-      clusterReviewStatus: true,
-      publicStatus: true,
-      publicPublishedAt: true,
-      firstSeenAt: true,
-    },
-  }) : null
-  const isRepresentative = event?.clusterReviewStatus === 'confirmed'
-    && event.representativeArticleId === article.id
+  const isRepresentative = event?.representativeArticleId === article.id
 
   await client.article.update({
     where: { id: article.id },
@@ -129,7 +159,7 @@ async function syncCandidate(
           : null,
       publicPublicationReason: !isRepresentative
         ? 'not-event-representative'
-        : published ? 'eligible' : getRevokeReason(article, config),
+        : published ? 'eligible' : getRevokeReason(article, event, config),
       publicPublicationEvaluatedAt: now,
       publicContentUpdatedAt: !isRepresentative
         ? null
@@ -229,8 +259,13 @@ export async function refreshPublicPublications(
   if (ids.length === 0) return 0
 
   const articles = await client.article.findMany({ where: { id: { in: ids } }, select: publicationSelect })
-  const config = await getPublicPublicationConfig(client)
-  for (const article of articles) await syncCandidate(article, config, client, options)
+  const [config, eventMap] = await Promise.all([
+    getPublicPublicationConfig(client),
+    getPublicationEventMap(client, articles),
+  ])
+  for (const article of articles) {
+    await syncCandidate(article, config, client, options, article.eventId ? eventMap.get(article.eventId) ?? null : null)
+  }
   if (client === db) invalidatePublicArticleCache()
   return articles.length
 }
@@ -244,8 +279,13 @@ export async function refreshPublicPublicationsForSource(
     select: publicationSelect,
   })
   if (articles.length === 0) return 0
-  const config = await getPublicPublicationConfig(client)
-  for (const article of articles) await syncCandidate(article, config, client)
+  const [config, eventMap] = await Promise.all([
+    getPublicPublicationConfig(client),
+    getPublicationEventMap(client, articles),
+  ])
+  for (const article of articles) {
+    await syncCandidate(article, config, client, {}, article.eventId ? eventMap.get(article.eventId) ?? null : null)
+  }
   return articles.length
 }
 
@@ -262,7 +302,10 @@ async function rebuildWithClient(
     client.article.findMany({ select: publicationSelect }),
     getPublicPublicationConfig(client),
   ])
-  for (const article of articles ?? []) await syncCandidate(article, config, client, options)
+  const eventMap = await getPublicationEventMap(client, articles ?? [])
+  for (const article of articles ?? []) {
+    await syncCandidate(article, config, client, options, article.eventId ? eventMap.get(article.eventId) ?? null : null)
+  }
   return articles?.length ?? 0
 }
 

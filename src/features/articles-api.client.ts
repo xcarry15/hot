@@ -9,7 +9,7 @@
  * 注意：本文件只能被客户端代码 import；`@/contracts/articles` 是纯 DTO，
  * 所以本模块本身也不依赖 Prisma / db，符合 client/server 边界。
  */
-import { isRequestJsonError, requestJson } from '@/lib/request-json.client';
+import { requestJson } from '@/lib/request-json.client';
 import type {
   ArticleDetailDto,
   ArticleListResponseDto,
@@ -193,16 +193,3 @@ export async function updateArticleTechnicalStatus(
   invalidateArticleDetailCache(articleId);
 }
 
-export async function fetchRelatedByBrand(
-  articleId: string,
-  take = 5,
-  signal?: AbortSignal,
-): Promise<unknown> {
-  try {
-    return await requestJson('GET', `/api/articles/${encodeURIComponent(articleId)}/related-by-brand?take=${take}`, { signal });
-  } catch (error) {
-    // 文章已被删除或详情页持有旧 ID 时，关联面板应视为暂无数据，不产生未处理 404。
-    if (isRequestJsonError(error, 404)) return { items: [] };
-    throw error;
-  }
-}

@@ -12,7 +12,7 @@ Hot2 部署和更新方法（2026-07）
 
 - .env* 和 db/（服务器配置、SQLite 数据必须保留在服务器）
 - node_modules、.next、tests、docs、design-previews、构建缓存
-- 一次性开发脚本 cleanup-legacy-settings.ts、backfill-prompt-defaults.ts
+- 一次性开发脚本（backfill-prompt-defaults.ts、cleanup-legacy-settings.ts 已删除）
 - 根目录 Markdown/本地工具配置及所有旧 zip；`bat/` 部署/Nginx 文档保留
 
 部署包保留 prisma/migrations、prisma/seed.ts、scripts/db-baseline.ts、scripts/cleanup-logs.ts、scripts/optimize-database.ts 和 scripts/rebuild-public-publication.ts，供服务器初始化、迁移和维护使用。
@@ -134,7 +134,7 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
 
 更新注意：
 
-- 不要执行 db:seed、db:migrate:baseline 或 db:reset。
+- 不要执行 db:seed、db:migrate:baseline 或 db:danger:reset。
 - 不要删除 .env 或 db/custom.db。
 - 确认 `.env` 中的 `NEXT_PUBLIC_SITE_URL` 为当前正式域名，并在 build 前完成修改。
 - 修改 .env 后用 delete + start 让 PM2 重新读取环境变量；普通 restart 可能保留旧环境。

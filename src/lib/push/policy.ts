@@ -53,6 +53,7 @@ export function pushableWhere(settings: PushSettings) {
         aiStatus: 'done' as const,
         clusterStatus: 'clustered' as const,
         technicalIgnoredAt: null,
+        source: { is: { deletedAt: null } },
       },
     },
     OR: [

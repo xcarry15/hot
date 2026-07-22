@@ -20,9 +20,10 @@ import {
   Eye,
   EyeOff,
   Cpu,
+  RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { testAiSettings, type AiTestResult } from '@/features/settings-api.client'
+import { fetchOpenCodeModels, testAiSettings, type AiTestResult } from '@/features/settings-api.client'
 import {
   ProviderConfig,
   ProviderConfigs,
@@ -41,9 +42,28 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   const [testingAI, setTestingAI] = useState(false)
   const [aiTestResult, setAiTestResult] = useState<AiTestResult | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
+  const [opencodeModels, setOpencodeModels] = useState<string[]>(() => [...AI_PROVIDERS.opencode.models])
+  const [loadingOpenCodeModels, setLoadingOpenCodeModels] = useState(false)
 
   const currentProvider = AI_PROVIDERS[settings.ai_provider as AIProviderId] || AI_PROVIDERS.opencode
   const currentConfig = providerConfigs[currentProvider.id]
+
+  const handleRefreshOpenCodeModels = async () => {
+    setLoadingOpenCodeModels(true)
+    try {
+      const result = await fetchOpenCodeModels()
+      if (result.models.length === 0) {
+        toast.info('OpenCode 暂无可用的免费模型')
+        return
+      }
+      setOpencodeModels(result.models)
+      toast.success(`已更新 ${result.models.length} 个免费模型`)
+    } catch {
+      toast.error('读取 OpenCode 免费模型失败，已保留当前推荐项')
+    } finally {
+      setLoadingOpenCodeModels(false)
+    }
+  }
 
   const updateSetting = (key: keyof Settings, value: string) => {
     setSettings(prev => ({ ...prev, [key]: value }))
@@ -168,9 +188,9 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
             className="h-8 font-mono text-xs"
             placeholder={currentProvider.defaultModel || '输入模型名称'}
           />
-          {currentProvider.models.length > 0 && (
+          {(currentProvider.id === 'opencode' ? opencodeModels : currentProvider.models).length > 0 && (
             <div className="flex flex-wrap gap-1 pt-1">
-              {currentProvider.models.map((m) => (
+              {(currentProvider.id === 'opencode' ? opencodeModels : currentProvider.models).map((m) => (
                 <button
                   key={m}
                   type="button"
@@ -249,6 +269,24 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
             </div>
           )}
         </div>
+
+        {/* Refresh OpenCode models */}
+        {currentProvider.id === 'opencode' && (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-1.5 text-[11px]"
+              disabled={loadingOpenCodeModels}
+              onClick={() => void handleRefreshOpenCodeModels()}
+            >
+              <RefreshCw className={`h-3 w-3 ${loadingOpenCodeModels ? 'animate-spin' : ''}`} />
+              {loadingOpenCodeModels ? '读取中' : '刷新推荐'}
+            </Button>
+            <p className="text-[11px] text-muted-foreground">推荐项来自 OpenCode 免费模型列表</p>
+          </div>
+        )}
 
         {settings.ai_provider === 'opencode' && (
           <p className="text-xs text-muted-foreground">

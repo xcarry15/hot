@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
 import PublicErrorState from '@/components/public-error-state'
 import PublicHomeSkeleton from '@/components/public-home-skeleton'
@@ -37,12 +36,6 @@ export default function PublicHomePage(props: { searchParams: Promise<SearchPara
 
 async function PublicHomeContent({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams
-  const legacyTab = first(params.tab)
-  if (legacyTab === 'settings' || legacyTab === 'crawl-log') {
-    const detail = first(params.detail)
-    redirect(`/admin?tab=${legacyTab}${detail ? `&detail=${encodeURIComponent(detail)}` : ''}`)
-  }
-
   const search = first(params.q)
   let data
   try {

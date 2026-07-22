@@ -1,5 +1,5 @@
 {
-  "name": "nextjs_tailwind_shadcn_ts",
+  "name": "hot2",
   "version": "0.2.0",
   "private": true,
   "scripts": {
@@ -13,18 +13,16 @@
     "test:db-baseline": "vitest run tests/db-baseline.test.ts --maxWorkers=1 --reporter=verbose",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "db:push": "prisma db push",
+    "db:danger:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:migrate:baseline": "tsx scripts/db-baseline.ts",
     "db:migrate:status": "prisma migrate status",
-    "db:reset": "prisma migrate reset",
-    "db:cleanup-legacy": "tsx scripts/cleanup-legacy-settings.ts",
+    "db:danger:reset": "prisma migrate reset",
     "db:cleanup-logs": "tsx scripts/cleanup-logs.ts",
     "db:optimize": "tsx scripts/optimize-database.ts",
-    "db:backfill-prompts": "tsx scripts/backfill-prompt-defaults.ts",
     "db:rebuild-public": "tsx scripts/rebuild-public-publication.ts"
   },
   "dependencies": {

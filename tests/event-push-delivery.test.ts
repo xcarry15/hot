@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+
+function computeUrlHash(url: string): string {
+  return createHash('sha256').update(url.trim()).digest('hex').slice(0, 16);
+}
 
 const mocks = vi.hoisted(() => ({
   articleFindUnique: vi.fn(),
@@ -53,7 +58,7 @@ function representative(overrides: Record<string, unknown> = {}) {
     isAd: false,
     createdAt: new Date(),
     originalSource: null,
-    source: { name: '测试源' },
+    source: { name: '测试源', deletedAt: null },
     ...overrides,
   };
 }
@@ -87,7 +92,10 @@ describe('Event 推送门禁', () => {
 
   it('已完整推送 Event 不会因代表文章变化再次推送 - 使用 PushDelivery 防重', async () => {
     mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
-    mocks.pushLogFindMany.mockResolvedValue([{ eventId: 'e1', webhookUrl: 'https://hook/a', webhookRemark: 'A', status: 'success', createdAt: new Date() }]);
+    const tid = `t-${computeUrlHash('https://hook/a').slice(0, 8)}`;
+    mocks.pushDeliveryFindMany.mockResolvedValue([
+      { eventId: 'e1', targetId: tid, status: 'succeeded', createdAt: new Date(), leaseExpiresAt: null },
+    ]);
     mocks.eventFindUnique.mockResolvedValue({
       id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
       representativeArticle: representative({ id: 'a2' }),
@@ -105,24 +113,34 @@ describe('Event 推送门禁', () => {
     expect(mocks.pushLogCreate).not.toHaveBeenCalled();
   });
 
+  it('人工强制推送也不能绕过来源删除门禁', async () => {
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null, nextPushRetryAt: null,
+      representativeArticle: representative({ source: { name: '已删除源', deletedAt: new Date() } }),
+    });
+    await expect(pushEventToFeishu('e1', 'manual_force')).resolves.toMatchObject({
+      status: 'failed',
+      message: '代表文章来源已删除，不能推送',
+    });
+    expect(mocks.pushLogCreate).not.toHaveBeenCalled();
+  });
+
   it('历史成功但最新失败时 retry_failed 会实际重试该目标', async () => {
     mocks.webhookConfigs = [
       { url: 'https://hook/a', remark: 'A', enabled: true },
       { url: 'https://hook/b', remark: 'B', enabled: true },
     ];
+    const tidA = `t-${computeUrlHash('https://hook/a').slice(0, 8)}`;
+    const tidB = `t-${computeUrlHash('https://hook/b').slice(0, 8)}`;
     mocks.eventFindUnique.mockResolvedValue({
       id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
       representativeArticle: representative(),
     });
-    mocks.pushLogFindMany
+    mocks.pushDeliveryFindMany
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        { eventId: 'e1', webhookUrl: 'https://hook/a', webhookRemark: 'A', status: 'failure', createdAt: new Date('2026-07-18T12:00:00Z') },
-        { eventId: 'e1', webhookUrl: 'https://hook/a', webhookRemark: 'A', status: 'success', createdAt: new Date('2026-07-18T11:00:00Z') },
-        { eventId: 'e1', webhookUrl: 'https://hook/b', webhookRemark: 'B', status: 'success', createdAt: new Date('2026-07-18T12:00:00Z') },
-      ])
-      .mockResolvedValueOnce([
-        { eventId: 'e1', webhookUrl: 'https://hook/a', webhookRemark: 'A', status: 'success', createdAt: new Date('2026-07-18T13:00:00Z') },
-        { eventId: 'e1', webhookUrl: 'https://hook/b', webhookRemark: 'B', status: 'success', createdAt: new Date('2026-07-18T12:00:00Z') },
+        { eventId: 'e1', targetId: tidA, status: 'failed', createdAt: new Date('2026-07-18T12:00:00Z'), leaseExpiresAt: null },
+        { eventId: 'e1', targetId: tidB, status: 'succeeded', createdAt: new Date('2026-07-18T12:00:00Z'), leaseExpiresAt: null },
       ]);
     const result = await pushEventToFeishu('e1', 'retry_failed');
     expect(result).toMatchObject({ mode: 'retry_failed', attempted: 1, succeeded: 1, skipped: 1 });
@@ -138,15 +156,6 @@ describe('Event 推送门禁', () => {
       id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
       representativeArticle: representative(),
     });
-    mocks.pushLogFindMany
-      .mockResolvedValueOnce([
-        { eventId: 'e1', webhookUrl: 'https://hook/a', webhookRemark: 'A', status: 'success', createdAt: new Date() },
-        { eventId: 'e1', webhookUrl: 'https://hook/b', webhookRemark: 'B', status: 'success', createdAt: new Date() },
-      ])
-      .mockResolvedValueOnce([
-        { eventId: 'e1', webhookUrl: 'https://hook/a', webhookRemark: 'A', status: 'success', createdAt: new Date() },
-        { eventId: 'e1', webhookUrl: 'https://hook/b', webhookRemark: 'B', status: 'success', createdAt: new Date() },
-      ]);
     await pushEventToFeishu('e1', 'repush_all');
     expect(mocks.pushLogCreate).toHaveBeenCalledTimes(2);
   });
