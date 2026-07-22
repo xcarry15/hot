@@ -75,9 +75,10 @@ describe('Event 推送门禁', () => {
     });
     mocks.pushTargetCreate.mockImplementation(async ({ data }: { data: { name: string; urlHash: string } }) => ({
       id: `t-${data.urlHash.slice(0, 8)}`, name: data.name, urlHash: data.urlHash,
+      status: 'sending', leaseOwner: expect.any(String),
     }));
     mocks.pushDeliveryFindMany.mockResolvedValue([]);
-    mocks.pushDeliveryUpsert.mockResolvedValue({});
+    mocks.pushDeliveryUpsert.mockImplementation(async ({ create }: { create: Record<string, unknown> }) => create);
     mocks.pushDeliveryUpdateMany.mockResolvedValue({ count: 1 });
     mocks.settingFindUnique.mockImplementation(({ where }: { where: { key: string } }) => Promise.resolve({
       value: where.key === 'push_mode' ? 'realtime' : '50',
@@ -98,6 +99,7 @@ describe('Event 推送门禁', () => {
     ]);
     mocks.eventFindUnique.mockResolvedValue({
       id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
+      representativeArticleId: 'a2', pushRetryCount: 0,
       representativeArticle: representative({ id: 'a2' }),
     });
     await expect(pushEventToFeishu('e1')).resolves.toMatchObject({ attempted: 0 });
@@ -107,6 +109,7 @@ describe('Event 推送门禁', () => {
   it('强制推送也不能绕过聚类状态', async () => {
     mocks.eventFindUnique.mockResolvedValue({
       id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null, nextPushRetryAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0,
       representativeArticle: representative({ clusterStatus: 'failed' }),
     });
     await expect(pushEventToFeishu('e1', 'repush_all')).resolves.toMatchObject({ status: 'failed' });
@@ -116,6 +119,7 @@ describe('Event 推送门禁', () => {
   it('人工强制推送也不能绕过来源删除门禁', async () => {
     mocks.eventFindUnique.mockResolvedValue({
       id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null, nextPushRetryAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0,
       representativeArticle: representative({ source: { name: '已删除源', deletedAt: new Date() } }),
     });
     await expect(pushEventToFeishu('e1', 'manual_force')).resolves.toMatchObject({
@@ -134,6 +138,7 @@ describe('Event 推送门禁', () => {
     const tidB = `t-${computeUrlHash('https://hook/b').slice(0, 8)}`;
     mocks.eventFindUnique.mockResolvedValue({
       id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0,
       representativeArticle: representative(),
     });
     mocks.pushDeliveryFindMany
@@ -154,6 +159,7 @@ describe('Event 推送门禁', () => {
     ];
     mocks.eventFindUnique.mockResolvedValue({
       id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0,
       representativeArticle: representative(),
     });
     await pushEventToFeishu('e1', 'repush_all');
@@ -163,6 +169,7 @@ describe('Event 推送门禁', () => {
   it('未配置 Webhook 时不为每个 Event 重复制造失败日志', async () => {
     mocks.eventFindUnique.mockResolvedValue({
       id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null, nextPushRetryAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0,
       representativeArticle: representative(),
     });
     await expect(pushEventToFeishu('e1')).resolves.toMatchObject({ status: 'no_webhooks' });

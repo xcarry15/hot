@@ -24,9 +24,10 @@ Install dependencies and copy `.env.example` to `.env` for local setup. Use:
 
 - `npm run dev` — start the development server at `http://localhost:3011`.
 - `npm run lint` — run ESLint.
-- `npx tsc --noEmit` — type-check without emitting files.
+- `npm run typecheck` — type-check without emitting files.
 - `npm test` — run the default Vitest suite (excluding the database baseline test).
-- `npm run test:critical` or `npm run test:all` — run the critical suite or every test.
+- `npm run test:critical` — run the critical business suite; `npm run test:migrations` validates a clean SQLite migration path; `npm run test:all` runs both the normal suite and migration smoke.
+- `npm run verify` — run lint, type-check, all automated tests, and the production build.
 - `npm run build` — create the production build; `npm run start` — serve it.
 - `npm run db:migrate` — create/apply a local development migration; `npm run db:generate` — regenerate Prisma Client.
 - `npm run db:migrate:status` — verify migration state before delivery.
@@ -40,7 +41,7 @@ Use strict TypeScript, two-space indentation, single quotes, semicolons, and the
 
 ## Testing Guidelines
 
-Vitest discovers tests under `tests/`. Add or update regression tests for pipeline, deduplication, API, database, cancellation, or push-delivery changes. Run the relevant file first, then `npm test`; run `npm run test:db-baseline` separately for migration changes. No coverage threshold is configured.
+Vitest discovers tests under `tests/`. Add or update regression tests for pipeline, deduplication, API, database, cancellation, or push-delivery changes. Run the relevant file first, then `npm test`; run `npm run test:migrations` for schema/migration changes. `npm run test:legacy-baseline` is only for the historical db-push baseline workflow. No coverage threshold is configured.
 
 ## Commit & Pull Request Guidelines
 

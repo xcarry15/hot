@@ -27,6 +27,13 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (pathname === '/api/health') {
+    if (!['GET', 'HEAD'].includes(request.method)) {
+      return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
+    }
+    return NextResponse.next();
+  }
+
   const isPublicArticleInteractionApi = /^\/api\/public\/articles\/[^/]+\/(click|view)$/.test(pathname);
   if (isPublicArticleInteractionApi) {
     if (request.method !== 'POST') {

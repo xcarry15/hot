@@ -22,7 +22,7 @@ import {
 // ── 工厂：可读 article/source 生成器 ──
 
 function article(partial: Partial<ArticleProgress>): ArticleProgress {
-  return {
+  const base: ArticleProgress = {
     id: 'a',
     title: 't',
     crawl: 'done',
@@ -36,8 +36,18 @@ function article(partial: Partial<ArticleProgress>): ArticleProgress {
     lastTime: 0,
     technicalIssues: [],
     isEventRepresentative: true,
-    ...partial,
   }
+
+  if (partial.crawl === 'failed') {
+    base.process = 'blocked'
+    base.ai = 'blocked'
+    base.cluster = 'blocked'
+    base.clusterStatus = 'pending'
+    base.push = 'blocked'
+    base.technicalIssues = ['process_failed']
+  }
+
+  return { ...base, ...partial }
 }
 
 function source(id: string, articles: ArticleProgress[], discarded: SourceProgress['discarded'] = []): SourceProgress {
@@ -52,8 +62,9 @@ function source(id: string, articles: ArticleProgress[], discarded: SourceProgre
 
 describe('matchStepChip 单谓词命中', () => {
   it('正常与异常一级状态保持互斥', () => {
-    expect(matchStepChip(article({ ai: 'pending' }), 'normal-ai')).toBe(true)
-    expect(matchStepChip(article({ ai: 'pending' }), 'anomaly-all')).toBe(false)
+    const aiPending = article({ ai: 'pending', cluster: 'blocked', clusterStatus: 'pending', push: 'blocked' })
+    expect(matchStepChip(aiPending, 'normal-ai')).toBe(true)
+    expect(matchStepChip(aiPending, 'anomaly-all')).toBe(false)
     expect(matchStepChip(article({ crawl: 'failed' }), 'anomaly-failure')).toBe(true)
     expect(matchStepChip(article({ crawl: 'failed' }), 'normal-all')).toBe(false)
   })
@@ -68,12 +79,12 @@ describe('matchStepChip 单谓词命中', () => {
 
 describe('applyFilterState', () => {
   const s1 = source('s1', [
-    article({ id: '1', ai: 'done' }),
-    article({ id: '2', push: 'done' }),
+    article({ id: '1', ai: 'done', cluster: 'pending', clusterStatus: 'pending', push: 'blocked' }),
+    article({ id: '2', ai: 'done', push: 'done' }),
   ], [{ id: 'd1', title: 'd', reason: 'filter:keyword' }])
 
   const s2 = source('s2', [
-    article({ id: '3', ai: 'pending' }),
+    article({ id: '3', ai: 'pending', cluster: 'blocked', clusterStatus: 'pending', push: 'blocked' }),
     article({ id: '4', crawl: 'failed' }),
   ])
 

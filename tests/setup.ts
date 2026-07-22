@@ -42,6 +42,14 @@ vi.mock('@/lib/db', () => ({
       count: vi.fn(),
       deleteMany: vi.fn(),
     },
+    tuningSuggestion: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      deleteMany: vi.fn(),
+    },
     source: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -63,18 +71,27 @@ vi.mock('@/lib/db', () => ({
       upsert: vi.fn(),
     },
     pushLog: {
+      count: vi.fn(),
       create: vi.fn(),
       findMany: vi.fn(),
       deleteMany: vi.fn(),
     },
     fetchLog: {
+      count: vi.fn(),
       findMany: vi.fn(),
       deleteMany: vi.fn(),
     },
     discardedItem: {
       findMany: vi.fn(),
+      count: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    discardedRetryAudit: {
+      count: vi.fn(),
+      deleteMany: vi.fn(),
     },
     job: {
+      count: vi.fn(),
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn(),
@@ -82,6 +99,11 @@ vi.mock('@/lib/db', () => ({
       update: vi.fn(),
       updateMany: vi.fn(),
       deleteMany: vi.fn(),
+    },
+    inboxSnapshot: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
     },
     pushTarget: {
       findUnique: vi.fn(),

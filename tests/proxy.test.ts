@@ -69,6 +69,15 @@ describe('proxy auth', () => {
     expect(res.status).toBe(401);
   });
 
+  it('生产环境健康检查无需 Token，但拒绝写请求', async () => {
+    process.env.API_TOKEN = 'secret123';
+    (process.env as Record<string,string>).NODE_ENV = 'production';
+    const { proxy } = await import('@/proxy');
+    expect(proxy(makeRequest('GET', '/api/health')).status).not.toBe(401);
+    expect(proxy(makeRequest('HEAD', '/api/health')).status).not.toBe(401);
+    expect(proxy(makeRequest('POST', '/api/health')).status).toBe(405);
+  });
+
   it('POST /api/articles 无 token → 401', async () => {
     process.env.API_TOKEN = 'secret123';
     (process.env as Record<string,string>).NODE_ENV = 'production';

@@ -30,7 +30,7 @@ Hot2 部署和更新方法（2026-07）
     --exclude='.env' --exclude='.env.*' --exclude='db/' --exclude='node_modules/' \
     /tmp/h2-hot2-release/ /www/wwwroot/hot.kfxz.cn/
   cd /www/wwwroot/hot.kfxz.cn
-  npm install
+  npm ci
 
 不要直接在生产目录执行 `unzip -o`：它只能覆盖文件，无法删除新版本已经移除的旧 Route、组件或脚本。
 
@@ -99,6 +99,18 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
 四、日常更新
 ------------
 
+推荐方式：推送 `master` 后由 GitHub Actions 自动执行 CI；全部通过后，`Deploy production` 通过 SSH 调用 `scripts/deploy-production.sh`。仓库需配置：
+
+  DEPLOY_SSH_KEY     Secret，SSH 私钥
+  DEPLOY_HOST        Variable（或同名 Secret），生产服务器地址
+  DEPLOY_USER        Variable（或同名 Secret），SSH 用户
+  DEPLOY_PORT        可选 Variable/Secret，默认 22
+  DEPLOY_KNOWN_HOSTS 可选 Variable/Secret，建议填写固定 known_hosts；为空时 workflow 使用 ssh-keyscan
+
+自动部署会保留服务器 `.env*`、`db/` 与 `node_modules/`，停 PM2 后执行 SQLite `.backup`，再执行 `rsync --delete`、`npm ci`、migration、Prisma generate、数据库优化、构建、单实例 PM2 启动和 `https://hot.kfxz.cn/api/health` 健康检查。失败时脚本会尽量恢复旧 PM2 服务，但不会自动回滚已应用的 migration；数据库可从当次备份恢复。
+
+手工方式保留如下：
+
 本地：
 
   1. 修改并验证代码。
@@ -122,7 +134,7 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
     /tmp/h2-hot2-release/ /www/wwwroot/hot.kfxz.cn/
 
   cd /www/wwwroot/hot.kfxz.cn
-  npm install                          # package-lock/package.json 有变化时必须执行
+  npm ci                               # 严格按 package-lock 安装，确保与 CI 一致
   npm run db:migrate:deploy            # 应用新增 migration；无新增时为空操作
   npm run db:generate
   npm run db:optimize                   # 启用/校验 WAL、NORMAL、busy_timeout 并执行 PRAGMA optimize
@@ -131,6 +143,7 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
   pm2 delete h2-hot2
   pm2 start npm --name h2-hot2 -- start
   pm2 save
+  curl --fail https://hot.kfxz.cn/api/health
 
 更新注意：
 
