@@ -74,7 +74,9 @@ $ExcludePatterns = @(
     # bat/ 目录里只排除打包工具脚本，部署/Nginx 文档继续随包发布
     "bat/run.bat",
     "bat/pack-deploy.ps1",
-    "bat/启动.vbs"
+    "bat/启动.vbs",
+    "bat/本地一键初始化.bat",
+    "bat/local-init.ps1"
 )
 
 function Test-ShouldExclude($relativePath, $patterns) {
@@ -132,6 +134,18 @@ Get-ChildItem -Path $ProjectRoot -Recurse -File -ErrorAction SilentlyContinue | 
 }
 Write-Host "  copied: $copied   skipped: $skipped" -ForegroundColor Gray
 
+$RequiredReleaseFiles = @(
+    "package.json",
+    "package-lock.json",
+    "scripts\init-production.sh"
+)
+foreach ($requiredFile in $RequiredReleaseFiles) {
+    $requiredPath = Join-Path $TempDir $requiredFile
+    if (-not [System.IO.File]::Exists($requiredPath)) {
+        throw "部署包缺少必要文件：$requiredFile"
+    }
+}
+
 Write-Host "Zipping..." -ForegroundColor White
 
 $OutputPath = Join-Path $ScriptDir $OutputFile
@@ -166,8 +180,9 @@ Write-Host "  Deploy Steps" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  1. 将 ZIP 上传到 /tmp 等应用目录之外的位置。" -ForegroundColor Yellow
-Write-Host "  2. 存量服务器先停止 h2-hot2，并同时备份 custom.db、-wal、-shm。" -ForegroundColor Yellow
-Write-Host "  3. 解压到临时目录后用 rsync --delete 收敛同步；保留 .env*、db/、node_modules/。" -ForegroundColor Yellow
+Write-Host "  2. 全新服务器：正确解压并同步到项目根目录后执行 bash scripts/init-production.sh。" -ForegroundColor Yellow
+Write-Host "  3. 日常更新默认由 GitHub Actions 自动完成，无需手工上传 ZIP。" -ForegroundColor Yellow
+Write-Host "     手工更新时先停止 h2-hot2 并备份数据库，再用 rsync --delete 收敛同步。" -ForegroundColor Yellow
 Write-Host "     不要直接在应用目录执行 unzip -o，避免已删除的旧代码残留。" -ForegroundColor Red
 Write-Host "  4. 顺序执行 migrate:deploy -> generate -> optimize -> build，再以单实例启动 PM2。" -ForegroundColor Yellow
 Write-Host "  5. 已有数据库首次跨过 20260718230000 migration 时，额外执行一次 db:rebuild-public。" -ForegroundColor Yellow

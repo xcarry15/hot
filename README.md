@@ -1,18 +1,21 @@
 # Hot2
 
-Hot2 是面向餐饮/零售行业的新闻聚合、情报审核与飞书推送工具，主链路为：
+Hot2 是面向餐饮与零售行业的新闻聚合、AI 分析、事件去重、人工审核和飞书推送系统。
 
 ```text
-数据源采集 → 详情处理/关键词过滤 → AI 分析与事件身份提取 → 事件聚类 → 情报审核 → Event 唯一推送/公开展示
+数据源采集 → 正文处理与筛选 → AI 分析 → Event 聚类 → 人工审核 → 公开展示 / 飞书推送
 ```
+
+技术栈：Next.js 16、React 19、TypeScript、Prisma 6、SQLite、Vitest。
 
 ## 快速开始
 
-环境要求：Node.js >= 20.9.0、npm。
+环境要求：Node.js >= 20.9.0、npm >= 10。
 
 ```bash
-npm install
-copy .env.example .env       # Windows；Linux/macOS 使用 cp
+npm ci
+copy .env.example .env       # Windows
+# cp .env.example .env       # Linux / macOS
 npm run db:migrate:deploy
 npm run db:generate
 npm run db:seed
@@ -20,131 +23,180 @@ npm run db:optimize
 npm run dev
 ```
 
-开发地址：`http://localhost:3011`。根路径 `/` 是公开新闻卡片页，文章详情使用 `/news/[id]`；后台位于 `/admin`，左侧导航收敛为“工作台”和“设置”。生产环境必须在 `.env` 设置 `API_TOKEN`，首次访问后台时输入该 token 建立临时 HttpOnly 会话；Cookie 保存由 Token 派生的会话值，不直接保存可调用 API 的原始 Token，旧版原始 Token Cookie 不再兼容。公开端保持匿名访问。生产部署还应将 `NEXT_PUBLIC_SITE_URL` 设置为正式访问地址，用于 canonical、Open Graph 和 sitemap。公开导航中的"工具"目前为占位页面，"数据"暂未提供实际页面。
+访问地址：
 
+- 公开站点：`http://localhost:3011`
+- 管理后台：`http://localhost:3011/admin`
+- 文章详情：`/news/[eventId]`
 
-交互性能采用轻量策略：后台工作台与设置页按访问动态加载，设置标签悬停、聚焦或触摸时预加载目标代码块；文章详情工作台只在首次打开时加载，标题悬停 120ms 后同时预加载工作台代码与文章详情，快速划过会取消详情请求，并在 15 秒内合并/复用详情结果。分享海报组件和二维码依赖只在用户点击分享后挂载。公开 Event 持久化 `publicDateKey/publicSortAt`，公开首页按文章数量分页，首批和每次"加载更多"均读取 12 篇；分页使用 `publicSortAt + Event.id` 稳定游标，不再按日期批量查询，也不设单日截断上限；公开总数与刷新探测共享 60 秒短缓存，翻页不重复执行相同全量计数。文章详情的 metadata 与页面渲染复用同一次详情读取，服务端详情结果使用最多 100 个 key、30 秒的有界短缓存，上一篇/下一篇只读取当前日期组和相邻日期边界，其他来源读取由 `eventId/publishedAt/createdAt` 联合索引支撑；公开列表短缓存限制为最多 50 个 key。工作台按项目日处理量读取最近 250 篇 Article 和 250 条未入库记录，并额外补齐不在该窗口内的全部技术待办 Article；“全部文章”和人工待办使用独立服务端分页列表，不扩大任务快照。任务运行时每 3 秒只读取轻量 Job 进度，阶段变化或任务结束才刷新完整文章记录，空闲时每 15 秒刷新，页面不可见时暂停周期请求。技术工作队列使用 5 秒短缓存合并导航计数和工作台的重复扫描，Job 完成后立即失效，人工待办数由数据库直接唯一计数。数据看板统计使用 15 秒短缓存合并重复请求，隐藏时暂停 30 秒自动刷新，Job 历史查询限制为最近 500 条；Job 完成后统计缓存立即失效。采集阶段按数据源批量预取本轮 URL 对应的 Article 和 DiscardedItem，关键词候选一次批量预取并在短事务中写入，浏览量和原文点击统一聚合到单个短事务落库。
+Windows 需要完全重建本地环境时，可直接双击 `bat/本地一键初始化.bat`。入口使用纯英文 PowerShell 脚本执行，避免 CMD 中文编码问题；该操作会删除本地 SQLite 和历史数据。
 
-公开首页按文章数量分页，首批和每次“加载更多”均读取 12 篇；分页使用 `publicSortAt + Event.id` 稳定游标，允许同一日期跨批加载并在前端合并为同一日期组。首页只保留单层日期标题，不再使用月份与日期折叠，使单次查询和 DOM 增量保持有界。
-公开列表不再按日期批量查询，也不设单日截断上限；即使单日文章量很大，也可通过数量游标继续完整加载。
+## 环境变量
 
-后台顶层页在首次访问时动态挂载，此后切换会保留页面状态、滚动位置和已加载数据；隐藏的工作台和 Dashboard 暂停轮询，避免用保持状态换取后台空转。
+```env
+DATABASE_URL=file:../db/custom.db
+API_TOKEN=
+NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
+```
 
-设置页各子页面统一沿用工作台的紧凑视觉语言：方角控件、细边框、低阴影、较小间距与明确的主次色；宽屏优先并列展示相关配置和数据，减少无效留白，同时保留危险操作与异常状态的醒目标识。
+- `DATABASE_URL`：SQLite 路径，默认指向 `db/custom.db`。
+- `API_TOKEN`：生产环境必填，用于后台登录和受保护 API；未配置时生产环境拒绝访问。
+- `NEXT_PUBLIC_SITE_URL`：正式站点地址，用于 canonical、Open Graph 和 sitemap。
 
-Event 成员对比采用一篇文章一行的横向列表，代表文章置顶，其余按发布时间倒序；列表按“选择/序号、发布时间、标题、代表、品牌、事件键、总分、审核、来源、状态、公开、推送、操作”排列。来源、来源状态、公开状态和推送状态分别展示，便于快速确认文章当前是否已投递；复合内容保持单行并使用“ / ”分隔。各列按内容自适应宽度，标题、品牌、来源、事件键等长文本列限制最大宽度并省略溢出内容，发布时间、标题和操作列固定在两侧，减少横向空白并便于直接维护多篇文章。代表文章不显示“单独拆分”操作，避免拆分代表时触发无效请求。
+公开首页、公开文章 API 和健康检查保持匿名访问；后台页面及其他 API 受 Token 会话保护。
 
-工作台按真实流水线展示 `采集 → 处理 → AI → 聚类 → 推送`，统一承载 Job 监控、技术恢复、Article 人工校准、Event 修正、公开决策和 Event 级人工推送。主列表仍保持来源分组和轻量 CrawlLog DTO；点击文章后打开右侧宽抽屉，按需读取 Article 与 Event 完整详情。抽屉首屏先给出当前处理结论、总分、AI 置信度、人工归类、公开状态、来源数和目标级推送结果，并按单列高密度流程组织 AI 洞察、核心要点、品牌/分类、规范事件身份、评分校准、正文核验、公开策略、人工归类、聚类审计、成员移动/拆分/合并、代表文章、推送记录、访问转化和人工覆盖字段。标题区直接提供人工编辑、保留人工覆盖后重新生成 AI、重新抓取全文后全量重跑、跳转归类修正、代表文章强制公开/隐藏和人工强制推送。强制推送绕过评分、相关度和自动推送开关，但不绕过 active Event、代表文章、聚类完成和 AI 完成门禁。Event 校准区直接展示当前代表和成员对比列表，不再重复展示首次发现、最近发现、公开/推送状态、事件键或其他统计卡片；成员列表可切换文章、指定代表、单篇拆分或勾选多篇批量拆为同一个新 Event。成员列表下方按当前选中文章的品牌独立展示近 30 天同品牌候选，候选不计入 Event 来源数，支持查看详情或确认后移入当前 Event；接口使用精确品牌优先、数组部分重合补充，并在服务端做规范化过滤。目标 Event 搜索展示代表标题、来源、分数、公开/推送状态和最近时间，明确区分“仅移动当前文章”和“当前整组并入”；拆分、移动、合并均在执行前显示影响范围并二次确认。聚类审计按时间展示系统判断、人工操作、置信度、理由和关联候选。`articleId + panel=cluster/content` 可直接定位文章与校准区；目标文章已删除时关闭详情并清理失效定位。主动重新生成统一提交持久化单篇 Job。Article 保留 AI 与人工校准结果，Event 是公开和推送的唯一门禁。
+## 核心架构
 
-工作台状态区域采用单选筛选，依次提供全部、需处理、自动恢复、已忽略、待处理、待 AI、待聚类、待推和已推送；数据源、今天和含未入库保持独立筛选。普通流水线列表仍只读取最近 250 篇 Article，但会额外合并全部“需人工处理”和“自动恢复中”文章，保证技术待办不因时间窗口丢失，且按 Article.id 去重。“全部文章”和“人工内容待办”提供服务端分页全库入口，确保较早文章、聚类待复核、待归类和低置信文章始终可达。当前任务区展示任务范围、目标文章或数据源、阶段队列、当前阶段、完成数、百分比和错误数；项目使用全局单 Job 模型，不伪造多任务等待队列。正文处理、AI、聚类与推送采用有限自动重试：仍在退避窗口内显示“自动恢复中”，此时管理员也可直接“强制忽略”，立即停止后续自动重试；达到 5 次上限后转为“需人工处理”，不再进入自动任务。忽略后不计入技术待办，并可通过“已忽略”筛选随时恢复。每篇文章只暴露当前失败步骤的原位恢复操作；单篇 Job 会在快照中携带目标 Article 和当前阶段，使对应步骤在任务整个运行期间持续显示加载状态。推送失败只投影到 Event 当前代表 Article，非代表成员显示为不适用。
+项目采用单进程模块化单体。Next.js 同时承载页面、API、调度器和任务执行器；生产环境只运行一个 PM2 实例，不需要 Redis、消息队列或独立 Worker。
 
-工作台筛选采用两级互斥分类：第一层为全部、正常、异常和已忽略；正常细分为全部正常、处理中、待 AI、待聚类、待推送和已推送，异常细分为全部异常、需处理、待复核、业务过滤和流程失败。每篇文章只归入一个细分类：人工待办优先，其次是聚类复核、技术失败或自动恢复、软文或重复等业务过滤，最后才按正常流程阶段归类。技术聚类失败归入“异常 → 流程失败”。自动恢复期间，文章标题后显示红色“异常”标签，恢复成功并清除技术状态后自动消失。业务识别标签使用实色背景区分，技术失败、自动恢复与人工处理使用醒目状态色；标签仅用于快速识别，不改变流程状态或技术恢复规则。
+### 数据模型
 
-文章行的条件性操作与对应状态标签统一放在标题区域，全部按“状态标签 → 操作按钮”排列；强制忽略、去聚类复核、忽略和恢复均使用细黑边框并位于对应状态最后，避免右侧固定流程列和时间列随操作按钮出现而移动。
+- `Source`：采集源及解析配置。
+- `Article`：原始报道、正文、AI 结果和人工校准记录。
+- `Event`：同一事件的聚合单元，也是公开展示和推送去重的唯一边界。
+- `Job`：批量或单篇任务的状态、进度、租约与取消事实。
+- `PushDelivery`：每个 Event 对每个推送目标的最新投递状态；`PushLog` 只保存历史审计。
+- `DiscardedItem`：未进入 Article 的采集结果和重试记录。
+- `Setting`、`Keyword`、`PushTarget`：运行配置、筛选词和推送目标。
 
-工作台的任务列表只展示已启用且未删除的数据源分组；禁用源的历史文章、未入库记录和上次 Job 源结果均不在该列表展示，但仍可通过“全部文章”检索历史 Article。页面不再显示同步时间或空闲时的上次任务进度条；数据源展开后直接显示文章，仅未入库原因分组保留折叠。数据源标题在名称后紧凑显示完整快照的本次发现、文章、推送、异常、需人工处理、自动恢复和未入库数量，不随列表筛选变化；“今日发布”按文章自身的 publishedAt 过滤。
+`Article` 与 `Event` 的职责必须保持分离：
 
-工作台的分阶段运行按钮与顶部控制合并为同一紧凑工具行，统一使用小尺寸方角按钮，不提供低频的数据源下拉筛选，减少顶部纵向与横向占用。
+- AI 必须先提取 `subjects / action / object`，应用再确定性生成 `eventKey`。
+- Article 保存内容处理、AI 与人工校准结果。
+- Event 选择唯一代表 Article，并决定公开和推送状态。
+- 非代表 Article 不公开、不推送。
+- `Event.publicStatus` 是公开状态的事实源。
 
-工作台的异常二级筛选不再合并显示“业务过滤”，改为独立的“软文”和“重复”按钮，分别按 `isAd` 与非代表 Event 成员统计。同一篇文章可同时命中两个筛选，不改变其流程状态。
+### 处理流水线
 
-## 项目结构
+| 阶段 | 代码 | 职责 |
+| --- | --- | --- |
+| collect | `src/lib/pipeline/collect.ts` | 读取数据源并写入采集结果 |
+| process | `src/lib/pipeline/process.ts` | 获取正文、清洗内容、关键词筛选 |
+| ai | `src/lib/pipeline/analyze.ts` | 生成摘要、评分和结构化事件身份 |
+| cluster | `src/lib/pipeline/cluster.ts` | 把 Article 归入 Event 或标记待复核 |
+| push | `src/lib/pipeline/push-bridge.ts` | 按 Event 和目标执行推送 |
+
+`src/lib/execution.ts` 是 Job 的统一编排入口。批量阶段会分块处理全部当前积压；分块大小不是任务完成边界。调度器位于 `src/lib/scheduler.ts`，自动采集默认关闭，配置从数据库读取。
+
+### 发布与推送边界
+
+基础门禁集中在 `src/lib/event-release-policy.ts`：
+
+- Event 必须为 active 且聚类审核已确认。
+- Article 必须是当前代表、完成 AI 和聚类，且来源未删除。
+- 来源公开开关、评分、相关度和软文规则属于公开策略。
+- 推送开关、目标状态和投递模式属于推送策略。
+- `needs_review` 不得成为代表、公开或推送。
+
+公开数据由 `src/lib/public-publication-service.ts` 维护快照，读取逻辑位于 `src/lib/public-article-service.ts`。推送实现位于 `src/lib/push/`，支持：
+
+- `normal`：正常流水线推送
+- `retry_failed`：仅重试失败目标
+- `manual_force`：人工强制推送，但不绕过 Event 完整性门禁
+- `repush_all`：对当前 Event 的启用目标完整重推
+
+## 代码结构
 
 ```text
-src/app/              公开页面、后台页面和 API Route Handler
-src/app/admin/        Token 保护的管理后台
-src/app/news/         可分享、可收录的公开文章详情页
-src/app/robots.ts     robots 规则；仅公开首页和文章详情参与收录
-src/app/sitemap.ts    公开首页和文章详情 sitemap
-src/components/       工作台、文章详情抽屉、设置、数据源和公开端 UI 组件
-src/features/         前端 API 客户端
-src/contracts/        API、AI、文章、推送等共享契约
-src/lib/              execution、pipeline、AI、Event 聚类、推送、设置等核心模块
-prisma/               schema、seed、migration 历史
-tests/                Vitest 测试
-scripts/              migration baseline 与维护脚本
-bat/                  Windows 启动、打包、部署和 Nginx 文档
-.github/workflows/     GitHub Actions 持续集成与生产部署
-db/                   本地 SQLite 数据（不进入部署包）
+src/app/                 页面、Route Handler、robots 和 sitemap
+src/components/          公开端与管理后台 UI
+src/features/            浏览器端 API 客户端
+src/contracts/           前后端共享 DTO 和领域契约
+src/lib/                 服务、流水线、调度、公开和推送逻辑
+prisma/                  Schema、seed 和有序 migration
+tests/                   Vitest 测试
+scripts/                 生产初始化、部署和数据库维护脚本
+bat/                     Windows 初始化、打包和运维文档
+.github/workflows/        CI 与生产部署流程
 ```
 
-公开端以 active Event 为内容单位，每个 Event 只展示一张卡片，正文和评分取代表 Article 的最终人工校准结果，详情页同时列出其他报道来源。`Event.publicStatus` 是唯一公开事实源；Article 仅保存人工公开策略和当前代表文章的公开结果投影，非代表成员固定为未公开。代表文章切换时会同步清理旧代表投影；`/news/[id]` 的 id 为 Event.id。浏览和原文点击仍累计到当前代表 Article，且不会污染公开内容更新时间；两类计数均为单实例内存短聚合后落库的近似统计，进程异常终止时允许丢失极少量未刷新计数。
+职责约束：
 
-## 当前架构与数据事实
+- Route Handler 只处理鉴权、参数和响应转换，业务规则放在 `src/lib/`。
+- API 不直接向浏览器返回 Prisma Model，应通过 `src/contracts/` 中的 DTO。
+- 设置定义集中在 `src/lib/settings-catalog.ts`。
+- Event 校准集中在 `src/lib/event-service.ts`。
+- 人工审核集中在 `src/lib/review-service.ts`。
+- 公开规则和推送规则不得复制到 React 组件。
 
-- Next.js 16 App Router + React 19 + TypeScript；Prisma 6 + SQLite；单进程模块化单体，生产只运行一个 PM2 实例。
-- `src/lib/execution.ts` 是唯一批量 Job 编排入口，内存互斥保证同时只有一个批量任务。process、AI、cluster 阶段会按固定大小分批消费本次符合条件的全部积压，不会因单批上限而把未处理完的任务标记为成功。Job 表的阶段、进度、错误数和 heartbeat 是任务状态事实源；Job 失败直接进入 `failed`，不在没有独立 Worker 的前提下自动重新入队；停止请求会先把 `running` 写为 `cancel_requested`，再通过 `AbortSignal` 协作式取消并最终写入 `cancelled`，因此停止 API 与执行器不共享模块实例时也能生效。
-- 调度器每分钟 tick；自动抓取默认关闭。普通批量任务使用 `/api/crawl` 的 `all` 阶段，分阶段入口 `collect / process / cluster / ai / push` 仅供管理员运维。
-
-| 阶段 | 入口代码 | 作用 |
-|---|---|---|
-| collect | `src/lib/pipeline/collect.ts` | 采集数据源并写入/更新文章 |
-| process | `src/lib/pipeline/process.ts` | 抓取详情、提取正文、关键词过滤；不同 URL 的重复文章保留并标记 |
-| ai | `src/lib/pipeline/analyze.ts` | 写入摘要、规范事件身份、确定性事件键、评分和审计字段 |
-| cluster | `src/lib/pipeline/cluster.ts` | 使用 AI 事件身份将 Article 归入 Event，记录失败重试与待复核状态 |
-| push | `src/lib/pipeline/push-bridge.ts` | 按统一条件投递未推送文章 |
-
-Event 对外释放的基础完整性门禁统一收敛在 `src/lib/event-release-policy.ts`：Event 必须为 active 且已确认，Article 必须是当前代表、已完成聚类与 AI、来源未删除。代表选择、公开快照和所有推送模式共同复用该规则；公开来源开关、评分、相关度、软文和自动推送开关仍分别属于 Publication / Delivery 的渠道策略。公开快照批量刷新会一次预取涉及的 Event，避免按 Article 重复查询 Event。
-
-关键 API 约束：`POST /api/crawl` 是批量任务主入口；`POST /api/articles/[id]/workflow` 是单篇处理、聚类、AI 和普通推送恢复/重跑的唯一入口，其中 `retry` 只允许当前可恢复失败步骤，`regenerate` 会按起点重置并重算，且不能用于完整重推；`POST /api/articles/[id]/technical-status` 仅负责忽略或恢复技术待办，不删除 Article。推送服务使用 `normal`、`retry_failed`、`manual_force`、`repush_all` 四种明确模式：流水线普通推送、最新失败目标恢复、人工绕过阈值推送、Event 级完整重推。`manual_force` 与 `repush_all` 仍要求 active Event、有效代表文章、聚类完成和 AI 完成。`GET /api/crawl-log/status` 与 `GET /api/admin/work-queue-summary` 共同复用唯一技术待办事实源；推送失败只映射到代表 Article，并按当前启用目标的最新 PushDelivery 判断，PushLog 仅作为历史审计。旧 `/api/articles/refetch`、`/api/articles/reprocess` 和 Article 级 `/api/push` 已删除。Route Handler 只做适配，事务和业务规则由 Service 负责。
-
-`InboxSnapshot` 保存近 90 天的待归类积压快照，概览以此展示积压趋势；快照是派生指标，不改变文章流水线事实。
-
-详情处理的筛选契约是“品牌白名单命中，或标题具有明确餐饮/零售业态信号”。后者只包含餐饮、餐厅、便利店、超市、百货、购物中心等少量强信号，用于避免“便利店行业报告、餐厅闭店、超市首店”因未提及已知品牌而在 AI 前被误删；不使用“商业、公司”等泛化词放大噪声。关键词未命中候选只从标题本地提取，不调用 AI：数字及数字混合片段不进入候选，中文片段按较长词优先并移除被长词覆盖的短片段，每个标题最多记录 12 个。候选列表优先展示跨来源出现的词，再按出现次数和最近更新时间排序；人工采用后统一写入“提取”分类，并恢复最近最多 50 篇对应的未命中文章重新处理。
-
-`Job`、`FetchLog`、`PushLog`、`PushTarget`、`PushDelivery`、`DiscardedItem` 和 `EventClusterAudit` 分别记录任务、采集、目标配置、当前目标级投递账本、未入库条目和聚类/人工纠错事实。`Article` 记录全文、AI 与人工校准、归类和事件归属；`Event` 记录代表文章、来源数量、`clusterReviewStatus` 和公开状态。`clusterReviewStatus=pending` 时整个 Event 不得选代表、公开或推送，所有待复核成员确认后才恢复为 `confirmed`。PushDelivery 以 Event、目标、内容版本和模式做幂等，并使用租约防止并发发送；未知结果不得自动重发，只能人工强制确认。PushLog 关联 Event，并保存投递时的代表 Article，作为历史审计，不跟随当前代表文章变化。删除最后一篇 Article 时空 Event 归档而不物理删除，以保留投递审计和外键一致性。未配置可用 Webhook 时，批量推送直接跳过，不为每个 Event 重复写失败日志。
-
-设置默认值、校验、敏感性和导出策略集中在 `src/lib/settings-catalog.ts`；AI Provider 定义在 `src/contracts/ai-provider.ts`。OpenCode 设置页的推荐模型通过“刷新推荐”按钮调用 `/api/settings/opencode-models`，服务端实时读取 `https://opencode.ai/zen/v1/models`，只保留免费模型；读取失败时使用本地免费模型兜底。AI 先提取“品牌/主体（最多 3 个）/动作词/事项词”三段式事件身份；有明确品牌时事件键主体直接复用 `brand`，无品牌时才使用其他直接参与主体。主体单项不超过 16 个汉字，动作不超过 8 个字符，事项不超过 16 个汉字；`src/contracts/event-identity.ts` 会将常见同义动作压缩为稳定短语，再确定性生成事件键，模型不直接决定最终键字符串。事件身份提示词禁止行业趋势、战略概括和多动作长句；事项只保留一个地点、季度、数量、金额或对象词，身份宽泛时降低置信度。事件聚类在 AI 完成后执行，规则集中在 `src/contracts/event-clustering.ts`：只比较最近 7 天 active Event，先以 48 个高召回候选扩大覆盖，再以最多 15 个候选做完整排序；只有事件键/结构化身份、带交并比确认的正文相似度，或带主体锚点的标题相似度达到灰区门槛时，才把最多 5 个候选交给 AI，避免仅因品牌、行业词或正文覆盖率偏高制造待复核。规范事件键精确一致和结构化身份相似度是主证据，内容指纹、标准化标题、正文 8 字片段重合、发布时间距离与共享主体锚点作为辅助证据，“即将发生/已经发生”阶段冲突、主体冲突以及不同年份/季度/届次作为反证。候选成员保留代表文章和最近 12 篇已完成分析的报道，避免只比较最新 8 篇造成事件表征漂移。内容指纹一致可直接归入；标题完全一致仍须事件身份一致或高度相似，避免周期性同标题误并。聚合快讯或高证据灰区文章进入 `needs_review`，待复核 Event 仍参与后续候选召回，但 Event 级 `clusterReviewStatus=pending` 时不产生代表文章、公开或推送；只有所有灰区候选均以至少 85 置信度判定为不同事件时，才允许新建普通 Event。AI 超时、格式错误或低置信度结论一律进入待复核，不能降级成可推送事件。推送前还会对最近 14 天已推送 Event 做一次高置信重复拦截；人工强制推送仍由明确模式绕过。当前仍不引入 Embedding。
-
-AI 重置由 `src/lib/article-ai-reset.ts` 中的重置 helper 统一生成，重新分析继续保留人工覆盖。旧 Article duplicate 状态和“取消重复并分析”入口已经删除；内容指纹只作为 Event 聚类证据。
-
- AI 分析要求先事实、后判断：标题与正文一起输入，先提取品牌/核心主体、规范动作词和事项词，再独立计算广告概率、事件影响、内容可用性和行业相关度，最后生成事实要点与洞察。事件影响评分优先识别创始人、董事长、CEO 和核心经营高管变动，以及有明确数量、时间、地区的连锁开关店；普通岗位变动和单店常规调整不额外抬分。处理阶段会持久化当时的关键词真实命中结果；命中文章在广告规则处理后默认额外加 5 分（最终不超过 100），可在设置页调整为 0-20；空关键词库和仅由行业标题兜底保留的文章不加分。调整加分时使用已持久化的命中事实重算现有评分和公开状态，不改变 AI 原始事件分与内容分。分类只看核心事件，不被次要餐饮案例带偏；救灾、公益、事故和员工/消费者伤害等敏感议题禁止无证据推测动机或使用指控性用语。证据边界、执行顺序和 JSON 结构由代码统一维护，各可编辑块只描述单一字段标准；结构化结果解析允许 Markdown 包裹、字段别名、数字字符串和宽松数组格式，并统一归一化，但核心评分、洞察和完整事件身份缺失时仍判定失败并进入有限重试。历史提示词设置为空时直接使用当前代码默认，在设置页恢复默认并保存后持久化当前默认文本。主动重新生成使用 `promptVersion=v15`，不为历史 AI 结果做兼容重算。
-
-公开端保持自动发布：只有代表 Article 已完成聚类（`clusterStatus=clustered`）、AI 完成、来源允许公开，并同时满足最低评分、最低行业相关度和软文规则时才进入公开快照；默认阈值为评分 70、相关度 50，避免“文章有信息量但与餐饮/零售连锁主题无关”的内容仅凭高分自动公开。`pending`、`failed`、`needs_review` 均不得成为代表文章、公开或推送。自动代表文章先要求聚类和 AI 完成、来源未删除，再比较人工重要、评分、相关度和正文质量；人工指定代表文章同样必须满足该基础资格。来源是否允许公开继续由公开门禁独立判断，避免一个关闭公开的来源让 Event 错选低质量代表文章。后台可人工修正摘要、品牌、分类、规范事件身份、关键点和评分；事件身份按主体/行为/具体事项原子提交，修正后确定性重建事件键并重新聚类。管理员还可对单篇设置公开、隐藏或恢复自动规则；人工公开可绕过分数、相关度和软文阈值，但不绕过 Event、AI、代表文章和来源门禁。收件箱使用人工待处理视图，不把抓取、AI、聚类或推送技术失败混入人工队列。
-
-## 数据库与生产部署
-
-项目按 Prisma migration 发布，不使用 `prisma db push` 作为日常部署方式。当前 migration 按序位于 `prisma/migrations/`，生产由 `npm run db:migrate:deploy` 自动应用。CI 会在临时空 SQLite 上应用全部 migration 并执行 schema diff，防止 migration 顺序、SQL 或 schema 漂移。历史 `db push` 库首次切换前必须停服务并备份：
+## 常用命令
 
 ```bash
-npm run db:migrate:baseline
-npm run db:migrate:deploy
-npm run db:migrate:status
+npm run dev                 # 开发服务：http://localhost:3011
+npm run build               # 生产构建
+npm run start               # 启动生产服务
+npm run lint                # ESLint
+npm run typecheck           # TypeScript 类型检查
+npm test                    # 默认测试
+npm run test:critical       # 核心业务测试
+npm run test:migrations     # 空 SQLite migration 冒烟测试
+npm run test:all            # 默认测试 + migration 测试
+npm run verify              # lint + typecheck + 全测试 + build
 ```
 
-出现 drift 必须停止并人工检查，不要 reset 或覆盖数据库。SQLite 统一使用 WAL、`synchronous=NORMAL`、`busy_timeout=5000` 和外键检查；服务启动时会幂等初始化并输出状态，部署迁移后也应执行 `npm run db:optimize`。生产更新顺序：停止 PM2 → 使用 SQLite `.backup` 生成一致性备份并保留现有 `-wal`/`-shm` → 将部署包解压到临时目录并以收敛同步删除旧代码（保留 `.env`、`db/`、`node_modules/`）→ `npm ci` → `npm run db:migrate:deploy` → `npm run db:generate` → `npm run db:optimize` → `npm run build` → 重启 PM2 → 请求 `/api/health`。`20260720210000_replace_tags_with_event_identity` 会直接删除内容标签并新增三段式事件身份字段，不做旧文章回填；`20260721150000_compact_event_identity_prompt` 会把仍使用旧版默认提示词的事件身份设置升级为短词规范。本次业务数据按重新采集处理。首次跨过 `20260718230000_add_public_feed_sort` migration 的既有数据库，还需执行一次 `npm run db:rebuild-public` 回填公开排序快照；普通应用更新不清空服务器全局 Nginx 缓存，也不需要 reload Nginx。
+数据库命令：
 
 ```bash
-npm ci
-npm run db:migrate:deploy
-npm run db:generate
-npm run db:optimize
-npm run build
-pm2 delete h2-hot2 && pm2 start npm --name h2-hot2 -- start
+npm run db:migrate          # 本地创建或应用开发 migration
+npm run db:migrate:deploy   # 应用已有 migration
+npm run db:migrate:status   # 检查 migration 状态
+npm run db:generate         # 生成 Prisma Client
+npm run db:seed             # 写入初始配置和预设数据
+npm run db:optimize         # 启用/检查 WAL 并执行 PRAGMA optimize
+npm run db:cleanup-logs     # 清理过期运行日志
 ```
 
-日常运维：`npm run db:migrate:status`、`npm run db:optimize`、`npm run db:cleanup-logs`、`npm run db:rebuild-public`、`pm2 status`、`pm2 logs h2-hot2`。日志保留周期由 `src/lib/log-retention.ts` 统一负责：FetchLog 30 天，PushLog 90 天但保留未完成全部投递的记录，成功/失败/取消 Job 30 天；不会删除 Article、Source、DiscardedItem 或 pending/running Job。`db:reset`、`db:push` 仅限明确的本地重建或应急场景。
+日常生产部署禁止使用 `db:push` 或 `db:reset`。本项目不为历史业务数据维护兼容层；结构或规则变化按重新采集新数据处理。
 
-## 开发、验证与防漂移规则
+## 管理后台
+
+后台导航收敛为：
+
+- `工作台`：任务监控、技术恢复、Article 校准、Event 修正、公开决策和人工推送。
+- `设置`：数据源、关键词、AI、评分、推送目标、调度和数据维护。
+
+技术失败由任务区域处理；内容判断和 Event 校准由文章详情抽屉处理。两者共享同一工作台，但服务层职责不合并。
+
+单篇恢复统一使用 `POST /api/articles/[id]/workflow`：
+
+- `retry`：只重试当前可恢复的失败阶段。
+- `regenerate`：从指定阶段重置并重新计算。
+
+## 性能边界
+
+当前规模采用轻量优化：
+
+- SQLite WAL、必要索引和短事务。
+- 公开列表使用稳定游标分页和有界短缓存。
+- 后台详情按需加载，轮询在页面隐藏时暂停。
+- Job、公开统计和技术待办使用短缓存合并重复读取。
+- 批处理按固定 chunk 消费全部积压，避免一次加载无限数据。
+
+在有明确性能数据前，不引入 Redis、消息队列、微服务或多实例 PM2。
+
+## 测试与自动部署
+
+GitHub Actions 配置：
+
+- `.github/workflows/ci.yml`：`master` push、Pull Request 或手动触发；执行 lint、类型检查、单元测试、migration smoke 和生产构建。
+- `.github/workflows/deploy.yml`：`master` 的 CI 成功后自动部署生产；也支持手动重新部署。
+
+部署流程会停止 PM2、备份 SQLite、同步并删除旧代码、安装依赖、应用 migration、构建、以单实例启动 PM2，并检查 `/api/health`。服务器上的 `.env` 和 `db/` 不会被发布包覆盖。
+
+服务器全新初始化使用：
 
 ```bash
-npm run dev
-npm run lint
-npm run typecheck
-npm test                         # 快速回归：纯函数、Service、Route、业务门禁
-npm run test:critical            # 关键链路快速门禁
-npm run test:migrations          # 空 SQLite 全 migration + schema diff
-npm run test:legacy-baseline     # 仅历史 db push 库切换逻辑
-npm run test:all                 # 快速回归 + migration smoke
-npm run verify                   # lint + 类型 + 全测试 + build
-npm run build
+cd /www/wwwroot/hot.kfxz.cn
+bash scripts/init-production.sh
 ```
 
-测试按第一性原理分层：纯函数测试固定确定性规则；Service 测试固定事务、状态变更和领域边界；Route/Proxy 测试固定 HTTP 与鉴权适配；migration smoke 证明空库可以到达当前 schema；生产构建证明 Next.js 边界可编译。外部网站、AI Provider 和 Feishu Webhook 默认使用 stub，不把不稳定网络作为常规 CI 前提。新增业务入口前先检查是否可归入现有 Route/Service；默认值只维护在对应目录；数据库字段变更必须同时提交 schema、migration 和发布说明。当前业务数据按重新采集处理，不为旧 Article/Event 数据增加双读、回填或兼容分支。API 新字段必须同步 DTO、序列化函数和消费者，不得直接把 Prisma model 返回浏览器。修改设置、Provider、聚类或去重规则时同步契约、校验、UI、README 和相关实施文档。逻辑变更应补充对应 Vitest 回归测试。
+完整步骤见 `bat/部署和更新方法.txt`，Nginx 模板见 `bat/本项目的nginx.txt`。
 
-GitHub Actions：`.github/workflows/ci.yml` 在 `master` push 和 PR 上执行 lint、类型检查、全部快速回归、migration smoke 和生产构建；`.github/workflows/deploy.yml` 只在 `master` 的 CI 成功后部署，也支持手动触发。生产环境必须配置 Secret `DEPLOY_SSH_KEY`；`DEPLOY_HOST`、`DEPLOY_USER`、可选的 `DEPLOY_PORT`、`DEPLOY_KNOWN_HOSTS` 推荐使用 Environment/Repository Variables，也兼容同名 Secrets。部署使用 `scripts/deploy-production.sh`，服务器必须已有 `.env`、`db/custom.db`、Node.js、PM2、sqlite3、rsync、tar 与 curl。GitHub 不保存生产 `.env` 或数据库。
+## 安全规则
 
-## 安全与发布文件
-
-不要提交 `.env`、API key、Webhook URL、SQLite 数据或部署压缩包。部署包不包含 `.env*`、`db/`、测试、设计预览、根目录 Markdown、本地工具配置或旧压缩包；`bat/` 中的部署/Nginx 文档会随包保留。完整现场流程见 `bat/部署和更新方法.txt`，Nginx 模板见 `bat/本项目的nginx.txt`。
-
+- 不提交 `.env`、API Token、Webhook、SSH 私钥、SQLite 数据或部署压缩包。
+- 生产环境必须设置强随机 `API_TOKEN`。
+- PM2 只能运行一个 `h2-hot2` 实例，禁止 `-i max` 和 cluster 模式。
+- 普通发布不清理服务器全局 Nginx 缓存，也不 reload Nginx。
+- migration 前先备份数据库；出现 drift 时停止操作，不要 reset 用户数据库。

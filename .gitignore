@@ -42,6 +42,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 local-*
+!bat/local-init.ps1
 .claude
 .z-ai-config
 *.log
