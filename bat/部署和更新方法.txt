@@ -1,9 +1,11 @@
-Hot2 部署和更新方法（2026-07）
-================================
+Hot2 部署和更新方法（2026-07-22）
+==================================
 
 适用版本：Next.js 16 + Prisma/SQLite + PM2，Node.js >= 20.9.0。
 生产目录：/www/wwwroot/hot.kfxz.cn
 应用端口：3011
+
+运行时说明：GitHub Actions CI 固定使用 Node.js 22；截至 2026-07-22，生产服务器使用 Node.js 20.20.2。两者均满足项目要求，但升级 Node.js 后应重新执行依赖安装和构建。
 
 一、部署包说明
 --------------
@@ -13,14 +15,23 @@ Hot2 部署和更新方法（2026-07）
 - .env* 和 db/（服务器配置、SQLite 数据必须保留在服务器）
 - node_modules、.next、tests、docs、design-previews、构建缓存
 - 一次性开发脚本（backfill-prompt-defaults.ts、cleanup-legacy-settings.ts 已删除）
-- 根目录 Markdown/本地工具配置及所有旧 zip；`bat/` 部署/Nginx 文档保留
+- 根目录 Markdown、本地工具配置及所有旧 zip；bat/ 中的部署和 Nginx 文档保留
 
-部署包保留 prisma/migrations、prisma/seed.ts、scripts/db-baseline.ts、scripts/cleanup-logs.ts、scripts/optimize-database.ts 和 scripts/rebuild-public-publication.ts，供服务器初始化、迁移和维护使用。
+部署包保留以下生产初始化、迁移和维护文件：
+
+- prisma/migrations、prisma/seed.ts
+- scripts/deploy-production.sh
+- scripts/db-baseline.ts
+- scripts/cleanup-logs.ts
+- scripts/optimize-database.ts
+- scripts/rebuild-public-publication.ts
 
 二、新服务器初始化
---------------------
+------------------
 
-将 zip 上传到应用目录之外（示例使用 `/tmp`），再收敛同步到生产目录：
+GitHub 自动部署要求服务器上已经存在生产目录、.env、db/custom.db 和已注册的 PM2 应用，因此第一次部署必须先手工初始化。
+
+将 zip 上传到应用目录之外（示例使用 /tmp），再收敛同步到生产目录：
 
   rm -rf /tmp/h2-hot2-release
   mkdir -p /tmp/h2-hot2-release
@@ -32,7 +43,7 @@ Hot2 部署和更新方法（2026-07）
   cd /www/wwwroot/hot.kfxz.cn
   npm ci
 
-不要直接在生产目录执行 `unzip -o`：它只能覆盖文件，无法删除新版本已经移除的旧 Route、组件或脚本。
+不要直接在生产目录执行 unzip -o：它只能覆盖文件，无法删除新版本已经移除的旧 Route、组件或脚本。
 
 创建 .env（只在第一次部署执行，之后不要覆盖）：
 
@@ -40,7 +51,7 @@ Hot2 部署和更新方法（2026-07）
   echo "API_TOKEN=$(openssl rand -hex 32)" >> .env
   echo 'NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn' >> .env
 
-`NEXT_PUBLIC_SITE_URL` 必须在 `npm run build` 前设置为正式域名，用于 canonical、Open Graph 和 sitemap。
+NEXT_PUBLIC_SITE_URL 必须在 npm run build 前设置为正式域名，用于 canonical、Open Graph 和 sitemap。
 
 初始化空 SQLite：
 
@@ -49,6 +60,7 @@ Hot2 部署和更新方法（2026-07）
   npm run db:generate
   npm run db:seed
   npm run db:optimize
+  npm run db:migrate:status
   npm run build
 
 启动 PM2：
@@ -57,22 +69,29 @@ Hot2 部署和更新方法（2026-07）
   pm2 save
   pm2 startup
 
-然后访问 `https://hot.kfxz.cn/admin/login`，输入服务器 `.env` 中的 `API_TOKEN`。验证成功后浏览器使用 HttpOnly Cookie 访问后台，不需要在设置页或 localStorage 再保存 Token。
+按 pm2 startup 的输出完成开机启动配置。然后访问 https://hot.kfxz.cn/admin/login，输入服务器 .env 中的 API_TOKEN。验证成功后浏览器通过 HttpOnly Cookie 访问后台，不需要在设置页或 localStorage 再保存 Token。
 
-生产环境除明确开放的公开文章 API 外，后台页面和后台 API（包括 GET）均受保护；脚本直接调用后台 API 时仍需发送 `Authorization: Bearer <API_TOKEN>`。
+公开访问例外只有：
 
-PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js 进程内，禁止使用 `pm2 -i max`、cluster 模式或同时启动多个 `h2-hot2` 实例。
+- GET/HEAD /api/health：HTTP 存活检查
+- GET/HEAD/OPTIONS /api/public/articles 及其详情接口：公开文章数据
+- 后台登录所需的 /api/admin-auth
+
+其余后台页面和后台 API（包括 GET）均受保护；脚本直接调用后台 API 时仍需发送 Authorization: Bearer <API_TOKEN>。
+
+PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js 进程内，禁止使用 pm2 -i max、cluster 模式或同时启动多个 h2-hot2 实例。
 
 三、存量 db push 数据库首次切换
 --------------------------------
 
-只对历史上使用 `prisma db push`、尚未建立 `_prisma_migrations` 记录的服务器执行一次。先停服务并进行 SQLite 一致性备份：
+只对历史上使用 prisma db push、尚未建立 _prisma_migrations 记录的服务器执行一次。先停服务并进行 SQLite 一致性备份：
 
   cd /www/wwwroot/hot.kfxz.cn
   pm2 stop h2-hot2
   backup_dir="/www/backup/h2-hot2/$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$backup_dir"
   sqlite3 db/custom.db ".timeout 5000" ".backup '$backup_dir/custom.db'"
+  test -s "$backup_dir/custom.db"
   cp -a db/custom.db-wal db/custom.db-shm "$backup_dir/" 2>/dev/null || true
 
 执行 baseline 预检：
@@ -80,8 +99,8 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
   npm run db:migrate:baseline
 
 - exit 0：结构与 baseline 匹配，已安全标记 baseline。
-- exit 2：检测到 drift，停止操作；检查 stdout/stderr 和备份，不要 reset、db push 或手工覆盖。
-- exit 1：命令失败，先处理命令/环境问题。
+- exit 2：检测到 drift，停止操作；检查输出和备份，不要 reset、db push 或手工覆盖。
+- exit 1：命令失败，先处理命令或环境问题。
 
 预检成功后继续应用后续 migration：
 
@@ -92,14 +111,25 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
   npm run db:migrate:status
   pm2 start h2-hot2
 
-架构和数据库说明以根目录 `README.md` 为准，实际迁移顺序以 `prisma/migrations/` 为准。本文件不复制迁移清单，避免源码新增 migration 后出现文档漂移。
+架构和数据库说明以根目录 README.md 为准，实际迁移顺序以 prisma/migrations/ 为准。本文件不复制迁移清单，避免源码新增 migration 后出现文档漂移。
 
-切换完成后禁止再次执行 baseline；日常更新只执行 migrate deploy。`db:rebuild-public` 用于给既有 Event 重建公开发布与排序快照；首次跨过 `20260718230000_add_public_feed_sort` migration 时执行一次即可，不要加入每次更新的固定流程。
+切换完成后禁止再次执行 baseline；日常更新只执行 migrate deploy。db:rebuild-public 用于给既有 Event 重建公开发布与排序快照；首次跨过 20260718230000_add_public_feed_sort migration 时执行一次即可，不要加入每次更新的固定流程。
 
-四、日常更新
-------------
+四、日常自动更新
+----------------
 
-推荐方式：推送 `master` 后由 GitHub Actions 自动执行 CI；全部通过后，`Deploy production` 通过 SSH 调用 `scripts/deploy-production.sh`。仓库需配置：
+标准触发流程：
+
+  推送或合并到 master
+    -> CI 执行 lint、类型检查、测试、migration smoke 和生产构建
+    -> CI 全部成功
+    -> Deploy production 自动部署当前通过 CI 的提交
+
+也可在 GitHub Actions 页面手动运行 CI。
+
+手动运行 Deploy production 会绕过 CI，只应用于“重新部署已经验证过的提交”，不要用它替代正常的测试流程。运行时应确认所选分支或提交就是准备上线的版本。
+
+仓库 production Environment 需要配置：
 
   DEPLOY_SSH_KEY     Secret，SSH 私钥
   DEPLOY_HOST        Variable（或同名 Secret），生产服务器地址
@@ -107,23 +137,36 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
   DEPLOY_PORT        可选 Variable/Secret，默认 22
   DEPLOY_KNOWN_HOSTS 可选 Variable/Secret，建议填写固定 known_hosts；为空时 workflow 使用 ssh-keyscan
 
-自动部署会保留服务器 `.env*`、`db/` 与 `node_modules/`，停 PM2 后执行 SQLite `.backup`，再执行 `rsync --delete`、`npm ci`、migration、Prisma generate、数据库优化、构建、单实例 PM2 启动和 `https://hot.kfxz.cn/api/health` 健康检查。失败时脚本会尽量恢复旧 PM2 服务，但不会自动回滚已应用的 migration；数据库可从当次备份恢复。
+自动部署执行：上传临时发布包、停止 PM2、创建 SQLite .backup、rsync --delete、npm ci、migration、Prisma generate、数据库优化、生产构建、单实例 PM2 启动和 /api/health 检查。服务器上的 .env*、db/、node_modules/ 会在同步时保留；上传的压缩包和临时解压目录会在脚本退出时删除。
 
-手工方式保留如下：
+失败边界必须明确：部署失败时脚本只会尽量重新启动原 PM2 注册项；不会恢复旧代码、旧 node_modules、旧 .next，也不会回滚已经应用的 migration。因此“PM2 被重新启动”不等于已经回滚。需要恢复时，应从当次 SQLite 备份恢复数据库，并重新部署明确的已知可用提交。
 
-本地：
+/api/health 只证明 Next.js 进程能够返回 HTTP 200，不查询数据库，也不验证 migration 状态。完整检查应同时执行：
 
-  1. 修改并验证代码。
+  cd /www/wwwroot/hot.kfxz.cn
+  npm run db:migrate:status
+  curl --fail --silent --show-error https://hot.kfxz.cn/api/health
+
+五、手工更新
+------------
+
+仅在 GitHub Actions 不可用或明确需要人工发布时使用。
+
+Windows 本地：
+
+  1. 修改并自行验证代码。
   2. 执行 bat/run.bat 生成最新 zip。
 
 服务器：
 
   # 先将新 zip 上传到 /tmp/<部署包.zip>
   cd /www/wwwroot/hot.kfxz.cn
+  set -euo pipefail
   pm2 stop h2-hot2
   backup_dir="/www/backup/h2-hot2/$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$backup_dir"
   sqlite3 db/custom.db ".timeout 5000" ".backup '$backup_dir/custom.db'"
+  test -s "$backup_dir/custom.db"
   cp -a db/custom.db-wal db/custom.db-shm "$backup_dir/" 2>/dev/null || true
 
   rm -rf /tmp/h2-hot2-release
@@ -134,43 +177,61 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
     /tmp/h2-hot2-release/ /www/wwwroot/hot.kfxz.cn/
 
   cd /www/wwwroot/hot.kfxz.cn
-  npm ci                               # 严格按 package-lock 安装，确保与 CI 一致
-  npm run db:migrate:deploy            # 应用新增 migration；无新增时为空操作
+  npm ci
+  npm run db:migrate:deploy
   npm run db:generate
-  npm run db:optimize                   # 启用/校验 WAL、NORMAL、busy_timeout 并执行 PRAGMA optimize
-  # 首次跨过 20260718230000 migration 时额外执行一次：npm run db:rebuild-public
+  npm run db:optimize
+  # 首次跨过 20260718230000_add_public_feed_sort migration 时额外执行一次：npm run db:rebuild-public
+  npm run db:migrate:status
   npm run build
   pm2 delete h2-hot2
   pm2 start npm --name h2-hot2 -- start
   pm2 save
-  curl --fail https://hot.kfxz.cn/api/health
+  curl --fail --silent --show-error https://hot.kfxz.cn/api/health
 
 更新注意：
 
 - 不要执行 db:seed、db:migrate:baseline 或 db:danger:reset。
 - 不要删除 .env 或 db/custom.db。
-- 确认 `.env` 中的 `NEXT_PUBLIC_SITE_URL` 为当前正式域名，并在 build 前完成修改。
+- 确认 .env 中的 NEXT_PUBLIC_SITE_URL 为当前正式域名，并在 build 前完成修改。
 - 修改 .env 后用 delete + start 让 PM2 重新读取环境变量；普通 restart 可能保留旧环境。
-- 保持 PM2 单实例运行，禁止 `-i max` 或 cluster 模式。
-- 普通应用更新不要清空 `/www/server/nginx/proxy_cache_dir/`：它是服务器全局缓存目录，可能影响其他站点。本项目动态请求已在站点配置中绕过代理缓存，构建后不需要 reload Nginx。
-- 只有实际修改 `bat/本项目的nginx.txt` 并同步到服务器站点配置时，才执行 `nginx -t && nginx -s reload`。
+- 保持 PM2 单实例运行，禁止 -i max 或 cluster 模式。
+- 普通应用更新不要清空 /www/server/nginx/proxy_cache_dir/：它是服务器全局缓存目录，可能影响其他站点。本项目动态请求已在站点配置中绕过代理缓存，构建后不需要 reload Nginx。
+- 只有实际修改 bat/本项目的nginx.txt 并同步到服务器站点配置时，才执行 nginx -t && nginx -s reload。
 
-五、日志维护
+六、备份与磁盘空间
+------------------
+
+自动部署和本文件中的手工更新都会在 /www/backup/h2-hot2/ 下新增按时间命名的 SQLite 备份目录。目前没有自动保留或清理策略，长期频繁部署会持续占用服务器磁盘。
+
+查看占用和待清理目录：
+
+  du -sh /www/backup/h2-hot2
+  find /www/backup/h2-hot2 -mindepth 1 -maxdepth 1 -type d -mtime +30 -print
+
+确认输出无误、已保留最近一次有效备份和关键 migration 前备份后，才可删除超过 30 天的目录：
+
+  find /www/backup/h2-hot2 -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf -- {} +
+
+同时可用 du -sh ~/.pm2/logs 检查 PM2 日志占用。不要把数据库备份、部署 zip 或日志提交到 GitHub。
+
+七、日志维护
 ------------
 
-按保留周期清理历史日志：
+按保留周期清理数据库内的历史日志：
 
   cd /www/wwwroot/hot.kfxz.cn
   npm run db:cleanup-logs
 
 清理边界：
 
-- FetchLog：30 天。
-- PushLog：90 天，但所属 Event 尚未完成全部 Webhook 投递时保留，避免丢失目标级事实和重复推送。
-- Job：只清理超过 30 天的 completed/failed；pending/running 不会被删除。
+- FetchLog：超过 30 天删除。
+- PushLog：超过 90 天且所属 Event 已完成全部 Webhook 投递时删除，避免丢失目标级事实和造成重复推送。
+- Job：超过 30 天且状态为 succeeded、completed、failed 或 cancelled 时删除。
+- queued、running、cancel_requested Job 不会被删除。
 - 不删除 Article、Source、DiscardedItem，也不自动执行 VACUUM。
 
-六、常用运维命令
+八、常用运维命令
 ----------------
 
   pm2 status
@@ -178,69 +239,131 @@ PM2 只能启动一个应用实例。调度器和 Job 执行器运行在 Next.js
   pm2 restart h2-hot2
   pm2 restart h2-hot2 --update-env
   pm2 delete h2-hot2 && pm2 start npm --name h2-hot2 -- start
-
   pm2 stop h2-hot2
   pm2 delete h2-hot2
-#####################################################################
+
   npm run db:migrate:status
   npm run db:optimize
   npm run db:cleanup-logs
+  curl --fail --silent --show-error https://hot.kfxz.cn/api/health
 
-七、Nginx
---------
+九、Nginx
+---------
 
-使用 `bat/本项目的nginx.txt` 中的配置模板：
+使用 bat/本项目的nginx.txt 中的配置模板：
 
 - 动态请求代理到 127.0.0.1:3011。
-- `/_next/static/` 由 Nginx 直接提供 immutable 静态资源。
+- /_next/static/ 由 Nginx 直接提供 immutable 静态资源。
 - 动态页面绕过 proxy_cache，避免重新构建后旧 HTML 引用已删除的 chunk。
 - 模板为 JS/CSS/JSON/SVG/HTML 响应启用 gzip，减少后台快照和前端资源传输体积。
-- 仅修改 Nginx 配置时执行 `nginx -t && nginx -s reload`；普通代码发布无需执行。
+- 仅修改 Nginx 配置时执行 nginx -t && nginx -s reload；普通代码发布无需执行。
 
-八、从零重建（破坏性操作）
---------------------------
+十、初始化或清理历史数据
+------------------------
 
-仅在数据损坏或明确要清空全部业务数据时执行。先确认已有备份并停服务：
+先根据目标选择一种方式，不要混用。
 
+A. 清理主要业务历史，保留配置（通常应选此方式）
+
+如果只是要“初始化宝塔服务器中本项目的历史数据”，进入后台：
+
+  设置 -> 数据 -> 一键清空所有数据
+
+该操作会删除：
+
+- Article、Event、EventClusterAudit
+- PushLog、PushDelivery
+- DiscardedItem、DiscardedRetryAudit
+- FetchLog、Job
+
+该操作会保留：
+
+- Source、Keyword、Setting
+- KeywordCandidate、TuningSuggestion、InboxSnapshot、PushTarget、EventDirty
+
+因此它准确含义是“清理主要采集、文章、事件、推送和任务历史，并保留现有配置”，不是清空 SQLite 中的每一张表。操作前仍建议备份 db/custom.db。
+
+B. 删除整个 SQLite 并从零重建（完全破坏性）
+
+只有在数据库损坏，或明确要求连数据源、关键词、设置、候选、快照和推送目标等全部重新初始化时执行：
+
+  cd /www/wwwroot/hot.kfxz.cn
+  set -euo pipefail
+  test -s db/custom.db
   pm2 stop h2-hot2
+
   backup_dir="/www/backup/h2-hot2/$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$backup_dir"
   sqlite3 db/custom.db ".timeout 5000" ".backup '$backup_dir/custom.db'"
+  test -s "$backup_dir/custom.db"
   cp -a db/custom.db-wal db/custom.db-shm "$backup_dir/" 2>/dev/null || true
+
   rm -f db/custom.db db/custom.db-journal db/custom.db-wal db/custom.db-shm
   npm run db:migrate:deploy
   npm run db:generate
   npm run db:seed
   npm run db:optimize
+  npm run db:migrate:status
   npm run build
+
   pm2 delete h2-hot2
   pm2 start npm --name h2-hot2 -- start
   pm2 save
+  curl --fail --silent --show-error https://hot.kfxz.cn/api/health
 
-————————————————
+test -s "$backup_dir/custom.db" 成功后才会继续删除原数据库；任一命令失败时 set -euo pipefail 会停止后续步骤。恢复备份前必须先停止 PM2，避免应用继续写库。
 
-Windows 本地重建（会删除本地数据）：
+十一、Windows 本地从零重建
+--------------------------
 
-# 1. 结束当前服务（开发用 npm run dev 直接 Ctrl+C；PM2 用 pm2 stop h2-hot2）
-# 2. 备份并删除本地数据库
-Copy-Item .\db\custom.db .\db\custom.db.bak-$((Get-Date).ToString('yyyyMMdd-HHmmss')) -Force
+以下操作会删除本地数据：
 
-Remove-Item .\db\custom.db, .\db\custom.db-journal, .\db\custom.db-wal, .\db\custom.db-shm -Force -ErrorAction SilentlyContinue
+  # 1. 先结束当前服务：npm run dev 使用 Ctrl+C；PM2 使用 pm2 stop h2-hot2
 
-# 3. 应用全部 migration（空库）
-npm run db:generate
-npm run db:migrate:deploy
-npm run db:seed
-npm run db:optimize
+  # 2. 备份并删除本地数据库
+  if (Test-Path .\db\custom.db) {
+    Copy-Item .\db\custom.db .\db\custom.db.bak-$((Get-Date).ToString('yyyyMMdd-HHmmss')) -Force
+  }
+  Remove-Item .\db\custom.db, .\db\custom.db-journal, .\db\custom.db-wal, .\db\custom.db-shm -Force -ErrorAction SilentlyContinue
 
-npm run dev
+  # 3. 应用 migration、生成客户端并写入种子数据
+  npm run db:migrate:deploy
+  npm run db:generate
+  npm run db:seed
+  npm run db:optimize
+  npm run db:migrate:status
 
+重建完成后只选一种启动方式，不要先运行会持续占用终端的 npm run dev，再继续执行 build：
 
-# 4. 构建并启动
-npm run build
-pm2 delete h2-hot2 2>$null
-pm2 start npm --name h2-hot2 -- start
-pm2 save
+  # 调试模式
+  npm run dev
 
-# 调试模式（不需要 build / PM2）：
-#   npm run dev
+或：
+
+  # 本地生产模式
+  npm run build
+  pm2 delete h2-hot2 2>$null
+  pm2 start npm --name h2-hot2 -- start
+  pm2 save
+
+十二、关闭自动部署与撤销 SSH 权限
+--------------------------------
+
+完全关闭部署 workflow：在 GitHub 仓库 Actions -> Deploy production 页面选择 Disable workflow。此操作会同时关闭自动和手动部署。
+
+如果只保留手动部署：修改 .github/workflows/deploy.yml，删除 workflow_run 触发，仅保留 workflow_dispatch。提交前确认不会误触发生产发布。
+
+彻底撤销 GitHub Actions 的服务器权限时，执行以下三步：
+
+1. 在 DEPLOY_USER 对应账户下，从 ~/.ssh/authorized_keys 删除带 github-actions-hot2 注释的公钥。当前部署用户为 root 时，可先检查再删除：
+
+     grep -n 'github-actions-hot2' /root/.ssh/authorized_keys
+     cp -a /root/.ssh/authorized_keys /root/.ssh/authorized_keys.bak
+     sed -i '/github-actions-hot2/d' /root/.ssh/authorized_keys
+     chmod 600 /root/.ssh/authorized_keys
+
+2. 在 GitHub Settings -> Environments -> production 中删除 DEPLOY_SSH_KEY 和 DEPLOY_KNOWN_HOSTS。
+
+3. 不再需要部署配置时，同时删除 DEPLOY_HOST、DEPLOY_USER、DEPLOY_PORT Variables/Secrets，并 Disable workflow。
+
+只删除 GitHub Secret 可以阻止 workflow 使用密钥；同时删除服务器 authorized_keys 中的公钥，才能确保旧私钥即使留有副本也无法再次登录。任何文档、日志和聊天中都不要保存或回显 SSH 私钥、服务器密码、API_TOKEN 或 .env 内容。
