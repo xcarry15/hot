@@ -15,10 +15,9 @@ import { EXPORTABLE_SETTING_KEYS } from '@/lib/settings';
 describe('POST /api/settings/export', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('返回信封 + 真实(未脱敏)密钥值', async () => {
+  it('返回信封和可导出配置，不包含敏感凭证', async () => {
     mocks.settingFindMany.mockResolvedValue([
       { key: 'ai_provider', value: 'deepseek' },
-      { key: 'deepseek_api_key', value: 'sk-secret-123' },
       { key: 'push_min_score', value: '60' },
     ]);
 
@@ -29,7 +28,8 @@ describe('POST /api/settings/export', () => {
     expect(body.type).toBe('hot2-settings');
     expect(body.version).toBe(1);
     expect(typeof body.exportedAt).toBe('string');
-    expect(body.settings.deepseek_api_key).toBe('sk-secret-123'); // 未脱敏
+    expect(body.settings.deepseek_api_key).toBeUndefined();
+    expect(body.settings.feishu_webhook_url).toBeUndefined();
     expect(body.settings.ai_provider).toBe('deepseek');
     expect(body.settings.push_min_score).toBe('60');
   });

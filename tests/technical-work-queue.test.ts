@@ -36,4 +36,21 @@ describe('technical work queue', () => {
       expect.objectContaining({ articleId: 'a-unknown', issues: ['push_failed'], state: 'manual' }),
     ]);
   });
+
+  it('只查询启用且未删除来源的技术待办', async () => {
+    mocks.articleFindMany.mockResolvedValue([]);
+    mocks.eventFindMany.mockResolvedValue([]);
+    mocks.targetStates.mockResolvedValue(new Map());
+
+    await getTechnicalWorkQueue();
+
+    expect(mocks.articleFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ source: { is: { enabled: true, deletedAt: null } } }),
+    }));
+    expect(mocks.eventFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        representativeArticle: { is: { source: { is: { enabled: true, deletedAt: null } } } },
+      }),
+    }));
+  });
 });

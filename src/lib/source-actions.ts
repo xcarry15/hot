@@ -64,7 +64,7 @@ export async function createSource(body: unknown) {
   if (!parsed.success) {
     return { error: formatSourceSchemaError(parsed.error), status: 400 as const };
   }
-  const { name, type, url, parserConfig, enabled } = parsed.data;
+  const { name, type, url, parserConfig, enabled, publicEnabled } = parsed.data;
 
   let serializedConfig: string;
   try {
@@ -83,6 +83,7 @@ export async function createSource(body: unknown) {
       url,
       parserConfig: serializedConfig,
       enabled: enabled !== false,
+      publicEnabled,
     },
   });
 

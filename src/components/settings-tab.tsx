@@ -76,7 +76,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   const settingsBaselineRef = useRef<string | null>(null)
   const settingsBaselineStateRef = useRef<SettingsType | null>(null)
   const providerBaselineRef = useRef<ProviderConfigs | null>(null)
-  const revealAttemptedRef = useRef(false)
+  const revealedSensitiveTabsRef = useRef<Set<'ai-model' | 'push'>>(new Set())
   const pendingRevealBaselineRef = useRef<string | null>(null)
   // reveal 401 只提示一次：避免 StrictMode 双跑 / 刷新 / 切回设置页重复打扰；
   // 用户在「账户」填好 token 后下一次 fetchSettings 会自动恢复明文回显。
@@ -127,9 +127,9 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     }
   }, [])
 
-  const revealSensitiveSettingsForEditor = useCallback(async () => {
+  const revealSensitiveSettingsForEditor = useCallback(async (tab: 'ai-model' | 'push') => {
     try {
-      const revealKeys = activeTab === 'push'
+      const revealKeys = tab === 'push'
         ? [SETTING_KEYS.FEISHU_WEBHOOK_URL]
         : (Object.keys(AI_PROVIDERS) as AIProviderId[]).map((id) => providerKey(id, 'api_key'))
       const revealed = await revealSettings(revealKeys)
@@ -150,7 +150,8 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
       setSettings(nextSettings)
       setProviderConfigs(nextProviders)
     } catch (err) {
-      revealAttemptedRef.current = false
+      // 同一类敏感配置加载失败时允许下一次进入该页重试；另一类配置互不影响。
+      revealedSensitiveTabsRef.current.delete(tab)
       if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
         if (!warnedAuthRef.current) {
           warnedAuthRef.current = true
@@ -160,7 +161,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         }
       }
     }
-  }, [activeTab, providerConfigs, settings, settingsFingerprint])
+  }, [providerConfigs, settings, settingsFingerprint])
 
   useEffect(() => {
     const handle = setTimeout(loadSettingsTab, 0)
@@ -189,9 +190,10 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   }), [providerConfigs, settingsFingerprint])
 
   useEffect(() => {
-    if (loading || !['ai-model', 'push'].includes(activeTab) || revealAttemptedRef.current) return
-    revealAttemptedRef.current = true
-    void revealSensitiveSettingsForEditor()
+    const tab = activeTab === 'ai-model' || activeTab === 'push' ? activeTab : null
+    if (loading || !tab || revealedSensitiveTabsRef.current.has(tab)) return
+    revealedSensitiveTabsRef.current.add(tab)
+    void revealSensitiveSettingsForEditor(tab)
   }, [activeTab, loading, revealSensitiveSettingsForEditor])
 
   useEffect(() => {

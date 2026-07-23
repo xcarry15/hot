@@ -209,6 +209,9 @@ export async function getCrawlLogSnapshot(
   const articles = Array.from(new Map(
     [...recentArticles, ...technicalArticles].map((article) => [article.id, article]),
   ).values());
+  // 技术队列可能处于短暂缓存中；以本次快照实际可见的文章为准，避免摘要出现列表中找不到的待办。
+  const visibleTechnicalArticleIds = new Set(technicalArticles.map((article) => article.id));
+  const visibleTechnicalItems = technicalItems.filter((item) => visibleTechnicalArticleIds.has(item.articleId));
   const pushStatesByEvent = await getPushTargetStatesForEvents(
     articles.flatMap((article) => article.eventId ? [article.eventId] : []),
   );
@@ -439,7 +442,7 @@ export async function getCrawlLogSnapshot(
     latestJob,
     sources,
     fetchedAt: Date.now(),
-    technicalTotal: technicalItems.filter((item) => item.state === 'manual').length,
-    autoRetryTotal: technicalItems.filter((item) => item.state === 'auto_retry').length,
+    technicalTotal: visibleTechnicalItems.filter((item) => item.state === 'manual').length,
+    autoRetryTotal: visibleTechnicalItems.filter((item) => item.state === 'auto_retry').length,
   };
 }

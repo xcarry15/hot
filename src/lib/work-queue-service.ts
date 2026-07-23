@@ -4,7 +4,7 @@ import { getTechnicalWorkQueue } from '@/lib/technical-work-queue-service';
 export async function getWorkQueueSummary() {
   const [technicalItems, failedSources, humanTotalRows, clusterReview, lowConfidence] = await Promise.all([
     getTechnicalWorkQueue(),
-    db.source.count({ where: { deletedAt: null, OR: [{ status: 'warning' }, { status: 'breaker' }] } }),
+    db.source.count({ where: { enabled: true, deletedAt: null, OR: [{ status: 'warning' }, { status: 'breaker' }] } }),
     db.$queryRaw<Array<{ total: bigint | number }>>`
       SELECT COUNT(DISTINCT "id") AS "total"
       FROM "articles"

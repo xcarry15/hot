@@ -27,6 +27,7 @@ describe('source-actions', () => {
       url: 'https://example.com/news',
       parserConfig: { itemSelector: '.item' },
       enabled: true,
+      publicEnabled: false,
     })).resolves.toEqual({ source: { id: 's1' }, status: 201 });
 
     expect(mocks.source.create).toHaveBeenCalledWith({
@@ -34,6 +35,7 @@ describe('source-actions', () => {
         name: '示例源',
         url: 'https://example.com/news',
         parserConfig: JSON.stringify({ itemSelector: '.item' }),
+        publicEnabled: false,
       }),
     });
   });

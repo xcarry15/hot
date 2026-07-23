@@ -82,6 +82,21 @@ describe('crawl-log-service', () => {
     });
   });
 
+  it('技术摘要只统计当前快照实际可见的待办', async () => {
+    mocks.technicalQueue.mockResolvedValue([
+      { articleId: 'disabled-source-article', issues: ['ai_failed'], retryAvailableAt: null, state: 'manual' },
+    ]);
+    mocks.articleFindMany.mockResolvedValue([]);
+
+    const snapshot = await getCrawlLogSnapshot({ limit: 50 });
+
+    expect(snapshot.technicalTotal).toBe(0);
+    expect(snapshot.autoRetryTotal).toBe(0);
+    expect(mocks.articleFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ source: { enabled: true, deletedAt: null } }),
+    }));
+  });
+
   describe('active / latest Job 互斥', () => {
     function setupTxMock(activeValue: unknown[], latestValue: unknown[], articlesValue: unknown[] = [], discardedValue: unknown[] = []) {
       // 用 moquer 直返而不走真实 ops 数组元素

@@ -188,7 +188,7 @@ describe('Event 人工纠错', () => {
       eventKey: '旧品牌/开店/旧事项', eventKeyConfidence: 60,
     });
 
-    await expect(moveArticleToEvent('a1', 'target')).resolves.toBe(true);
+    await expect(moveArticleToEvent('source', 'a1', 'target')).resolves.toBe(true);
     expect(mocks.articleUpdate).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'a1' },
       data: expect.objectContaining({
@@ -201,5 +201,15 @@ describe('Event 人工纠错', () => {
     expect(moveUpdate?.data).not.toHaveProperty('eventAction');
     expect(moveUpdate?.data).not.toHaveProperty('eventObject');
     expect(moveUpdate?.data).not.toHaveProperty('eventKey');
+  });
+
+  it('移动文章必须与路径中的源 Event 一致', async () => {
+    mocks.articleFindUnique.mockResolvedValue({
+      id: 'a1', eventId: 'actual-source', aiStatus: 'done', clusterStatus: 'clustered', eventKey: '事件',
+    });
+    mocks.eventFindUnique.mockResolvedValue({ id: 'target', status: 'active' });
+
+    await expect(moveArticleToEvent('requested-source', 'a1', 'target')).resolves.toBe(false);
+    expect(mocks.articleUpdate).not.toHaveBeenCalled();
   });
 });
