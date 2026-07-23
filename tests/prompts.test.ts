@@ -56,7 +56,8 @@ describe('buildStep2Prompt', () => {
     expect(prompt).toContain('event_action');
     expect(prompt).toContain('event_object');
     expect(prompt).toContain('原子动作词');
-    expect(prompt).toContain('最多 16 个汉字');
+    expect(prompt).toContain('event_subjects 单项不超过 16 个汉字');
+    expect(prompt).toContain('event_object 不超过 16 个汉字');
     expect(prompt).toContain('一个辨识词或短语');
     expect(prompt).toContain('brand 只服务展示/搜索');
     expect(prompt).toContain('不得反向覆盖 event_subjects');
@@ -64,10 +65,10 @@ describe('buildStep2Prompt', () => {
     expect(prompt).toContain('事件身份硬约束（不可被评判块覆盖）');
     expect(prompt).toContain('聚合快讯只能选一个子事件');
     expect(prompt).toContain('不得跨条目拼接');
-    expect(prompt).toContain('尚在传闻、洽谈、研究或未落地的交易');
-    expect(prompt).toContain('必须写“终止合作”');
-    expect(prompt).toContain('确实没有可定位具体事件');
-    expect(prompt).toContain('event_subjects 输出 []');
+    expect(prompt).toContain('同一事件不同报道应输出相同的subjects/action/object');
+    expect(prompt).toContain('event_key由程序按subjects/action/object生成');
+    expect(prompt).toContain('无可定位具体事件');
+    expect(prompt).toContain('subjects输出[]');
   });
 
   it('广告硬约束避免把劳动保障事实误判为软文', () => {
