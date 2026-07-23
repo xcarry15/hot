@@ -38,6 +38,9 @@ export const ARTICLE_LIST_SELECT = {
   aiConfidence: true,
   aiStatus: true,
   fetchStatus: true,
+  fetchError: true,
+  aiError: true,
+  clusterError: true,
   skipReason: true,
   isAd: true,
   reviewStatus: true,
@@ -109,6 +112,10 @@ export interface ArticleListFieldsDto {
   aiConfidence: number | null;
   aiStatus: string;
   fetchStatus: string;
+  /** 各流程阶段最近一次失败原因；成功或未失败时为 null。 */
+  fetchError: string | null;
+  aiError: string | null;
+  clusterError: string | null;
   skipReason: string | null;
   isAd: boolean;
   reviewStatus: string;
@@ -275,6 +282,9 @@ function serializeArticleListFields(
     aiConfidence: article.aiConfidence ?? null,
     aiStatus: article.aiStatus,
     fetchStatus: article.fetchStatus,
+    fetchError: article.fetchError,
+    aiError: article.aiError,
+    clusterError: article.clusterError,
     skipReason: article.skipReason,
     isAd: article.isAd,
     reviewStatus: article.reviewStatus,

@@ -6,12 +6,11 @@ describe('article-service filters', () => {
     expect(buildArticleListWhere({})).toEqual({});
   });
 
-  it('需要关注只包含人工待办，不混入技术异常', () => {
+  it('需要关注只包含聚类复核与低分析置信，不混入默认未审核或技术异常', () => {
     expect(buildArticleListWhere({ anomaly: 'needs_attention' })).toEqual({
       AND: [{ OR: [
         { clusterStatus: 'needs_review' },
         { aiStatus: 'done', aiConfidence: { lt: 70 } },
-        { reviewStatus: 'unreviewed' },
       ] }],
     });
   });

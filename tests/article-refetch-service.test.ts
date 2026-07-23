@@ -51,4 +51,18 @@ describe('article-refetch-service', () => {
       data: { keywordMatched: false },
     });
   });
+
+  it('重新抓取没有获得有效正文时返回失败，供工作流中断后续阶段', async () => {
+    mocks.article.findUnique
+      .mockResolvedValueOnce({ id: 'a2' })
+      .mockResolvedValueOnce({ fetchError: '来源正文页超时' });
+    const { fetchArticleDetail } = await import('@/lib/detail-fetcher');
+    vi.mocked(fetchArticleDetail).mockResolvedValueOnce('');
+
+    await expect(refetchArticle('a2')).resolves.toEqual({
+      success: false,
+      contentLength: 0,
+      error: '来源正文页超时',
+    });
+  });
 });

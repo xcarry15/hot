@@ -138,9 +138,10 @@ export function useCrawlLogSnapshot(
             try {
               const jobs = await fetchCrawlLogJobStatus()
               if (!unmountedRef.current) {
+                const jobChanged = jobs.activeJob?.id !== current.activeJob.id
                 const stageChanged = jobs.activeJob?.currentStage !== current.activeJob.currentStage
                 const jobFinished = !jobs.activeJob
-                if (stageChanged || jobFinished) {
+                if (jobChanged || stageChanged || jobFinished) {
                   await refreshSnapshotRefForPolling.current()
                 } else {
                   const next = { ...current, activeJob: jobs.activeJob, latestJob: jobs.latestJob, fetchedAt: jobs.fetchedAt }

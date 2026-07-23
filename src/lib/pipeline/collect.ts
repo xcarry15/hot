@@ -73,6 +73,9 @@ export async function collectItem(
       nextClusterRetryAt: null,
       eventKey: '',
       fetchStatus: 'pending' as const,
+      fetchError: null,
+      fetchRetryCount: 0,
+      nextFetchRetryAt: null,
     } : {};
     await db.article.update({
       where: { id: existing.id },
@@ -219,7 +222,7 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
           errorMessage: 'Success response but 0 items parsed (possible site restructure)',
         },
       });
-      return { success: false, items: [], error: '0 items parsed' };
+      return { success: true, items: [], error: '0 items parsed' };
     }
 
     // Success - reset failure count and record the latest fetch time.

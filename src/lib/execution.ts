@@ -383,7 +383,7 @@ async function executeCollectJob(
       if (jobId) {
         const sourceResult = result.results[0];
         await advanceJobProgress(jobId, {
-          doneDelta: sourceResult?.success ? 1 : 0,
+          doneDelta: 1,
           errorDelta: sourceResult?.success ? 0 : 1,
           currentItemLabel: sourceResult?.sourceName ?? id,
         });
@@ -581,6 +581,10 @@ async function executeSingleArticleWorkflow(
     result.process = await refetchArticle(articleId);
     stages.push('process');
     if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
+    if (!result.process || (result.process as { success?: boolean }).success !== true) {
+      const reason = (result.process as { error?: string } | null)?.error || '未获取到有效正文';
+      throw new Error(`正文重新获取失败：${reason}；已停止后续 AI 分析和事件聚类`);
+    }
   }
 
   if (startAt === 'cluster') {
@@ -679,7 +683,7 @@ async function collectSingleSource(
   const results = [{ sourceId, sourceName, ...result }];
   if (jobId) {
     await advanceJobProgress(jobId, {
-      doneDelta: result.success ? 1 : 0,
+      doneDelta: 1,
       errorDelta: result.success ? 0 : 1,
     });
   }

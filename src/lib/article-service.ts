@@ -41,7 +41,6 @@ import {
   buildCanonicalEventKey,
   isCompleteEventIdentity,
   normalizeEventIdentity,
-  resolveEventKeySubjects,
   serializeEventSubjects,
 } from '@/contracts/event-identity';
 import { clusterArticle, markClusterFailure } from '@/lib/event-clustering-service';
@@ -89,7 +88,6 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
     where.OR = [
       { clusterStatus: 'needs_review' },
       { aiStatus: 'done', aiConfidence: { lt: 70 } },
-      { reviewStatus: 'unreviewed' },
     ];
   }
   if (filter.anomaly === 'technical') {
@@ -323,15 +321,11 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
     const value = snapshot[field];
     data[field] = value as never;
   }
-  const identityChanged = touched.includes('brand')
-    || touched.some((field) => identityFields.includes(field))
+  const identityChanged = touched.some((field) => identityFields.includes(field))
     || validRestored.some((field) => identityFields.includes(field));
   if (identityChanged) {
     const identity = normalizeEventIdentity({
-      subjects: resolveEventKeySubjects(
-        typeof data.brand === 'string' ? data.brand : current.brand,
-        typeof data.eventSubjects === 'string' ? data.eventSubjects : current.eventSubjects,
-      ),
+      subjects: typeof data.eventSubjects === 'string' ? data.eventSubjects : current.eventSubjects,
       action: typeof data.eventAction === 'string' ? data.eventAction : current.eventAction,
       object: typeof data.eventObject === 'string' ? data.eventObject : current.eventObject,
     });
@@ -378,8 +372,10 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
     await refreshPublicPublication(id, tx, { contentChanged });
   });
   invalidatePublicArticleCache();
-  if (identityChanged) {
+  if (identityChanged || touched.includes('brand')) {
     if (current.eventId) await recalculateEventById(current.eventId);
+  }
+  if (identityChanged) {
     if (current.aiStatus === 'done') {
       try {
         await clusterArticle(id);
@@ -387,7 +383,7 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
         await markClusterFailure(id, error);
       }
     }
-  } else {
+  } else if (!touched.includes('brand')) {
     await recalculateArticleEvent(id);
   }
   return getArticleDetail(id);

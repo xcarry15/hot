@@ -7,6 +7,7 @@ import { MANUAL_OVERRIDE_FIELDS, parseManualOverrides } from '@/lib/shared/artic
 export function buildAiResetData(options: { preserveManualOverrides?: boolean } = {}): Prisma.ArticleUpdateInput {
   return {
     aiStatus: 'pending',
+    aiError: null,
     ...(options.preserveManualOverrides ? {} : {
       relevance: 0,
       summary: '',

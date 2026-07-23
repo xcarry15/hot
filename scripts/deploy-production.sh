@@ -58,6 +58,16 @@ npm ci
 npm run db:migrate:deploy
 npm run db:generate
 npm run db:optimize
+
+# The public feed sort migration added persisted snapshot fields with empty
+# defaults. Rebuild only when an existing published Event still has the old
+# empty snapshot, so normal deployments do not rescan the whole article set.
+PUBLIC_REBUILD_NEEDED="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT CASE WHEN EXISTS (SELECT 1 FROM events WHERE publicStatus = 'published' AND (publicDateKey = '' OR publicSortAt IS NULL)) THEN 1 ELSE 0 END;")"
+if [[ "$PUBLIC_REBUILD_NEEDED" == "1" ]]; then
+  echo "检测到旧公开发布快照，执行一次 db:rebuild-public"
+  npm run db:rebuild-public
+fi
+
 npm run build
 
 pm2 delete "$APP_NAME" >/dev/null 2>&1 || true

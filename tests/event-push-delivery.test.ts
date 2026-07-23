@@ -108,7 +108,7 @@ describe('Event 推送门禁', () => {
 
   it('强制推送也不能绕过聚类状态', async () => {
     mocks.eventFindUnique.mockResolvedValue({
-      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null, nextPushRetryAt: null,
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
       representativeArticleId: 'a1', pushRetryCount: 0,
       representativeArticle: representative({ clusterStatus: 'failed' }),
     });
@@ -150,6 +150,50 @@ describe('Event 推送门禁', () => {
     const result = await pushEventToFeishu('e1', 'retry_failed');
     expect(result).toMatchObject({ mode: 'retry_failed', attempted: 1, succeeded: 1, skipped: 1 });
     expect(mocks.pushLogCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('结果未知不进入 retry_failed，只能等待人工强制推送确认', async () => {
+    mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
+    const tid = `t-${computeUrlHash('https://hook/a').slice(0, 8)}`;
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null, nextPushRetryAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0,
+      representativeArticle: representative(),
+    });
+    mocks.pushDeliveryFindMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { eventId: 'e1', targetId: tid, status: 'unknown', createdAt: new Date(), leaseExpiresAt: null, lastError: 'DB write failed' },
+      ]);
+
+    await expect(pushEventToFeishu('e1', 'retry_failed')).resolves.toMatchObject({
+      status: 'failed',
+      message: '当前没有失败的推送目标',
+      attempted: 0,
+    });
+    expect(mocks.sendWebhook).not.toHaveBeenCalled();
+  });
+
+  it('结果未知时 normal 也不自动推送', async () => {
+    mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
+    const tid = `t-${computeUrlHash('https://hook/a').slice(0, 8)}`;
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(), nextPushRetryAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0,
+      representativeArticle: representative(),
+    });
+    mocks.pushDeliveryFindMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { eventId: 'e1', targetId: tid, status: 'unknown', createdAt: new Date(), leaseExpiresAt: null, lastError: 'DB write failed' },
+      ]);
+
+    await expect(pushEventToFeishu('e1')).resolves.toMatchObject({
+      status: 'failed',
+      message: '存在投递结果未知的目标，需要人工强制推送确认',
+      attempted: 0,
+    });
+    expect(mocks.sendWebhook).not.toHaveBeenCalled();
   });
 
   it('repush_all 向全部启用目标发送', async () => {

@@ -13,6 +13,37 @@ import { requestJson } from '@/lib/request-json.client';
 /** Settings 行级 key→value 映射：与前端 Settings interface 一致。 */
 export type SettingsMap = Record<string, string>;
 
+const SETTINGS_CHANGED_EVENT = 'hot2-settings-changed';
+const LIVE_SETTING_KEYS = ['auto_crawl_enabled', 'crawl_interval_min'] as const;
+type LiveSettingKey = typeof LIVE_SETTING_KEYS[number];
+export type LiveSettingsPatch = Partial<Record<LiveSettingKey, string>>;
+
+function getLiveSettingsPatch(patch: SettingsMap): LiveSettingsPatch {
+  const changes: LiveSettingsPatch = {};
+  for (const key of LIVE_SETTING_KEYS) {
+    if (typeof patch[key] === 'string') changes[key] = patch[key];
+  }
+  return changes;
+}
+
+export function subscribeToSettingsChanged(listener: (changes: LiveSettingsPatch) => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  const handleChange = (event: Event) => {
+    const detail = (event as CustomEvent<{ changes?: LiveSettingsPatch }>).detail;
+    if (detail?.changes && Object.keys(detail.changes).length > 0) listener(detail.changes);
+  };
+  window.addEventListener(SETTINGS_CHANGED_EVENT, handleChange);
+  return () => window.removeEventListener(SETTINGS_CHANGED_EVENT, handleChange);
+}
+
+function publishSettingsChanged(patch: SettingsMap): void {
+  if (typeof window === 'undefined') return;
+  const changes = getLiveSettingsPatch(patch);
+  if (Object.keys(changes).length === 0) return;
+  window.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT, { detail: { changes } }));
+}
+
 export async function fetchSettings(signal?: AbortSignal): Promise<SettingsMap> {
   return requestJson<SettingsMap>('GET', '/api/settings', { signal });
 }
@@ -29,7 +60,9 @@ export async function saveSettings(
   patch: SettingsMap,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  return requestJson('PUT', '/api/settings', { body: patch, signal });
+  const result = await requestJson('PUT', '/api/settings', { body: patch, signal });
+  publishSettingsChanged(patch);
+  return result;
 }
 
 export interface SettingsSaveResult { ok: true; scoreRecomputed?: number; publicationRebuilt?: boolean; success?: boolean }

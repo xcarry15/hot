@@ -4,7 +4,7 @@ Hot2 部署和更新方法（精简版）
 生产目录：/www/wwwroot/hot.kfxz.cn
 生产端口：3011
 PM2 应用：h2-hot2（只能运行一个实例）
-环境要求：Node.js >= 20.9.0、npm >= 10、PM2、sqlite3、rsync、unzip、curl
+环境要求：Node.js >= 20.9.0、npm >= 10、PM2、sqlite3、rsync、unzip、tar、curl
 
 
 一、服务端首次初始化或完全重建
@@ -45,13 +45,12 @@ Windows 生成的 zip 可能让 unzip 返回“使用反斜杠路径”的警告
 
   APP=/www/wwwroot/hot.kfxz.cn
   ZIP=/www/wwwroot/h2-hot2-release.zip
-  TMP=/tmp/h2-hot2-init
+  TMP="$(mktemp -d /tmp/h2-hot2-init.XXXXXX)"
+  cleanup() { rm -rf -- "$TMP"; }
+  trap cleanup EXIT
 
   test -s "$ZIP"
   test -s "$APP/.env"
-
-  rm -rf "$TMP"
-  mkdir -p "$TMP"
 
   set +e
   unzip -q "$ZIP" -d "$TMP"
@@ -134,13 +133,13 @@ Windows 生成的 zip 可能让 unzip 返回“使用反斜杠路径”的警告
   推送或合并到 master
     -> GitHub Actions 自动测试
     -> 测试成功
-    -> 自动备份数据库并部署生产环境
+    -> 自动备份数据库并部署生产环境；如检测到旧公开发布快照，会自动执行一次 db:rebuild-public
 
 查看运行状态：
 
   https://github.com/xcarry15/hot/actions
 
-手动运行 Deploy production 会绕过 CI，只用于重新部署已经验证过的提交。
+手动运行 Deploy production 不会重新执行 CI，也不会验证目标提交是否已通过 CI；只有确认目标提交已由 CI 成功验证后才可使用。
 
 自动部署会保留服务器上的：
 
@@ -163,12 +162,16 @@ Windows 双击：
 确认后会自动：
 
 - 停止当前项目的本地 Node 进程
-- 删除本地 SQLite、node_modules 和 .next
+- 删除本地 SQLite 和 .next；默认复用已有 node_modules
 - 保留现有 .env；没有时从 .env.example 创建
-- npm ci、migration、Prisma generate、seed、数据库优化
+- 依赖缺失时执行带缓存优化的 npm ci、migration、Prisma generate、seed、数据库优化
 - 启动开发服务并打开 http://localhost:3011
 
 该流程不保留本地历史数据，也不会自动运行测试或生产构建。
+
+如果依赖安装异常或 package-lock.json 已发生变化，可在项目根目录执行：
+
+  bat/本地一键初始化.bat -RefreshDependencies
 
 
 四、只清理业务历史，保留配置

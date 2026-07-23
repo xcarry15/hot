@@ -41,7 +41,11 @@ const ACTION_CANONICAL_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/(?:财报|业绩|营收|利润|经营数据|业务前瞻)/u, '发布业绩'],
   [/(?:IPO|上市)/iu, 'IPO上市'],
   [/(?:融资|募资)/u, '融资'],
-  [/(?:收购|并购|兼并)/u, '完成收购'],
+  [/(?:拟|计划|考虑|洽谈|协商|研究).*?(?:入股|投资)/u, '计划入股'],
+  [/(?:入股|投资).*?(?:洽谈|协商|研究|尚未|未决定)/u, '计划入股'],
+  [/(?:(?:拟|计划|意向|考虑|洽谈|协商|研究|竞购|传闻).*?(?:收购|并购|兼并|买下)|(?:收购|并购|兼并|买下).*?(?:尚未|未落地|传闻|洽谈|协商|研究))/u, '计划收购'],
+  [/(?:收购|并购|兼并|买下)/u, '完成收购'],
+  [/(?:终止|停止|取消|解除|中止).*?(?:合作|协议|授权|销售|经销)/u, '终止合作'],
   [/(?:合作|联手|签约|战略协议)/u, '启动合作'],
   [/(?:上线|推出|发布).*?(?:功能|服务|系统)/u, '上线功能'],
   [/(?:发布|推出|上新).*?(?:产品|新品|品牌)/u, '发布产品'],
@@ -51,6 +55,12 @@ const ACTION_CANONICAL_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/(?:维权|起诉|投诉|争议)/u, '争议维权'],
   [/(?:捐赠|驰援|救援|备灾)/u, '捐赠救援'],
   [/(?:获奖|荣获|夺冠)/u, '获得奖项'],
+];
+
+const EVENT_SUBJECT_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^(?:7-?11|7-?eleven|eleven|seven\s*&?\s*i|sevenandi)(?:便利店|控股|集团)?$/iu, '7-Eleven'],
+  [/^(?:costco|costco开市客|开市客)$/iu, 'Costco开市客'],
+  [/^十足便利(?:店)?$/u, '十足便利'],
 ];
 
 const VAGUE_ACTION_PATTERN = /布局|升级|发力|加码|推进|深化|探索|调整|应对|打造|构建|聚焦|优化|转型|发展|战略|经营重心/u;
@@ -89,6 +99,13 @@ function decodeArray(value: unknown): unknown {
   }
 }
 
+function canonicalizeEventSubject(value: string): string {
+  for (const [pattern, canonical] of EVENT_SUBJECT_ALIASES) {
+    if (pattern.test(value)) return canonical;
+  }
+  return value;
+}
+
 export function normalizeEventSubjects(value: unknown): string[] {
   const decoded = decodeArray(value);
   const values = Array.isArray(decoded)
@@ -99,7 +116,7 @@ export function normalizeEventSubjects(value: unknown): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const value of values) {
-    const subject = cleanComponent(value, EVENT_SUBJECT_MAX_LENGTH);
+    const subject = canonicalizeEventSubject(cleanComponent(value, EVENT_SUBJECT_MAX_LENGTH));
     const token = normalizeIdentityToken(subject);
     if (!subject || !token || seen.has(token)) continue;
     seen.add(token);
@@ -107,15 +124,6 @@ export function normalizeEventSubjects(value: unknown): string[] {
     if (result.length >= EVENT_SUBJECT_MAX_ITEMS) break;
   }
   return result;
-}
-
-/**
- * 连锁消费场景优先使用已提取的品牌作为事件主体，保证品牌字段与事件键只有一套真相。
- * 无明确品牌的事件（如监管、人事或行业事件）才退回模型提取的直接主体。
- */
-export function resolveEventKeySubjects(brand: unknown, fallback: unknown): string[] {
-  const brandSubjects = normalizeEventSubjects(brand);
-  return brandSubjects.length > 0 ? brandSubjects : normalizeEventSubjects(fallback);
 }
 
 export function normalizeEventIdentity(input: {

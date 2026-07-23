@@ -8,10 +8,13 @@ import {
   ALL_STEP_FILTER_KEYS, EMPTY_FILTER_STATE, isArticleFailed,
 } from './types'
 import { URL_PARAM_CHIPS, URL_PARAM_SRC, URL_PARAM_DISC, URL_PARAM_TODAY } from './constants'
+import { isTechnicalSkipReason } from '@/lib/article-pipeline-status'
 
 export type ArticleFilterBucket =
   | 'normal-processing'
   | 'normal-ai'
+  | 'normal-no-event'
+  | 'normal-multi-event'
   | 'normal-cluster'
   | 'normal-push'
   | 'normal-pushed'
@@ -29,9 +32,11 @@ export function getArticleFilterBucket(article: ArticleProgress): ArticleFilterB
     article.technicalState === 'auto_retry'
     || (article.technicalIssues?.length ?? 0) > 0
     || isArticleFailed(article)
-    || Boolean(article.skipReason && (article.crawl === 'skipped' || article.ai === 'skipped'))
+    || Boolean(isTechnicalSkipReason(article.skipReason) && (article.crawl === 'skipped' || article.ai === 'skipped'))
   ) return 'anomaly-failure'
   if ((article.anomalyLabels?.length ?? 0) > 0) return 'anomaly-business'
+  if (article.skipReason === '无具体事件') return 'normal-no-event'
+  if (article.skipReason === '多事件聚合稿') return 'normal-multi-event'
   if (article.push === 'done') return 'normal-pushed'
   if (article.ai === 'done' && article.cluster === 'pending') return 'normal-cluster'
   if (article.cluster === 'done' && article.push === 'pending') return 'normal-push'
@@ -62,6 +67,12 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
       return article.anomalyLabels?.includes('duplicate') ?? false
     case 'anomaly-low-confidence':
       return article.anomalyLabels?.includes('low-confidence') ?? false
+    case 'normal-no-event':
+      return article.skipReason === '无具体事件'
+    case 'normal-multi-event':
+      return article.skipReason === '多事件聚合稿'
+    case 'normal-public':
+      return article.isPublic
     case 'ignored':
       return bucket === 'ignored'
     default:

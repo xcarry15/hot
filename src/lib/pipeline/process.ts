@@ -44,7 +44,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
   // 重置"已抓取但正文为空"的文章，让它们重新进详情页流程。
   await db.article.updateMany({
     where: { cleanContent: '', fetchStatus: 'fetched', technicalIgnoredAt: null },
-    data: { fetchStatus: 'pending' },
+    data: { fetchStatus: 'pending', fetchError: null },
   });
 
   // 只恢复仍在自动重试额度内、且退避已到期的失败文章。

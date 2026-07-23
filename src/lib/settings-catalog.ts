@@ -24,6 +24,10 @@ import {
   PROMPT_BLOCK_ORDER,
   SCORE_WEIGHT_META,
 } from './prompts';
+import {
+  DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE,
+  DEFAULT_EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE,
+} from '@/contracts/event-clustering';
 
 export const SETTING_KEYS = {
   FEISHU_WEBHOOK_URL: 'feishu_webhook_url',
@@ -64,6 +68,8 @@ export const SETTING_KEYS = {
   AI_WEIGHT_CONTENT: 'ai_weight_content',
   AI_KEYWORD_MATCH_BONUS: 'ai_keyword_match_bonus',
   AI_CONCURRENCY: 'ai_concurrency',
+  EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE: 'event_cluster_ai_same_event_confidence',
+  EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE: 'event_cluster_ai_different_event_confidence',
 
 } as const;
 
@@ -140,7 +146,7 @@ const definitions: SettingDefinition[] = [
   { key: SETTING_KEYS.PUBLIC_IRRELEVANT_RULE, defaultValue: 'hidden', schema: z.enum(['auto', 'public', 'hidden']), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUBLIC_PIN_HOURS, defaultValue: '24', schema: intRange(1, 720, '重要文章置顶时长'), sensitive: false, exportable: true, frontend: true, seed: true },
 
-  { key: SETTING_KEYS.AUTO_CRAWL_ENABLED, defaultValue: 'false', schema: z.enum(['true', 'false']), sensitive: false, exportable: true, frontend: false, seed: false },
+  { key: SETTING_KEYS.AUTO_CRAWL_ENABLED, defaultValue: 'false', schema: z.enum(['true', 'false']), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.CRAWL_INTERVAL_MIN, defaultValue: '120', schema: intRange(5, 10080, '爬取间隔（分钟）'), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.SCHEDULER_LAST_CRAWL_AT, defaultValue: '', schema: text, sensitive: false, exportable: false, frontend: false, seed: false },
   { key: SETTING_KEYS.SCHEDULER_LAST_PUSH_DATE, defaultValue: '', schema: text, sensitive: false, exportable: false, frontend: false, seed: false },
@@ -164,7 +170,9 @@ const definitions: SettingDefinition[] = [
   { key: SETTING_KEYS.AI_WEIGHT_EVENT, defaultValue: String(SCORE_WEIGHT_META.event.defaultWeight), schema: intRange(0, 100, '事件权重'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_WEIGHT_CONTENT, defaultValue: String(SCORE_WEIGHT_META.content.defaultWeight), schema: intRange(0, 100, '内容权重'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_KEYWORD_MATCH_BONUS, defaultValue: '5', schema: intRange(0, 20, '关键词命中加分'), sensitive: false, exportable: true, frontend: true, seed: false },
-  { key: SETTING_KEYS.AI_CONCURRENCY, defaultValue: '3', schema: intRange(1, 10, 'AI并发数'), sensitive: false, exportable: true, frontend: false, seed: false },
+  { key: SETTING_KEYS.AI_CONCURRENCY, defaultValue: '3', schema: intRange(1, 10, 'AI并发数'), sensitive: false, exportable: true, frontend: true, seed: false },
+  { key: SETTING_KEYS.EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE, defaultValue: String(DEFAULT_EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE), schema: intRange(70, 95, '自动归入同一事件置信度'), sensitive: false, exportable: true, frontend: true, seed: true },
+  { key: SETTING_KEYS.EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE, defaultValue: String(DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE), schema: intRange(70, 99, '自动新建独立事件置信度'), sensitive: false, exportable: true, frontend: true, seed: true },
 
   // Provider 专属配置由 AI_PROVIDERS 契约派生，避免 URL / 默认模型漂移。
   ...providerSettingDefinitions,

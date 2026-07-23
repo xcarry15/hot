@@ -209,7 +209,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
         </div>
 
         {/* AI Parameters */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <div className="space-y-1">
             <Label className="text-xs">Temperature <span className="text-muted-foreground">(0-2)</span></Label>
             <Input
@@ -236,6 +236,54 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
               placeholder="10240"
             />
           </div>
+          <div className="space-y-1">
+            <Label className="text-xs">AI 并发数 <span className="text-muted-foreground">(1-10)</span></Label>
+            <Input
+              type="number"
+              value={settings.ai_concurrency}
+              onChange={(e) => updateSetting('ai_concurrency', e.target.value)}
+              className="h-8 text-xs"
+              min="1"
+              max="10"
+              step="1"
+              placeholder="3"
+            />
+            <p className="text-[11px] text-muted-foreground">调高可缩短处理时间，但更容易触发服务商限流。</p>
+          </div>
+        </div>
+
+        <div className="space-y-2 border-t pt-3">
+          <div>
+            <p className="text-xs font-medium">聚类判定阈值</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">只影响后续聚类；提高阈值会减少自动判断、增加待复核。</p>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label className="text-xs">自动归入同一 Event <span className="text-muted-foreground">(70-95)</span></Label>
+              <Input
+                type="number"
+                value={settings.event_cluster_ai_same_event_confidence}
+                onChange={(e) => updateSetting('event_cluster_ai_same_event_confidence', e.target.value)}
+                className="h-8 text-xs"
+                min="70"
+                max="95"
+                step="1"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">自动新建独立 Event <span className="text-muted-foreground">(70-99)</span></Label>
+              <Input
+                type="number"
+                value={settings.event_cluster_ai_different_event_confidence}
+                onChange={(e) => updateSetting('event_cluster_ai_different_event_confidence', e.target.value)}
+                className="h-8 text-xs"
+                min="70"
+                max="99"
+                step="1"
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">“独立事件”还要求存在明确的阶段、主体或限定条件冲突，避免仅凭相近标题自动拆分。</p>
         </div>
 
         {/* Test connection */}

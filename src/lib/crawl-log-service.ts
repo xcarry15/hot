@@ -17,6 +17,7 @@ import { db } from '@/lib/db';
 import { readPushSettings } from '@/lib/push/policy';
 import {
   deriveSkipReason,
+  isBusinessSkipReason,
   projectArticleSteps,
   type ArticleStepInput,
   type PushThresholds,
@@ -30,6 +31,7 @@ import type {
   SourceProgress,
 } from '@/contracts/crawl-log';
 import { getTechnicalWorkQueue } from '@/lib/technical-work-queue-service';
+import { getPushTargetStatesForEvents } from '@/lib/push/delivery';
 import { ACTIVE_JOB_STATUSES, TERMINAL_JOB_STATUSES } from '@/lib/job-status';
 
 const DEFAULT_LIMIT = 500;
@@ -43,16 +45,20 @@ const crawlLogArticleSelect = {
   publishedAt: true,
   sourceId: true,
   fetchStatus: true,
+  fetchError: true,
   nextFetchRetryAt: true,
   technicalIgnoredAt: true,
   clusterStatus: true,
+  clusterError: true,
   nextClusterRetryAt: true,
   aiStatus: true,
+  aiError: true,
   aiConfidence: true,
   score: true,
   isAd: true,
+  reviewStatus: true,
   eventId: true,
-  event: { select: { articleCount: true, pushedAt: true, nextPushRetryAt: true, representativeArticleId: true } },
+  event: { select: { articleCount: true, pushedAt: true, nextPushRetryAt: true, representativeArticleId: true, publicStatus: true } },
   nextAiRetryAt: true,
   relevance: true,
   createdAt: true,
@@ -203,6 +209,9 @@ export async function getCrawlLogSnapshot(
   const articles = Array.from(new Map(
     [...recentArticles, ...technicalArticles].map((article) => [article.id, article]),
   ).values());
+  const pushStatesByEvent = await getPushTargetStatesForEvents(
+    articles.flatMap((article) => article.eventId ? [article.eventId] : []),
+  );
 
   if (activeJobs.length > 1) {
     console.error(
@@ -272,11 +281,12 @@ export async function getCrawlLogSnapshot(
       let lastRunItemsFound: number | undefined;
       let lastRunError: string | undefined;
       if (runResult) {
-        lastRunStatus = runResult.success ? 'success' : 'failed';
+        const isWarning = runResult.error === '0 items parsed';
+        lastRunStatus = isWarning ? 'warning' : runResult.success ? 'success' : 'failed';
         lastRunItemsFound = runResult.itemsFound;
         lastRunError = runResult.error;
-        status = runResult.success ? 'success' : 'error';
-        error = runResult.error;
+        status = isWarning ? 'warning' : runResult.success ? 'success' : 'error';
+        error = isWarning ? undefined : runResult.error;
       }
       bySource.set(sourceId, {
         id: sourceId,
@@ -307,6 +317,9 @@ export async function getCrawlLogSnapshot(
 
     const technicalItem = technicalByArticleId.get(a.id);
     const isRepresentative = a.event?.representativeArticleId === a.id;
+    const pushFailureReason = isRepresentative && a.eventId
+      ? pushStatesByEvent.get(a.eventId)?.find((target) => target.latestStatus === 'failure' || target.latestStatus === 'unknown')
+      : undefined;
     const stepInput: ArticleStepInput = {
       fetchStatus: a.fetchStatus,
       clusterStatus: a.clusterStatus,
@@ -319,6 +332,12 @@ export async function getCrawlLogSnapshot(
       pushApplicable: isRepresentative,
     };
     const projection = projectArticleSteps(stepInput, push);
+    const skipReason = deriveSkipReason({
+      aiStatus: a.aiStatus,
+      skipReason: a.skipReason,
+      summary: a.summary,
+    });
+    const businessAiSkipped = a.aiStatus === 'skipped' && isBusinessSkipReason(skipReason);
     // P0-4: 不再应用全局阶段 overlay——没有 currentItemId 时伪造转圈会失真
     const articleProgress: ArticleProgress = {
       id: a.id,
@@ -328,18 +347,19 @@ export async function getCrawlLogSnapshot(
       process: projection.process,
       cluster: projection.cluster,
       ai: projection.ai,
-      score: projection.ai === 'done' ? a.score : null,
+      score: projection.ai === 'done' || businessAiSkipped ? a.score : null,
       anomalyLabels: [
         ...(a.isAd ? ['ad' as const] : []),
         ...(a.event && a.event.articleCount > 1 && !isRepresentative ? ['duplicate' as const] : []),
-        ...(a.aiStatus === 'done' && a.aiConfidence != null && a.aiConfidence < 70 ? ['low-confidence' as const] : []),
+        ...((a.aiStatus === 'done'
+          || (a.aiStatus === 'skipped' && (a.skipReason === '无具体事件' || a.skipReason === '多事件聚合稿')))
+          && a.aiConfidence != null
+          && a.aiConfidence < 70
+          ? ['low-confidence' as const]
+          : []),
       ],
       push: projection.push,
-      skipReason: deriveSkipReason({
-        aiStatus: a.aiStatus,
-        skipReason: a.skipReason,
-        summary: a.summary,
-      }),
+      skipReason,
       lastTime: a.updatedAt.getTime(),
       // P1-6: 推送/AI 重试时间，方便管理员判断"何时自动重试"
       pushRetryAt: projection.pushRetryAt ?? (a.event?.nextPushRetryAt ? a.event.nextPushRetryAt.toISOString() : null),
@@ -350,7 +370,19 @@ export async function getCrawlLogSnapshot(
       technicalIssues: technicalItem?.issues ?? [],
       technicalState: a.technicalIgnoredAt ? 'ignored' : (technicalItem?.state ?? null),
       technicalIgnoredAt: a.technicalIgnoredAt?.toISOString() ?? null,
+      technicalErrorReasons: {
+        ...(a.fetchStatus === 'failed' && a.fetchError ? { process: a.fetchError } : {}),
+        ...(a.aiStatus === 'failed' && a.aiError ? { ai: a.aiError } : {}),
+        ...(a.clusterStatus === 'failed' && a.clusterError ? { cluster: a.clusterError } : {}),
+        ...(pushFailureReason ? {
+          push: pushFailureReason.latestStatus === 'unknown'
+            ? `投递结果未知${pushFailureReason.latestError ? `：${pushFailureReason.latestError}` : ''}；需要人工强制推送确认`
+            : `推送失败：${pushFailureReason.webhookRemark || '投递目标'}${pushFailureReason.latestError ? `：${pushFailureReason.latestError}` : ''}`,
+        } : {}),
+      },
+      reviewStatus: a.reviewStatus,
       isEventRepresentative: isRepresentative,
+      isPublic: isRepresentative && a.event?.publicStatus === 'published',
     };
     group.articles.push(articleProgress);
   }

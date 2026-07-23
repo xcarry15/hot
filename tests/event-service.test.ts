@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   articleFindFirst: vi.fn(),
+  articleFindUnique: vi.fn(),
   articleFindMany: vi.fn(),
   articleCount: vi.fn(),
   articleUpdateMany: vi.fn(),
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
 function transactionClient() {
   return {
     article: {
+      findUnique: mocks.articleFindUnique,
       findFirst: mocks.articleFindFirst,
       findMany: mocks.articleFindMany,
       count: mocks.articleCount,
@@ -51,13 +53,14 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/public-publication-service', () => ({ refreshEventPublicPublication: mocks.refresh }));
 
-import { deriveEventClusterReviewStatus, mergeEvents, reconcileEventAfterArticleDeletion, selectRepresentativeCandidate, setEventRepresentative, sharedBrands, splitEventArticles } from '@/lib/event-service';
+import { deriveEventClusterReviewStatus, mergeEvents, moveArticleToEvent, reconcileEventAfterArticleDeletion, selectRepresentativeCandidate, setEventRepresentative, sharedBrands, splitEventArticles } from '@/lib/event-service';
 
 describe('Event 人工纠错', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.eventFindUnique.mockReset();
     mocks.articleFindMany.mockReset();
+    mocks.articleFindUnique.mockReset();
     mocks.transaction.mockImplementation((operation: (client: ReturnType<typeof transactionClient>) => unknown) => operation(transactionClient()));
     mocks.auditCreate.mockResolvedValue({});
     mocks.articleUpdateMany.mockResolvedValue({ count: 1 });
@@ -164,5 +167,39 @@ describe('Event 人工纠错', () => {
     });
     await expect(setEventRepresentative('e1', 'a1')).resolves.toBe(false);
     expect(mocks.eventUpdate).not.toHaveBeenCalled();
+  });
+
+  it('移动文章到已有 Event 时保留 Article 自身事件身份', async () => {
+    mocks.articleFindMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.articleFindFirst.mockResolvedValue(null);
+    mocks.eventFindUnique
+      .mockResolvedValueOnce({
+        id: 'target',
+        status: 'active',
+      })
+      .mockResolvedValueOnce({ representativeArticleId: null, representativeManual: false })
+      .mockResolvedValueOnce({ representativeArticleId: null, representativeManual: false })
+      .mockResolvedValueOnce({ representativeArticleId: null, representativeManual: false });
+    mocks.articleFindUnique.mockResolvedValue({
+      id: 'a1', eventId: 'source', aiStatus: 'done', clusterStatus: 'needs_review',
+      eventSubjects: '["旧品牌"]', eventAction: '开店', eventObject: '旧事项',
+      eventKey: '旧品牌/开店/旧事项', eventKeyConfidence: 60,
+    });
+
+    await expect(moveArticleToEvent('a1', 'target')).resolves.toBe(true);
+    expect(mocks.articleUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'a1' },
+      data: expect.objectContaining({
+        eventId: 'target',
+        clusterStatus: 'clustered',
+      }),
+    }));
+    const moveUpdate = mocks.articleUpdate.mock.calls.find(([input]) => input?.where?.id === 'a1')?.[0];
+    expect(moveUpdate?.data).not.toHaveProperty('eventSubjects');
+    expect(moveUpdate?.data).not.toHaveProperty('eventAction');
+    expect(moveUpdate?.data).not.toHaveProperty('eventObject');
+    expect(moveUpdate?.data).not.toHaveProperty('eventKey');
   });
 });

@@ -77,6 +77,31 @@ function readObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
+const FACTUAL_NON_AD_ACTION_PATTERN = /缴纳?(?:五险一金|社保|公积金)|提供?(?:五险一金|社保|公积金|职业伤害保障)|签署?劳动合同|员工福利|劳动保障|用工制度/u;
+
+function normalizeAdDecision(input: {
+  isAd: boolean;
+  probability: number;
+  eventScore: number;
+  identity: { action: string; object: string };
+  summary: string;
+  keyPoints: string[];
+}): { isAd: boolean; probability: number } {
+  const factualText = [
+    input.identity.action,
+    input.identity.object,
+    input.summary,
+    ...input.keyPoints,
+  ].join(' ');
+  // 已验证的劳动保障/用工制度事实常因“由企业发布且对品牌有利”被误判。
+  // 公益、救灾、辟谣等内容仍交给模型按文章核心目的判断，避免把品牌宣传
+  // 仅凭一个事实关键词强制洗成非广告。
+  if (input.isAd && input.eventScore >= 10 && FACTUAL_NON_AD_ACTION_PATTERN.test(factualText)) {
+    return { isAd: false, probability: Math.min(input.probability, 19) };
+  }
+  return { isAd: input.isAd, probability: input.probability };
+}
+
 function legacyEventKeyParts(value: unknown): [unknown, unknown, unknown] {
   const parts = readText(value).split(/[|/]/u).map((item) => item.trim()).filter(Boolean);
   return [parts[0], parts[1], parts.slice(2).join(' ')];
@@ -130,10 +155,45 @@ export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
       ?? '',
   });
   const identity = normalizeEventIdentity({
-    subjects: explicitIdentity.subjects.length > 0 ? explicitIdentity.subjects : legacySubjects ?? brand,
+    subjects: explicitIdentity.subjects.length > 0 ? explicitIdentity.subjects : legacySubjects,
     action: explicitIdentity.action || legacyAction,
     object: explicitIdentity.object || legacyObject,
   });
+  const eventScore = clampScore(raw.event_score ?? raw.eventScore);
+  const normalizedAd = normalizeAdDecision({
+    isAd,
+    probability: raw.ad_probability == null && explicitIsAd !== null
+      ? (explicitIsAd ? 100 : 0)
+      : adProbability,
+    eventScore,
+    identity,
+    summary,
+    keyPoints,
+  });
+  // “有没有具体事件”首先由事件影响分表达。模型偶尔会在给出 0-9 分后仍
+  // 为观点稿硬凑主体/动作/事项；此时直接清空身份，仍保留本次完整 AI 审计信息。
+  if (eventScore <= 9) {
+    return {
+      event_score: eventScore,
+      content_score: clampScore(raw.content_score ?? raw.contentScore),
+      relevance: clampScore(raw.relevance),
+      is_ad: normalizedAd.isAd,
+      ad_probability: normalizedAd.probability,
+      confidence,
+      category: (() => {
+        const category = readText(raw.category);
+        return CATEGORIES.has(category) ? category : '其他';
+      })(),
+      summary,
+      brand,
+      event_subjects: [],
+      event_action: '',
+      event_object: '',
+      event_key: '',
+      event_key_confidence: 0,
+      key_points: keyPoints,
+    };
+  }
   if (!isCompleteEventIdentity(identity)) {
     throw new Error('LLM 响应缺少完整事件身份（主体/行为/具体事项）');
   }
@@ -146,13 +206,11 @@ export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
   );
 
   return {
-    event_score: clampScore(raw.event_score ?? raw.eventScore),
+    event_score: eventScore,
     content_score: clampScore(raw.content_score ?? raw.contentScore),
     relevance: clampScore(raw.relevance),
-    is_ad: isAd,
-    ad_probability: raw.ad_probability == null && explicitIsAd !== null
-      ? (explicitIsAd ? 100 : 0)
-      : adProbability,
+    is_ad: normalizedAd.isAd,
+    ad_probability: normalizedAd.probability,
     confidence,
     category: (() => {
       const category = readText(raw.category);

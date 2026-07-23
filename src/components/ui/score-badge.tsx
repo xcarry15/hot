@@ -32,7 +32,7 @@ function ScoreTooltip({ score, details }: { score: number; details: ScoreDetails
           {scoreRow('内容质量', details.contentScore)}
           {scoreRow('加权原始分', details.rawScore)}
           {scoreRow('广告概率', details.adProbability)}
-          {scoreRow('AI 置信度', details.aiConfidence)}
+          {scoreRow('分析置信度', details.aiConfidence)}
           <div className="border-t border-slate-100 pt-0.5 mt-0.5">
             <div className="flex items-center justify-between gap-3">
               <span className="text-slate-500">最终得分</span>
@@ -112,7 +112,7 @@ export function ScoreBadge({ score, variant = 'pill', details }: ScoreBadgeProps
 
 /**
  * 内联评分构成展示，用于文章详情/文章弹窗底部。
- * 以单行 flex-wrap 形式展示所有评分细分字段（事件/内容/加权/广告/置信 + 最终分）。
+ * 以单行 flex-wrap 形式展示所有评分细分字段（事件/内容/加权/广告/分析置信度 + 最终分）。
  */
 export function ScoreBreakdown({
   score,
@@ -146,7 +146,7 @@ export function ScoreBreakdown({
         <span className={`${getScoreStyle(adProbability).textOnly}`}>广告 {adProbability}%</span>
       )}
       {aiConfidence != null && (
-        <span className={`${getScoreStyle(aiConfidence).textOnly}`}>置信 {aiConfidence}%</span>
+        <span className={`${getScoreStyle(aiConfidence).textOnly}`}>分析置信 {aiConfidence}%</span>
       )}
       <span className={`font-semibold ${getScoreStyle(score).textOnly}`}>最终 {score}</span>
     </div>

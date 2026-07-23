@@ -15,5 +15,5 @@ export async function pushAllPendingArticles(signal?: AbortSignal, jobId?: strin
     if (!jobId) return
     void advanceJobProgress(jobId, { doneDelta: done, errorDelta: failed, currentItemLabel: '推送处理中' })
   })
-  return { total: result.success + result.failed, processed: result.success, errors: result.failed }
+  return { total: result.success + result.failed + result.skipped, processed: result.success, errors: result.failed }
 }

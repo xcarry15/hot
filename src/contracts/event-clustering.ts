@@ -1,11 +1,16 @@
 export const EVENT_CLUSTER_WINDOW_DAYS = 7;
+export const EVENT_CLUSTER_FOLLOW_UP_DAYS = 14;
 // 候选召回优先保证覆盖率，最终只把少量高相关候选交给 AI。
 export const EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES = 48;
 export const EVENT_CLUSTER_MAX_CANDIDATES = 15;
 export const EVENT_CLUSTER_MAX_AI_CANDIDATES = 5;
 export const EVENT_CLUSTER_MAX_MEMBER_ARTICLES = 12;
 export const EVENT_CLUSTER_MAX_RETRIES = 5;
-export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v6';
+export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v7';
+/** AI 判为同一事件后允许自动归入的最低置信度。 */
+export const DEFAULT_EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE = 70;
+/** AI 判为不同事件后允许自动新建 Event 的最低置信度。 */
+export const DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE = 85;
 
 export interface ContentShingleResult {
   charOverlap: number;
@@ -119,6 +124,7 @@ export function hasLiteralContentOverlap(left: string, right: string, size = 12)
 }
 
 export function isMultiTopicTitle(value: string): boolean {
+  if ((value.match(/[、，,]/gu)?.length ?? 0) >= 2 && /(?:\.\.\.|…)$/.test(value.trim())) return true;
   const clauses = value
     .split(/[；;！？!?]+/u)
     .map((item) => item.trim())

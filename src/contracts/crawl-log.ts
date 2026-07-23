@@ -21,7 +21,7 @@ export interface ArticleProgress {
   process: StepStatus;
   cluster: StepStatus;
   ai: StepStatus;
-  /** AI 完成后的最终有效评分；未完成时为 null。 */
+  /** AI 完成分析后的最终有效评分；业务正常跳过文章也保留评分，技术未完成时为 null。 */
   score: number | null;
   /** 仅用于列表标题后的轻量异常标签，不暴露 AI 分析明细。 */
   anomalyLabels: Array<'ad' | 'duplicate' | 'low-confidence'>;
@@ -39,7 +39,12 @@ export interface ArticleProgress {
   technicalIssues: Array<'process_failed' | 'ai_failed' | 'cluster_failed' | 'push_failed'>;
   technicalState?: 'auto_retry' | 'manual' | 'ignored' | null;
   technicalIgnoredAt?: string | null;
+  /** 当前技术失败的可展示原因，按步骤键保存。 */
+  technicalErrorReasons: Partial<Record<'process' | 'ai' | 'cluster' | 'push', string>>;
+  reviewStatus: string;
   isEventRepresentative: boolean;
+  /** 当前 Event 的代表文章已处于公开状态。 */
+  isPublic: boolean;
 }
 
 export interface DiscardedRow {

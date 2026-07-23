@@ -10,7 +10,7 @@ import type { ArticleListItemDto, ArticleListResponseDto } from '@/contracts/art
 import { cancelArticleDetailPrefetch, fetchArticleList, prefetchArticleDetail } from '@/features/articles-api.client'
 import { preloadArticleWorkspace } from '@/components/article-workspace-drawer'
 
-type QueueView = 'all' | 'attention' | 'unreviewed' | 'cluster_review' | 'low_confidence'
+type QueueView = 'all' | 'attention' | 'cluster_review' | 'low_confidence'
 
 const PAGE_SIZE = 30
 
@@ -18,14 +18,13 @@ function timeLabel(value: string): string {
   return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-function statusLabel(item: ArticleListItemDto): string {
+function statusLabel(item: ArticleListItemDto): string | null {
   if (item.clusterStatus === 'needs_review') return '聚类待复核'
-  if (item.reviewStatus === 'unreviewed') return '待人工归类'
-  if (item.aiStatus === 'done' && item.aiConfidence != null && item.aiConfidence < 70) return '低置信度'
+  if (item.aiStatus === 'done' && item.aiConfidence != null && item.aiConfidence < 70) return '低分析置信度'
   if (item.reviewStatus === 'important') return '重要'
   if (item.reviewStatus === 'general') return '一般'
   if (item.reviewStatus === 'irrelevant') return '无关'
-  return '正常'
+  return null
 }
 
 export default function ArticleLibrarySheet({
@@ -37,7 +36,7 @@ export default function ArticleLibrarySheet({
 }: {
   open: boolean
   initialView?: QueueView
-  counts?: { total: number; clusterReview: number; unreviewed: number; lowConfidence: number }
+  counts?: { total: number; clusterReview: number; lowConfidence: number }
   onOpenChange: (open: boolean) => void
   onOpenArticle: (articleId: string) => void
 }) {
@@ -77,7 +76,6 @@ export default function ArticleLibrarySheet({
         pageSize: PAGE_SIZE,
         search: search || undefined,
         anomaly: view === 'attention' ? 'needs_attention' : undefined,
-        reviewStatus: view === 'unreviewed' ? 'unreviewed' : undefined,
         clusterView: view === 'cluster_review' ? 'needs_review' : undefined,
         maxConfidence: view === 'low_confidence' ? 70 : undefined,
         sort: 'newest',
@@ -136,9 +134,8 @@ export default function ArticleLibrarySheet({
             {([
               ['all', '全部文章', null],
               ['attention', '全部人工待办', counts?.total],
-              ['unreviewed', '待归类', counts?.unreviewed],
               ['cluster_review', '聚类复核', counts?.clusterReview],
-              ['low_confidence', '低置信度', counts?.lowConfidence],
+              ['low_confidence', '低分析置信度', counts?.lowConfidence],
             ] as const).map(([key, label, count]) => (
               <button
                 key={key}
@@ -158,8 +155,9 @@ export default function ArticleLibrarySheet({
             <div className="space-y-3 p-6 text-center text-sm text-destructive"><p>{error}</p><Button size="sm" variant="outline" onClick={() => void load()}>重试</Button></div>
           ) : data?.items.length ? (
             <div className="divide-y">
-              {data.items.map((item) => (
-                <button
+              {data.items.map((item) => {
+                const status = statusLabel(item)
+                return <button
                   key={item.id}
                   type="button"
                   onMouseEnter={() => { preloadArticleWorkspace(); prefetchArticleDetail(item.id) }}
@@ -174,9 +172,9 @@ export default function ArticleLibrarySheet({
                     <span className="line-clamp-1 text-xs font-medium leading-5">{item.title}</span>
                     <span className="mt-1 block text-[11px] text-muted-foreground">{item.source.name} · {timeLabel(item.publishedAt ?? item.createdAt)}</span>
                   </span>
-                  <span className="shrink-0 border px-1.5 py-0.5 text-[10px] text-muted-foreground">{statusLabel(item)}</span>
+                  {status && <span className="shrink-0 border px-1.5 py-0.5 text-[10px] text-muted-foreground">{status}</span>}
                 </button>
-              ))}
+              })}
             </div>
           ) : (
             <div className="p-8 text-center text-sm text-muted-foreground">暂无符合条件的文章</div>

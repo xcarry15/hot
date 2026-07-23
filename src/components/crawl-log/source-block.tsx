@@ -76,6 +76,7 @@ export const SourceBlock = memo(function SourceBlock({
   const totalCount = summaryArticles.length
   const manualCount = summaryArticles.filter(a => a.technicalState === 'manual').length
   const autoRetryCount = summaryArticles.filter(a => a.technicalState === 'auto_retry').length
+  const publicCount = summaryArticles.filter(a => a.isPublic).length
   const pushedCount = summaryArticles.filter(a => a.push === 'done').length
   const anomalyCount = summaryArticles.filter(hasArticleAnomaly).length
   const discardedCount = summarySource?.discarded?.length ?? source.discarded?.length ?? 0
@@ -128,8 +129,9 @@ export const SourceBlock = memo(function SourceBlock({
           >
             {lastRunLabel}
           </Badge>
-          <span className="text-muted-foreground text-xs">文章 {totalCount}</span>
-          <span className="text-xs text-emerald-700">推送 {pushedCount}</span>
+            <span className="text-muted-foreground text-xs">文章 {totalCount}</span>
+            <span className="text-xs text-sky-700">公开 {publicCount}</span>
+            <span className="text-xs text-emerald-700">推送 {pushedCount}</span>
           <span className={`text-xs ${anomalyCount > 0 ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>异常 {anomalyCount}</span>
           {manualCount > 0 && <span className="text-xs font-medium text-red-700">需处理 {manualCount}</span>}
           {autoRetryCount > 0 && <span className="text-xs font-medium text-blue-700">自动恢复 {autoRetryCount}</span>}
