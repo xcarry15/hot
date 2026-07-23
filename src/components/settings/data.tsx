@@ -237,7 +237,7 @@ export default function DataTab() {
             </Button>
             <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleFilePicked} className="hidden" />
           </div>
-          <p className="text-xs text-destructive">⚠️ 导出文件含明文 API 密钥，请勿外传。导入将覆盖当前配置。</p>
+          <p className="text-xs text-muted-foreground">⚠️ 导出不含 API 密钥和 Webhook；在新环境导入后，请在「AI 模型」和「推送」重新填写。</p>
         </CardContent>
       </Card>
 
@@ -367,7 +367,8 @@ export default function DataTab() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认导入配置？</AlertDialogTitle>
             <AlertDialogDescription>
-              将用文件中的参数覆盖当前配置（AI 模型、提示词、推送、调度、去重等）。
+              将覆盖模型参数、提示词、推送规则、调度和去重等非敏感配置。
+              API 密钥和 Webhook 不会导入。
               文件中未包含的参数保持不变。导入后页面将自动刷新。
             </AlertDialogDescription>
           </AlertDialogHeader>

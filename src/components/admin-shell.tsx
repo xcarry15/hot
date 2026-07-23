@@ -126,8 +126,7 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
               <img src="/icon-192x192.png" alt="logo" className="w-full h-full object-cover" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-[13px] font-semibold leading-5 tracking-tight truncate">新闻聚合</h1>
-              <p className="text-[11px] leading-4 text-muted-foreground">管理后台</p>
+              <h1 className="text-[13px] font-semibold leading-5 tracking-tight truncate">管理后台</h1>
             </div>
           </div>
 

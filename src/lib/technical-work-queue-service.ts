@@ -13,6 +13,7 @@ export interface TechnicalWorkItem {
 
 const articleFailureWhere: Prisma.ArticleWhereInput = {
   technicalIgnoredAt: null,
+  source: { is: { enabled: true, deletedAt: null } },
   OR: [
     { fetchStatus: 'failed' },
     { clusterStatus: 'failed' },
@@ -47,7 +48,11 @@ async function buildTechnicalWorkQueue(): Promise<TechnicalWorkItem[]> {
       select: { id: true, fetchStatus: true, nextFetchRetryAt: true, clusterStatus: true, aiStatus: true, skipReason: true, nextClusterRetryAt: true, nextAiRetryAt: true },
     }),
     db.event.findMany({
-      where: { status: 'active', representativeArticleId: { not: null } },
+      where: {
+        status: 'active',
+        representativeArticleId: { not: null },
+        representativeArticle: { is: { source: { is: { enabled: true, deletedAt: null } } } },
+      },
       select: { id: true, representativeArticleId: true, nextPushRetryAt: true, representativeArticle: { select: { technicalIgnoredAt: true } } },
     }),
   ]);

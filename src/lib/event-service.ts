@@ -569,7 +569,7 @@ export async function confirmIndependentArticle(eventId: string, articleId: stri
   return updated;
 }
 
-export async function moveArticleToEvent(articleId: string, targetEventId: string): Promise<boolean> {
+export async function moveArticleToEvent(sourceEventId: string, articleId: string, targetEventId: string): Promise<boolean> {
   const result = await db.$transaction(async (tx) => {
     const [article, target] = await Promise.all([
       tx.article.findUnique({
@@ -584,8 +584,7 @@ export async function moveArticleToEvent(articleId: string, targetEventId: strin
         select: { id: true, status: true },
       }),
     ]);
-    if (!article?.eventId || article.eventId === targetEventId || target?.status !== 'active') return null;
-    const sourceEventId = article.eventId;
+    if (article?.eventId !== sourceEventId || sourceEventId === targetEventId || target?.status !== 'active') return null;
     // P1-7: 不得通过移动隐式绕过技术门禁
     const canCluster = article.aiStatus === 'done';
     await tx.article.update({

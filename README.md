@@ -43,6 +43,8 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 - `API_TOKEN`：生产环境必填，用于后台登录和受保护 API；未配置时生产环境拒绝访问。
 - `NEXT_PUBLIC_SITE_URL`：正式站点地址，用于 canonical、Open Graph 和 sitemap。
 
+本地开发如需通过代理访问 OpenCode 等外部服务，可在启动 `npm run dev` 的终端设置 `HTTP_PROXY` / `HTTPS_PROXY`（可选 `NO_PROXY`）。开发服务器会自动使用这些变量；生产环境不会启用此逻辑。
+
 公开首页、公开文章 API 和健康检查保持匿名访问；后台页面及其他 API 受 Token 会话保护。
 
 ## 核心架构
