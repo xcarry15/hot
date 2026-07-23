@@ -59,12 +59,12 @@ export default function PublicHeader({ active = 'articles', readingProgress = fa
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--public-hairline)] bg-[var(--public-canvas)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--public-canvas)]/85">
-      <div className="mx-auto flex min-h-16 max-w-[1200px] items-center gap-4 px-4 sm:px-6 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-        <Link href="/" onClick={closeMobileMenu} className="public-pressable flex min-w-0 items-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]">
-          <img src="/icon-192x192.png" alt="新闻聚合" width="36" height="36" className="h-9 w-9 rounded-none" />
+      <div className="mx-auto flex min-h-14 max-w-[1200px] items-center gap-3 px-4 sm:min-h-16 sm:gap-4 sm:px-6 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+        <Link href="/" onClick={closeMobileMenu} className="public-pressable flex min-w-0 items-center gap-2 sm:gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]">
+          <img src="/icon-192x192.png" alt="新闻聚合" width="36" height="36" className="h-8 w-8 rounded-none sm:h-9 sm:w-9" />
           <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold tracking-tight text-[var(--public-ink)]">行业新闻聚合</h1>
-            <p className="truncate text-xs text-[var(--public-muted)]">精选行业动态与品牌资讯</p>
+            <h1 className="truncate text-sm font-semibold tracking-tight text-[var(--public-ink)] sm:text-base">行业新闻聚合</h1>
+            <p className="hidden truncate text-xs text-[var(--public-muted)] sm:block">精选行业动态与品牌资讯</p>
           </div>
         </Link>
 

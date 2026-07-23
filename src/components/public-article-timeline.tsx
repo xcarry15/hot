@@ -37,7 +37,7 @@ export default function PublicArticleTimeline({ groups }: Props) {
               aria-expanded={!isCollapsed}
               aria-controls={`public-date-items-${group.date}`}
               id={`public-date-group-${group.date}`}
-              className={`public-date-heading public-display flex w-full items-center gap-2 px-1 text-left text-xl sm:text-2xl ${groupIndex === 0 ? 'text-[var(--public-primary)]' : 'text-[var(--public-ink)]'}`}
+              className={`public-date-heading public-display flex w-full items-center gap-2 px-0 text-left text-lg sm:px-1 sm:text-2xl ${groupIndex === 0 ? 'text-[var(--public-primary)]' : 'text-[var(--public-ink)]'}`}
               style={{ '--public-reveal-delay': `${Math.min(groupIndex, 3) * 30}ms` } as CSSProperties}
             >
               <span className="shrink-0 transition-transform duration-200" style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} aria-hidden="true">
@@ -49,7 +49,7 @@ export default function PublicArticleTimeline({ groups }: Props) {
             </button>
             <ol
               id={`public-date-items-${group.date}`}
-              className={`mt-1 overflow-hidden transition-all duration-300 ${isCollapsed ? 'max-h-0 opacity-0' : 'max-h-[9999px] opacity-100'}`}
+              className={`mt-0 overflow-hidden transition-all duration-300 sm:mt-1 ${isCollapsed ? 'max-h-0 opacity-0' : 'max-h-[9999px] opacity-100'}`}
               aria-label={`${getPublicDateLabel(group.date)}文章`}
             >
               {group.items.map((article, articleIndex) => (

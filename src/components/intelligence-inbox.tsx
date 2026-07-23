@@ -54,8 +54,7 @@ import { parseEventSubjects } from "@/contracts/event-identity";
 type DetailPanel = ArticleWorkspacePanel;
 type EventComparisonRow =
   | { kind: "member"; sortAt: number; memberIndex: number; article: EventDetail["articles"][number] }
-  | { kind: "recommended"; sortAt: number; eventId: string; event: EventDetail["audits"][number]["candidateEvent"] }
-  | { kind: "brand-candidate"; sortAt: number; candidate: EventDetail["brandCandidates"][number] };
+  | { kind: "recommended"; sortAt: number; eventId: string; event: EventDetail["audits"][number]["candidateEvent"] };
 type EventDetail = {
   id: string;
   representativeArticleId: string | null;
@@ -1034,13 +1033,8 @@ export default function IntelligenceInbox({
         event: recommendedEvent,
       });
     }
-    rows.push(...brandCandidates.map((candidate) => ({
-      kind: "brand-candidate" as const,
-      sortAt: new Date(candidate.publishedAt || candidate.createdAt).getTime(),
-      candidate,
-    })));
     return rows.sort((left, right) => right.sortAt - left.sortAt);
-  }, [brandCandidates, eventMembers, recommendedEvent, recommendedEventId]);
+  }, [eventMembers, recommendedEvent, recommendedEventId]);
   const eventSourceCount = new Set(eventMembers.map((article) => article.source.name)).size;
   const clickRate = detail && detail.viewCount > 0
     ? Math.round((detail.originalClickCount / detail.viewCount) * 100)
@@ -1142,7 +1136,7 @@ export default function IntelligenceInbox({
 
                   <div className="pt-1">
                     <div className="mb-1.5 flex items-center gap-2">
-                      <div><p className="text-xs font-semibold">事件成员对比</p><p className="text-xs text-muted-foreground">勾选当前成员可批量拆分，至少保留一篇；推荐和同品牌候选单独标识。</p></div>
+                      <div><p className="text-xs font-semibold">事件成员对比</p><p className="text-xs text-muted-foreground">勾选当前成员可批量拆分，至少保留一篇；同品牌文章已移至下方单独查看。</p></div>
                       {selectedSplitIds.size > 0 && <Button size="sm" variant="outline" className="ml-auto h-7 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticles([...selectedSplitIds])}><Split className="h-3 w-3" />拆分所选 {selectedSplitIds.size} 篇</Button>}
                     </div>
                     <div className="min-w-0 max-w-full max-h-[320px] overflow-x-scroll overflow-y-auto overscroll-contain border">
@@ -1194,32 +1188,6 @@ export default function IntelligenceInbox({
                                 </tr>
                               );
                             }
-                            if (row.kind === "brand-candidate") {
-                              const candidate = row.candidate;
-                              const sourceStatus = candidate.source.deleted
-                                ? "已删除"
-                                : candidate.source.publicEnabled
-                                  ? "可公开"
-                                  : "不公开";
-                              const stickyRowBackground = "bg-amber-50";
-                              return (
-                                <tr key={`brand-candidate-${candidate.id}`} className="group whitespace-nowrap border-b border-amber-200 bg-amber-50/60">
-                                  <td className={`sticky left-0 z-[2] border-r px-1 py-1.5 align-middle ${stickyRowBackground}`}><div className="flex items-center justify-center"><span className="font-medium text-amber-800">—</span></div></td>
-                                  <td className="w-[1%] whitespace-nowrap border-r px-2 py-1.5 font-mono tabular-nums align-middle text-muted-foreground">{timeLabel(candidate.publishedAt || candidate.createdAt)}</td>
-                                  <td className="border-r px-1 py-1.5 text-center font-semibold tabular-nums align-middle">{candidate.score}</td>
-                                  <td className={`sticky left-[52px] z-[2] min-w-[220px] border-r px-2 py-1.5 align-middle ${stickyRowBackground}`}><button type="button" onClick={() => selectArticle(candidate.id, "cluster")} className="block max-w-[360px] truncate text-left font-medium text-amber-950 hover:underline" title={candidate.title}>{candidate.title}</button></td>
-                                  <td className="border-r px-1 py-1.5 text-center align-middle">{candidate.isEventRepresentative ? <span className="border border-amber-400 bg-white px-1.5 py-0.5 text-amber-800">候选代表</span> : <span className="text-muted-foreground">—</span>}</td>
-                                  <td className="border-r px-2 py-1.5 align-middle text-muted-foreground" title={candidate.brand ? splitBrands(candidate.brand).join(" / ") : candidate.matchedBrands.join(" / ")}><div className="max-w-[160px] truncate">{candidate.brand ? splitBrands(candidate.brand).join(" / ") : "—"}</div></td>
-                                  <td className="border-r px-2 py-1.5 font-mono align-middle text-muted-foreground" title={candidate.eventKey || "未生成"}><div className="max-w-[260px] truncate">{candidate.eventKey || "—"}</div></td>
-                                  <td className={`border-r px-1 py-1.5 text-center align-middle ${candidate.reviewStatus === "unreviewed" ? "text-red-700" : "text-muted-foreground"}`}>{reviewLabel(candidate.reviewStatus)}</td>
-                                  <td className="border-r px-2 py-1.5 align-middle" title={candidate.source.name}><div className="max-w-[180px] truncate">{candidate.source.name}</div></td>
-                                  <td className={`border-r px-2 py-1.5 align-middle ${candidate.source.deleted ? "text-red-700" : candidate.source.publicEnabled ? "text-emerald-700" : "text-muted-foreground"}`}>{sourceStatus}</td>
-                                  <td className={`border-r px-2 py-1.5 align-middle ${candidate.publicStatus === "published" ? "text-emerald-700" : "text-muted-foreground"}`}>{candidate.publicStatus === "published" ? "已公开" : "未公开"}</td>
-                                  <td className="border-r px-2 py-1.5 align-middle text-muted-foreground">{candidate.eventPushedAt ? "已推送" : "未推送"}</td>
-                                  <td className={`sticky right-0 z-[2] px-1 py-1 align-middle ${stickyRowBackground}`}><div className="flex items-center gap-1 whitespace-nowrap"><span className="border border-amber-400 bg-white px-1 py-0.5 text-amber-800">同品牌候选</span><Button size="sm" variant="outline" className="h-6 rounded-none border-amber-400 px-1.5 text-xs text-amber-800 hover:bg-amber-100" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>移入</Button></div></td>
-                                </tr>
-                              );
-                            }
                             const article = row.article;
                             const representative = eventDetail.representativeArticleId === article.id;
                             const selected = selectedSplitIds.has(article.id);
@@ -1263,6 +1231,60 @@ export default function IntelligenceInbox({
                         </tbody>
                       </table>
                     </div>
+
+                    {brandCandidates.length > 0 && (
+                      <section className="mt-2 border-t pt-2">
+                        <div className="mb-1.5 flex items-center gap-2">
+                          <div>
+                            <p className="text-xs font-semibold">同品牌文章</p>
+                            <p className="text-xs text-muted-foreground">这些文章与当前文章存在品牌交集，但属于其他 Event；可查看后移入当前 Event。</p>
+                          </div>
+                          <span className="ml-auto shrink-0 text-xs text-muted-foreground">{brandCandidates.length} 篇</span>
+                        </div>
+                        <div className="min-w-0 max-w-full max-h-[240px] overflow-x-auto overflow-y-auto overscroll-contain border">
+                          <table className="w-max min-w-[760px] table-auto border-collapse text-xs">
+                            <thead className="sticky top-0 z-[1] bg-muted/60 text-muted-foreground">
+                              <tr>
+                                <th className="whitespace-nowrap border-b border-r bg-muted px-2 py-1 text-left font-medium">发布时间</th>
+                                <th className="border-b border-r px-1 py-1 text-center font-medium">总分</th>
+                                <th className="min-w-[260px] border-b border-r px-2 py-1 text-left font-medium">标题</th>
+                                <th className="border-b border-r px-2 py-1 text-left font-medium">匹配品牌</th>
+                                <th className="border-b border-r px-2 py-1 text-left font-medium">文章品牌</th>
+                                <th className="border-b border-r px-2 py-1 text-left font-medium">来源</th>
+                                <th className="border-b border-r px-2 py-1 text-left font-medium">状态</th>
+                                <th className="border-b bg-muted px-2 py-1 text-left font-medium">操作</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {brandCandidates.map((candidate) => {
+                                const sourceStatus = candidate.source.deleted
+                                  ? "已删除"
+                                  : candidate.source.publicEnabled
+                                    ? "可公开"
+                                    : "不公开";
+                                const articleBrands = candidate.brand
+                                  ? splitBrands(candidate.brand).join(" / ")
+                                  : "—";
+                                return (
+                                  <tr key={`brand-candidate-${candidate.id}`} className="whitespace-nowrap border-b border-amber-200 bg-amber-50/60 last:border-b-0">
+                                    <td className="border-r px-2 py-1.5 font-mono tabular-nums text-muted-foreground">{timeLabel(candidate.publishedAt || candidate.createdAt)}</td>
+                                    <td className="border-r px-1 py-1.5 text-center font-semibold tabular-nums">{candidate.score}</td>
+                                    <td className="min-w-[260px] border-r px-2 py-1.5">
+                                      <button type="button" onClick={() => selectArticle(candidate.id, "cluster")} className="block max-w-[360px] truncate text-left font-medium text-amber-950 hover:underline" title={candidate.title}>{candidate.title}</button>
+                                    </td>
+                                    <td className="border-r px-2 py-1.5 text-amber-800" title={candidate.matchedBrands.join(" / ")}><div className="max-w-[160px] truncate">{candidate.matchedBrands.join(" / ") || "—"}</div></td>
+                                    <td className="border-r px-2 py-1.5 text-muted-foreground" title={articleBrands}><div className="max-w-[160px] truncate">{articleBrands}</div></td>
+                                    <td className="border-r px-2 py-1.5 text-muted-foreground" title={candidate.source.name}><div className="max-w-[180px] truncate">{candidate.source.name}</div></td>
+                                    <td className="border-r px-2 py-1.5 text-muted-foreground">{candidate.isEventRepresentative ? "其他 Event 代表" : sourceStatus}</td>
+                                    <td className="px-1 py-1.5"><Button size="sm" variant="outline" className="h-6 rounded-none border-amber-400 px-1.5 text-xs text-amber-800 hover:bg-amber-100" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>移入</Button></td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+                    )}
 
                   </div>
 

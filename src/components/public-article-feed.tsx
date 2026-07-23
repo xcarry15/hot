@@ -58,7 +58,6 @@ function createState(
   return {
     ...data,
     groups,
-    items: groups.flatMap((group) => group.items),
     displayedArticleCount: countGroupItems(groups),
     displayedDateCount: groups.length,
   }
@@ -165,10 +164,10 @@ export default function PublicArticleFeed({
 
   return (
     <>
-      <div className="public-section-enter mb-5 flex items-center justify-between gap-4">
-        <h1 className="public-display shrink-0 text-3xl leading-tight text-[var(--public-ink)] sm:text-4xl">文章列表</h1>
-        <form method="get" className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-          <label className="w-[220px] min-w-0 sm:w-[280px]">
+      <div className="public-section-enter mb-4 flex flex-wrap items-center justify-between gap-3 sm:mb-5 sm:gap-4">
+        <h1 className="public-display shrink-0 text-2xl leading-tight text-[var(--public-ink)] sm:text-4xl">文章列表</h1>
+        <form method="get" className="ml-0 flex w-full min-w-0 items-center gap-2 sm:ml-auto sm:w-auto sm:flex-wrap sm:justify-end">
+          <label className="min-w-0 flex-1 sm:w-[280px] sm:flex-none">
             <span className="sr-only">搜索文章</span>
             <input
               name="q"
@@ -177,7 +176,7 @@ export default function PublicArticleFeed({
               className="h-9 w-full rounded-none border border-[var(--public-hairline)] bg-transparent px-3 text-sm text-[var(--public-ink)] outline-none transition-[border-color,box-shadow] placeholder:text-[var(--public-muted-soft)] focus:border-[var(--public-primary)] focus:ring-4 focus:ring-[color:rgb(204_120_92_/_0.15)]"
             />
           </label>
-          <button type="submit" className="public-pressable h-9 shrink-0 rounded-none bg-[var(--public-primary)] px-4 text-sm font-medium text-white transition-colors hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color:rgb(204_120_92_/_0.25)]">搜索</button>
+          <button type="submit" className="public-pressable h-9 shrink-0 rounded-none bg-[var(--public-primary)] px-3 text-sm font-medium text-white transition-colors hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color:rgb(204_120_92_/_0.25)] sm:px-4">搜索</button>
           {hasFilter && <Link href="/" className="shrink-0 px-1 text-sm text-[var(--public-muted)] underline-offset-4 transition-colors hover:text-[var(--public-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">清除</Link>}
         </form>
       </div>
