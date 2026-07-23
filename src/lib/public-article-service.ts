@@ -21,6 +21,7 @@ const PUBLIC_PAGE_SIZE = 12;
 const PUBLIC_CACHE_TTL_MS = 60_000;
 const PUBLIC_DETAIL_CACHE_TTL_MS = 30_000;
 const PUBLIC_MAX_ROWS_PER_DATE = 250;
+const PUBLIC_EXCERPT_MAX_LENGTH = 180;
 
 type PublicArticleListParams = { search?: string; cursor?: string };
 
@@ -31,7 +32,6 @@ type PublicArticleCursor = {
 
 const representativeListSelect = {
   id: true,
-  url: true,
   title: true,
   originalSource: true,
   summary: true,
@@ -46,6 +46,7 @@ const representativeListSelect = {
 
 const representativeDetailSelect = {
   ...representativeListSelect,
+  url: true,
   cleanContent: true,
   keyPoints: true,
   publicContentUpdatedAt: true,
@@ -74,9 +75,10 @@ function normalizeText(value: string | undefined, maxLength: number): string {
 }
 
 function toExcerpt(summary: string, cleanContent = ''): string {
-  if (summary) return summary;
-  const text = stripHtml(cleanContent).replace(/\s+/g, ' ').trim();
-  return text.length > 160 ? `${text.slice(0, 160)}…` : text;
+  const text = (summary || stripHtml(cleanContent)).replace(/\s+/g, ' ').trim();
+  return text.length > PUBLIC_EXCERPT_MAX_LENGTH
+    ? `${text.slice(0, PUBLIC_EXCERPT_MAX_LENGTH)}…`
+    : text;
 }
 
 type SortablePublicEventRow = {
@@ -95,11 +97,9 @@ function serializeEvent(row: PublicEventListRow, cleanContent = ''): PublicArtic
   const article = row.representativeArticle!;
   return {
     id: row.id,
-    url: article.url,
     title: article.title,
     originalSource: article.originalSource,
     excerpt: toExcerpt(article.summary, cleanContent),
-    summary: article.summary,
     brand: article.brand,
     category: article.category,
     score: article.score,
@@ -210,14 +210,12 @@ async function buildList(params: PublicArticleListParams): Promise<PublicArticle
     count: dateRows.length,
     items: dateRows.map((row) => serializeEvent(row)),
   }));
-  const items = groups.flatMap((group) => group.items);
   const total = await countPublicArticles(search);
   const lastRow = eligible.at(-1);
   return {
     total,
-    items,
     groups,
-    displayedArticleCount: items.length,
+    displayedArticleCount: groups.reduce((count, group) => count + group.items.length, 0),
     displayedDateCount: groups.length,
     nextCursor: hasMore && lastRow ? encodeCursor(lastRow) : null,
     hasMore,
@@ -332,6 +330,8 @@ async function buildPublicArticleDetail(id: string): Promise<PublicArticleDetail
   }));
   return {
     ...serializeEvent(row, article.cleanContent),
+    url: article.url,
+    summary: article.summary,
     keyPoints: parseJsonArray(article.keyPoints),
     related,
     sources: sources.map((source) => ({

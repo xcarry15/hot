@@ -14,11 +14,9 @@ export interface PublicArticleSourceDto {
 
 export interface PublicArticleListItemDto {
   id: string;
-  url: string;
   title: string;
   originalSource: string | null;
   excerpt: string;
-  summary: string;
   brand: string;
   category: string;
   score: number;
@@ -43,6 +41,8 @@ export interface PublicArticleNavigationItemDto {
 }
 
 export interface PublicArticleDetailDto extends PublicArticleListItemDto {
+  url: string;
+  summary: string;
   keyPoints: string[];
   sources: Array<{
     id: string;
@@ -67,7 +67,6 @@ export interface PublicArticleDateGroupDto {
 
 export interface PublicArticleListResponseDto {
   total: number;
-  items: PublicArticleListItemDto[];
   groups: PublicArticleDateGroupDto[];
   displayedArticleCount: number;
   displayedDateCount: number;

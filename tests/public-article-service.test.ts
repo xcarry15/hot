@@ -61,8 +61,8 @@ describe('public-article-service Event 门禁', () => {
     mocks.eventFindMany.mockResolvedValueOnce([eventRow('e1', '2026-07-15T01:00:00Z', 3)]);
     mocks.eventCount.mockResolvedValue(1);
     const result = await listPublicArticles();
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0]).toMatchObject({ id: 'e1', sourceCount: 3, title: '文章 e1' });
+    expect(result.groups.flatMap((group) => group.items)).toHaveLength(1);
+    expect(result.groups[0].items[0]).toMatchObject({ id: 'e1', sourceCount: 3, title: '文章 e1' });
   });
 
   it('详情使用 Event.id，并列出全部来源', async () => {
