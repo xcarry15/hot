@@ -1,5 +1,6 @@
 param(
-    [switch]$CheckOnly
+    [switch]$CheckOnly,
+    [switch]$RefreshDependencies
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,7 +43,8 @@ try {
     Write-Host '  Hot2 Local Initialization' -ForegroundColor Cyan
     Write-Host '========================================' -ForegroundColor Cyan
     Write-Host ''
-    Write-Host 'This will delete the local SQLite database, node_modules, and .next.' -ForegroundColor Yellow
+    Write-Host 'This will delete the local SQLite database and .next.' -ForegroundColor Yellow
+    Write-Host 'Existing node_modules will be reused unless -RefreshDependencies is provided.' -ForegroundColor Yellow
     Write-Host 'The existing .env file will be preserved.' -ForegroundColor Yellow
     Write-Host ''
 
@@ -111,6 +113,16 @@ try {
         exit 0
     }
 
+    $RequiredDependencyFiles = @(
+        'node_modules\.bin\next.cmd',
+        'node_modules\.bin\prisma.cmd',
+        'node_modules\.bin\tsx.cmd'
+    )
+    $MissingDependencyCount = ($RequiredDependencyFiles |
+        Where-Object { -not (Test-Path -LiteralPath (Join-Path $ProjectRoot $_) -PathType Leaf) } |
+        Measure-Object).Count
+    $ReuseDependencies = -not $RefreshDependencies -and $MissingDependencyCount -eq 0
+
     Write-Host '[1/7] Stopping Node processes that belong to this project...'
     $Pm2Command = Get-Command pm2.cmd -ErrorAction SilentlyContinue
     if ($Pm2Command) {
@@ -137,10 +149,16 @@ try {
         Remove-Item -LiteralPath (Join-Path $DatabaseDirectory $DatabaseFile) -Force -ErrorAction SilentlyContinue
     }
     Remove-ProjectDirectory '.next'
-    Remove-ProjectDirectory 'node_modules'
+    if (-not $ReuseDependencies) {
+        Remove-ProjectDirectory 'node_modules'
+    }
 
-    Write-Host '[3/7] Installing dependencies from package-lock.json...'
-    Invoke-Npm @('ci')
+    if ($ReuseDependencies) {
+        Write-Host '[3/7] Reusing existing node_modules...' -ForegroundColor Gray
+    } else {
+        Write-Host '[3/7] Installing dependencies from package-lock.json...'
+        Invoke-Npm @('ci', '--prefer-offline', '--no-audit', '--no-fund')
+    }
 
     Write-Host '[4/7] Applying migrations and generating Prisma Client...'
     Invoke-Npm @('run', 'db:migrate:deploy')

@@ -36,7 +36,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import DiscardedDetailSheet from './article-detail-sheet'
 import ArticleWorkspaceDrawer from './article-workspace-drawer'
 import ArticleLibrarySheet from './article-library-sheet'
-import { fetchSettings, saveSettings } from '@/features/settings-api.client'
+import { fetchSettings, saveSettings, subscribeToSettingsChanged } from '@/features/settings-api.client'
 import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
 import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
 import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
@@ -66,8 +66,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const [articleDetailPanel, setArticleDetailPanel] = useState<ArticleWorkspacePanel | null>(null)
   const [articleDetailOpen, setArticleDetailOpen] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
-  const [libraryView, setLibraryView] = useState<'all' | 'attention' | 'unreviewed' | 'cluster_review' | 'low_confidence'>('all')
-  const [humanQueue, setHumanQueue] = useState({ total: 0, clusterReview: 0, unreviewed: 0, lowConfidence: 0 })
+  const [libraryView, setLibraryView] = useState<'all' | 'attention' | 'cluster_review' | 'low_confidence'>('all')
+  const [humanQueue, setHumanQueue] = useState({ total: 0, clusterReview: 0, lowConfidence: 0 })
 
   const refreshHumanQueue = useCallback(() => {
     fetchWorkQueueSummary(true).then((data) => setHumanQueue(data.human)).catch(() => undefined)
@@ -239,6 +239,12 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     return () => { cancelled = true }
   }, [])
 
+  useEffect(() => subscribeToSettingsChanged((changes) => {
+    if (typeof changes.auto_crawl_enabled === 'string') {
+      setAutoCrawl(changes.auto_crawl_enabled === 'true')
+    }
+  }), [])
+
   // ── 派生状态 ────────────────────────────────────────────
   // isAnyRunning 仅依赖 snapshot.activeJob——DB 是唯一事实源。
   const isAnyRunning = snapshot?.activeJob != null
@@ -332,6 +338,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
         key: stage,
         label: labels[stage],
         state: index < currentIndex ? 'done' as const : index === currentIndex ? 'running' as const : 'pending' as const,
+        progress: index === currentIndex
+          ? { done: activeJob.progressDone, total: activeJob.progressTotal }
+          : null,
       })),
       currentPosition: currentIndex >= 0 ? currentIndex + 1 : 0,
     }
@@ -357,6 +366,11 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     }
     return { label: '空闲', variant: 'outline' as const, spinning: false }
   }, [activeJob, latestJob])
+
+  const latestJobFailure = useMemo(() => {
+    if (!latestJob || latestJob.status !== 'failed' || !latestJob.error.trim()) return null
+    return latestJob.error.trim()
+  }, [latestJob])
 
   // ── Button Handlers ──
 
@@ -804,13 +818,15 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
                     }`}
                     aria-current={stage.state === 'running' ? 'step' : undefined}
                   >
-                    {stage.state === 'done' ? <Check className="h-3 w-3" /> : stage.state === 'running' ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className="h-1.5 w-1.5 rounded-full bg-current opacity-40" />}
-                    {stage.label}
-                  </span>
+                     {stage.state === 'done' ? <Check className="h-3 w-3" /> : stage.state === 'running' ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className="h-1.5 w-1.5 rounded-full bg-current opacity-40" />}
+                     {stage.label}
+                     {stage.progress && stage.progress.total > 0 && <span className="ml-0.5 tabular-nums opacity-75">{stage.progress.done}/{stage.progress.total}</span>}
+                   </span>
                 </div>
               ))}
             </div>
             <div className="flex items-center gap-3">
+              {progressView.pct != null && <span className="w-9 shrink-0 text-right tabular-nums text-xs text-muted-foreground">{progressView.pct}%</span>}
               <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
                 <div
                   className={`h-full rounded-full bg-primary transition-[width] duration-300 ease-out ${progressView.pct == null ? 'w-1/3 animate-pulse' : ''}`}
@@ -824,8 +840,6 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
               </div>
               <div className="flex shrink-0 items-center gap-2 text-xs">
                 <span className="font-medium text-blue-700">{progressView.stageLabel || '准备中'}</span>
-                {progressView.total > 0 && <span className="tabular-nums text-muted-foreground">{progressView.done}/{progressView.total}</span>}
-                {progressView.pct != null && <span className="w-9 text-right tabular-nums text-muted-foreground">{progressView.pct}%</span>}
                 {progressView.errors > 0 && <span className="font-medium text-destructive">✕{progressView.errors}</span>}
               </div>
             </div>
@@ -836,6 +850,13 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           <p className="text-xs text-muted-foreground">
             数据源抓取时将在这里实时显示进度
           </p>
+        )}
+        {latestJobFailure && (
+          <div className="flex min-w-0 items-start gap-2 border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
+            <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span className="shrink-0 font-medium">任务失败</span>
+            <span className="min-w-0 break-words text-destructive/90">{latestJobFailure}</span>
+          </div>
         )}
         {(failedSources.length > 0 || failedArticles > 0 || autoRetryArticles > 0) && (
           <div className="flex flex-wrap items-center gap-2 border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -848,7 +869,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
         )}
         <div className="flex flex-wrap items-center gap-2 border bg-background px-3 py-2 text-xs">
           <span className="font-medium">人工待办</span>
-          <span className="text-muted-foreground">共 {humanQueue.total} 篇 · 聚类复核 {humanQueue.clusterReview} · 待归类 {humanQueue.unreviewed} · 低置信 {humanQueue.lowConfidence}</span>
+          <span className="text-muted-foreground">共 {humanQueue.total} 篇 · 聚类复核 {humanQueue.clusterReview} · 低分析置信 {humanQueue.lowConfidence}</span>
           <Button size="sm" variant="outline" className="ml-auto h-7 px-2 text-xs" onClick={() => openLibrary('attention')}>打开待办队列</Button>
         </div>
       </div>

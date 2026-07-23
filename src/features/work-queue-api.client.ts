@@ -13,7 +13,6 @@ export interface WorkQueueSummary {
   human: {
     total: number;
     clusterReview: number;
-    unreviewed: number;
     lowConfidence: number;
   };
 }

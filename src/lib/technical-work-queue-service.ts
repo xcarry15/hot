@@ -81,12 +81,16 @@ async function buildTechnicalWorkQueue(): Promise<TechnicalWorkItem[]> {
   const targetStatesByEvent = await getPushTargetStatesForEvents(events.map((event) => event.id));
   for (const event of events) {
     if (!event.representativeArticleId || event.representativeArticle?.technicalIgnoredAt) continue;
-    const hasFailure = (targetStatesByEvent.get(event.id) ?? []).some((target) => target.latestStatus === 'failure');
+    const targetStates = targetStatesByEvent.get(event.id) ?? [];
+    const hasUnknown = targetStates.some((target) => target.latestStatus === 'unknown');
+    const hasFailure = targetStates.some((target) => target.latestStatus === 'failure' || target.latestStatus === 'unknown');
     if (!hasFailure) continue;
     const existing = items.get(event.representativeArticleId) ?? { articleId: event.representativeArticleId, issues: [], retryAvailableAt: null, state: event.nextPushRetryAt ? 'auto_retry' : 'manual' };
     if (!existing.issues.includes('push_failed')) existing.issues.push('push_failed');
     existing.retryAvailableAt = event.nextPushRetryAt?.toISOString() ?? existing.retryAvailableAt;
-    if (!event.nextPushRetryAt) existing.state = 'manual';
+    // unknown 表示“可能已经投递成功”，任何自动重试都有重复投递风险；
+    // 即使旧的 nextPushRetryAt 仍存在，也必须转人工确认。
+    if (hasUnknown || !event.nextPushRetryAt) existing.state = 'manual';
     items.set(existing.articleId, existing);
   }
   return [...items.values()];

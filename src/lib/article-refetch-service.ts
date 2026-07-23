@@ -33,6 +33,7 @@ export async function refetchArticle(articleId: string) {
   const resetData: Prisma.ArticleUpdateInput = {
     ...buildAiResetDataForArticle(article),
     fetchStatus: 'pending',
+    fetchError: null,
     fetchRetryCount: 0,
     nextFetchRetryAt: null,
     keywordMatched: false,
@@ -52,6 +53,10 @@ export async function refetchArticle(articleId: string) {
   if (article.eventId) await recalculateEventById(article.eventId);
   await refreshPublicPublication(articleId);
   const content = await fetchArticleDetail(articleId);
+  if (content.length === 0) {
+    const latest = await db.article.findUnique({ where: { id: articleId }, select: { fetchError: true } });
+    return { success: false, contentLength: 0, error: latest?.fetchError || '未获取到有效正文' };
+  }
   const keywordMatch = await evaluateKeywordMatch(`${article.title} ${content.slice(0, 1000)}`).catch(() => ({
     configured: false,
     matched: false,

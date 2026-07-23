@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   readPushSettings: vi.fn(),
   consoleError: vi.fn(),
   technicalQueue: vi.fn(),
+  pushTargetStates: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -34,6 +35,9 @@ vi.mock('@/lib/technical-work-queue-service', () => ({
   getTechnicalWorkQueue: mocks.technicalQueue,
   invalidateTechnicalWorkQueueCache: vi.fn(),
 }));
+vi.mock('@/lib/push/delivery', () => ({
+  getPushTargetStatesForEvents: mocks.pushTargetStates,
+}));
 
 import {
   clampCrawlLogLimit,
@@ -52,6 +56,7 @@ describe('crawl-log-service', () => {
       minRelevance: 5,
     });
     mocks.technicalQueue.mockResolvedValue([]);
+    mocks.pushTargetStates.mockResolvedValue(new Map());
   });
 
   afterEach(() => {
@@ -360,5 +365,57 @@ describe('crawl-log-service', () => {
       expect(snapshot.fetchedAt).toBeGreaterThanOrEqual(before);
       expect(snapshot.fetchedAt).toBeLessThanOrEqual(Date.now());
     });
+  });
+
+  it('文章技术失败原因投影到工作台 DTO', async () => {
+    const record = {
+      id: 'a-error', title: '失败文章', publishedAt: new Date(), sourceId: 's1',
+      fetchStatus: 'failed', fetchError: '正文请求超时', clusterStatus: 'failed', clusterError: '聚类服务异常',
+      aiStatus: 'failed', aiError: 'AI 限流', aiConfidence: null, score: 0, isAd: false, reviewStatus: 'general',
+      eventId: null, event: null, nextFetchRetryAt: null, nextClusterRetryAt: null, nextAiRetryAt: null,
+      relevance: 0, createdAt: new Date(), updatedAt: new Date(), summary: '', skipReason: null, technicalIgnoredAt: null,
+      source: { name: 'S' },
+    };
+    mocks.transaction.mockImplementation(async () => [[], [], [record], [], []]);
+
+    const snapshot = await getCrawlLogSnapshot();
+    expect(snapshot.sources[0].articles[0].technicalErrorReasons).toEqual({
+      process: '正文请求超时',
+      ai: 'AI 限流',
+      cluster: '聚类服务异常',
+    });
+  });
+
+  it('推送失败原因包含目标与最近一次投递错误', async () => {
+    const record = {
+      id: 'a-push-error', title: '推送失败文章', publishedAt: new Date(), sourceId: 's1',
+      fetchStatus: 'fetched', fetchError: null, clusterStatus: 'clustered', clusterError: null,
+      aiStatus: 'done', aiError: null, aiConfidence: 90, score: 90, isAd: false, reviewStatus: 'general',
+      eventId: 'e1', event: { articleCount: 1, pushedAt: null, nextPushRetryAt: null, representativeArticleId: 'a-push-error', publicStatus: 'unpublished' },
+      nextFetchRetryAt: null, nextClusterRetryAt: null, nextAiRetryAt: null,
+      relevance: 90, createdAt: new Date(), updatedAt: new Date(), summary: '', skipReason: null, technicalIgnoredAt: null,
+      source: { name: 'S' },
+    };
+    mocks.technicalQueue.mockResolvedValue([]);
+    mocks.pushTargetStates.mockResolvedValue(new Map([
+      ['e1', [{ latestStatus: 'failure', webhookRemark: '运营群', latestError: 'HTTP 502', webhookUrl: 'https://hook/a', latestCreatedAt: new Date() }]],
+    ]));
+    mocks.transaction.mockImplementation(async () => [[], [], [record], [], []]);
+
+    const snapshot = await getCrawlLogSnapshot();
+    expect(snapshot.sources[0].articles[0].technicalErrorReasons.push).toBe('推送失败：运营群：HTTP 502');
+  });
+
+  it('0 篇解析结果作为警告而不是失败源', async () => {
+    const job = {
+      id: 'collect', type: 'collect', status: 'succeeded', payload: '{}', error: '', currentStage: 'collect',
+      progressTotal: 1, progressDone: 1, progressErrors: 0, currentItemLabel: '', heartbeatAt: null,
+      startedAt: new Date(), completedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
+      result: JSON.stringify({ result: { sources: [{ sourceId: 's1', sourceName: 'S', success: true, itemsFound: 0, error: '0 items parsed' }] } }),
+    };
+    mocks.transaction.mockImplementation(async () => [[], [job], [], [], [{ id: 's1', name: 'S' }]]);
+
+    const snapshot = await getCrawlLogSnapshot();
+    expect(snapshot.sources[0]).toMatchObject({ status: 'warning', lastRunStatus: 'warning' });
   });
 });

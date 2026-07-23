@@ -35,7 +35,10 @@ function article(partial: Partial<ArticleProgress>): ArticleProgress {
     push: 'pending',
     lastTime: 0,
     technicalIssues: [],
+    technicalErrorReasons: {},
     isEventRepresentative: true,
+    isPublic: false,
+    reviewStatus: 'general',
   }
 
   if (partial.crawl === 'failed') {
@@ -72,6 +75,37 @@ describe('matchStepChip 单谓词命中', () => {
   it('软文和重复按业务标签独立命中', () => {
     expect(matchStepChip(article({ anomalyLabels: ['ad'] }), 'anomaly-ad')).toBe(true)
     expect(matchStepChip(article({ anomalyLabels: ['duplicate'] }), 'anomaly-duplicate')).toBe(true)
+  })
+
+  it('未人工审核不再被归为异常', () => {
+    expect(matchStepChip(article({ reviewStatus: 'unreviewed' }), 'anomaly-all')).toBe(false)
+    expect(matchStepChip(article({ reviewStatus: 'unreviewed' }), 'normal-all')).toBe(true)
+  })
+
+  it('无具体事件是正常跳过，不是流程失败', () => {
+    const skipped = article({ ai: 'skipped', cluster: 'not_applicable', push: 'not_applicable', skipReason: '无具体事件' })
+    expect(matchStepChip(skipped, 'anomaly-failure')).toBe(false)
+    expect(matchStepChip(skipped, 'normal-all')).toBe(true)
+    expect(matchStepChip(skipped, 'normal-no-event')).toBe(true)
+    expect(matchStepChip(skipped, 'normal-processing')).toBe(false)
+  })
+
+  it('多事件聚合稿是正常跳过，不是聚类异常', () => {
+    const skipped = article({ ai: 'skipped', cluster: 'not_applicable', push: 'not_applicable', skipReason: '多事件聚合稿' })
+    expect(matchStepChip(skipped, 'anomaly-all')).toBe(false)
+    expect(matchStepChip(skipped, 'normal-all')).toBe(true)
+    expect(matchStepChip(skipped, 'normal-multi-event')).toBe(true)
+    expect(matchStepChip(skipped, 'normal-processing')).toBe(false)
+  })
+
+  it('已公开只匹配公开端展示的 Event 代表文章', () => {
+    expect(matchStepChip(article({ isPublic: true }), 'normal-public')).toBe(true)
+    expect(matchStepChip(article({ isPublic: false }), 'normal-public')).toBe(false)
+  })
+
+  it('技术失败的原因随文章快照保留，供工作台展示', () => {
+    const item = article({ technicalErrorReasons: { process: '正文页请求超时' } })
+    expect(item.technicalErrorReasons.process).toBe('正文页请求超时')
   })
 })
 

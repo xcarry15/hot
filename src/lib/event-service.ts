@@ -64,13 +64,16 @@ async function getSameBrandCandidates(eventId: string, brand: string) {
     eventId: true,
     title: true,
     url: true,
+    eventKey: true,
     score: true,
     relevance: true,
     brand: true,
+    reviewStatus: true,
     publicStatus: true,
     publishedAt: true,
     createdAt: true,
-    source: { select: { name: true, type: true, publicEnabled: true } },
+    source: { select: { name: true, type: true, publicEnabled: true, deletedAt: true } },
+    event: { select: { pushedAt: true, representativeArticleId: true } },
   } as const;
 
   // 先命中完全相同的品牌字段，再用品牌片段补齐多品牌/历史格式数据。
@@ -105,8 +108,16 @@ async function getSameBrandCandidates(eventId: string, brand: string) {
     .sort(compareArticleTime)
     .slice(0, SAME_BRAND_CANDIDATE_TAKE);
 
-  return candidates.map((article) => ({
+  return candidates.map(({ event, source, ...article }) => ({
     ...article,
+    eventPushedAt: event?.pushedAt?.toISOString() ?? null,
+    isEventRepresentative: event?.representativeArticleId === article.id,
+    source: {
+      name: source.name,
+      type: source.type,
+      publicEnabled: source.publicEnabled,
+      deleted: source.deletedAt !== null,
+    },
     publishedAt: article.publishedAt?.toISOString() ?? null,
     createdAt: article.createdAt.toISOString(),
   }));
@@ -355,7 +366,21 @@ export async function getEventArticles(eventId: string, articleId?: string) {
             select: {
               id: true,
               status: true,
-              representativeArticle: { select: { title: true } },
+              articleCount: true,
+              publicStatus: true,
+              pushedAt: true,
+              representativeArticle: {
+                select: {
+                  title: true,
+                  eventKey: true,
+                  score: true,
+                  brand: true,
+                  reviewStatus: true,
+                  publishedAt: true,
+                  createdAt: true,
+                  source: { select: { name: true, type: true, publicEnabled: true, deletedAt: true } },
+                },
+              },
             },
           },
         },
@@ -419,6 +444,21 @@ export async function getEventArticles(eventId: string, articleId?: string) {
         } : {}),
       },
       createdAt: audit.createdAt.toISOString(),
+      candidateEvent: audit.candidateEvent ? {
+        ...audit.candidateEvent,
+        pushedAt: audit.candidateEvent.pushedAt?.toISOString() ?? null,
+        representativeArticle: audit.candidateEvent.representativeArticle ? {
+          ...audit.candidateEvent.representativeArticle,
+          publishedAt: audit.candidateEvent.representativeArticle.publishedAt?.toISOString() ?? null,
+          createdAt: audit.candidateEvent.representativeArticle.createdAt.toISOString(),
+          source: {
+            name: audit.candidateEvent.representativeArticle.source.name,
+            type: audit.candidateEvent.representativeArticle.source.type,
+            publicEnabled: audit.candidateEvent.representativeArticle.source.publicEnabled,
+            deleted: audit.candidateEvent.representativeArticle.source.deletedAt !== null,
+          },
+        } : null,
+      } : null,
     })),
     articles: event.articles.map((article) => ({
       ...article,
@@ -532,8 +572,17 @@ export async function confirmIndependentArticle(eventId: string, articleId: stri
 export async function moveArticleToEvent(articleId: string, targetEventId: string): Promise<boolean> {
   const result = await db.$transaction(async (tx) => {
     const [article, target] = await Promise.all([
-      tx.article.findUnique({ where: { id: articleId }, select: { id: true, eventId: true, aiStatus: true, clusterStatus: true } }),
-      tx.event.findUnique({ where: { id: targetEventId }, select: { id: true, status: true } }),
+      tx.article.findUnique({
+        where: { id: articleId },
+        select: {
+          id: true, eventId: true, aiStatus: true, clusterStatus: true,
+          eventKey: true,
+        },
+      }),
+      tx.event.findUnique({
+        where: { id: targetEventId },
+        select: { id: true, status: true },
+      }),
     ]);
     if (!article?.eventId || article.eventId === targetEventId || target?.status !== 'active') return null;
     const sourceEventId = article.eventId;
@@ -565,7 +614,11 @@ export async function moveArticleToEvent(articleId: string, targetEventId: strin
         action: 'move',
         decisionSource: 'admin',
         confidence: 100,
-        evidence: JSON.stringify({ sourceEventId, targetEventId }),
+        evidence: JSON.stringify({
+          sourceEventId,
+          targetEventId,
+          articleEventKey: article.eventKey,
+        }),
       },
     });
     return { sourceEventId };

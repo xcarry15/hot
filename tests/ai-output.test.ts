@@ -58,6 +58,36 @@ describe('parseAiAnalysisOutput', () => {
     expect(parsed.key_points).toEqual(['重复']);
   });
 
+  it('可核验的劳动保障动作不因品牌自述误判为广告', () => {
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      event_score: 40,
+      is_ad: true,
+      ad_probability: 85,
+      event_action: '缴纳五险一金',
+      event_object: '全职骑手快递小哥',
+      summary: '京东每年投入超百亿，为全职骑手和快递员缴纳五险一金并签署劳动合同。',
+      key_points: ['京东为15万全职骑手缴纳五险一金'],
+    }));
+    expect(parsed.is_ad).toBe(false);
+    expect(parsed.ad_probability).toBe(19);
+  });
+
+  it('公益宣传仍尊重模型的广告判断', () => {
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      event_score: 20,
+      is_ad: true,
+      ad_probability: 85,
+      event_action: '捐赠救援',
+      event_object: '品牌公益物资',
+      summary: '全文围绕品牌公益活动与品牌形象展开，缺少独立行业信息。',
+      key_points: ['品牌发布捐赠活动宣传稿'],
+    }));
+    expect(parsed.is_ad).toBe(true);
+    expect(parsed.ad_probability).toBe(85);
+  });
+
   it('缺少核心评分字段时拒绝结果', () => {
     expect(() => parseAiAnalysisOutput(JSON.stringify({ summary: '没有评分' }))).toThrow();
   });
@@ -67,6 +97,32 @@ describe('parseAiAnalysisOutput', () => {
       ...validOutput,
       event_object: '',
     }))).toThrow('完整事件身份');
+  });
+
+  it('纯观点文章缺少事件身份时识别为无具体事件', () => {
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      event_score: 5,
+      event_subjects: [],
+      event_action: '',
+      event_object: '',
+    }));
+    expect(parsed.event_score).toBe(5);
+    expect(parsed.event_key).toBe('');
+    expect(parsed.summary).toBe(validOutput.summary);
+  });
+
+  it('低事件分即使模型编造完整身份也识别为无具体事件', () => {
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      event_score: 5,
+      event_subjects: ['山姆'],
+      event_action: '评估产品',
+      event_object: '供应商渗透率',
+    }));
+    expect(parsed.event_subjects).toEqual([]);
+    expect(parsed.event_action).toBe('');
+    expect(parsed.event_object).toBe('');
   });
 
   it('宽泛或多动作身份会自动降级置信度', () => {

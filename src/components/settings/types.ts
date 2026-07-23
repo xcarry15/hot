@@ -32,6 +32,7 @@ export interface Settings extends Record<PromptBlockKey, string> {
   public_general_rule: string
   public_irrelevant_rule: string
   public_pin_hours: string
+  auto_crawl_enabled: string
   crawl_interval_min: string
   ai_provider: string
   ai_temperature: string
@@ -41,6 +42,9 @@ export interface Settings extends Record<PromptBlockKey, string> {
   ai_weight_content: string
   ai_keyword_match_bonus: string
   ai_step2_content_max_chars: string
+  ai_concurrency: string
+  event_cluster_ai_same_event_confidence: string
+  event_cluster_ai_different_event_confidence: string
 }
 
 export interface AiTestResult {

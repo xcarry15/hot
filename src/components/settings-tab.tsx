@@ -19,7 +19,7 @@ import {
 } from '@/components/settings/types'
 import { AI_PROVIDERS, providerSettingKey as providerKey, type AIProviderId } from '@/contracts/ai-provider'
 import { getFrontendSettingDefaults, SETTING_KEYS } from '@/lib/settings-catalog'
-import { fetchSettings, revealSettings, saveSettings } from '@/features/settings-api.client'
+import { fetchSettings, revealSettings, saveSettings, subscribeToSettingsChanged } from '@/features/settings-api.client'
 
 const sectionLoading = () => <Skeleton className="mt-4 h-40 w-full" />
 const loadAiModel = () => import('@/components/settings/ai-model')
@@ -74,6 +74,8 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('dashboard')
   const settingsBaselineRef = useRef<string | null>(null)
+  const settingsBaselineStateRef = useRef<SettingsType | null>(null)
+  const providerBaselineRef = useRef<ProviderConfigs | null>(null)
   const revealAttemptedRef = useRef(false)
   const pendingRevealBaselineRef = useRef<string | null>(null)
   // reveal 401 只提示一次：避免 StrictMode 双跑 / 刷新 / 切回设置页重复打扰；
@@ -168,10 +170,23 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   useEffect(() => {
     if (!loading) {
       settingsBaselineRef.current = currentSettingsFingerprint
+      settingsBaselineStateRef.current = settings
+      providerBaselineRef.current = providerConfigs
     }
     // 仅在初次加载结束时建立基线；后续编辑不能覆盖基线。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading])
+
+  useEffect(() => subscribeToSettingsChanged((changes) => {
+    setSettings(prev => ({ ...prev, ...changes }))
+
+    const baselineSettings = settingsBaselineStateRef.current
+    if (!baselineSettings) return
+    const nextBaselineSettings = { ...baselineSettings, ...changes } as SettingsType
+    const baselineProviders = providerBaselineRef.current ?? providerConfigs
+    settingsBaselineStateRef.current = nextBaselineSettings
+    settingsBaselineRef.current = settingsFingerprint(nextBaselineSettings, baselineProviders)
+  }), [providerConfigs, settingsFingerprint])
 
   useEffect(() => {
     if (loading || !['ai-model', 'push'].includes(activeTab) || revealAttemptedRef.current) return
@@ -183,6 +198,8 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     const pending = pendingRevealBaselineRef.current
     if (pending && pending === currentSettingsFingerprint) {
       settingsBaselineRef.current = pending
+      settingsBaselineStateRef.current = settings
+      providerBaselineRef.current = providerConfigs
       pendingRevealBaselineRef.current = null
     }
   }, [currentSettingsFingerprint])
@@ -200,12 +217,37 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     return payload
   }, [settings, providerConfigs])
 
+  const saveImportedPrompts = async (patch: Partial<SettingsType>) => {
+    const nextSettings: SettingsType = { ...settings, ...patch }
+    const promptPatch = Object.fromEntries(
+      Object.entries(patch).filter(([, value]) => typeof value === 'string'),
+    ) as Record<string, string>
+    setSaving(true)
+    try {
+      await saveSettings(promptPatch)
+      if (mountedRef.current) {
+        setSettings(nextSettings)
+        const baselineSettings = {
+          ...(settingsBaselineStateRef.current ?? settings),
+          ...patch,
+        } as SettingsType
+        const baselineProviders = providerBaselineRef.current ?? providerConfigs
+        settingsBaselineRef.current = settingsFingerprint(baselineSettings, baselineProviders)
+        settingsBaselineStateRef.current = baselineSettings
+      }
+    } finally {
+      if (mountedRef.current) setSaving(false)
+    }
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
       const result = await saveSettings(buildSavePayload()) as { scoreRecomputed?: number; publicationRebuilt?: boolean }
       if (mountedRef.current) {
         settingsBaselineRef.current = currentSettingsFingerprint
+        settingsBaselineStateRef.current = settings
+        providerBaselineRef.current = providerConfigs
         const details = [
           result.scoreRecomputed ? `已重算 ${result.scoreRecomputed} 篇评分` : '',
           result.publicationRebuilt ? '已同步公开状态' : '',
@@ -304,7 +346,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         </TabsContent>
 
         <TabsContent value="prompts" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
-          <PromptsTab settings={settings} setSettings={setSettings} />
+          <PromptsTab settings={settings} setSettings={setSettings} onImportPrompts={saveImportedPrompts} saving={saving} />
         </TabsContent>
 
         <TabsContent value="push" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">

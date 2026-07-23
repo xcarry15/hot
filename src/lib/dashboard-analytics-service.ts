@@ -209,13 +209,16 @@ async function buildDashboardAnalytics(
     db.article.findMany({
       where: { createdAt: timeWhere, ...sourceFilter },
       select: {
+        id: true,
         sourceId: true,
         createdAt: true,
         fetchStatus: true,
         aiStatus: true,
+        skipReason: true,
+        aiSnapshot: true,
         score: true,
         isAd: true,
-        event: { select: { pushedAt: true, articleCount: true } },
+        event: { select: { pushedAt: true, articleCount: true, representativeArticleId: true } },
         viewCount: true,
         originalClickCount: true,
       },
@@ -289,7 +292,11 @@ async function buildDashboardAnalytics(
       trend.processed += 1;
     }
 
-    const isAnalyzed = row.fetchStatus === 'fetched' && row.aiStatus === 'done';
+    const businessSkipAnalyzed = row.aiStatus === 'skipped'
+      && (row.skipReason === '无具体事件' || row.skipReason === '多事件聚合稿')
+      && row.aiSnapshot !== '{}';
+    const isAnalyzed = row.fetchStatus === 'fetched'
+      && (row.aiStatus === 'done' || businessSkipAnalyzed);
     if (isAnalyzed) {
       source.newArticles += 1;
       trend.newArticles += 1;
@@ -312,7 +319,9 @@ async function buildDashboardAnalytics(
       }
     }
 
-    if ((row.event?.articleCount ?? 0) > 1) {
+    // Event 只有一篇代表文章；重复数应只计非代表成员，
+    // 否则两篇稿件的 Event 会被误算成 2 篇重复稿。
+    if ((row.event?.articleCount ?? 0) > 1 && row.event?.representativeArticleId !== row.id) {
       source.duplicates += 1;
       source.duplicateArticles += 1;
       trend.duplicates += 1;

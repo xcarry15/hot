@@ -113,6 +113,11 @@ export async function getAISettings(): Promise<AISettings> {
     ? requestedProvider as AIProviderId
     : defaultProvider;
   const providerDef = AI_PROVIDERS[provider];
+  const rawTemperature = map[SETTING_KEYS.AI_TEMPERATURE]?.trim();
+  const parsedTemperature = rawTemperature ? Number(rawTemperature) : Number.NaN;
+  const temperature = Number.isFinite(parsedTemperature)
+    ? Math.max(0, Math.min(2, parsedTemperature))
+    : DEFAULT_TEMPERATURE;
 
   const apiKey = map[providerSettingKey(provider, 'api_key')] ?? '';
   const baseUrl = map[providerSettingKey(provider, 'base_url')] || providerDef.baseUrl;
@@ -123,7 +128,7 @@ export async function getAISettings(): Promise<AISettings> {
     apiKey,
     baseUrl,
     model,
-    temperature: Math.max(0, Math.min(2, parseFloat(map[SETTING_KEYS.AI_TEMPERATURE]) || DEFAULT_TEMPERATURE)),
+    temperature,
     maxTokens: Math.max(1, Math.min(65536, parseInt(map[SETTING_KEYS.AI_MAX_TOKENS]) || DEFAULT_MAX_TOKENS)),
     systemPrompt: map[SETTING_KEYS.AI_SYSTEM_PROMPT],
     blockAd: map.ai_block_ad,

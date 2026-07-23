@@ -122,7 +122,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
             // 内容指纹是事件聚类的强证据；详情正文变化时必须同步更新。
             contentHash: computeContentFingerprint(article.title, cleaned),
             fetchStatus: meaningful ? 'fetched' : 'failed',
-            ...(meaningful ? { fetchRetryCount: 0, nextFetchRetryAt: null, technicalIgnoredAt: null } : {}),
+            ...(meaningful ? { fetchRetryCount: 0, nextFetchRetryAt: null, fetchError: null, technicalIgnoredAt: null } : {}),
             ...(detailPublishedAt ? { publishedAt: detailPublishedAt } : {}),
             ...originalSourceData,
           },
@@ -130,6 +130,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
 
         console.log(`[fetchArticleDetail] article=${articleId} content_len=${cleaned.length} meaningful=${meaningful} attempt=${attempt} via=${fetchMethod}${detailPublishedAt ? ` detailDate=${detailPublishedAt.toISOString()}` : ''}`);
         if (meaningful) return cleaned;
+        lastError = new Error(`正文内容不足（有效文本 ${meaningfulTextLength(cleaned)} 字）`);
       }
     } catch (err) {
       if (signal?.aborted) throw err;
@@ -146,10 +147,13 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
     where: { id: articleId },
     data: {
       fetchStatus: 'failed',
+      fetchError: (lastError?.message || '未获取到有效正文').slice(0, 1000),
       fetchRetryCount: retryCount,
       nextFetchRetryAt: retryCount >= FETCH_MAX_RETRIES ? null : new Date(Date.now() + FETCH_RETRY_DELAY_MS),
     },
   });
 
-	return article.cleanContent || '';
+  // 失败时不能把旧的短正文当作本次抓取成功的结果返回。
+  // 否则单篇重跑会继续进入 AI / 聚类，批处理也可能把失败文章计为已处理。
+  return '';
 }

@@ -48,7 +48,7 @@ export async function GET() {
  * - dedup-logs: Clear dedup-type discarded records
  * - fetch-logs: Clear all fetch logs
  * - reset-ai: Reset all articles' AI status to pending
- * - reset-ai-failed: Reset only failed/skipped articles' AI status to pending
+ * - reset-ai-failed: Reset only technical AI failures to pending
  * - vacuum: 压缩数据库文件，回收 DELETE 后未释放的磁盘空间
  */
 export async function POST(request: Request) {

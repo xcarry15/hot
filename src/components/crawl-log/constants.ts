@@ -25,7 +25,10 @@ export const NORMAL_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'normal-all', label: '全部正常', description: '全部正常流转文章' },
   { key: 'normal-processing', label: '处理中', description: '正在采集或提取正文' },
   { key: 'normal-ai', label: '待 AI', description: '正文处理完成，等待 AI 分析' },
+  { key: 'normal-no-event', label: '无具体事件', description: 'AI 已完成分析，但文章没有可定位的具体事件' },
+  { key: 'normal-multi-event', label: '多事件稿', description: 'AI 已完成分析，但文章包含多个独立事件' },
   { key: 'normal-cluster', label: '待聚类', description: 'AI 已生成事件身份，等待事件聚类' },
+  { key: 'normal-public', label: '已公开', description: '已在公开端展示的 Event 代表文章' },
   { key: 'normal-push', label: '待推送', description: '已满足推送条件，等待投递' },
   { key: 'normal-pushed', label: '已推送', description: '已成功完成投递' },
 ] as const
@@ -37,7 +40,7 @@ export const ANOMALY_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'anomaly-failure', label: '流程失败', description: '流程失败、跳过或自动恢复中' },
   { key: 'anomaly-ad', label: '软文', description: 'AI 判定为广告或软文的文章' },
   { key: 'anomaly-duplicate', label: '重复', description: '同一事件中的非代表报道' },
-  { key: 'anomaly-low-confidence', label: '低置信', description: 'AI 对分析结果把握不足，建议人工复核' },
+  { key: 'anomaly-low-confidence', label: '低分析置信', description: 'AI 对文章分析结论的证据把握不足，建议人工复核' },
 ] as const
 
 export const STEP_FILTER_CHIPS: readonly StepFilterChip[] = [

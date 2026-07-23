@@ -28,6 +28,8 @@ export interface PushTargetState {
   webhookRemark: string;
   latestStatus: 'success' | 'failure' | 'never_attempted' | 'unknown';
   latestCreatedAt: Date | null;
+  /** 最近一次投递的失败说明；仅用于管理端技术恢复界面。 */
+  latestError: string | null;
 }
 
 export interface PushArticleResult {
@@ -101,7 +103,7 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
   const deliveries = await db.pushDelivery.findMany({
     where: { eventId: { in: uniqueEventIds }, targetId: { in: targets.map((target) => target.id) } },
     orderBy: { createdAt: 'desc' },
-    select: { eventId: true, targetId: true, status: true, createdAt: true, leaseExpiresAt: true },
+    select: { eventId: true, targetId: true, status: true, createdAt: true, leaseExpiresAt: true, lastError: true },
   });
 
   const latest = new Map<string, typeof deliveries[number]>();
@@ -125,6 +127,7 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
         webhookRemark: config.remark || '',
         latestStatus,
         latestCreatedAt: delivery?.createdAt ?? null,
+        latestError: delivery?.lastError || null,
       };
     }));
   }
@@ -137,7 +140,7 @@ export async function getPushTargetStates(eventId: string): Promise<PushTargetSt
 
 export async function getFailedPushTargets(eventId: string): Promise<PushTargetState[]> {
   return (await getPushTargetStates(eventId)).filter(
-    (target) => target.latestStatus === 'failure' || target.latestStatus === 'unknown',
+    (target) => target.latestStatus === 'failure',
   );
 }
 
@@ -279,6 +282,9 @@ async function pushEventToFeishuInternal(
     return target.latestStatus !== 'success';
   }).map((target) => target.webhookUrl));
 
+  if (mode === 'normal' && targetStates.some((target) => target.latestStatus === 'unknown')) {
+    return emptyPushResult(mode, 'failed', '存在投递结果未知的目标，需要人工强制推送确认', enabled.length);
+  }
   if (mode === 'retry_failed' && selectedUrls.size === 0) {
     return emptyPushResult(mode, 'failed', '当前没有失败的推送目标', enabled.length);
   }

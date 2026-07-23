@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,8 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
+  Download,
+  FileUp,
   MessageSquareText,
   RefreshCcw,
 } from 'lucide-react'
@@ -27,6 +29,7 @@ import {
   PROMPT_BLOCK_ORDER,
   SCORE_WEIGHT_META,
   PromptBlockId,
+  PromptBlockKey,
 } from '@/lib/prompts'
 import { Settings } from './types'
 import { previewScoreSettings } from '@/features/settings-api.client'
@@ -34,12 +37,28 @@ import { previewScoreSettings } from '@/features/settings-api.client'
 interface Props {
   settings: Settings
   setSettings: React.Dispatch<React.SetStateAction<Settings>>
+  onImportPrompts: (patch: Partial<Settings>) => Promise<void>
+  saving: boolean
 }
 
-export default function PromptsTab({ settings, setSettings }: Props) {
+type PromptBackupKey = 'ai_system_prompt' | PromptBlockKey
+
+interface PromptBackupPayload {
+  type: 'hot2-prompt-backup'
+  version: 1
+  exportedAt: string
+  prompts: Partial<Record<PromptBackupKey, string>>
+}
+
+function isPromptBackupKey(value: string): value is PromptBackupKey {
+  return value === 'ai_system_prompt' || PROMPT_BLOCK_ORDER.some((blockId) => PROMPT_BLOCK_META[blockId].key === value)
+}
+
+export default function PromptsTab({ settings, setSettings, onImportPrompts, saving }: Props) {
   const [resetDialog, setResetDialog] = useState<{ onConfirm: () => void } | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [preview, setPreview] = useState<{ total: number; changed: number; increased: number; decreased: number; samples: { id: string; title: string; before: number; after: number; delta: number }[] } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const updateSetting = (key: keyof Settings, value: string) => {
     setSettings(prev => ({ ...prev, [key]: value }))
@@ -56,18 +75,73 @@ export default function PromptsTab({ settings, setSettings }: Props) {
     toast.info('已恢复为默认系统角色，保存后生效')
   }
 
+  const exportPrompts = () => {
+    const prompts: Partial<Record<PromptBackupKey, string>> = {
+      ai_system_prompt: settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT,
+    }
+    for (const blockId of PROMPT_BLOCK_ORDER) {
+      const meta = PROMPT_BLOCK_META[blockId]
+      prompts[meta.key] = settings[meta.key] || meta.defaultBlock
+    }
+
+    const payload: PromptBackupPayload = {
+      type: 'hot2-prompt-backup',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      prompts,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `hot2-prompts-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+    toast.success('提示词已导出')
+  }
+
+  const importPrompts = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (file.size > 1_000_000) {
+      toast.error('文件过大，请确认是否为提示词备份文件')
+      return
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(await file.text())
+      if (!parsed || typeof parsed !== 'object') throw new Error('文件格式无效')
+      const backup = parsed as Partial<PromptBackupPayload>
+      if (backup.type !== 'hot2-prompt-backup' || backup.version !== 1 || !backup.prompts || typeof backup.prompts !== 'object') {
+        throw new Error('不是有效的提示词备份文件')
+      }
+
+      const imported: Partial<Settings> = {}
+      for (const [key, value] of Object.entries(backup.prompts)) {
+        if (isPromptBackupKey(key) && typeof value === 'string') imported[key] = value
+      }
+      if (Object.keys(imported).length === 0) throw new Error('备份文件中没有可识别的提示词')
+
+      await onImportPrompts(imported)
+      toast.success(`已导入并保存 ${Object.keys(imported).length} 项提示词，已立即生效`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '导入提示词失败')
+    }
+  }
+
   const resetAllPrompts = () => {
     setSettings(prev => ({
       ...prev,
       ai_system_prompt: DEFAULT_SYSTEM_PROMPT,
       ai_block_ad: PROMPT_BLOCK_META.ad.defaultBlock,
-      ai_block_event_score: PROMPT_BLOCK_META.eventScore.defaultBlock,
-      ai_block_category: PROMPT_BLOCK_META.category.defaultBlock,
-      ai_block_relevance: PROMPT_BLOCK_META.relevance.defaultBlock,
-      ai_block_content_score: PROMPT_BLOCK_META.contentScore.defaultBlock,
+      ai_block_event_identity: PROMPT_BLOCK_META.eventIdentity.defaultBlock,
       ai_block_key_points: PROMPT_BLOCK_META.keyPoints.defaultBlock,
       ai_block_summary: PROMPT_BLOCK_META.summary.defaultBlock,
-      ai_block_event_identity: PROMPT_BLOCK_META.eventIdentity.defaultBlock,
+      ai_block_event_score: PROMPT_BLOCK_META.eventScore.defaultBlock,
+      ai_block_content_score: PROMPT_BLOCK_META.contentScore.defaultBlock,
+      ai_block_category: PROMPT_BLOCK_META.category.defaultBlock,
+      ai_block_relevance: PROMPT_BLOCK_META.relevance.defaultBlock,
       ai_block_brand: PROMPT_BLOCK_META.brand.defaultBlock,
       ai_weight_event: String(SCORE_WEIGHT_META.event.defaultWeight),
       ai_weight_content: String(SCORE_WEIGHT_META.content.defaultWeight),
@@ -105,14 +179,40 @@ export default function PromptsTab({ settings, setSettings }: Props) {
     <>
       <Card className="mt-2 py-0">
         <CardContent className="space-y-2.5 p-3">
-          <div className="flex items-center gap-2 border-b pb-2">
+          <div className="flex flex-wrap items-center gap-2 border-b pb-2">
             <MessageSquareText className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-semibold">提示词</span>
-            <span className="text-xs text-muted-foreground">— 编辑后需点底部「保存设置」生效</span>
-            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs ml-auto gap-1" onClick={() => setResetDialog({ onConfirm: resetAllPrompts })}>
-              <RefreshCcw className="h-3 w-3" />
-              恢复默认
-            </Button>
+            <span className="text-xs text-muted-foreground">— 手动编辑需点底部「保存设置」；导入会自动保存</span>
+            <div className="ml-auto flex flex-wrap items-center gap-1">
+              <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={exportPrompts}>
+                <Download className="h-3 w-3" />
+                一键导出
+              </Button>
+              <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => fileInputRef.current?.click()} disabled={saving}>
+                <FileUp className="h-3 w-3" />
+                一键导入
+              </Button>
+              <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={importPrompts} className="hidden" />
+              <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setResetDialog({ onConfirm: resetAllPrompts })}>
+                <RefreshCcw className="h-3 w-3" />
+                恢复默认
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-1.5 border p-2.5">
+            <p className="text-xs font-medium">当前生效的代码护栏</p>
+            <div className="grid gap-x-4 gap-y-1 text-[11px] text-muted-foreground sm:grid-cols-2">
+              <p>• event_score ≤ 9：标记为无具体事件，不进入 Event 聚类。</p>
+              <p>• 标题包含多个独立事件：不自动合并，保留为正常跳过。</p>
+              <p>• 聚类时间信号：常规 7 天；跟进候选最多召回 14 天。</p>
+              <p>• eventKey 由主体 / 原子动作 / 辨识事项确定性生成，brand 不覆盖事件主体。</p>
+              <p>• 广告概率 ≤ 20 不扣分；达到 50 后进入广告封顶，硬事实高分稿封顶 70，其余封顶 45。</p>
+              <p>• 关键词加分在广告规则之后执行，最终分数封顶 100。</p>
+              <p>• 劳动保障事实仅在模型已判广告时触发非广告兜底，避免单个关键词洗掉宣传稿。</p>
+              <p>• 正文、AI、聚类和推送失败均有限次自动重试，耗尽后转人工处理。</p>
+            </div>
+            <p className="text-[11px] text-muted-foreground">以上属于防止误聚类、误公开和误评分的安全约束；可运营参数请在本页、AI 模型和推送页调整。</p>
           </div>
 
           {/* 评分权重 */}
@@ -190,7 +290,7 @@ export default function PromptsTab({ settings, setSettings }: Props) {
                 <RefreshCcw className="h-3 w-3" />恢复
               </Button>
             </div>
-            <Textarea value={settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT} onChange={(e) => updateSetting('ai_system_prompt', e.target.value)} className="text-xs min-h-[80px] max-h-[160px] !field-sizing-fixed resize-y overflow-y-auto" />
+            <Textarea value={settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT} onChange={(e) => updateSetting('ai_system_prompt', e.target.value)} className="text-xs min-h-[120px] max-h-[240px] !field-sizing-fixed resize-y overflow-y-auto" />
           </div>
 
           {/* 评判块 */}
@@ -208,7 +308,7 @@ export default function PromptsTab({ settings, setSettings }: Props) {
                       <RefreshCcw className="h-3 w-3" />恢复
                     </Button>
                   </div>
-                  <Textarea value={settings[meta.key] || meta.defaultBlock} onChange={(e) => updateSetting(meta.key as keyof Settings, e.target.value)} className="text-xs min-h-[80px] max-h-[200px] !field-sizing-fixed resize-y overflow-y-auto font-mono" />
+                  <Textarea value={settings[meta.key] || meta.defaultBlock} onChange={(e) => updateSetting(meta.key as keyof Settings, e.target.value)} className="text-xs min-h-[120px] max-h-[280px] !field-sizing-fixed resize-y overflow-y-auto font-mono" />
                   <p className="text-[11px] text-muted-foreground">{meta.scoreHint}</p>
                 </div>
               )

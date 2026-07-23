@@ -5,11 +5,14 @@ import {
   EVENT_CLUSTER_MAX_AI_CANDIDATES,
   EVENT_CLUSTER_MAX_MEMBER_ARTICLES,
   EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES,
+  EVENT_CLUSTER_FOLLOW_UP_DAYS,
   EVENT_CLUSTER_MAX_RETRIES,
   EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP,
   EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD,
   EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE,
   EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP,
+  DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE,
+  DEFAULT_EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE,
   EVENT_CLUSTER_MIN_KEY_CONFIDENCE,
   EVENT_CLUSTER_RULE_VERSION,
   EVENT_CLUSTER_STRONG_CONTENT_JACCARD,
@@ -33,11 +36,14 @@ import { createChatCompletion } from '@/lib/ai-client';
 import { parseStrictJsonObject } from '@/lib/ai-helpers';
 import { db } from '@/lib/db';
 import { recalculateEventById } from '@/lib/event-service';
+import { getSetting, SETTING_KEYS } from '@/lib/settings';
 
 const aiDecisionSchema = z.object({
   same_event: z.boolean(),
   confidence: z.number().int().min(0).max(100),
-  reason: z.string().trim().max(50),
+  // reason 仅用于审计展示；模型偶尔超出提示词字数，不应因此把有效判决
+  // 降级成“AI 判断失败”。解析后统一截断即可。
+  reason: z.string().trim().min(1).transform((value) => value.slice(0, 100)),
 }).strict();
 
 type ClusterClient = Pick<Prisma.TransactionClient, 'article' | 'event' | 'eventClusterAudit'>;
@@ -115,6 +121,27 @@ export interface AiCandidateAudit {
   aiDecision: { sameEvent: boolean; confidence: number; reason: string };
 }
 
+type AiClusterThresholds = {
+  sameEvent: number;
+  differentEvent: number;
+};
+
+function parseThreshold(value: string, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+}
+
+async function getAiClusterThresholds(): Promise<AiClusterThresholds> {
+  const [sameEvent, differentEvent] = await Promise.all([
+    getSetting(SETTING_KEYS.EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE),
+    getSetting(SETTING_KEYS.EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE),
+  ]);
+  return {
+    sameEvent: parseThreshold(sameEvent, DEFAULT_EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE, 70, 95),
+    differentEvent: parseThreshold(differentEvent, DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE, 70, 99),
+  };
+}
+
 export function isAmbiguousEventCandidate(evidence: {
   eventKeyMatch: boolean;
   identityConfidence: number;
@@ -150,21 +177,75 @@ export function isAmbiguousEventCandidate(evidence: {
     && evidence.charContentJaccard >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD;
   const tokenContentSignal = evidence.tokenContentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
     && evidence.tokenContentJaccard >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD;
+  // 正文相似只能证明“稿件内容接近”，不能证明“事件相同”。至少要求主体
+  // 与动作/具体事项共同一致，避免不同品牌使用同一站点模板时进入人工复核。
+  const contentIdentitySignal = evidence.actionSimilarity >= 0.4
+    || evidence.objectSimilarity >= 0.5;
   const contentSignal = (charContentSignal || tokenContentSignal)
+    && contentIdentitySignal
+    && (evidence.subjectSimilarity >= 0.5 || evidence.identityScore >= 0.55)
     && (evidence.sharedAnchors.length > 0 || evidence.identityScore >= 0.4);
 
   return keySignal || identitySignal || titleSignal || contentSignal;
 }
 
+export function hasDuplicateReportEvidence(evidence: {
+  titleOverlap: number;
+  charContentOverlap: number;
+  charContentJaccard: number;
+  tokenContentOverlap: number;
+  tokenContentJaccard: number;
+}): boolean {
+  const titleWithContent = evidence.titleOverlap >= EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP
+    && (evidence.charContentOverlap >= 0.2 || evidence.tokenContentOverlap >= 0.3);
+  const charContent = evidence.charContentOverlap >= EVENT_CLUSTER_STRONG_CONTENT_OVERLAP
+    && evidence.charContentJaccard >= EVENT_CLUSTER_STRONG_CONTENT_JACCARD;
+  const tokenContent = evidence.tokenContentOverlap >= EVENT_CLUSTER_STRONG_CONTENT_OVERLAP
+    && evidence.tokenContentJaccard >= 0.15;
+  return titleWithContent || charContent || tokenContent;
+}
+
+export function isStrongEventKeyDuplicate(evidence: {
+  eventKeyMatch: boolean;
+  identityConfidence: number;
+  daysApart: number;
+  titleOverlap: number;
+  charContentOverlap: number;
+  charContentJaccard: number;
+  tokenContentOverlap: number;
+  tokenContentJaccard: number;
+}): boolean {
+  return evidence.eventKeyMatch
+    && evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
+    && hasDuplicateReportEvidence(evidence);
+}
+
+export function isNearExactReprint(evidence: {
+  exactTitle: boolean;
+  tokenContentOverlap: number;
+  tokenContentJaccard: number;
+  phaseConflict: boolean;
+  identityConflict: boolean;
+  multiTopic: boolean;
+}): boolean {
+  return evidence.exactTitle
+    && evidence.tokenContentOverlap >= 0.95
+    && evidence.tokenContentJaccard >= 0.8
+    && !evidence.phaseConflict
+    && !evidence.identityConflict
+    && !evidence.multiTopic;
+}
+
 export function shouldCreateClusterReview(
   ambiguousCount: number,
   aiCandidates: Pick<AiCandidateAudit, 'aiDecision'>[],
+  differentEventConfidence = DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE,
 ): boolean {
   if (ambiguousCount === 0) return false;
   const hasAiFailure = aiCandidates.some((candidate) => candidate.aiDecision.confidence === 0);
   const allAmbiguousConfidentlyDifferent = aiCandidates.length === ambiguousCount
     && aiCandidates.every((candidate) => (
-      !candidate.aiDecision.sameEvent && candidate.aiDecision.confidence >= 85
+      !candidate.aiDecision.sameEvent && candidate.aiDecision.confidence >= differentEventConfidence
     ));
   return hasAiFailure || !allAmbiguousConfidentlyDifferent;
 }
@@ -253,7 +334,13 @@ function computePairEvidence(
     charOverlap: 0, charJaccard: 0, tokenOverlap: 0, tokenJaccard: 0,
   };
   if (includeContent) {
-    contentSimilarity = contentShingleSimilarity(article.cleanContent, member.cleanContent);
+    const sameSubject = identity.subjectOverlap >= 0.5;
+    const sameExactTitle = normalizedTitle.length > 0 && normalizedTitle === memberNormalizedTitle;
+    // 正文相似度只有在主体或标题已有交集时才值得计算。不同品牌在同一站点
+    // 常共享页脚、推荐栏和模板文案，直接比较会制造大量伪“强重复”。
+    if (fingerprintMatch || sameSubject || sameExactTitle) {
+      contentSimilarity = contentShingleSimilarity(article.cleanContent, member.cleanContent);
+    }
   }
 
   const daysApart = Math.abs(articleDate(article).getTime() - articleDate(member).getTime()) / 86_400_000;
@@ -283,13 +370,38 @@ function computePairEvidence(
   if (isExact) {
     decision = 'exact';
   } else if (!phaseConflict && !identity.identityConflict && !multiTopic) {
-    const keyConfirmed = eventKeyMatch
-      && identity.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE;
+    // 不同媒体转载时常只删改署名、图片说明或个别句子。标题完全一致且正文
+    // token 几乎重合时，这是比单次 AI 事件身份更稳定的“同一稿件”证据。
+    const nearExactReprint = isNearExactReprint({
+      exactTitle,
+      tokenContentOverlap: contentSimilarity.tokenOverlap,
+      tokenContentJaccard: contentSimilarity.tokenJaccard,
+      phaseConflict,
+      identityConflict: identity.identityConflict,
+      multiTopic,
+    });
+    const keyConfirmed = isStrongEventKeyDuplicate({
+      eventKeyMatch,
+      identityConfidence: identity.identityConfidence,
+      daysApart,
+      titleOverlap,
+      charContentOverlap: contentSimilarity.charOverlap,
+      charContentJaccard: contentSimilarity.charJaccard,
+      tokenContentOverlap: contentSimilarity.tokenOverlap,
+      tokenContentJaccard: contentSimilarity.tokenJaccard,
+    });
     const identityConfirmed = identity.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
       && identity.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE
       && identity.subjectOverlap >= 0.6
       && identity.actionOverlap >= 0.5
-      && identity.objectOverlap >= 0.45;
+      && identity.objectOverlap >= 0.45
+      && hasDuplicateReportEvidence({
+        titleOverlap,
+        charContentOverlap: contentSimilarity.charOverlap,
+        charContentJaccard: contentSimilarity.charJaccard,
+        tokenContentOverlap: contentSimilarity.tokenOverlap,
+        tokenContentJaccard: contentSimilarity.tokenJaccard,
+      });
     // P0-3: 要求同一表示空间的指标同时成立
     const charContentConfirmed = contentSimilarity.charOverlap >= EVENT_CLUSTER_STRONG_CONTENT_OVERLAP
       && contentSimilarity.charJaccard >= EVENT_CLUSTER_STRONG_CONTENT_JACCARD;
@@ -302,7 +414,7 @@ function computePairEvidence(
       && identity.actionOverlap >= 0.45
       && identity.objectOverlap >= 0.65;
 
-    if (keyConfirmed || identityConfirmed || charContentConfirmed || tokenContentConfirmed || titleConfirmed) {
+    if (nearExactReprint || keyConfirmed || identityConfirmed || charContentConfirmed || tokenContentConfirmed || titleConfirmed) {
       decision = 'strong';
     } else if (isAmbiguousEventCandidate({
       eventKeyMatch,
@@ -397,11 +509,12 @@ function bestPairEvidenceForCandidate(
 function isStrongPushedDuplicate(pair: PairEvidence): boolean {
   if (pair.fingerprintMatch) return true;
   if (pair.phaseConflict || pair.identityConflict) return false;
-  if (pair.eventKeyMatch && pair.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE) return true;
+  if (isStrongEventKeyDuplicate(pair)) return true;
   if (pair.identityScore >= 0.84
     && pair.subjectSimilarity >= 0.75
     && pair.actionSimilarity >= 0.6
-    && pair.objectSimilarity >= 0.7) return true;
+    && pair.objectSimilarity >= 0.7
+    && hasDuplicateReportEvidence(pair)) return true;
   // P0-3: 要求同一表示空间的指标同时成立
   const charConfirmed = pair.charContentOverlap >= 0.78 && pair.charContentJaccard >= 0.5;
   const tokenConfirmed = pair.tokenContentOverlap >= 0.78 && pair.tokenContentJaccard >= 0.5;
@@ -581,13 +694,15 @@ async function askAiSameEvent(
   article: { title: string; cleanContent: string; eventKey: string; eventKeyConfidence: number | null },
   pair: PairEvidence,
   candidate: Candidate,
+  thresholds: AiClusterThresholds,
   signal?: AbortSignal,
 ) {
   const member = candidate.articles.find((item) => item.id === pair.matchedMemberArticleId) ?? candidate.articles[0];
   const prompt = `判断是否是同一个具体新闻事件。
 同一事件必须同时满足：核心主体相同、具体动作/结果相同、时间阶段一致。
 以下均不算同一事件：只有品牌/地点/奖项/话题相同；预告与事后结果；聚合快讯仅有一个子项重合。
-证据不足时返回 false 且 confidence 不超过 60；只有存在明确冲突时才返回 false 且 confidence 至少 85。
+证据不足时返回 false 且 confidence 不超过 60；只有存在明确冲突时才返回 false 且 confidence 至少 ${thresholds.differentEvent}。
+只有同一事件证据充分时才返回 true，且 confidence 至少 ${thresholds.sameEvent}。
 
 新文章事件键：${article.eventKey}（置信度 ${article.eventKeyConfidence ?? 0}）
 新文章：${article.title}
@@ -597,7 +712,7 @@ async function askAiSameEvent(
 匹配成员标题：${member.title}
 匹配成员正文：${member.cleanContent.slice(0, 600)}
 
-只返回 JSON：{"same_event":false,"confidence":0,"reason":"不超过50字"}`;
+只返回 JSON：{"same_event":false,"confidence":0,"reason":"不超过100字"}`;
   const result = await createChatCompletion([
     { role: 'system', content: '你是保守的新闻事件聚类器，只根据给定文本判断，证据不足时分开。' },
     { role: 'user', content: prompt },
@@ -607,18 +722,33 @@ async function askAiSameEvent(
 
 /**
  * AI 聚类判决后处理。提示词要求：
- * - same_event=true 时 confidence 应 ≥70（低置信不能自动归入）
- * - same_event=false 时 confidence 应 ≤60（除非有明确冲突，此时 ≥85）
+ * - same_event=true 时必须达到当前设置的自动归入阈值
+ * - same_event=false 只有规则层已有明确冲突时，才可达到当前设置的独立事件阈值
  * 如果 AI 返回违反这些约束的组合，保守纠正。
  */
-function validateAiClusterDecision(raw: { same_event: boolean; confidence: number; reason: string }): {
+function hasExplicitDifferentEvidence(pair: PairEvidence): boolean {
+  return pair.phaseConflict
+    || pair.identityConflict
+    || pair.qualifierConflict
+    || pair.qualifierConflictOnPair;
+}
+
+function validateAiClusterDecision(
+  raw: { same_event: boolean; confidence: number; reason: string },
+  pair: PairEvidence,
+  thresholds: AiClusterThresholds,
+): {
   sameEvent: boolean; confidence: number; reason: string;
 } {
-  if (raw.same_event && raw.confidence < 70) {
-    return { sameEvent: false, confidence: 0, reason: `AI 判断矛盾（sameEvent=true 但 confidence=${raw.confidence}<70），已保守分开` };
+  if (raw.same_event && raw.confidence < thresholds.sameEvent) {
+    return { sameEvent: false, confidence: 0, reason: `AI 判断矛盾（sameEvent=true 但 confidence=${raw.confidence}<${thresholds.sameEvent}），已保守分开` };
   }
-  if (!raw.same_event && raw.confidence > 70) {
-    return { sameEvent: false, confidence: Math.min(raw.confidence, 60), reason: raw.reason };
+  if (!raw.same_event && raw.confidence >= thresholds.differentEvent && !hasExplicitDifferentEvidence(pair)) {
+    return {
+      sameEvent: false,
+      confidence: 60,
+      reason: `${raw.reason}（缺少明确身份冲突，按低置信不同事件处理）`,
+    };
   }
   return { sameEvent: raw.same_event, confidence: raw.confidence, reason: raw.reason };
 }
@@ -667,7 +797,7 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     return { eventId, action: 'fallback_create' };
   }
   const referenceAt = articleDate(article);
-  const windowMs = EVENT_CLUSTER_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const windowMs = EVENT_CLUSTER_FOLLOW_UP_DAYS * 24 * 60 * 60 * 1000;
   const windowStart = new Date(referenceAt.getTime() - windowMs);
   const windowEnd = new Date(referenceAt.getTime() + windowMs);
   const candidateRows = await db.event.findMany({
@@ -785,10 +915,11 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     .slice(0, EVENT_CLUSTER_MAX_AI_CANDIDATES);
 
   const aiCandidates: AiCandidateAudit[] = [];
+  const thresholds = ambiguous.length > 0 ? await getAiClusterThresholds() : null;
   for (const item of ambiguous) {
     let rawDecision;
     try {
-      rawDecision = await askAiSameEvent(article, item.evidence, item.candidate, signal);
+      rawDecision = await askAiSameEvent(article, item.evidence, item.candidate, thresholds!, signal);
     } catch (error) {
       if (signal?.aborted) throw error;
       console.warn('[event-clustering] candidate decision failed:', error);
@@ -800,7 +931,7 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       });
       continue;
     }
-    const decision = validateAiClusterDecision(rawDecision);
+    const decision = validateAiClusterDecision(rawDecision, item.evidence, thresholds!);
     const auditDecision: AiCandidateAudit = {
       candidateEventId: item.candidate.id,
       matchedMemberArticleId: item.evidence.matchedMemberArticleId,
@@ -812,14 +943,18 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       },
     };
     aiCandidates.push(auditDecision);
-    if (decision.sameEvent && decision.confidence >= 70) {
+    if (decision.sameEvent && decision.confidence >= thresholds!.sameEvent) {
       const eventId = await db.$transaction((tx) => attachArticle(tx, article, item.candidate, item.evidence, 'ai', decision.confidence));
       await recalculateEventById(eventId);
       return { eventId, action: 'attach' };
     }
   }
 
-  const needsReview = shouldCreateClusterReview(ambiguous.length, aiCandidates);
+  const needsReview = shouldCreateClusterReview(
+    ambiguous.length,
+    aiCandidates,
+    thresholds?.differentEvent,
+  );
   const eventId = await db.$transaction((tx) => createEventForArticle(tx, article, {
     action: needsReview ? 'fallback_create' : 'create',
     decisionSource: needsReview ? 'ai' : 'rule',

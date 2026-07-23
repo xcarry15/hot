@@ -59,6 +59,7 @@ model Article {
   eventKey      String    @default("") // 程序由主体/行为/具体事项确定性生成
   eventKeyConfidence Int? // 0-100，AI 对事件身份提取的置信度；人工修正为 100
   fetchStatus   FetchStatus @default(pending) // pending=待抓取, fetched=已抓取有内容, failed=已确认抓取失败
+  fetchError    String?   // 最近一次正文抓取失败原因；成功抓取时清空
   fetchRetryCount Int       @default(0) // 正文处理连续失败次数；达到 5 次后停止自动重试
   nextFetchRetryAt DateTime? // 正文处理失败后的下次自动重试时间
   technicalIgnoredAt DateTime? // 管理员忽略技术异常后，不再计入任务中心待办
@@ -83,6 +84,7 @@ model Article {
   scorePolicySnapshot String @default("") // JSON：本次权重及广告规则快照
   promptVersion String    @default("v1")
   aiStatus      String    @default("pending") // pending, done, skipped, failed
+  aiError       String?   // 最近一次 AI 分析失败原因；成功分析时清空
   aiSnapshot    String    @default("{}") // 最近一次 AI 原始结构化结果；人工修改不覆盖此快照
   manualOverrides String  @default("[]") // JSON string[]；记录当前由人工覆盖的字段
   manualCorrectedAt DateTime?

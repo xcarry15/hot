@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   articleFindUnique: vi.fn(),
   articleUpdate: vi.fn(),
   getAISettings: vi.fn(),
+  buildStep2Prompt: vi.fn(),
   fetchArticleDetail: vi.fn(),
   cleanContentMarkdown: vi.fn(),
   extractArticleBody: vi.fn(),
@@ -53,25 +54,12 @@ vi.mock('@/lib/cleaner', () => ({
 
 vi.mock('@/lib/prompts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/prompts')>()),
-  buildStep2Prompt: vi.fn(),
+  buildStep2Prompt: mocks.buildStep2Prompt,
 }));
 
 vi.mock('@/lib/ai-helpers', () => ({
   buildSystemContent: vi.fn().mockReturnValue('system'),
-  extractJsonObject: vi.fn().mockReturnValue({
-    event_score: 50,
-    is_ad: false,
-    relevance: 70,
-    category: '餐饮',
-    content_score: 60,
-    summary: 'test',
-    brand: '测试品牌A',
-    event_subjects: ['测试主体'],
-    event_action: '发布',
-    event_object: '测试事项',
-    event_key_confidence: 90,
-    key_points: ['p1'],
-  }),
+  extractJsonObject: vi.fn().mockImplementation((value: string) => JSON.parse(value)),
   pickStringArray: vi.fn().mockReturnValue([]),
 }));
 
@@ -93,6 +81,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
       keywordMatchBonus: 5,
       step2ContentMaxChars: 5000,
     });
+    mocks.buildStep2Prompt.mockReturnValue('prompt');
   });
 
   it('AI 失败 → 写 aiStatus=failed，不读品牌字典（offlineClassify 已删）', async () => {
@@ -125,6 +114,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
     expect(updateCall).toBeDefined();
     expect(updateCall![0].data.aiStatus).toBe('failed');
     expect(updateCall![0].data.summary).toBe('[AI 处理失败]');
+    expect(updateCall![0].data.aiError).toBe('mock ai failure');
   });
 
   it('AI 失败时不伪装成 done（failed 不进推送池）', async () => {
@@ -172,5 +162,105 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
       summary: null,
       publishedAt: null,
     })).resolves.not.toThrow();
+  });
+
+  it('无具体事件正常跳过，但保留模型与 Prompt 审计信息', async () => {
+    const longContent = '这是一篇有足够正文的行业趋势文章。'.repeat(8);
+    mocks.createChatCompletion.mockResolvedValue({
+      content: JSON.stringify({
+        event_score: 5,
+        content_score: 78,
+        relevance: 88,
+        is_ad: false,
+        ad_probability: 5,
+        confidence: 82,
+        category: '零售',
+        summary: '便利店行业增长正从单纯开店转向经营单客价值。',
+        brand: [],
+        event_subjects: [],
+        event_action: '',
+        event_object: '',
+        event_key_confidence: 0,
+        key_points: ['行业增长逻辑发生变化'],
+      }),
+      model: 'audit-model',
+      provider: 'opencode',
+    });
+
+    const result = await aiModule.processWithAI({
+      id: 'trend-1',
+      title: '便利店增长逻辑正在失效',
+      aiStatus: 'pending',
+      cleanContent: longContent,
+      summary: null,
+      publishedAt: null,
+    });
+
+    expect(result.status).toBe('skipped');
+    const updateCall = mocks.articleUpdate.mock.calls.find(c => c[0]?.where?.id === 'trend-1');
+    expect(updateCall?.[0].data).toMatchObject({
+      aiStatus: 'skipped',
+      skipReason: '无具体事件',
+      aiModel: 'audit-model',
+      aiProvider: 'opencode',
+      eventKey: '',
+      eventKeyConfidence: 0,
+    });
+    expect(updateCall?.[0].data.promptHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.parse(updateCall?.[0].data.aiSnapshot)).toMatchObject({
+      eventScore: 5,
+      contentScore: 78,
+      model: 'audit-model',
+      provider: 'opencode',
+    });
+  });
+
+  it('多事件聚合稿也完成 AI 分析，不丢失软文与内容判断', async () => {
+    const longContent = '聚合稿包含多条有效零售新闻，需要保留整体分析和广告判断。'.repeat(8);
+    mocks.createChatCompletion.mockResolvedValue({
+      content: JSON.stringify({
+        event_score: 45,
+        content_score: 62,
+        relevance: 90,
+        is_ad: false,
+        ad_probability: 10,
+        confidence: 78,
+        category: '零售',
+        summary: '文章汇总了多个彼此独立的零售事件。',
+        brand: ['杉杉奥莱', '金粒门'],
+        event_subjects: ['杉杉奥莱'],
+        event_action: '计划开店',
+        event_object: '西安首店',
+        event_key_confidence: 55,
+        key_points: ['聚合稿含多个独立事件'],
+      }),
+      model: 'audit-model',
+      provider: 'opencode',
+    });
+
+    const result = await aiModule.processWithAI({
+      id: 'digest-1',
+      title: '联商头条：杉杉奥莱首进西安；金粒门浙江首店落地',
+      aiStatus: 'pending',
+      cleanContent: longContent,
+      summary: null,
+      publishedAt: null,
+    });
+
+    expect(result.status).toBe('skipped');
+    expect(mocks.createChatCompletion).toHaveBeenCalledTimes(1);
+    const updateCall = mocks.articleUpdate.mock.calls.find(c => c[0]?.where?.id === 'digest-1');
+    expect(updateCall?.[0].data).toMatchObject({
+      aiStatus: 'skipped',
+      skipReason: '多事件聚合稿',
+      aiModel: 'audit-model',
+      aiProvider: 'opencode',
+      eventSubjects: '[]',
+      eventAction: '',
+      eventObject: '',
+      eventKey: '',
+      eventKeyConfidence: 0,
+    });
+    expect(updateCall?.[0].data.aiSnapshot).not.toBe('{}');
   });
 });

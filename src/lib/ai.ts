@@ -8,11 +8,11 @@ import { cleanContentMarkdown, extractArticleBody, meaningfulTextLength } from '
 import { MIN_MEANINGFUL_CHARS } from './shared/content-policy';
 import { buildStep2Prompt } from './prompts';
 import { buildSystemContent } from './ai-helpers';
+import { isMultiTopicTitle } from '@/contracts/event-clustering';
 import {
   buildCanonicalEventKey,
   capEventIdentityConfidence,
   normalizeEventIdentity,
-  resolveEventKeySubjects,
   serializeEventSubjects,
 } from '@/contracts/event-identity';
 import { assertNotAborted } from './worker-stop';
@@ -30,8 +30,8 @@ import {
 } from './article-calibration';
 import { parseAiAnalysisOutput } from './ai-output';
 
-// v15：事件键优先复用品牌字段，避免品牌与事件主体重复提取后产生漂移。
-const PROMPT_VERSION = 'v15';
+// v19：区分“核心事件报道”与“拿事件当引子的行业分析”，并收窄广告硬兜底。
+const PROMPT_VERSION = 'v19';
 
 // AI 失败最大重试次数。超过后标 skipped 放弃，防止 provider 持续故障时无限重试烧 token。
 const AI_MAX_RETRIES = 5;
@@ -128,11 +128,9 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
     };
   } catch (err) {
     if (signal?.aborted) throw err;
-    if (err instanceof AIClientError) throw err;
-    // API 失败（如 429/5xx/网络错误）或 JSON 解析失败 → 返回 null，
-    // 由 processWithAI 写入 aiStatus='failed'，留在重试池等待下一轮。
-    console.error(`[ai] deepAnalyze failed for "${article.title}":`, err instanceof Error ? err.message : err);
-    return null;
+    // 失败状态和原因统一由 processWithAI 持久化；这里不能吞掉原始异常，
+    // 否则工作台只能看到模糊的“AI 失败”。
+    throw err;
   }
 }
 
@@ -179,13 +177,15 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
 
   // Deep analysis: 一次性生成全部字段（复用已查询的 article 对象，无额外 DB 查询）
   let step2;
+  let aiFailure: { message: string; kind?: string; global?: boolean } | null = null;
   try {
     step2 = await deepAnalyze(article as Article, settings, signal);
   } catch (error) {
-    if (error instanceof AIClientError && error.global) {
-      return { status: 'failed', errorKind: error.kind, globalError: true };
-    }
-    throw error;
+    if (signal?.aborted) throw error;
+    aiFailure = {
+      message: error instanceof Error ? error.message : String(error),
+      ...(error instanceof AIClientError ? { kind: error.kind, global: error.global } : {}),
+    };
   }
   assertNotAborted(signal);
 
@@ -202,7 +202,7 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       summary: step2.summary,
       brand: step2.brand,
       category: step2.category,
-      eventSubjects: serializeEventSubjects(resolveEventKeySubjects(step2.brand, step2.eventSubjects)),
+      eventSubjects: serializeEventSubjects(step2.eventSubjects),
       eventAction: step2.eventAction,
       eventObject: step2.eventObject,
       eventKey: step2.eventKey,
@@ -226,12 +226,12 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       article.manualOverrides,
     );
     const effectiveIdentity = normalizeEventIdentity({
-      subjects: resolveEventKeySubjects(effective.brand, effective.eventSubjects),
+      subjects: effective.eventSubjects,
       action: effective.eventAction,
       object: effective.eventObject,
     });
     const identityManuallyOverridden = parseManualOverrides(article.manualOverrides).some((field) => (
-      field === 'brand' || field === 'eventSubjects' || field === 'eventAction' || field === 'eventObject'
+      field === 'eventSubjects' || field === 'eventAction' || field === 'eventObject'
     ));
     const effectiveScore = buildEffectiveScoreUpdate({
       eventScore: effective.eventScore,
@@ -244,6 +244,8 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       keywordBonus: keywordMatchBonus,
     });
 
+    const multiTopic = isMultiTopicTitle(article.title);
+    const noConcreteEvent = step2.eventScore <= 9 || multiTopic;
     assertNotAborted(signal);
     await db.article.update({
       where: { id: articleId },
@@ -252,13 +254,15 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         category: effective.category,
         summary: effective.summary,
         brand: effective.brand,
-        eventSubjects: serializeEventSubjects(effectiveIdentity.subjects),
-        eventAction: effectiveIdentity.action,
-        eventObject: effectiveIdentity.object,
-        eventKey: buildCanonicalEventKey(effectiveIdentity),
-        eventKeyConfidence: identityManuallyOverridden
-          ? capEventIdentityConfidence(effectiveIdentity, 100)
-          : step2.eventKeyConfidence,
+        eventSubjects: noConcreteEvent ? '[]' : serializeEventSubjects(effectiveIdentity.subjects),
+        eventAction: noConcreteEvent ? '' : effectiveIdentity.action,
+        eventObject: noConcreteEvent ? '' : effectiveIdentity.object,
+        eventKey: noConcreteEvent ? '' : buildCanonicalEventKey(effectiveIdentity),
+        eventKeyConfidence: noConcreteEvent
+          ? 0
+          : identityManuallyOverridden
+            ? capEventIdentityConfidence(effectiveIdentity, 100)
+            : step2.eventKeyConfidence,
         keyPoints: effective.keyPoints,
         ...effectiveScore,
         eventScore: effective.eventScore,
@@ -270,13 +274,16 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         promptHash: step2.promptHash,
         isAd: effective.isAd,
         promptVersion: PROMPT_VERSION,
-        aiStatus: 'done',
+        aiStatus: noConcreteEvent ? 'skipped' : 'done',
+        aiError: null,
         aiSnapshot: buildArticleAiSnapshot(aiSnapshot),
-        skipReason: null,
+        aiRetryCount: 0,
+        nextAiRetryAt: null,
+        skipReason: multiTopic ? '多事件聚合稿' : noConcreteEvent ? '无具体事件' : null,
       },
     });
 
-    return { status: 'done' };
+    return { status: noConcreteEvent ? 'skipped' : 'done' };
   } else {
     // AI 调用完全失败 — 指数退避 + 失败计数。
     // provider 故障时整批 failed，nextAiRetryAt 防止下一轮 cron 全量重试烧 token。
@@ -288,6 +295,7 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         where: { id: articleId },
         data: {
           aiStatus: 'skipped',
+          aiError: aiFailure?.message.slice(0, 1000) || 'AI 连续失败，已停止自动重试',
           aiRetryCount: retryCount,
           nextAiRetryAt: null,
           skipReason: `AI 连续失败 ${retryCount} 次，已放弃`,
@@ -301,13 +309,14 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         where: { id: articleId },
         data: {
           aiStatus: 'failed',
+          aiError: aiFailure?.message.slice(0, 1000) || 'AI 分析未返回有效结果',
           aiRetryCount: retryCount,
           nextAiRetryAt: new Date(Date.now() + backoffMs),
           ...(parseManualOverrides(article.manualOverrides).includes('summary') ? {} : { summary: '[AI 处理失败]' }),
         },
       });
     }
-    return { status: 'failed', errorKind: 'content' };
+    return { status: 'failed', errorKind: aiFailure?.kind ?? 'content', globalError: aiFailure?.global };
   }
 }
 

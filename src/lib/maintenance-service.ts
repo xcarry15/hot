@@ -19,6 +19,11 @@ import { deleteArticlesByIds } from '@/lib/article-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
 import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
+import { recalculateEventsInTransaction } from '@/lib/event-service';
+import type { Prisma } from '@prisma/client';
+
+type MaintenanceTransaction = Prisma.TransactionClient;
+type AiResetArticle = Prisma.ArticleGetPayload<object>;
 
 // ── 只读：统计 ──────────────────────────────────────────────────
 
@@ -48,7 +53,13 @@ export async function getCleanupStats(): Promise<CleanupStats> {
     jobsTotal,
   ] = await Promise.all([
     db.article.count(),
-    db.article.count({ where: { score: { lt: 40 }, aiStatus: { in: ['skipped', 'failed'] } } }),
+    db.article.count({
+      where: {
+        score: { lt: 40 },
+        aiStatus: 'skipped',
+        skipReason: { startsWith: '内容不足' },
+      },
+    }),
     db.event.count({ where: { pushedAt: { not: null } } }),
     db.article.count({ where: { aiStatus: { in: ['pending', 'failed'] } } }),
     db.event.count({ where: { articleCount: { gt: 1 } } }),
@@ -133,13 +144,40 @@ function pauseAndResetOps() {
 
 // ── 重置 AI 状态 ────────────────────────────────────────────────
 
+async function resetArticleAiAndEventState(
+  tx: MaintenanceTransaction,
+  articles: AiResetArticle[],
+): Promise<void> {
+  const articleIds = articles.map((article) => article.id);
+  if (articleIds.length === 0) return;
+
+  // 重新分析会生成全新的 Event 归属。先解除旧归属和聚类状态，避免
+  // analyzeAllPending 因 eventId 非空永远跳过这些文章。
+  await tx.eventClusterAudit.deleteMany({ where: { articleId: { in: articleIds } } });
+  for (const article of articles) {
+    await tx.article.update({
+      where: { id: article.id },
+      data: {
+        ...buildAiResetDataForArticle(article),
+        event: { disconnect: true },
+        clusterStatus: 'pending',
+        clusteredAt: null,
+        clusterError: null,
+        clusterRetryCount: 0,
+        nextClusterRetryAt: null,
+      } satisfies Prisma.ArticleUpdateInput,
+    });
+  }
+  // 旧 Event 可能含有未重置成员；重算会保留这些成员，并把空 Event 收口为 merged。
+  const eventIds = [...new Set(articles.map((article) => article.eventId).filter((id): id is string => Boolean(id)))];
+  await recalculateEventsInTransaction(tx, eventIds);
+}
+
 export async function resetAllAi(): Promise<{ reset: number }> {
   let reset = 0;
   await db.$transaction(async tx => {
     const articles = await tx.article.findMany({ where: { aiStatus: { not: 'pending' } } });
-    for (const article of articles) {
-      await tx.article.update({ where: { id: article.id }, data: buildAiResetDataForArticle(article) });
-    }
+    await resetArticleAiAndEventState(tx, articles);
     reset = articles.length;
     if (reset > 0) await rebuildPublicPublicationSnapshot(tx);
   });
@@ -150,10 +188,15 @@ export async function resetAllAi(): Promise<{ reset: number }> {
 export async function resetFailedAi(): Promise<{ reset: number }> {
   let reset = 0;
   await db.$transaction(async tx => {
-    const articles = await tx.article.findMany({ where: { aiStatus: { in: ['failed', 'skipped'] } } });
-    for (const article of articles) {
-      await tx.article.update({ where: { id: article.id }, data: buildAiResetDataForArticle(article) });
-    }
+    const articles = await tx.article.findMany({
+      where: {
+        OR: [
+          { aiStatus: 'failed' },
+          { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
+        ],
+      },
+    });
+    await resetArticleAiAndEventState(tx, articles);
     reset = articles.length;
     if (reset > 0) await rebuildPublicPublicationSnapshot(tx);
   });
@@ -175,7 +218,13 @@ export async function clearFetchLogs(): Promise<{ deleted: number }> {
 
 export async function deleteLowQualityArticles() {
   const lowQuality = await db.article.findMany({
-    where: { score: { lt: 40 }, aiStatus: { in: ['skipped', 'failed'] } },
+    // “无具体事件”和“多事件聚合稿”是正常分类结果，不是低质量技术垃圾。
+    // AI 技术失败也应进入恢复队列，不应被“低质量清理”直接删除。
+    where: {
+      score: { lt: 40 },
+      aiStatus: 'skipped',
+      skipReason: { startsWith: '内容不足' },
+    },
     select: { id: true },
   });
   return deleteArticlesByIds(lowQuality.map((a) => a.id));

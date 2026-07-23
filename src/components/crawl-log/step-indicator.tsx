@@ -71,7 +71,8 @@ export function StepIndicator({
   // 失败后的操作仍占用原阶段位置；即使因其他任务被禁用，也不应退回成普通状态文案。
   const displayLabel = forceLabel && status !== 'running' ? forceLabel : label
   const isPushAction = label === '推送'
-  const columnWidth = isPushAction ? 'w-[62px]' : label === 'AI分析' ? 'w-[58px]' : 'w-[48px]'
+  const isPublicStatus = label === '公开'
+  const columnWidth = isPushAction || isPublicStatus ? 'w-[62px]' : label === 'AI分析' ? 'w-[58px]' : 'w-[48px]'
   const isForcePush = isPushAction && !!forceLabel && isClickable
   const isUnfinishedUnavailable = !isClickable && (
     status === 'pending'
@@ -90,7 +91,7 @@ export function StepIndicator({
       ? 'w-[62px] justify-center bg-amber-100 text-amber-800 hover:bg-amber-200'
       : status === 'pending'
         ? 'w-[62px] justify-center bg-amber-100 text-amber-800 hover:bg-amber-200'
-        : `w-[62px] justify-center ${s.bg} ${s.text}`
+    : `${columnWidth} justify-center ${s.bg} ${s.text}`
   const pushDisplayStyle = isPushAction
     ? isUnfinishedUnavailable
       ? 'w-[62px] justify-center bg-slate-100 text-foreground'
@@ -139,6 +140,8 @@ export function StepIndicator({
 function shortSkipLabel(reason: string): string {
   if (reason.startsWith('[AI 处理失败]')) return 'AI 失败'
   if (reason === '内容不足') return '内容不足'
+  if (reason === '无具体事件') return '无具体事件'
+  if (reason === '多事件聚合稿') return '多事件稿'
   // 未知形态：截断防溢出。
   return reason.length > 8 ? `${reason.slice(0, 8)}…` : reason
 }

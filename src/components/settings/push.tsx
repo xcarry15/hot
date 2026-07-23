@@ -273,16 +273,30 @@ export default function PushTab({ settings, setSettings }: Props) {
       <Card className="py-0">
         <CardContent className="space-y-2 p-3">
           <span className="text-sm font-semibold">抓取配置</span>
+          <div className="flex items-center justify-between gap-3 border-b pb-2">
+            <div>
+              <Label htmlFor="auto-crawl-enabled" className="text-xs">启用自动抓取</Label>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">关闭后仍可手动执行抓取；默认关闭。</p>
+            </div>
+            <Switch
+              id="auto-crawl-enabled"
+              checked={settings.auto_crawl_enabled === 'true'}
+              onCheckedChange={(checked) => updateSetting('auto_crawl_enabled', checked ? 'true' : 'false')}
+              aria-label="启用自动抓取"
+            />
+          </div>
           <div className="space-y-1.5">
-            <Label className="text-xs">抓取间隔（分钟）</Label>
+            <Label htmlFor="crawl-interval-min" className="text-xs">抓取间隔（分钟）</Label>
             <Input
+              id="crawl-interval-min"
               type="number"
               value={settings.crawl_interval_min}
               onChange={(e) => updateSetting('crawl_interval_min', e.target.value)}
-              className="h-8 text-xs w-28"
+              className="h-8 w-28 text-xs"
               min="5"
               max="10080"
             />
+            <p className="text-[11px] text-muted-foreground">自动抓取开启后，调度器按此间隔检查并创建全流程任务。</p>
           </div>
         </CardContent>
       </Card>

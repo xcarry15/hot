@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors } from '@/contracts/event-clustering';
 import { buildCanonicalEventKey, normalizeEventAction, normalizeEventIdentity } from '@/contracts/event-identity';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
-import { buildAiClusterAuditEvidence, isAmbiguousEventCandidate, shouldCreateClusterReview, type AiCandidateAudit } from '@/lib/event-clustering-service';
+import { buildAiClusterAuditEvidence, hasDuplicateReportEvidence, isAmbiguousEventCandidate, isNearExactReprint, isStrongEventKeyDuplicate, shouldCreateClusterReview, type AiCandidateAudit } from '@/lib/event-clustering-service';
 
 describe('轻量事件聚类规则', () => {
   it('统一标题中的空白、标点和大小写', () => {
@@ -34,6 +34,9 @@ describe('轻量事件聚类规则', () => {
     expect(normalizeEventAction('发布Q1业绩前瞻')).toBe('发布业绩');
     expect(normalizeEventAction('共同推进卫星店项目并计划新增门店')).toBe('计划开店');
     expect(normalizeEventAction('正式开业')).toBe('正式开店');
+    expect(normalizeEventAction('收购尚未落地')).toBe('计划收购');
+    expect(normalizeEventAction('协商入股波兰便利店')).toBe('计划入股');
+    expect(normalizeEventAction('终止中国线上经销商合作')).toBe('终止合作');
   });
 
   it('转载改写正文仍能形成强内容证据', () => {
@@ -59,6 +62,7 @@ describe('轻量事件聚类规则', () => {
   it('聚合快讯不会直接自动并入其中一个子事件', () => {
     expect(isMultiTopicTitle('华莱士开卖下午茶！蜀海供应链南京新仓投运')).toBe(true);
     expect(isMultiTopicTitle('联商头条：7-11拟入股波兰最大便利店；深圳文和友撤场')).toBe(true);
+    expect(isMultiTopicTitle('西班牙品牌MYKA首店落址香港、赵露思推出美妆品牌、帽总三明治登陆深圳…')).toBe(true);
   });
 
   it('单一主题的情绪化标题不会被误判为聚合快讯', () => {
@@ -69,6 +73,55 @@ describe('轻量事件聚类规则', () => {
   it('同事件改写保留共享主体锚点，不同门店奖项不共享主体锚点', () => {
     expect(sharedEventAnchors('十足便利与七鲜小厨合作', '十足便利店引进七鲜小厨专供菜')).toContain('十足');
     expect(sharedEventAnchors('都江堰邻你超市荣获年度好门店', '永辉超市福州店荣获年度好门店')).toEqual([]);
+  });
+
+  it('事件身份还需标题或正文证据才能自动归并', () => {
+    expect(hasDuplicateReportEvidence({
+      titleOverlap: 0.29,
+      charContentOverlap: 0.01,
+      charContentJaccard: 0,
+      tokenContentOverlap: 0.75,
+      tokenContentJaccard: 0.2,
+    })).toBe(true);
+    expect(hasDuplicateReportEvidence({
+      titleOverlap: 0.26,
+      charContentOverlap: 0.08,
+      charContentJaccard: 0.01,
+      tokenContentOverlap: 0.47,
+      tokenContentJaccard: 0.03,
+    })).toBe(false);
+  });
+
+  it('相同事件键超过普通窗口时也不能单独构成强重复', () => {
+    expect(isStrongEventKeyDuplicate({
+      eventKeyMatch: true,
+      identityConfidence: 90,
+      daysApart: 9,
+      titleOverlap: 0.2,
+      charContentOverlap: 0.05,
+      charContentJaccard: 0.01,
+      tokenContentOverlap: 0.1,
+      tokenContentJaccard: 0.02,
+    })).toBe(false);
+  });
+
+  it('同标题跨媒体近全文转载即使哈希不同也作为强重复证据', () => {
+    expect(isNearExactReprint({
+      exactTitle: true,
+      tokenContentOverlap: 0.984,
+      tokenContentJaccard: 0.892,
+      phaseConflict: false,
+      identityConflict: false,
+      multiTopic: false,
+    })).toBe(true);
+    expect(isNearExactReprint({
+      exactTitle: true,
+      tokenContentOverlap: 0.7,
+      tokenContentJaccard: 0.5,
+      phaseConflict: false,
+      identityConflict: false,
+      multiTopic: false,
+    })).toBe(false);
   });
 
   it('达到最大重试次数的聚类失败文章不会再次进入批次', () => {
@@ -116,9 +169,9 @@ describe('聚类 AI 候选审计', () => {
     expect(isAmbiguousEventCandidate({
       eventKeyMatch: false,
       identityConfidence: 0,
-      identityScore: 0,
-      subjectSimilarity: 0,
-      actionSimilarity: 0,
+      identityScore: 0.55,
+      subjectSimilarity: 0.6,
+      actionSimilarity: 0.5,
       objectSimilarity: 0,
       titleOverlap: 0,
       charContentOverlap: 0.6,
@@ -131,6 +184,48 @@ describe('聚类 AI 候选审计', () => {
       multiTopic: false,
       sharedAnchors: ['品牌A'],
     })).toBe(true);
+  });
+
+  it('同品牌但动作和事项都不一致时不因正文相似进入复核', () => {
+    expect(isAmbiguousEventCandidate({
+      eventKeyMatch: false,
+      identityConfidence: 80,
+      identityScore: 0.52,
+      subjectSimilarity: 1,
+      actionSimilarity: 0,
+      objectSimilarity: 0.25,
+      titleOverlap: 0.25,
+      charContentOverlap: 0,
+      charContentJaccard: 0,
+      tokenContentOverlap: 0.43,
+      tokenContentJaccard: 0.22,
+      daysApart: 1,
+      phaseConflict: false,
+      identityConflict: false,
+      multiTopic: false,
+      sharedAnchors: ['品牌A'],
+    })).toBe(false);
+  });
+
+  it('不同主体不会仅因站点模板正文相似进入复核', () => {
+    expect(isAmbiguousEventCandidate({
+      eventKeyMatch: false,
+      identityConfidence: 85,
+      identityScore: 0.3,
+      subjectSimilarity: 0,
+      actionSimilarity: 1,
+      objectSimilarity: 0.15,
+      titleOverlap: 0,
+      charContentOverlap: 0.65,
+      charContentJaccard: 0.5,
+      tokenContentOverlap: 0.7,
+      tokenContentJaccard: 0.5,
+      daysApart: 1,
+      phaseConflict: false,
+      identityConflict: false,
+      multiTopic: false,
+      sharedAnchors: [],
+    })).toBe(false);
   });
 
   const identityEvidence = {
@@ -159,6 +254,14 @@ describe('聚类 AI 候选审计', () => {
     expect(shouldCreateClusterReview(1, [
       { aiDecision: { sameEvent: false, confidence: 0, reason: 'AI 判断失败' } },
     ])).toBe(true);
+  });
+
+  it('独立事件阈值可由调用方调整', () => {
+    const decisions = [
+      { aiDecision: { sameEvent: false, confidence: 80, reason: '主体不同' } },
+    ];
+    expect(shouldCreateClusterReview(1, decisions)).toBe(true);
+    expect(shouldCreateClusterReview(1, decisions, 80)).toBe(false);
   });
 
   it('只有全部高置信判定为不同事件时才允许正常新建 Event', () => {
