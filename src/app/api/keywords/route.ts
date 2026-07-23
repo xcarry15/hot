@@ -20,7 +20,10 @@ export async function GET(request: Request) {
 
     if (format === 'xlsx') {
       const candidates = await listKeywordCandidatesForExport();
-      return new NextResponse(keywordsToXlsx(keywords, candidates), {
+      const xlsxBuffer = keywordsToXlsx(keywords, candidates);
+      const responseBody = new ArrayBuffer(xlsxBuffer.byteLength);
+      new Uint8Array(responseBody).set(xlsxBuffer);
+      return new NextResponse(responseBody, {
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           'Content-Disposition': 'attachment; filename="keywords.xlsx"',
