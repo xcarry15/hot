@@ -208,6 +208,10 @@ bash scripts/init-production.sh
 
 完整步骤见 `bat/部署和更新方法.txt`，Nginx 模板见 `bat/本项目的nginx.txt`。
 
+## 关键词工作簿
+
+关键词页使用 XLSX 导入/导出，工作簿包含正式关键词、已采用候选词、永久忽略候选词和待确认候选词四个 Sheet；导入会恢复候选词状态，并对已采用词继续恢复本机未入库文章。
+
 ## 安全规则
 
 - 不提交 `.env`、API Token、Webhook、SSH 私钥、SQLite 数据或部署压缩包。

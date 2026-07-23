@@ -9,6 +9,22 @@ const EXTRACTED_KEYWORD_CATEGORY = '提取';
 const STOP_WORDS = new Set(['我们', '公司', '行业', '市场', '相关', '表示', '发布', '消息', '最新', '多个', '进行', '以及']);
 const titleSegmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' });
 
+export type KeywordCandidateStatus = 'pending' | 'approved' | 'dismissed';
+
+export interface KeywordCandidateExportRow {
+  phrase: string;
+  occurrences: number;
+  sampleTitles: string[];
+  status: KeywordCandidateStatus;
+}
+
+export interface ImportedKeywordCandidate {
+  phrase: string;
+  occurrences?: number;
+  sampleTitles?: string[];
+  status: KeywordCandidateStatus;
+}
+
 function parseSampleTitles(value: string): string[] {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -96,6 +112,46 @@ export async function listKeywordCandidates() {
     || right.sourceCount - left.sourceCount
     || right.updatedAt.getTime() - left.updatedAt.getTime()
   )).slice(0, 100);
+}
+
+export async function listKeywordCandidatesForExport(): Promise<KeywordCandidateExportRow[]> {
+  const rows = await db.keywordCandidate.findMany({
+    orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+  });
+  return rows.map((row) => ({
+    phrase: row.phrase,
+    occurrences: row.occurrences,
+    sampleTitles: parseSampleTitles(row.sampleTitles),
+    status: row.status as KeywordCandidateStatus,
+  }));
+}
+
+export async function importKeywordCandidate(row: ImportedKeywordCandidate) {
+  const phrase = row.phrase.trim();
+  if (!phrase) return { imported: false, restored: 0 };
+
+  const occurrences = Number.isFinite(row.occurrences) && (row.occurrences ?? 0) > 0
+    ? Math.floor(row.occurrences!)
+    : 1;
+  const sampleTitles = (row.sampleTitles ?? []).filter(Boolean).slice(0, 5);
+  const candidate = await db.keywordCandidate.upsert({
+    where: { phrase },
+    create: {
+      phrase,
+      occurrences,
+      sampleTitles: JSON.stringify(sampleTitles),
+      status: row.status === 'approved' ? 'pending' : row.status,
+    },
+    update: {
+      occurrences,
+      sampleTitles: JSON.stringify(sampleTitles),
+      status: row.status === 'approved' ? 'pending' : row.status,
+    },
+  });
+
+  if (row.status !== 'approved') return { imported: true, restored: 0 };
+  const result = await updateKeywordCandidate(candidate.id, 'approve');
+  return { imported: true, restored: result?.restored ?? 0 };
 }
 
 export async function updateKeywordCandidate(id: string, action: 'approve' | 'dismiss') {

@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import {
-  addKeyword, addKeywordsText, clearKeywords, deleteKeyword, importKeywordsCsv,
-  keywordsToCsv, listKeywords,
+  addKeyword, addKeywordsText, clearKeywords, deleteKeyword, importKeywordsXlsx,
+  keywordsToXlsx, listKeywords,
 } from '@/lib/keyword-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
-import { listKeywordCandidates, updateKeywordCandidate } from '@/lib/keyword-candidate-service';
+import { listKeywordCandidates, listKeywordCandidatesForExport, updateKeywordCandidate } from '@/lib/keyword-candidate-service';
 import { runJob } from '@/lib/execution';
 
 // GET /api/keywords - List all keywords
-//   ?format=csv   → export as CSV
+//   ?format=xlsx  → export keywords and candidate decisions as XLSX
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -18,11 +18,15 @@ export async function GET(request: Request) {
 
     const keywords = await listKeywords();
 
-    if (format === 'csv') {
-      return new NextResponse(keywordsToCsv(keywords), {
+    if (format === 'xlsx') {
+      const candidates = await listKeywordCandidatesForExport();
+      const xlsxBuffer = keywordsToXlsx(keywords, candidates);
+      const responseBody = new ArrayBuffer(xlsxBuffer.byteLength);
+      new Uint8Array(responseBody).set(xlsxBuffer);
+      return new NextResponse(responseBody, {
         headers: {
-          'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': 'attachment; filename="keywords.csv"',
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': 'attachment; filename="keywords.xlsx"',
         },
       });
     }
@@ -36,18 +40,25 @@ export async function GET(request: Request) {
 // POST /api/keywords - Add keyword(s)
 //   { word }              → 单个添加
 //   { text }              → 批量添加（每行一个词，category=default）
-//   { action: 'import-csv', csv: '类型,关键词\\n提取,xxx' }  → CSV 导入
+//   XLSX body       → 导入正式关键词及候选词处理状态
 export async function POST(request: Request) {
   try {
+    if (request.headers.get('content-type')?.includes('spreadsheetml')) {
+      const result = await runExclusiveMutation('导入关键词', async () => (
+        importKeywordsXlsx(new Uint8Array(await request.arrayBuffer()))
+      ));
+      const processQueued = result.restored > 0
+        ? (await runJob('process', { trigger: 'keyword-xlsx-import' })).queued
+        : false;
+      return NextResponse.json({ ...result, processQueued });
+    }
+
     const result = await runExclusiveMutation('更新关键词', async () => {
       const body = await request.json();
       if ((body.action === 'approve-candidate' || body.action === 'dismiss-candidate') && typeof body.id === 'string') {
         const result = await updateKeywordCandidate(body.id, body.action === 'approve-candidate' ? 'approve' : 'dismiss');
         if (!result) return { kind: 'invalid' as const };
         return { kind: 'candidate' as const, data: result };
-      }
-      if (body.action === 'import-csv' && body.csv) {
-        return { kind: 'ok' as const, data: await importKeywordsCsv(String(body.csv)) };
       }
       if (body.text) {
         const data = await addKeywordsText(String(body.text), body.category);
