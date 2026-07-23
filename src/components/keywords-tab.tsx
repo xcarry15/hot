@@ -33,9 +33,9 @@ import {
   bulkAddKeywords,
   bulkClearKeywords,
   deleteKeyword,
-  exportKeywordsCsvBlob,
+  exportKeywordsXlsxBlob,
   fetchKeywords,
-  importKeywordsCsv,
+  importKeywordsXlsx,
   fetchKeywordCandidates,
   updateKeywordCandidate,
   type KeywordCandidate,
@@ -141,14 +141,14 @@ export default function KeywordsTab() {
 
   const handleExport = async () => {
     try {
-      const blob = await exportKeywordsCsvBlob()
+      const blob = await exportKeywordsXlsxBlob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'keywords.csv'
+      a.download = 'keywords.xlsx'
       a.click()
       URL.revokeObjectURL(url)
-      toast.success('已导出关键词')
+      toast.success('已导出关键词及候选词状态')
     } catch {
       toast.error('导出失败')
     }
@@ -159,13 +159,11 @@ export default function KeywordsTab() {
     if (!file) return
     setBulkLoading(true)
     try {
-      const text = await file.text()
-      const data = await importKeywordsCsv(text)
-      if (data.error) throw new Error(data.error)
-      toast.success(`已导入 ${data.imported} 个，跳过 ${data.skipped} 个`)
+      const data = await importKeywordsXlsx(file)
+      toast.success(`已导入 ${data.imported} 个关键词，恢复 ${data.restored} 篇，候选状态已同步`)
       loadKeywords()
     } catch (err) {
-      toast.error(err instanceof Error && err.message ? err.message : '导入失败，请检查 CSV 格式（类型, 关键词）')
+      toast.error(err instanceof Error && err.message ? err.message : '导入失败，请检查 XLSX 工作簿格式')
     } finally {
       setBulkLoading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -209,13 +207,13 @@ export default function KeywordsTab() {
           <Tag className="h-4 w-4 text-primary shrink-0" />
           <span className="text-sm font-semibold">关键词管理</span>
           <Badge variant="secondary" className="text-xs px-2 py-0">{keywords.length}</Badge>
-          <span className="text-xs text-muted-foreground hidden sm:inline">命中即抓取；未命中丢弃；词库为空时不过滤</span>
+          <span className="text-xs text-muted-foreground hidden sm:inline">命中即抓取；未命中丢弃；XLSX 同步候选词状态</span>
           <div className="flex-1" />
           <div className="flex items-center gap-2 flex-wrap">
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="hidden"
               onChange={handleImport}
             />
@@ -234,7 +232,7 @@ export default function KeywordsTab() {
               variant="outline"
               className="h-7 gap-1.5 px-2.5 text-xs"
               onClick={handleExport}
-              disabled={keywords.length === 0}
+              disabled={keywords.length === 0 && candidates.length === 0}
             >
               <Download className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">导出</span>
