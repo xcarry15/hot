@@ -25,6 +25,7 @@ import {
   Tag,
   Upload,
   Download,
+  Search,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { KEYWORD_CATEGORIES } from '@/features/keywords-catalog'
@@ -33,6 +34,7 @@ import {
   bulkAddKeywords,
   bulkClearKeywords,
   deleteKeyword,
+  deleteKeywordCandidate,
   exportKeywordsXlsxBlob,
   fetchKeywords,
   importKeywordsXlsx,
@@ -48,9 +50,14 @@ interface Keyword {
   category: string
   word: string
   createdAt?: string
+  hitCount: number
 }
 
 type BulkAction = 'clear-all'
+
+type KeywordGroup =
+  | { key: string; label: string; kind: 'keywords'; items: Keyword[] }
+  | { key: string; label: string; kind: 'candidates'; items: KeywordCandidate[] }
 
 // ========== Main Keywords Tab ==========
 
@@ -62,6 +69,7 @@ export default function KeywordsTab() {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkText, setBulkText] = useState('')
   const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const loadKeywords = useCallback(async () => {
@@ -79,8 +87,7 @@ export default function KeywordsTab() {
   const handleCandidate = async (candidate: KeywordCandidate, action: 'approve-candidate' | 'dismiss-candidate') => {
     try {
       const result = await updateKeywordCandidate(candidate.id, action)
-      setCandidates((prev) => prev.filter((item) => item.id !== candidate.id))
-      if (action === 'approve-candidate') await loadKeywords()
+      await loadKeywords()
       toast.success(action === 'approve-candidate' ? `已采用「${candidate.phrase}」，恢复 ${result.restored} 篇${result.processQueued ? '，处理流水线已启动' : ''}` : '候选词已永久忽略')
     } catch {
       toast.error('候选词操作失败')
@@ -96,6 +103,18 @@ export default function KeywordsTab() {
     try {
       await deleteKeyword(id)
       toast.success('关键词已删除')
+      loadKeywords()
+    } catch {
+      toast.error('删除失败')
+    }
+  }
+
+  const handleSearch = () => setSearch(searchInput.trim())
+
+  const handleDeleteCandidate = async (candidate: KeywordCandidate) => {
+    try {
+      await deleteKeywordCandidate(candidate.id)
+      toast.success('处理后的关键词已删除')
       loadKeywords()
     } catch {
       toast.error('删除失败')
@@ -179,8 +198,10 @@ export default function KeywordsTab() {
     acc[kw.category].push(kw)
     return acc
   }, {})
-  // Sort groups: known categories first, then others alphabetically
+  // 先按组内数量排序，数量相同再沿用目录顺序。
   const groupKeys = Object.keys(grouped).sort((a, b) => {
+    const countDifference = grouped[b].length - grouped[a].length
+    if (countDifference !== 0) return countDifference
     const ai = KEYWORD_CATEGORIES.indexOf(a as (typeof KEYWORD_CATEGORIES)[number])
     const bi = KEYWORD_CATEGORIES.indexOf(b as (typeof KEYWORD_CATEGORIES)[number])
     if (ai !== -1 && bi !== -1) return ai - bi
@@ -188,6 +209,103 @@ export default function KeywordsTab() {
     if (bi !== -1) return 1
     return a.localeCompare(b)
   })
+  const pendingCandidates = candidates.filter(candidate => candidate.status === 'pending')
+  const reviewedCandidates = candidates.filter(candidate => candidate.status !== 'pending')
+  const reviewedCandidateGroups = [
+    { key: 'approved', label: '已采用', items: reviewedCandidates.filter(candidate => candidate.status === 'approved') },
+    { key: 'dismissed', label: '永久忽略', items: reviewedCandidates.filter(candidate => candidate.status === 'dismissed') },
+  ]
+  const getGroupPriority = (group: KeywordGroup) => {
+    if (group.key === 'dismissed') return 0
+    if (group.kind === 'keywords' && group.label === '提取') return 1
+    if (group.key === 'approved') return 2
+    if (group.kind === 'keywords' && group.label === 'default') return 3
+    return 4
+  }
+  const keywordGroups: KeywordGroup[] = [
+    ...groupKeys.map(group => ({ key: `keyword-${group}`, label: group, kind: 'keywords' as const, items: grouped[group] })),
+    ...reviewedCandidateGroups.map(group => ({ key: group.key, label: group.label, kind: 'candidates' as const, items: group.items })),
+  ].filter(group => group.items.length > 0)
+    .map((group, index) => ({ group, index }))
+    .sort((left, right) => {
+      const priorityDifference = getGroupPriority(left.group) - getGroupPriority(right.group)
+      if (priorityDifference !== 0) return priorityDifference
+      return right.group.items.length - left.group.items.length || left.index - right.index
+    })
+    .map(({ group }) => group)
+  const sortedKeywordGroups: KeywordGroup[] = keywordGroups.map(group => (
+    group.kind === 'keywords'
+      ? { ...group, items: [...group.items].sort((left, right) => right.hitCount - left.hitCount || left.word.localeCompare(right.word)) }
+      : { ...group, items: [...group.items].sort((left, right) => right.occurrences - left.occurrences || left.phrase.localeCompare(right.phrase)) }
+  ))
+
+  const getGroupClassName = (group: KeywordGroup) => {
+    if (group.key === 'dismissed') return 'border-rose-200 bg-rose-50/60 dark:border-rose-900/50 dark:bg-rose-950/20'
+    if (group.kind === 'keywords' && group.label === '提取') return 'border-sky-200 bg-sky-50/60 dark:border-sky-900/50 dark:bg-sky-950/20'
+    if (group.key === 'approved') return 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/50 dark:bg-emerald-950/20'
+    if (group.kind === 'keywords' && group.label === 'default') return 'border-amber-200 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-950/20'
+    return 'border-border/50 bg-background'
+  }
+
+  const renderKeywordGroupItem = (item: Keyword | KeywordCandidate, groupLabel: string) => {
+    const isKeyword = 'word' in item
+    const word = isKeyword ? item.word : item.phrase
+    const count = isKeyword ? item.hitCount : item.occurrences
+    const countLabel = isKeyword ? '命中' : '出现'
+    const handleItemDelete = () => {
+      if (isKeyword) void handleDelete(item.id)
+      else void handleDeleteCandidate(item)
+    }
+
+    return (
+      <div key={item.id} className="flex min-h-5 w-fit max-w-full items-center gap-0.5 py-0" title={`${countLabel} ${count} 次`}>
+        <span className="truncate text-[11px]">{word}</span>
+        <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">({count})</span>
+        <button
+          type="button"
+          onClick={handleItemDelete}
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground hover:text-destructive"
+          aria-label={`删除${groupLabel}关键词 ${word}`}
+          title={`删除「${word}」`}
+        >
+          <X className="h-3 w-3" aria-hidden="true" />
+        </button>
+      </div>
+    )
+  }
+
+  const renderCandidate = (candidate: KeywordCandidate) => (
+    <div key={candidate.id} className="flex min-h-6 items-center gap-1 px-1.5 py-0.5">
+      <span
+        className="min-w-0 flex-1 truncate text-[11px] font-medium"
+        title={candidate.sampleTitles.length > 0 ? candidate.sampleTitles.join('；') : candidate.phrase}
+      >
+        {candidate.phrase}
+      </span>
+      <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">
+        出现 {candidate.occurrences} 次 · {candidate.sourceCount} 来源 · 可恢复 {candidate.recallCount} 篇
+      </span>
+      <Button
+        size="sm"
+        className="h-5 min-h-5 shrink-0 px-1 text-[10px] leading-none"
+        onClick={() => void handleCandidate(candidate, 'approve-candidate')}
+        aria-label="采用并恢复"
+        title="采用并恢复"
+      >
+        采用
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-5 min-h-5 shrink-0 px-1 text-[10px] leading-none"
+        onClick={() => void handleCandidate(candidate, 'dismiss-candidate')}
+        aria-label="永久忽略"
+        title="永久忽略"
+      >
+        忽略
+      </Button>
+    </div>
+  )
 
   if (loading) {
     return (
@@ -202,14 +320,14 @@ export default function KeywordsTab() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="border-b bg-background px-3 py-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Tag className="h-4 w-4 text-primary shrink-0" />
-          <span className="text-sm font-semibold">关键词管理</span>
-          <Badge variant="secondary" className="text-xs px-2 py-0">{keywords.length}</Badge>
-          <span className="text-xs text-muted-foreground hidden sm:inline">命中即抓取；未命中丢弃；XLSX 同步候选词状态</span>
+      <div className="border-b bg-background px-2 py-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Tag className="h-3.5 w-3.5 text-primary shrink-0" />
+          <span className="text-xs font-semibold">关键词管理</span>
+          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">{keywords.length}</Badge>
+          <span className="hidden text-[10px] text-muted-foreground sm:inline">命中即抓取；未命中丢弃；XLSX 同步候选词状态</span>
           <div className="flex-1" />
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 flex-wrap">
             <input
               ref={fileInputRef}
               type="file"
@@ -220,31 +338,31 @@ export default function KeywordsTab() {
             <Button
               size="sm"
               variant="outline"
-              className="h-7 gap-1.5 px-2.5 text-xs"
+              className="h-6 gap-1 px-1.5 text-[11px]"
               onClick={() => fileInputRef.current?.click()}
               disabled={bulkLoading}
             >
-              <Upload className="h-3.5 w-3.5" />
+              <Upload className="h-3 w-3" />
               <span className="hidden sm:inline">导入</span>
             </Button>
             <Button
               size="sm"
               variant="outline"
-              className="h-7 gap-1.5 px-2.5 text-xs"
+              className="h-6 gap-1 px-1.5 text-[11px]"
               onClick={handleExport}
               disabled={keywords.length === 0 && candidates.length === 0}
             >
-              <Download className="h-3.5 w-3.5" />
+              <Download className="h-3 w-3" />
               <span className="hidden sm:inline">导出</span>
             </Button>
             <Button
               size="sm"
               variant="outline"
-              className="h-7 gap-1.5 px-2.5 text-xs text-destructive hover:text-destructive"
+              className="h-6 gap-1 px-1.5 text-[11px] text-destructive hover:text-destructive"
               onClick={() => setClearAllDialogOpen(true)}
               disabled={keywords.length === 0 || bulkLoading}
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-3 w-3" />
               <span className="hidden sm:inline">清空</span>
             </Button>
           </div>
@@ -252,79 +370,92 @@ export default function KeywordsTab() {
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
-        <div className="space-y-2 p-2">
-          {/* Add Keywords */}
-          <section className="flex items-start gap-2">
-            <Textarea
-              placeholder="输入关键词（每行一个）..."
-              value={bulkText}
-              onChange={(e) => setBulkText(e.target.value)}
-              className="min-h-[58px] flex-1 resize-y text-xs"
-            />
-            <Button size="sm" onClick={handleBulkAdd} disabled={!bulkText.trim() || bulkLoading} className="h-8 shrink-0 gap-1.5 px-3 text-xs">
-              {bulkLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-              添加
-            </Button>
+        <div className="flex min-h-full flex-col gap-1.5 p-1.5">
+          <section className="flex items-center gap-1.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <Textarea
+                rows={1}
+                placeholder="输入关键词（每行一个）..."
+                value={bulkText}
+                onChange={(e) => setBulkText(e.target.value)}
+                className="h-8 min-h-8 min-w-0 flex-1 resize-y py-1.5 text-xs focus-visible:border-foreground/50 focus-visible:ring-0 focus-visible:ring-offset-0"
+              />
+              <Button size="sm" variant="outline" onClick={handleBulkAdd} disabled={!bulkText.trim() || bulkLoading} className="h-8 shrink-0 gap-1 px-2 text-xs">
+                {bulkLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                添加
+              </Button>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <Input
+                className="h-8 w-32 text-xs focus-visible:border-foreground/50 focus-visible:ring-0 focus-visible:ring-offset-0 sm:w-40"
+                placeholder="搜索关键词..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSearch()
+                }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 shrink-0 gap-1 px-2 text-xs"
+                onClick={handleSearch}
+                title="搜索关键词"
+              >
+                <Search className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">搜索</span>
+              </Button>
+              {search && <span className="shrink-0 text-[10px] text-muted-foreground">
+                {groupKeys.reduce((acc, g) => acc + grouped[g].filter(kw => kw.word.includes(search)).length, 0)} 个结果
+              </span>}
+            </div>
           </section>
 
-          {candidates.length > 0 && <section className="border border-amber-300 bg-amber-50/50 p-2.5 dark:bg-amber-950/10">
-            <div className="mb-2 flex items-center gap-2"><span className="text-sm font-medium">未命中候选词</span><Badge variant="secondary" className="text-xs">{candidates.length}</Badge><span className="text-xs text-muted-foreground">本地统计生成，需人工确认后加入词库</span></div>
-            <div className="space-y-1">{candidates.slice(0, 12).map((candidate) => <div key={candidate.id} className="border bg-background px-2.5 py-1.5"><div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-xs font-medium">{candidate.phrase}</span><span className="shrink-0 text-[11px] text-muted-foreground">出现 {candidate.occurrences} 次 · {candidate.sourceCount} 个来源 · 可恢复 {candidate.recallCount} 篇</span><Button size="sm" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'approve-candidate')}>采用并恢复</Button><Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void handleCandidate(candidate, 'dismiss-candidate')}>永久忽略</Button></div>{candidate.sampleTitles.length > 0 && <div className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">{candidate.sampleTitles.slice(0, 3).map((title) => <p key={title} className="truncate">· {title}</p>)}</div>}</div>)}</div>
-          </section>}
+          <div className={pendingCandidates.length > 0 ? 'grid min-h-0 gap-1.5 lg:grid-cols-[minmax(300px,360px)_minmax(0,1fr)]' : 'min-h-0'}>
+            {pendingCandidates.length > 0 && <section className="min-w-0 overflow-hidden border border-amber-300 bg-amber-50/50 dark:bg-amber-950/10">
+              <div className="flex h-7 items-center gap-1.5 border-b border-amber-300 px-1.5">
+                <span className="text-xs font-medium">待确认候选</span>
+                <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">{pendingCandidates.length}</Badge>
+                <span className="truncate text-[10px] text-muted-foreground">确认后加入词库</span>
+              </div>
+              <div className="max-h-[520px] overflow-y-auto divide-y divide-border/60 bg-background">
+                {pendingCandidates.map(renderCandidate)}
+              </div>
+            </section>}
 
-          {/* Search */}
-          <div className="flex items-center gap-2">
-            <Input
-              className="h-7 w-44 text-xs"
-              placeholder="搜索关键词..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search && (
-              <span className="text-xs text-muted-foreground">
-                {groupKeys.reduce((acc, g) => acc + grouped[g].filter(kw => kw.word.includes(search)).length, 0)} 个结果
-              </span>
-            )}
-          </div>
+            <section className="min-w-0 overflow-hidden border bg-background">
+              <div className="flex h-7 items-center gap-1.5 border-b px-1.5">
+                <span className="shrink-0 text-xs font-medium">关键词分组</span>
+                <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">{keywords.length + reviewedCandidates.length}</Badge>
+              </div>
 
-          {keywords.length === 0 ? (
-            <EmptyState
-              title="暂无关键词"
-              description="请添加要抓取的关键词（命中即入库）；词库为空时不过滤"
-              className="py-6"
-            />
-          ) : groupKeys.length === 0 ? (
-            <EmptyState
-              title={`未找到包含「${search}」的关键词`}
-              className="py-6"
-            />
-          ) : (
-            <div className="space-y-2">
-              {groupKeys.map(group => (
-                <section key={group}>
-                  <div className="mb-1 flex items-center gap-2">
-                    <span className="text-sm font-medium text-muted-foreground">{group}</span>
-                    <Badge variant="secondary" className="text-xs px-2 py-0">{grouped[group].length}</Badge>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {grouped[group].map(kw => (
-                      <Badge key={kw.id} variant="outline" className="gap-1 px-2 py-0.5 text-xs font-normal">
-                        {kw.word}
-                        <button
-                          onClick={() => handleDelete(kw.id)}
-                          className="hover:text-destructive"
-                          aria-label={`删除关键词 ${kw.word}`}
-                          title={`删除「${kw.word}」`}
-                        >
-                          <X className="h-3 w-3" aria-hidden="true" />
-                        </button>
-                      </Badge>
+              <div className="max-h-[520px] overflow-auto p-1">
+                {keywords.length === 0 && reviewedCandidates.length === 0 ? (
+                  <EmptyState
+                    title="暂无关键词"
+                    description="请添加要抓取的关键词（命中即入库）；词库为空时不过滤"
+                    className="py-6"
+                  />
+                ) : keywordGroups.length === 0 ? (
+                  <EmptyState title={`未找到包含「${search}」的关键词`} className="py-6" />
+                ) : (
+                  <div className="flex w-max min-w-full flex-nowrap items-start gap-1">
+                    {sortedKeywordGroups.map(group => (
+                      <section key={group.key} className={`w-fit shrink-0 overflow-hidden border ${getGroupClassName(group)}`}>
+                        <div className="flex h-5 items-center gap-0.5 border-b border-inherit bg-transparent px-1.5">
+                          <span className="truncate text-[11px] font-medium text-muted-foreground">{group.label}</span>
+                          <span className="text-[10px] text-muted-foreground">({group.items.length})</span>
+                        </div>
+                        <div className="space-y-0 px-1.5 py-0.5">
+                          {group.items.map(item => renderKeywordGroupItem(item, group.label))}
+                        </div>
+                      </section>
                     ))}
                   </div>
-                </section>
-              ))}
-            </div>
-          )}
+                )}
+              </div>
+            </section>
+          </div>
         </div>
       </ScrollArea>
 
