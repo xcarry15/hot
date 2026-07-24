@@ -219,15 +219,13 @@
   animation-delay: var(--public-reveal-delay, 0ms);
 }
 
-.public-article-surface,
-.public-related-surface {
+.public-article-surface {
   transition-duration: 180ms;
   transition-property: background-color, transform;
   transition-timing-function: var(--public-ease-out);
 }
 
 .public-article-title,
-.public-related-title,
 .public-navigation-title {
   transition-duration: var(--public-motion-fast);
   transition-property: color;
@@ -295,14 +293,12 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .public-article-link:hover .public-article-surface,
-  .public-related-link:hover .public-related-surface {
+  .public-article-link:hover .public-article-surface {
     background: var(--public-surface-soft);
     transform: translateX(4px);
   }
 
   .public-article-link:hover .public-article-title,
-  .public-related-link:hover .public-related-title,
   .public-navigation-link:hover .public-navigation-title {
     color: var(--public-primary);
   }
@@ -391,7 +387,6 @@
   }
 
   .public-article-surface,
-  .public-related-surface,
   .public-timeline-marker,
   .public-pressable,
   .public-back-link {

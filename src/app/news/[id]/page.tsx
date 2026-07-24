@@ -12,7 +12,8 @@ import { ScoreBadge } from '@/components/ui/score-badge'
 import { getPublicArticleDetail } from '@/lib/public-article-service'
 import { getPublicSiteUrl } from '@/lib/public-site'
 import { splitBrands } from '@/lib/shared/article-codecs'
-import { formatPublicDateTime, formatPublicTime } from '@/lib/shared/public-date'
+import { formatDaysAgo } from '@/lib/shared/date'
+import { formatPublicDateTime } from '@/lib/shared/public-date'
 
 export const dynamic = 'force-dynamic'
 
@@ -134,15 +135,32 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
               <PublicShareButton shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} title={article.title} summary={article.summary || article.excerpt} publishedAt={formatPublicDateTime(effectiveDate)} />
             </div>
 
-            {article.sources.length > 1 && (
-              <section className="mt-7 border-t border-[var(--public-hairline)] pt-5" aria-labelledby="event-sources-title">
-                <h2 id="event-sources-title" className="text-sm font-semibold text-[var(--public-primary)]">其他报道来源</h2>
+            {article.recentArticles.length > 0 && (
+              <section className="mt-7 border-t border-[var(--public-hairline)] pt-5" aria-labelledby="recent-articles-title">
+                <h2 id="recent-articles-title" className="text-sm font-semibold text-[var(--public-primary)]">近期文章</h2>
                 <ul className="mt-3 space-y-2 text-sm">
-                  {article.sources.map((item) => (
-                    <li key={item.id} className="flex items-start justify-between gap-4 border-b border-[var(--public-hairline)] pb-2">
-                      <div className="min-w-0"><a href={item.url} target="_blank" rel="noreferrer" className="line-clamp-2 text-[var(--public-body)] transition-colors hover:text-[var(--public-primary)] hover:underline">{item.title}</a><p className="mt-1 text-xs text-[var(--public-muted)]">{item.source.name}</p></div>
-                    </li>
-                  ))}
+                  {article.recentArticles.map((item) => {
+                    const itemDate = item.publishedAt || item.createdAt
+                    const content = (
+                      <>
+                        <span className="line-clamp-2 text-[var(--public-body)] transition-colors group-hover/recent:text-[var(--public-primary)] group-hover/recent:underline">{item.title}</span>
+                        <p className="mt-1 text-xs text-[var(--public-muted)]">{item.source.name}</p>
+                      </>
+                    )
+                    return (
+                      <li key={`${item.relation}-${item.id}`} className="flex items-start justify-between gap-4 border-b border-[var(--public-hairline)] pb-2">
+                        <time dateTime={itemDate} className="w-14 shrink-0 pt-0.5 text-right font-mono text-xs tabular-nums text-[var(--public-muted)]">{formatDaysAgo(itemDate)}</time>
+                        <div className="min-w-0 flex-1">
+                          {item.relation === 'same_brand' ? (
+                            <Link href={`/news/${item.eventId}`} className="group/recent block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">{content}</Link>
+                          ) : (
+                            <a href={item.url} target="_blank" rel="noreferrer" className="group/recent block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">{content}</a>
+                          )}
+                        </div>
+                        <ScoreBadge score={item.score} variant="compact-square" />
+                      </li>
+                    )
+                  })}
                 </ul>
               </section>
             )}
@@ -165,34 +183,6 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
             </nav>
           </article>
 
-          {article.related.length > 0 && (
-            <section className="mt-8" aria-labelledby="related-articles-title">
-              <div className="flex items-end justify-between gap-4 border-b border-[var(--public-hairline)] pb-3">
-                <h2 id="related-articles-title" className="public-display text-2xl text-[var(--public-ink)]">相关文章</h2>
-                <span className="text-xs text-[var(--public-muted)]">{article.related.length} 篇</span>
-              </div>
-              <ol className="mt-1">
-                {article.related.map((item) => {
-                  const itemDate = item.publishedAt || item.createdAt
-                  return (
-                    <li key={item.id}>
-                      <Link href={`/news/${item.id}`} className="public-related-link group/related grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)] sm:grid-cols-[5rem_minmax(0,1fr)] sm:gap-3">
-                        <time dateTime={itemDate} className="pt-2 text-right font-mono text-xs tabular-nums text-[var(--public-muted)]">{formatPublicTime(itemDate)}</time>
-                        <div className="border-l border-[var(--public-hairline)] pb-1 pl-3 sm:pl-4">
-                          <div className="public-related-surface block rounded-none bg-transparent px-2 py-2">
-                          <div className="flex items-start justify-between gap-3">
-                            <span className="public-related-title line-clamp-2 text-sm font-medium leading-6 text-[var(--public-ink)]">{item.title}</span>
-                            <ScoreBadge score={item.score} variant="compact-square" />
-                          </div>
-                          </div>
-                        </div>
-                      </Link>
-                    </li>
-                  )
-                })}
-              </ol>
-            </section>
-          )}
         </div>
       </main>
 

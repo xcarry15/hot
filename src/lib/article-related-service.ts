@@ -1,11 +1,10 @@
+import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { splitBrands } from '@/lib/shared/article-codecs';
 
-const MAX_TAKE = 10;
-const DEFAULT_TAKE = 5;
 const RELATED_WINDOW_DAYS = 30;
 
-type RelatedArticle = {
+type RelatedArticleBase = {
   id: string;
   title: string;
   summary: string;
@@ -16,27 +15,64 @@ type RelatedArticle = {
   brand: string;
 };
 
-function effectiveTime(article: Pick<RelatedArticle, 'publishedAt' | 'createdAt'>): number {
-  return (article.publishedAt ?? article.createdAt).getTime();
+type RelatedEvent = {
+  id: string;
+  firstSeenAt: Date;
+};
+
+type RelatedCandidate = RelatedArticleBase & {
+  url: string;
+  eventId: string | null;
+  source: { name: string; type: string };
+  event: RelatedEvent | null;
+  representedEvent: RelatedEvent | null;
+};
+
+export type RelatedArticle = {
+  /** Article id for same-event reports, Event id for same-brand articles. */
+  id: string;
+  eventId: string | null;
+  title: string;
+  score: number;
+  createdAt: Date;
+  publishedAt: Date | null;
+  url: string;
+  source: { name: string; type: string };
+  relation: 'same_event' | 'same_brand';
+};
+
+type RelatedVisibility = 'public' | 'pushed';
+
+export interface RelatedArticleOptions {
+  /** Retained for the Feishu delivery call site. */
+  onlyPushed?: boolean;
+  /** Public detail pages and pushed Feishu cards use different visibility gates. */
+  visibility?: RelatedVisibility;
 }
 
-/**
- * 相关动态是无向关系：任一文章的品牌出现在另一篇的品牌、标题或摘要中，双方都相关。
- * 这样 A -> B 的命中不会因为 B 的品牌字段不同而变成单向关系。
- */
-function isRelatedPair(article: RelatedArticle, candidate: RelatedArticle): boolean {
-  const articleBrands = splitBrands(article.brand);
-  const candidateBrands = splitBrands(candidate.brand);
-  const candidateBrandSet = new Set(candidateBrands);
+const relatedEventSelect = {
+  id: true,
+  firstSeenAt: true,
+} as const;
 
-  const articleBrandInCandidate = articleBrands.some((brand) =>
-    candidateBrandSet.has(brand) || candidate.title.includes(brand) || candidate.summary.includes(brand),
-  );
-  const candidateBrandInArticle = candidateBrands.some((brand) =>
-    article.title.includes(brand) || article.summary.includes(brand),
-  );
+const relatedCandidateSelect = {
+  id: true,
+  eventId: true,
+  title: true,
+  summary: true,
+  url: true,
+  brand: true,
+  score: true,
+  createdAt: true,
+  publishedAt: true,
+  aiStatus: true,
+  source: { select: { name: true, type: true } },
+  event: { select: relatedEventSelect },
+  representedEvent: { select: relatedEventSelect },
+} as const;
 
-  return articleBrandInCandidate || candidateBrandInArticle;
+function effectiveTime(article: Pick<RelatedArticle, 'publishedAt' | 'createdAt'>): number {
+  return (article.publishedAt ?? article.createdAt).getTime();
 }
 
 function compareByEffectiveTime(a: RelatedArticle, b: RelatedArticle): number {
@@ -45,72 +81,143 @@ function compareByEffectiveTime(a: RelatedArticle, b: RelatedArticle): number {
   return b.createdAt.getTime() - a.createdAt.getTime();
 }
 
-export interface RelatedArticleOptions {
-  onlyPushed?: boolean;
+function hasSharedBrand(article: RelatedArticleBase, candidate: RelatedArticleBase): boolean {
+  const articleBrands = splitBrands(article.brand);
+  const candidateBrands = splitBrands(candidate.brand);
+  const candidateBrandSet = new Set(candidateBrands);
+  return articleBrands.some((brand) => candidateBrandSet.has(brand));
 }
 
+function buildEventVisibilityWhere(options: RelatedArticleOptions): Prisma.EventWhereInput | null {
+  const visibility = options.visibility ?? (options.onlyPushed ? 'pushed' : null);
+  if (!visibility) return null;
+
+  if (visibility === 'public') {
+    return {
+      status: 'active',
+      clusterReviewStatus: 'confirmed',
+      publicStatus: 'published',
+      representativeArticleId: { not: null },
+      representativeArticle: { is: { aiStatus: 'done', clusterStatus: 'clustered' } },
+    };
+  }
+
+  return {
+    status: 'active',
+    pushedAt: { not: null },
+    representativeArticleId: { not: null },
+    representativeArticle: { is: { aiStatus: 'done', clusterStatus: 'clustered' } },
+  };
+}
+
+function isWithinRecentWindow(date: Date, cutoff: Date): boolean {
+  return date.getTime() >= cutoff.getTime();
+}
+
+function getCandidateRelation(
+  article: RelatedArticleBase & { eventId: string | null },
+  candidate: RelatedCandidate,
+): RelatedArticle['relation'] | null {
+  if (article.eventId && candidate.eventId === article.eventId) return 'same_event';
+  if (candidate.representedEvent && hasSharedBrand(article, candidate)) return 'same_brand';
+  return null;
+}
+
+function toRelatedArticle(
+  candidate: RelatedCandidate,
+  relation: RelatedArticle['relation'],
+): RelatedArticle {
+  const event = relation === 'same_event' ? candidate.event : candidate.representedEvent;
+  return {
+    id: relation === 'same_brand' && event ? event.id : candidate.id,
+    eventId: event?.id ?? candidate.eventId,
+    title: candidate.title,
+    score: candidate.score,
+    createdAt: relation === 'same_brand' && event ? event.firstSeenAt : candidate.createdAt,
+    publishedAt: candidate.publishedAt,
+    url: candidate.url,
+    source: candidate.source,
+    relation,
+  };
+}
+
+/**
+ * Return all other articles from the same Event and same-brand Events in the
+ * recent 30-day window. Both public pages and Feishu cards use this service so
+ * their recent-article sections cannot drift apart.
+ */
 export async function getRelatedArticles(
   id: string,
-  requestedTake: number,
+  requestedTake?: number,
   options: RelatedArticleOptions = {},
-) {
-  const take = Number.isFinite(requestedTake) ? Math.min(Math.max(requestedTake, 1), MAX_TAKE) : DEFAULT_TAKE;
+): Promise<RelatedArticle[] | null> {
   const article = await db.article.findUnique({
     where: { id },
-    select: { id: true, title: true, summary: true, brand: true, score: true, createdAt: true, publishedAt: true, aiStatus: true },
+    select: {
+      id: true,
+      title: true,
+      summary: true,
+      brand: true,
+      score: true,
+      createdAt: true,
+      publishedAt: true,
+      aiStatus: true,
+      eventId: true,
+    },
   });
   if (!article) return null;
 
   const brands = splitBrands(article.brand);
-
   const cutoff = new Date(Date.now() - RELATED_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  const brandMatch = brands.flatMap((brand) => [
-    { brand: { contains: brand } },
-    { title: { contains: brand } },
-    { summary: { contains: brand } },
-  ]);
+  const eventVisibilityWhere = buildEventVisibilityWhere(options);
+  const sameEventBranch: Prisma.ArticleWhereInput | null = article.eventId
+    ? {
+        eventId: article.eventId,
+        ...(eventVisibilityWhere ? { event: { is: eventVisibilityWhere } } : {}),
+      }
+    : null;
+  const brandBranches: Prisma.ArticleWhereInput[] = brands.map((brand) => ({
+    brand: { contains: brand },
+  })).map((branch) => ({
+    ...branch,
+    ...(eventVisibilityWhere ? { representedEvent: { is: eventVisibilityWhere } } : {}),
+  }));
 
-  // 先取时间窗口内的候选，再在内存中做双向匹配；不能直接在数据库 take，
-  // 否则 publishedAt 为空但 createdAt 更新的文章可能在排序后被截掉。
+  const relationBranches = [
+    ...(sameEventBranch ? [sameEventBranch] : []),
+    ...(brandBranches.length > 0 ? brandBranches : []),
+  ];
+  if (relationBranches.length === 0) return [];
+
   const candidates = await db.article.findMany({
     where: {
       id: { not: id },
-      aiStatus: options.onlyPushed ? 'done' : { in: ['done', 'failed'] },
-      ...(options.onlyPushed
-        ? {
-            representedEvent: {
-              is: {
-                status: 'active',
-                pushedAt: { not: null },
-              },
-            },
-          }
-        : {}),
       AND: [
+        { OR: relationBranches },
         {
           OR: [
-            ...brandMatch,
-            // 候选文章的品牌可能只出现在当前文章标题/摘要中，因此需要保留有品牌的候选。
-            { brand: { not: '' } },
+            { publishedAt: { gte: cutoff } },
+            { publishedAt: null, createdAt: { gte: cutoff } },
+            { event: { is: { firstSeenAt: { gte: cutoff } } } },
+            { representedEvent: { is: { firstSeenAt: { gte: cutoff } } } },
           ],
         },
-        { OR: [{ publishedAt: { gte: cutoff } }, { publishedAt: null, createdAt: { gte: cutoff } }] },
       ],
     },
-    select: { id: true, title: true, summary: true, score: true, createdAt: true, publishedAt: true, aiStatus: true, brand: true },
+    select: relatedCandidateSelect,
   });
 
-  return candidates
-    .filter((candidate) => isRelatedPair(article, candidate))
-    .sort(compareByEffectiveTime)
-    .slice(0, take)
-    .map(({ id: articleId, title, score, createdAt, publishedAt, aiStatus, brand }) => ({
-      id: articleId,
-      title,
-      score,
-      createdAt,
-      publishedAt,
-      aiStatus,
-      brand,
-    }));
+  const related = candidates
+    .map((candidate) => {
+      const relation = getCandidateRelation(article, candidate);
+      return relation ? toRelatedArticle(candidate, relation) : null;
+    })
+    .filter((candidate): candidate is RelatedArticle => Boolean(candidate))
+    .filter((candidate) => isWithinRecentWindow(candidate.publishedAt ?? candidate.createdAt, cutoff))
+    .sort(compareByEffectiveTime);
+
+  const take = typeof requestedTake === 'number' && Number.isFinite(requestedTake) && requestedTake > 0
+    ? Math.floor(requestedTake)
+    : null;
+  return take ? related.slice(0, take) : related;
 }

@@ -13,3 +13,10 @@ export function formatRelativeTime(dateStr: string | null): string {
   return date.toLocaleDateString('zh-CN')
 }
 
+export function formatDaysAgo(value: Date | string | null | undefined): string {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const days = Math.max(0, Math.floor((Date.now() - date.getTime()) / (24 * 60 * 60 * 1000)))
+  return days === 0 ? '今天' : `${days}天前`
+}

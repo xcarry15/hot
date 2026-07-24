@@ -1,8 +1,9 @@
 import { db } from '@/lib/db';
 import type { Prisma } from '@prisma/client';
-import { parseJsonArray, splitBrands, stripHtml } from '@/lib/shared/article-codecs';
+import { parseJsonArray, stripHtml } from '@/lib/shared/article-codecs';
 import { getPublicDateKey } from '@/lib/shared/public-date';
 import { enqueuePublicArticleOriginalClick, enqueuePublicArticleView } from '@/lib/public-view-service';
+import { getRelatedArticles } from '@/lib/article-related-service';
 import {
   publicArticleCountCache,
   publicArticleDetailCache,
@@ -14,7 +15,6 @@ import type {
   PublicArticleFeedRevisionDto,
   PublicArticleListItemDto,
   PublicArticleListResponseDto,
-  PublicArticleRelatedDto,
 } from '@/contracts/public-articles';
 
 const PUBLIC_PAGE_SIZE = 12;
@@ -252,8 +252,7 @@ async function buildPublicArticleDetail(id: string): Promise<PublicArticleDetail
   });
   if (!row?.representativeArticle) return null;
   const article = row.representativeArticle!;
-  const brands = splitBrands(article.brand).filter(Boolean);
-  const [sameDateRows, relatedRows, sources] = await Promise.all([
+  const [sameDateRows, recentArticleRows] = await Promise.all([
     db.event.findMany({
       where: { ...publicEventWhere, publicDateKey: row.publicDateKey },
       select: {
@@ -264,41 +263,7 @@ async function buildPublicArticleDetail(id: string): Promise<PublicArticleDetail
       orderBy: [{ publicSortAt: 'desc' }, { id: 'desc' }],
       take: PUBLIC_MAX_ROWS_PER_DATE,
     }),
-    brands.length === 0
-      ? Promise.resolve([])
-      : db.event.findMany({
-          where: {
-            ...publicEventWhere,
-            id: { not: row.id },
-            representativeArticle: {
-              is: {
-                aiStatus: 'done',
-                clusterStatus: 'clustered',
-                OR: brands.map((brand) => ({ brand: { contains: brand } })),
-              },
-            },
-          },
-          select: {
-            id: true,
-            firstSeenAt: true,
-            articleCount: true,
-            representativeArticle: {
-              select: {
-                title: true,
-                score: true,
-                publishedAt: true,
-                source: { select: { name: true, type: true } },
-              },
-            },
-          },
-          orderBy: { firstSeenAt: 'desc' },
-          take: 5,
-        }),
-    db.article.findMany({
-      where: { eventId: row.id },
-      select: { id: true, title: true, url: true, publishedAt: true, createdAt: true, source: { select: { name: true, type: true } } },
-      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-    }),
+    getRelatedArticles(article.id, undefined, { visibility: 'public' }),
   ]);
   const sortedNavigation = sameDateRows
     .filter((candidate) => candidate.representativeArticle)
@@ -320,28 +285,23 @@ async function buildPublicArticleDetail(id: string): Promise<PublicArticleDetail
         })
       : Promise.resolve(null),
   ]);
-  const related: PublicArticleRelatedDto[] = relatedRows.map((candidate) => ({
+  const recentArticles = (recentArticleRows ?? []).map((candidate) => ({
     id: candidate.id,
-    title: candidate.representativeArticle!.title,
-    score: candidate.representativeArticle!.score,
-    publishedAt: candidate.representativeArticle!.publishedAt?.toISOString() ?? null,
-    createdAt: candidate.firstSeenAt.toISOString(),
-    source: candidate.representativeArticle!.source,
+    eventId: candidate.eventId ?? row.id,
+    title: candidate.title,
+    score: candidate.score,
+    publishedAt: candidate.publishedAt?.toISOString() ?? null,
+    createdAt: candidate.createdAt.toISOString(),
+    url: candidate.url,
+    relation: candidate.relation,
+    source: candidate.source,
   }));
   return {
     ...serializeEvent(row, article.cleanContent),
     url: article.url,
     summary: article.summary,
     keyPoints: parseJsonArray(article.keyPoints),
-    related,
-    sources: sources.map((source) => ({
-      id: source.id,
-      title: source.title,
-      url: source.url,
-      publishedAt: source.publishedAt?.toISOString() ?? null,
-      createdAt: source.createdAt.toISOString(),
-      source: source.source,
-    })),
+    recentArticles,
     navigation: {
       previous: index > 0
         ? { id: sortedNavigation[index - 1].id, title: sortedNavigation[index - 1].representativeArticle!.title }

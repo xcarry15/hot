@@ -26,11 +26,10 @@ export default function PublicArticleCard({
   const categoryItems: PublicArticleMetaItem[] = article.category
     ? [{ label: article.category, kind: 'meta', className: '' }]
     : []
-  const originalSourceItems: PublicArticleMetaItem[] = article.originalSource && article.originalSource !== article.source.name
+  const sourceItems: PublicArticleMetaItem[] = article.originalSource?.trim()
     ? [{ label: `原始：${article.originalSource}`, kind: 'meta', className: '' }]
-    : []
-  const sourceItems: PublicArticleMetaItem[] = [{ label: article.source.name, kind: 'meta', className: '' }]
-  const metaGroups = [brandItems, categoryItems, originalSourceItems, sourceItems].filter((group) => group.length > 0)
+    : [{ label: article.source.name, kind: 'meta', className: '' }]
+  const metaGroups = [brandItems, categoryItems, sourceItems].filter((group) => group.length > 0)
 
   return (
     <li

@@ -293,7 +293,7 @@ async function pushEventToFeishuInternal(
   }
 
   const urgency = getPushUrgency(article);
-  const relatedArticles = (await getRelatedArticles(article.id, 3, { onlyPushed: true })) ?? [];
+  const relatedArticles = (await getRelatedArticles(article.id, undefined, { onlyPushed: true })) ?? [];
   const card = buildFeishuCard(
     { ...article, publicEventId: eventId },
     urgency,
