@@ -107,6 +107,14 @@ describe('matchStepChip 单谓词命中', () => {
     const item = article({ technicalErrorReasons: { process: '正文页请求超时' } })
     expect(item.technicalErrorReasons.process).toBe('正文页请求超时')
   })
+
+  it('人工审核通过与人工忽略独立于流水线正常/异常状态', () => {
+    expect(matchStepChip(article({ reviewStatus: 'important' }), 'review-passed')).toBe(true)
+    expect(matchStepChip(article({ reviewStatus: 'general' }), 'review-passed')).toBe(true)
+    expect(matchStepChip(article({ reviewStatus: 'irrelevant' }), 'review-passed')).toBe(false)
+    expect(matchStepChip(article({ reviewStatus: 'irrelevant' }), 'review-ignored')).toBe(true)
+    expect(matchStepChip(article({ reviewStatus: 'unreviewed' }), 'review-ignored')).toBe(false)
+  })
 })
 
 // ── 2. applyFilterState ──

@@ -19,6 +19,7 @@ import {
   ANOMALY_FILTER_CHIPS,
   NORMAL_FILTER_CHIPS,
   PRIMARY_FILTER_CHIPS,
+  REVIEW_FILTER_CHIPS,
   STEP_FILTER_CHIPS,
   type FilterChipKey,
   URL_PARAM_DETAIL,
@@ -794,6 +795,27 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
                 })}
               </div>
             )}
+
+            <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-l-2 border-sky-500/30 pl-2 [&::-webkit-scrollbar]:hidden" role="radiogroup" aria-label="人工审核状态">
+              <span className="shrink-0 text-[11px] text-muted-foreground">人工审核</span>
+              {REVIEW_FILTER_CHIPS.map(chip => {
+                const statusKey = chip.key as StepFilterKey
+                const active = filterState.chips.has(statusKey)
+                return (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    title={chip.description}
+                    onClick={() => setFilterState(prev => ({ ...prev, chips: new Set([statusKey]) }))}
+                    className={`h-6 shrink-0 border px-2 text-[11px] transition-colors ${active ? 'border-sky-600 bg-sky-600 text-white' : 'border-border bg-background text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {chip.label} <span className="tabular-nums opacity-75">({filterCounts[chip.key] ?? 0})</span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
         {activeTaskView && progressView?.isRunning && (
