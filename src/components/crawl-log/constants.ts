@@ -45,7 +45,7 @@ export const ANOMALY_FILTER_CHIPS: readonly StepFilterChip[] = [
 
 /** 人工审核维度独立于流水线状态，避免把内容忽略和技术忽略混成一个队列。 */
 export const REVIEW_FILTER_CHIPS: readonly StepFilterChip[] = [
-  { key: 'review-passed', label: '已通过', description: '人工审核已通过：重要或一般' },
+  { key: 'review-passed', label: '人工通过', description: '人工审核已通过：重要或一般' },
   { key: 'review-ignored', label: '人工忽略', description: '人工审核判定为无关的已入库文章' },
 ] as const
 

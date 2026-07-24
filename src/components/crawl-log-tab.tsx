@@ -175,10 +175,14 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   const filterCounts = useMemo(() => {
     const counts: Partial<Record<FilterChipKey, number>> = {}
+    const today = new Date().toDateString()
     for (const src of sources) {
+      const articles = filterState.publishedToday
+        ? src.articles.filter(article => article.publishedAt && new Date(article.publishedAt).toDateString() === today)
+        : src.articles
       // “全部”展示当前快照文章总数；已忽略虽默认不展开，仍属于文章总量。
-      counts.all = (counts.all ?? 0) + src.articles.length
-      for (const a of src.articles || []) {
+      counts.all = (counts.all ?? 0) + articles.length
+      for (const a of articles) {
         for (const chip of STEP_FILTER_CHIPS) {
           if (chip.key !== 'all' && matchStepChip(a, chip.key)) {
             counts[chip.key] = (counts[chip.key] ?? 0) + 1
@@ -187,7 +191,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       }
     }
     return counts
-  }, [sources])
+  }, [sources, filterState.publishedToday])
   const failedSources = useMemo(() => sources.filter(source => source.lastRunStatus === 'failed' || source.status === 'error'), [sources])
   const failedArticles = snapshot?.technicalTotal ?? 0
   const autoRetryArticles = snapshot?.autoRetryTotal ?? 0
@@ -731,7 +735,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           </Button>
         </div>
 
-          {/* 两级筛选：先判断正常/异常，再查看互斥的具体状态。 */}
+          {/* 顶部状态与人工审核筛选；选择正常/异常后显示具体流水线状态。 */}
           <div className="flex min-w-0 w-full flex-col gap-1">
             <div
               className="flex min-w-0 items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
@@ -769,6 +773,30 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
                   </button>
                 )
               })}
+              {REVIEW_FILTER_CHIPS.map(chip => {
+                const statusKey = chip.key as StepFilterKey
+                const active = filterState.chips.has(statusKey)
+                return (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    title={chip.description}
+                    onClick={() => setFilterState(prev => ({ ...prev, chips: new Set([statusKey]) }))}
+                    className={`flex h-7 shrink-0 items-center gap-1.5 border px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      active
+                        ? 'border-sky-600 bg-sky-600 font-medium text-white'
+                        : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <span>{chip.label}</span>
+                    <span className={`text-[11px] tabular-nums ${active ? 'opacity-80' : 'text-muted-foreground/70'}`}>
+                      ({filterCounts[chip.key] ?? 0})
+                    </span>
+                  </button>
+                )
+              })}
               {isFilterStateActive(filterState) && (
                 <Button size="sm" variant="ghost" onClick={() => setFilterState(EMPTY_FILTER_STATE)} className="h-7 px-2 text-xs text-muted-foreground" title="清除所有筛选">清除</Button>
               )}
@@ -796,26 +824,6 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
               </div>
             )}
 
-            <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-l-2 border-sky-500/30 pl-2 [&::-webkit-scrollbar]:hidden" role="radiogroup" aria-label="人工审核状态">
-              <span className="shrink-0 text-[11px] text-muted-foreground">人工审核</span>
-              {REVIEW_FILTER_CHIPS.map(chip => {
-                const statusKey = chip.key as StepFilterKey
-                const active = filterState.chips.has(statusKey)
-                return (
-                  <button
-                    key={chip.key}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    title={chip.description}
-                    onClick={() => setFilterState(prev => ({ ...prev, chips: new Set([statusKey]) }))}
-                    className={`h-6 shrink-0 border px-2 text-[11px] transition-colors ${active ? 'border-sky-600 bg-sky-600 text-white' : 'border-border bg-background text-muted-foreground hover:text-foreground'}`}
-                  >
-                    {chip.label} <span className="tabular-nums opacity-75">({filterCounts[chip.key] ?? 0})</span>
-                  </button>
-                )
-              })}
-            </div>
           </div>
 
         {activeTaskView && progressView?.isRunning && (

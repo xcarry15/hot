@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   Eye,
@@ -53,8 +53,8 @@ import { parseEventSubjects } from "@/contracts/event-identity";
 
 type DetailPanel = ArticleWorkspacePanel;
 type EventComparisonRow =
-  | { kind: "member"; sortAt: number; memberIndex: number; article: EventDetail["articles"][number] }
-  | { kind: "recommended"; sortAt: number; eventId: string; event: EventDetail["audits"][number]["candidateEvent"] };
+  | { kind: "member"; memberIndex: number; article: EventDetail["articles"][number] }
+  | { kind: "recommended"; eventId: string; event: EventDetail["audits"][number]["candidateEvent"] };
 type EventDetail = {
   id: string;
   representativeArticleId: string | null;
@@ -144,6 +144,39 @@ const REASONS = [
 ] as const;
 
 const WORKSPACE_ACTION_CLASS = "h-7 rounded-none px-2 text-xs font-medium";
+const EVENT_TABLE_CLASS = "w-max min-w-[1120px] table-auto border-separate border-spacing-0 text-xs";
+const EVENT_SOURCE_HEADER_CLASS = "sticky left-[52px] z-[3] w-[1%] max-w-[88px] border-b border-r bg-muted px-2 py-1 text-left font-medium";
+const EVENT_TITLE_HEADER_CLASS = "sticky z-[3] min-w-[150px] max-w-[240px] border-b border-r bg-muted px-2 py-1 text-left font-medium";
+const EVENT_SOURCE_CELL_CLASS = "sticky left-[52px] z-[2] w-[1%] max-w-[88px] border-r px-2 py-1.5 align-middle";
+const EVENT_TITLE_CELL_CLASS = "sticky z-[2] min-w-[150px] border-r px-2 py-1.5 align-middle";
+
+function EventComparisonTableHeader({
+  sourceHeaderRef,
+  sourceWidth,
+}: {
+  sourceHeaderRef?: RefObject<HTMLTableCellElement | null>;
+  sourceWidth: number;
+}) {
+  return (
+    <thead className="sticky top-0 z-[1] bg-muted/60 text-muted-foreground">
+      <tr>
+        <th className="sticky left-0 z-[3] w-[52px] border-b border-r bg-muted px-1 py-1 text-center font-medium">序号</th>
+        <th className="w-[1%] whitespace-nowrap border-b border-r bg-muted px-2 py-1 text-left font-medium">发布时间</th>
+        <th className="border-b border-r px-1 py-1 text-center font-medium">总分</th>
+        <th ref={sourceHeaderRef} className={EVENT_SOURCE_HEADER_CLASS}><div className="max-w-[72px] truncate">来源</div></th>
+        <th style={{ left: 52 + sourceWidth }} className={EVENT_TITLE_HEADER_CLASS}>标题</th>
+        <th className="border-b border-r px-1 py-1 text-center font-medium">代表关系</th>
+        <th className="border-b border-r px-2 py-1 text-left font-medium">品牌</th>
+        <th className="border-b border-r px-2 py-1 text-left font-medium">事件键</th>
+        <th className="border-b border-r px-1 py-1 text-center font-medium">审核</th>
+        <th className="border-b border-r px-2 py-1 text-left font-medium">状态</th>
+        <th className="border-b border-r px-2 py-1 text-left font-medium">公开</th>
+        <th className="border-b border-r px-2 py-1 text-left font-medium">推送</th>
+        <th className="sticky right-0 z-[3] border-b bg-muted px-2 py-1 text-left font-medium">操作</th>
+      </tr>
+    </thead>
+  );
+}
 
 const FULL_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
@@ -395,6 +428,8 @@ export default function IntelligenceInbox({
   const eventSearchRequestRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
   const initialPanelRef = useRef<DetailPanel | null>(initialPanel);
+  const eventSourceHeaderRef = useRef<HTMLTableCellElement>(null);
+  const [eventSourceColumnWidth, setEventSourceColumnWidth] = useState(88);
 
   useEffect(() => {
     initialPanelRef.current = initialPanel;
@@ -698,7 +733,7 @@ export default function IntelligenceInbox({
     setEventAction(`move-candidate:${candidate.id}`);
     try {
       const response = await fetch(
-        `/api/events/${encodeURIComponent(eventDetail.id)}/move`,
+        `/api/events/${encodeURIComponent(candidate.eventId)}/move`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1020,7 +1055,6 @@ export default function IntelligenceInbox({
   const eventComparisonRows = useMemo<EventComparisonRow[]>(() => {
     const rows: EventComparisonRow[] = eventMembers.map((article, index) => ({
       kind: "member",
-      sortAt: new Date(article.publishedAt || article.createdAt).getTime(),
       memberIndex: index + 1,
       article,
     }));
@@ -1028,13 +1062,24 @@ export default function IntelligenceInbox({
       const article = recommendedEvent?.representativeArticle;
       rows.push({
         kind: "recommended",
-        sortAt: article ? new Date(article.publishedAt || article.createdAt).getTime() : 0,
         eventId: recommendedEventId,
         event: recommendedEvent,
       });
     }
-    return rows.sort((left, right) => right.sortAt - left.sortAt);
+    return rows;
   }, [eventMembers, recommendedEvent, recommendedEventId]);
+  useEffect(() => {
+    const element = eventSourceHeaderRef.current;
+    if (!element) return;
+    const updateWidth = () => {
+      const width = Math.round(element.getBoundingClientRect().width);
+      setEventSourceColumnWidth((current) => current === width ? current : width);
+    };
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [eventDetail]);
   const eventSourceCount = new Set(eventMembers.map((article) => article.source.name)).size;
   const clickRate = detail && detail.viewCount > 0
     ? Math.round((detail.originalClickCount / detail.viewCount) * 100)
@@ -1140,24 +1185,8 @@ export default function IntelligenceInbox({
                       {selectedSplitIds.size > 0 && <Button size="sm" variant="outline" className="ml-auto h-7 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticles([...selectedSplitIds])}><Split className="h-3 w-3" />拆分所选 {selectedSplitIds.size} 篇</Button>}
                     </div>
                     <div className="min-w-0 max-w-full max-h-[320px] overflow-x-scroll overflow-y-auto overscroll-contain border">
-                      <table className="w-max min-w-[1120px] table-auto border-collapse text-xs">
-                        <thead className="sticky top-0 z-[1] bg-muted/60 text-muted-foreground">
-                          <tr>
-                            <th className="sticky left-0 z-[3] w-[52px] border-b border-r bg-muted px-1 py-1 text-center font-medium">序号</th>
-                            <th className="w-[1%] whitespace-nowrap border-b border-r bg-muted px-2 py-1 text-left font-medium">发布时间</th>
-                            <th className="border-b border-r px-1 py-1 text-center font-medium">总分</th>
-                            <th className="sticky left-[52px] z-[3] min-w-[220px] max-w-[360px] border-b border-r bg-muted px-2 py-1 text-left font-medium">标题</th>
-                            <th className="border-b border-r px-1 py-1 text-center font-medium">代表关系</th>
-                            <th className="border-b border-r px-2 py-1 text-left font-medium">品牌</th>
-                            <th className="border-b border-r px-2 py-1 text-left font-medium">事件键</th>
-                            <th className="border-b border-r px-1 py-1 text-center font-medium">审核</th>
-                            <th className="border-b border-r px-2 py-1 text-left font-medium">来源</th>
-                            <th className="border-b border-r px-2 py-1 text-left font-medium">状态</th>
-                            <th className="border-b border-r px-2 py-1 text-left font-medium">公开</th>
-                            <th className="border-b border-r px-2 py-1 text-left font-medium">推送</th>
-                            <th className="sticky right-0 z-[3] border-b bg-muted px-2 py-1 text-left font-medium">操作</th>
-                          </tr>
-                        </thead>
+                      <table className={EVENT_TABLE_CLASS}>
+                        <EventComparisonTableHeader sourceHeaderRef={eventSourceHeaderRef} sourceWidth={eventSourceColumnWidth} />
                         <tbody>
                           {eventComparisonRows.map((row) => {
                             if (row.kind === "recommended") {
@@ -1175,16 +1204,16 @@ export default function IntelligenceInbox({
                                   <td className={`sticky left-0 z-[2] border-r px-1 py-1.5 align-middle ${stickyRowBackground}`}><div className="flex items-center justify-center"><span className="font-medium text-sky-800">—</span></div></td>
                                   <td className="w-[1%] whitespace-nowrap border-r px-2 py-1.5 font-mono tabular-nums align-middle text-muted-foreground">{article ? timeLabel(article.publishedAt || article.createdAt) : "—"}</td>
                                   <td className="border-r px-1 py-1.5 text-center font-semibold tabular-nums align-middle">{article?.score ?? "—"}</td>
-                                  <td className={`sticky left-[52px] z-[2] min-w-[220px] border-r px-2 py-1.5 align-middle ${stickyRowBackground}`}><div className="block max-w-[360px] truncate text-left font-medium text-sky-950" title={article?.title || `Event ${row.eventId}`}>{article?.title || `Event ${row.eventId.slice(-8)}`}</div></td>
+                                  <td className={`${EVENT_SOURCE_CELL_CLASS} ${stickyRowBackground}`} title={article?.source.name || "未知来源"}><div className="max-w-[72px] truncate text-muted-foreground">{article?.source.name || "—"}</div></td>
+                                  <td style={{ left: 52 + eventSourceColumnWidth }} className={`${EVENT_TITLE_CELL_CLASS} ${stickyRowBackground}`}><div className="block max-w-[240px] truncate text-left font-medium text-sky-950" title={article?.title || `Event ${row.eventId}`}>{article?.title || `Event ${row.eventId.slice(-8)}`}</div></td>
                                   <td className="border-r px-1 py-1.5 text-center align-middle"><span className="bg-foreground px-1.5 py-0.5 text-background">推荐代表</span></td>
                                   <td className="border-r px-2 py-1.5 align-middle text-muted-foreground" title={article?.brand ? splitBrands(article.brand).join(" / ") : "无"}><div className="max-w-[160px] truncate">{article?.brand ? splitBrands(article.brand).join(" / ") : "—"}</div></td>
                                   <td className="border-r px-2 py-1.5 font-mono align-middle text-muted-foreground" title={article?.eventKey || "未生成"}><div className="max-w-[260px] truncate">{article?.eventKey || "—"}</div></td>
                                   <td className="border-r px-1 py-1.5 text-center align-middle text-muted-foreground">{article ? reviewLabel(article.reviewStatus) : "—"}</td>
-                                  <td className="border-r px-2 py-1.5 align-middle" title={article?.source.name || "未知来源"}><div className="max-w-[180px] truncate">{article?.source.name || "—"}</div></td>
                                   <td className="border-r px-2 py-1.5 align-middle text-muted-foreground">{sourceStatus}</td>
                                   <td className="border-r px-2 py-1.5 align-middle text-muted-foreground">{row.event?.publicStatus === "published" ? "已公开" : "未公开"}</td>
                                   <td className="border-r px-2 py-1.5 align-middle text-muted-foreground">{row.event?.pushedAt ? "已推送" : "未推送"}</td>
-                                  <td className={`sticky right-0 z-[2] px-1 py-1 align-middle ${stickyRowBackground}`}><div className="flex items-center gap-1 whitespace-nowrap"><span className="border border-sky-400 bg-white px-1 py-0.5 text-sky-800">系统推荐 Event</span><Button size="sm" variant="outline" className="h-6 rounded-none border-sky-400 px-1.5 text-xs text-sky-800 hover:bg-sky-100" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(row.eventId)}>并入</Button></div></td>
+                                  <td className={`sticky right-0 z-[2] px-1 py-1 align-middle ${stickyRowBackground}`}><div className="flex items-center whitespace-nowrap"><Button size="sm" variant="outline" className="h-6 rounded-none border-sky-400 px-1.5 text-xs text-sky-800 hover:bg-sky-100" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(row.eventId)}>并入</Button></div></td>
                                 </tr>
                               );
                             }
@@ -1215,12 +1244,12 @@ export default function IntelligenceInbox({
                                 <td className={`sticky left-0 z-[2] border-r px-1 py-1.5 align-middle ${stickyRowBackground}`}><div className="flex items-center justify-center gap-1"><input type="checkbox" aria-label={`选择拆分 ${article.title}`} checked={selected} disabled={eventDetail.articleCount <= 1 || eventAction !== null} onChange={() => toggleSplitSelection(article.id)} /><span className="tabular-nums text-muted-foreground">{row.memberIndex}</span></div></td>
                                 <td className="w-[1%] whitespace-nowrap border-r px-2 py-1.5 font-mono tabular-nums align-middle text-muted-foreground">{timeLabel(article.publishedAt || article.createdAt)}</td>
                                 <td className="border-r px-1 py-1.5 text-center font-semibold tabular-nums align-middle">{article.score}</td>
-                                <td className={`sticky left-[52px] z-[2] min-w-[220px] border-r px-2 py-1.5 align-middle ${stickyRowBackground}`}><button type="button" onClick={() => selectArticle(article.id, "cluster")} className="block max-w-[360px] truncate text-left font-medium hover:underline" title={article.title}>{article.title}</button></td>
+                                <td className={`${EVENT_SOURCE_CELL_CLASS} ${stickyRowBackground}`} title={article.source.name}><div className="max-w-[72px] truncate text-muted-foreground">{article.source.name}</div></td>
+                                <td style={{ left: 52 + eventSourceColumnWidth }} className={`${EVENT_TITLE_CELL_CLASS} ${stickyRowBackground}`}><button type="button" onClick={() => selectArticle(article.id, "cluster")} className="block max-w-[240px] truncate text-left font-medium hover:underline" title={article.title}>{article.title}</button></td>
                                 <td className="border-r px-1 py-1.5 text-center align-middle">{representative ? <span className="bg-foreground px-1.5 py-0.5 max-w-[160px] text-background">当前代表</span> : "—"}</td>
                                 <td className="border-r px-2 py-1.5 align-middle text-muted-foreground" title={article.brand ? splitBrands(article.brand).join(" / ") : "无"}><div className="max-w-[160px] truncate">{article.brand ? splitBrands(article.brand).join(" / ") : "—"}</div></td>
                                 <td className="border-r px-2 py-1.5 font-mono align-middle text-muted-foreground" title={article.eventKey || "未生成"}><div className="max-w-[260px] truncate">{article.eventKey || "—"}</div></td>
                                 <td className={`border-r px-1 py-1.5 text-center align-middle ${article.reviewStatus === "unreviewed" ? "text-red-700" : "text-muted-foreground"}`}>{reviewLabel(article.reviewStatus)}</td>
-                                <td className="border-r px-2 py-1.5 align-middle" title={article.source.name}><div className="max-w-[180px] truncate">{article.source.name}</div></td>
                                 <td className={`border-r px-2 py-1.5 align-middle ${article.source.deleted ? "text-red-700" : article.source.publicEnabled ? "text-emerald-700" : "text-muted-foreground"}`}>{sourceStatus}</td>
                                 <td className={`border-r px-2 py-1.5 align-middle ${article.publicStatus === "published" ? "text-emerald-700" : "text-muted-foreground"}`}>{article.publicStatus === "published" ? "已公开" : "未公开"}</td>
                                 <td className={`border-r px-2 py-1.5 align-middle ${article.pushStatus === "success" ? "text-emerald-700" : article.pushStatus === "failure" ? "text-red-700" : article.pushStatus === "partial" ? "text-amber-700" : "text-muted-foreground"}`}>{articlePushStatusLabel(article.pushStatus)}</td>
@@ -1242,21 +1271,10 @@ export default function IntelligenceInbox({
                           <span className="ml-auto shrink-0 text-xs text-muted-foreground">{brandCandidates.length} 篇</span>
                         </div>
                         <div className="min-w-0 max-w-full max-h-[240px] overflow-x-auto overflow-y-auto overscroll-contain border">
-                          <table className="w-max min-w-[760px] table-auto border-collapse text-xs">
-                            <thead className="sticky top-0 z-[1] bg-muted/60 text-muted-foreground">
-                              <tr>
-                                <th className="whitespace-nowrap border-b border-r bg-muted px-2 py-1 text-left font-medium">发布时间</th>
-                                <th className="border-b border-r px-1 py-1 text-center font-medium">总分</th>
-                                <th className="min-w-[260px] border-b border-r px-2 py-1 text-left font-medium">标题</th>
-                                <th className="border-b border-r px-2 py-1 text-left font-medium">匹配品牌</th>
-                                <th className="border-b border-r px-2 py-1 text-left font-medium">文章品牌</th>
-                                <th className="border-b border-r px-2 py-1 text-left font-medium">来源</th>
-                                <th className="border-b border-r px-2 py-1 text-left font-medium">状态</th>
-                                <th className="border-b bg-muted px-2 py-1 text-left font-medium">操作</th>
-                              </tr>
-                            </thead>
+                          <table className={EVENT_TABLE_CLASS}>
+                            <EventComparisonTableHeader sourceWidth={eventSourceColumnWidth} />
                             <tbody>
-                              {brandCandidates.map((candidate) => {
+                              {brandCandidates.map((candidate, index) => {
                                 const sourceStatus = candidate.source.deleted
                                   ? "已删除"
                                   : candidate.source.publicEnabled
@@ -1265,18 +1283,26 @@ export default function IntelligenceInbox({
                                 const articleBrands = candidate.brand
                                   ? splitBrands(candidate.brand).join(" / ")
                                   : "—";
+                                const matchedBrands = candidate.matchedBrands.join(" / ") || "—";
+                                const brandLabel = matchedBrands === "—" || matchedBrands === articleBrands
+                                  ? articleBrands
+                                  : `${articleBrands} · 匹配 ${matchedBrands}`;
+                                const stickyRowBackground = "bg-amber-50";
                                 return (
-                                  <tr key={`brand-candidate-${candidate.id}`} className="whitespace-nowrap border-b border-amber-200 bg-amber-50/60 last:border-b-0">
-                                    <td className="border-r px-2 py-1.5 font-mono tabular-nums text-muted-foreground">{timeLabel(candidate.publishedAt || candidate.createdAt)}</td>
-                                    <td className="border-r px-1 py-1.5 text-center font-semibold tabular-nums">{candidate.score}</td>
-                                    <td className="min-w-[260px] border-r px-2 py-1.5">
-                                      <button type="button" onClick={() => selectArticle(candidate.id, "cluster")} className="block max-w-[360px] truncate text-left font-medium text-amber-950 hover:underline" title={candidate.title}>{candidate.title}</button>
-                                    </td>
-                                    <td className="border-r px-2 py-1.5 text-amber-800" title={candidate.matchedBrands.join(" / ")}><div className="max-w-[160px] truncate">{candidate.matchedBrands.join(" / ") || "—"}</div></td>
-                                    <td className="border-r px-2 py-1.5 text-muted-foreground" title={articleBrands}><div className="max-w-[160px] truncate">{articleBrands}</div></td>
-                                    <td className="border-r px-2 py-1.5 text-muted-foreground" title={candidate.source.name}><div className="max-w-[180px] truncate">{candidate.source.name}</div></td>
-                                    <td className="border-r px-2 py-1.5 text-muted-foreground">{candidate.isEventRepresentative ? "其他 Event 代表" : sourceStatus}</td>
-                                    <td className="px-1 py-1.5"><Button size="sm" variant="outline" className="h-6 rounded-none border-amber-400 px-1.5 text-xs text-amber-800 hover:bg-amber-100" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>移入</Button></td>
+                                  <tr key={`brand-candidate-${candidate.id}`} className="group whitespace-nowrap border-b border-amber-200 bg-amber-50/60 last:border-b-0">
+                                    <td className={`sticky left-0 z-[2] w-[52px] border-r px-1 py-1.5 align-middle ${stickyRowBackground}`}><div className="flex items-center justify-center"><span className="tabular-nums text-muted-foreground">{index + 1}</span></div></td>
+                                    <td className="w-[1%] whitespace-nowrap border-r px-2 py-1.5 font-mono tabular-nums align-middle text-muted-foreground">{timeLabel(candidate.publishedAt || candidate.createdAt)}</td>
+                                    <td className="border-r px-1 py-1.5 text-center font-semibold tabular-nums align-middle">{candidate.score}</td>
+                                    <td className={`${EVENT_SOURCE_CELL_CLASS} ${stickyRowBackground}`} title={candidate.source.name}><div className="max-w-[72px] truncate text-muted-foreground">{candidate.source.name}</div></td>
+                                    <td style={{ left: 52 + eventSourceColumnWidth }} className={`${EVENT_TITLE_CELL_CLASS} ${stickyRowBackground}`}><button type="button" onClick={() => selectArticle(candidate.id, "cluster")} className="block max-w-[240px] truncate text-left font-medium text-amber-950 hover:underline" title={candidate.title}>{candidate.title}</button></td>
+                                    <td className="border-r px-1 py-1.5 text-center align-middle">{candidate.isEventRepresentative ? <span className="bg-foreground px-1.5 py-0.5 text-background">其他 Event 代表</span> : "—"}</td>
+                                    <td className="border-r px-2 py-1.5 align-middle text-muted-foreground" title={`文章品牌：${articleBrands}；匹配品牌：${matchedBrands}`}><div className="max-w-[160px] truncate">{brandLabel}</div></td>
+                                    <td className="border-r px-2 py-1.5 font-mono align-middle text-muted-foreground" title={candidate.eventKey || "未生成"}><div className="max-w-[260px] truncate">{candidate.eventKey || "—"}</div></td>
+                                    <td className={`border-r px-1 py-1.5 text-center align-middle ${candidate.reviewStatus === "unreviewed" ? "text-red-700" : "text-muted-foreground"}`}>{reviewLabel(candidate.reviewStatus)}</td>
+                                    <td className={`border-r px-2 py-1.5 align-middle ${candidate.source.deleted ? "text-red-700" : candidate.source.publicEnabled ? "text-emerald-700" : "text-muted-foreground"}`}>{sourceStatus}</td>
+                                    <td className={`border-r px-2 py-1.5 align-middle ${candidate.publicStatus === "published" ? "text-emerald-700" : "text-muted-foreground"}`}>{candidate.publicStatus === "published" ? "已公开" : "未公开"}</td>
+                                    <td className={`border-r px-2 py-1.5 align-middle ${candidate.eventPushedAt ? "text-emerald-700" : "text-muted-foreground"}`}>{candidate.eventPushedAt ? "已推送" : "未推送"}</td>
+                                    <td className={`sticky right-0 z-[2] px-1 py-1 align-middle ${stickyRowBackground}`}><div className="flex items-center whitespace-nowrap"><Button size="sm" variant="outline" className="h-6 rounded-none border-amber-400 px-1.5 text-xs text-amber-800 hover:bg-amber-100" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>移入</Button></div></td>
                                   </tr>
                                 );
                               })}
