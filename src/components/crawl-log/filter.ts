@@ -75,6 +75,10 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
       return article.isPublic
     case 'ignored':
       return bucket === 'ignored'
+    case 'review-passed':
+      return article.reviewStatus === 'important' || article.reviewStatus === 'general'
+    case 'review-ignored':
+      return article.reviewStatus === 'irrelevant'
     default:
       return bucket === key
   }
