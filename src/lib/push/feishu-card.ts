@@ -7,12 +7,12 @@
  * 设计要点：
  *   - 单个 lark_md 块承载元信息 + 要点 + 洞察，避免多 div/hr 撑高卡片
  *   - header template 复用 getScoreStyle 的六色段位 + urgent 时升 red
- *   - 时间紧凑格式 MM-DD HH:mm（中文环境）
+ *   - 时间显示为距今整天
  *   - 近期关联动态块（实际时间窗口 30 天）后置，title 截 50 字 + … 控制高度
  *   - 标题后缀 [软文] 仅 isAd=true 时附加（与 aiStatus='done' 契约一致）
  */
 import { parseJsonArray, splitBrands } from '@/lib/shared/article-codecs';
-import { formatRelativeTime } from '@/lib/shared/date';
+import { formatDaysAgo } from '@/lib/shared/date';
 import { getScoreStyle } from '@/lib/shared/score-style';
 
 export type PushUrgency = 'urgent' | 'normal';
@@ -131,7 +131,7 @@ export function buildFeishuCard(
     lines.push(`<font color='blue'>**🔗 ${brandName}近期另有${relatedArticles.length}篇**</font>`);
     for (const r of relatedArticles) {
       const relatedDate = r.publishedAt ?? r.createdAt;
-      const rTime = formatRelativeTime(relatedDate instanceof Date ? relatedDate.toISOString() : relatedDate);
+      const rTime = formatDaysAgo(relatedDate instanceof Date ? relatedDate.toISOString() : relatedDate);
       const rTitle = r.title.length > 50 ? r.title.slice(0, 50) + '…' : r.title;
       lines.push(`▪ <font color='grey'>${rTime}</font> ${rTitle}`);
     }

@@ -17,8 +17,21 @@ vi.mock('@/lib/db', () => ({
 import { getRelatedArticles } from '@/lib/article-related-service';
 
 const now = new Date();
-const currentArticle = {
+type TestArticle = {
+  id: string;
+  eventId: string;
+  brand: string;
+  title: string;
+  summary: string;
+  score: number;
+  createdAt: Date;
+  publishedAt: Date | null;
+  aiStatus: string;
+};
+
+const currentArticle: TestArticle = {
   id: 'article-a',
+  eventId: 'event-a',
   brand: JSON.stringify(['品牌A']),
   title: '品牌A的新动态',
   summary: '',
@@ -27,66 +40,85 @@ const currentArticle = {
   publishedAt: now,
   aiStatus: 'done',
 };
-const relatedArticle = {
+const relatedArticle: TestArticle = {
   id: 'article-b',
-  brand: JSON.stringify(['品牌B']),
-  title: '品牌B的历史文章',
-  summary: '本文回顾了品牌A的市场变化。',
+  eventId: 'event-b',
+  brand: JSON.stringify(['品牌A']),
+  title: '品牌A的历史文章',
+  summary: '',
   score: 70,
   createdAt: new Date(now.getTime() - 1_000),
   publishedAt: new Date(now.getTime() - 1_000),
   aiStatus: 'done',
 };
 
+function candidate(article: TestArticle, relation: 'same_event' | 'same_brand') {
+  const event = { id: article.eventId, firstSeenAt: article.createdAt };
+  return {
+    ...article,
+    url: `https://example.com/${article.id}`,
+    source: { name: '测试源', type: 'html' },
+    event: relation === 'same_event' ? event : null,
+    representedEvent: relation === 'same_brand' ? event : null,
+  };
+}
+
 describe('getRelatedArticles', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.articleFindUnique.mockImplementation(({ where }: { where: { id: string } }) =>
       Promise.resolve(where.id === currentArticle.id ? currentArticle : relatedArticle));
-    mocks.articleFindMany.mockImplementation(({ where }: {
-      where: {
-        id: { not: string };
-        AND?: Array<{ OR?: Array<{ brand?: { contains?: string; not?: string }; title?: { contains: string }; summary?: { contains: string } }> }>;
-      };
-    }) => {
-      const hasBroadBrandMatch = where.AND?.[0]?.OR?.some((condition) => condition.brand?.not === '') ?? false;
-      return Promise.resolve(
-        where.id.not === currentArticle.id
-          ? [relatedArticle]
-          : hasBroadBrandMatch
-            ? [currentArticle]
-            : [],
-      );
-    });
-  });
-
-  it('同一组相关动态必须能从新文章和历史文章双向看到', async () => {
-    const fromNewArticle = await getRelatedArticles(currentArticle.id, 5);
-    const fromHistoryArticle = await getRelatedArticles(relatedArticle.id, 5);
-
-    expect(fromNewArticle?.map(({ id }) => id)).toEqual([relatedArticle.id]);
-    expect(fromHistoryArticle?.map(({ id }) => id)).toEqual([currentArticle.id]);
-  });
-
-  it('历史文章没有品牌字段时，仍能通过其摘要中的品牌反向看到新文章', async () => {
-    const unbrandedHistory = {
-      ...relatedArticle,
-      id: 'article-b-without-brand',
-      brand: '[]',
-    };
-    mocks.articleFindUnique.mockImplementation(({ where }: { where: { id: string } }) =>
-      Promise.resolve(where.id === currentArticle.id ? currentArticle : unbrandedHistory));
     mocks.articleFindMany.mockImplementation(({ where }: { where: { id: { not: string } } }) =>
-      Promise.resolve(where.id.not === currentArticle.id ? [unbrandedHistory] : [currentArticle]));
-
-    const fromNewArticle = await getRelatedArticles(currentArticle.id, 5);
-    const fromHistoryArticle = await getRelatedArticles(unbrandedHistory.id, 5);
-
-    expect(fromNewArticle?.map(({ id }) => id)).toEqual([unbrandedHistory.id]);
-    expect(fromHistoryArticle?.map(({ id }) => id)).toEqual([currentArticle.id]);
+      Promise.resolve(where.id.not === currentArticle.id
+        ? [candidate(relatedArticle, 'same_brand')]
+        : [candidate(currentArticle, 'same_brand')]));
   });
 
-  it('发布时间为空的新入库文章按创建时间参与排序，不能在 take 前被截掉', async () => {
+  it('同一品牌的文章可以双向看到', async () => {
+    const fromCurrent = await getRelatedArticles(currentArticle.id, 5);
+    const fromRelated = await getRelatedArticles(relatedArticle.id, 5);
+
+    expect(fromCurrent?.map(({ id }) => id)).toEqual([relatedArticle.eventId]);
+    expect(fromRelated?.map(({ id }) => id)).toEqual([currentArticle.eventId]);
+  });
+
+  it('不同品牌不会仅因标题或摘要提到当前品牌而命中', async () => {
+    const unrelated = {
+      ...relatedArticle,
+      brand: JSON.stringify(['品牌B']),
+      title: '品牌A相关报道',
+      id: 'article-unrelated',
+    };
+    mocks.articleFindUnique.mockResolvedValue(currentArticle);
+    mocks.articleFindMany.mockResolvedValue([candidate(unrelated, 'same_brand')]);
+
+    await expect(getRelatedArticles(currentArticle.id, 5)).resolves.toEqual([]);
+  });
+
+  it('同事件文章与同品牌文章合并后按时间倒序返回', async () => {
+    const sameEventArticle = {
+      ...relatedArticle,
+      id: 'article-event',
+      eventId: currentArticle.eventId,
+      brand: JSON.stringify(['品牌B']),
+      createdAt: new Date(now.getTime() - 500),
+      publishedAt: null,
+    };
+    mocks.articleFindUnique.mockResolvedValue(currentArticle);
+    mocks.articleFindMany.mockResolvedValue([
+      candidate(sameEventArticle, 'same_event'),
+      candidate(relatedArticle, 'same_brand'),
+    ]);
+
+    const related = await getRelatedArticles(currentArticle.id);
+
+    expect(related?.map(({ id, relation }) => `${relation}:${id}`)).toEqual([
+      `same_event:${sameEventArticle.id}`,
+      `same_brand:${relatedArticle.eventId}`,
+    ]);
+  });
+
+  it('发布时间为空的新入库文章按创建时间参与排序，不能被窗口过滤', async () => {
     const recentIngestedArticle = {
       ...relatedArticle,
       id: 'article-recent',
@@ -94,39 +126,33 @@ describe('getRelatedArticles', () => {
       createdAt: now,
       publishedAt: null,
     };
-    const olderArticles = Array.from({ length: 5 }, (_, index) => ({
-      ...relatedArticle,
-      id: `article-old-${index}`,
-      brand: JSON.stringify(['品牌A']),
-      createdAt: new Date(now.getTime() - (index + 2) * 1_000),
-      publishedAt: new Date(now.getTime() - (index + 2) * 1_000),
-    }));
     mocks.articleFindUnique.mockResolvedValue(currentArticle);
-    mocks.articleFindMany.mockResolvedValue([...olderArticles, recentIngestedArticle]);
+    mocks.articleFindMany.mockResolvedValue([candidate(recentIngestedArticle, 'same_brand')]);
 
     const related = await getRelatedArticles(currentArticle.id, 5);
 
-    expect(related?.map(({ id }) => id)).toEqual([
-      recentIngestedArticle.id,
-      ...olderArticles.slice(0, 4).map(({ id }) => id),
-    ]);
+    expect(related?.map(({ id }) => id)).toEqual([recentIngestedArticle.eventId]);
   });
 
-  it('推送场景按 Event 的推送状态筛选关联文章', async () => {
-    mocks.articleFindUnique.mockResolvedValue(currentArticle);
-    mocks.articleFindMany.mockResolvedValue([relatedArticle]);
-
+  it('推送场景按已推送 Event 筛选关联文章', async () => {
     await getRelatedArticles(currentArticle.id, 3, { onlyPushed: true });
 
     expect(mocks.articleFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        aiStatus: 'done',
-        representedEvent: {
-          is: {
-            status: 'active',
-            pushedAt: { not: null },
-          },
-        },
+        AND: expect.arrayContaining([
+          expect.objectContaining({
+            OR: expect.arrayContaining([
+              expect.objectContaining({
+                representedEvent: {
+                  is: expect.objectContaining({
+                    status: 'active',
+                    pushedAt: { not: null },
+                  }),
+                },
+              }),
+            ]),
+          }),
+        ]),
       }),
     }));
   });

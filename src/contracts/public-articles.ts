@@ -26,12 +26,17 @@ export interface PublicArticleListItemDto {
   source: PublicArticleSourceDto;
 }
 
-export interface PublicArticleRelatedDto {
+export type PublicArticleRecentRelation = 'same_event' | 'same_brand';
+
+export interface PublicArticleRecentDto {
   id: string;
+  eventId: string;
   title: string;
   score: number;
   publishedAt: string | null;
   createdAt: string;
+  url: string;
+  relation: PublicArticleRecentRelation;
   source: Pick<PublicArticleSourceDto, 'name' | 'type'>;
 }
 
@@ -44,15 +49,7 @@ export interface PublicArticleDetailDto extends PublicArticleListItemDto {
   url: string;
   summary: string;
   keyPoints: string[];
-  sources: Array<{
-    id: string;
-    title: string;
-    url: string;
-    publishedAt: string | null;
-    createdAt: string;
-    source: Pick<PublicArticleSourceDto, 'name' | 'type'>;
-  }>;
-  related: PublicArticleRelatedDto[];
+  recentArticles: PublicArticleRecentDto[];
   navigation: {
     previous: PublicArticleNavigationItemDto | null;
     next: PublicArticleNavigationItemDto | null;
