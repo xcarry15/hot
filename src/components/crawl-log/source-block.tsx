@@ -117,11 +117,13 @@ export const SourceBlock = memo(function SourceBlock({
     <div className="rounded-lg border border-border overflow-hidden bg-card">
       <button
         onClick={onToggle}
-        className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-sm border-b ${statusBg} hover:opacity-80 transition-opacity`}
+        className={`w-full flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2 py-1.5 text-left text-sm border-b ${statusBg} hover:opacity-80 transition-opacity sm:flex-nowrap`}
       >
-        {statusIcon}
-        <span className="font-semibold truncate">{source.name}</span>
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div className="flex min-w-0 basis-full items-center gap-1.5 sm:basis-auto sm:flex-1">
+          {statusIcon}
+          <span className="min-w-0 truncate font-semibold">{source.name}</span>
+        </div>
+        <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-2 gap-y-0.5 pl-5 sm:basis-auto sm:flex-1 sm:pl-0">
           <Badge
             variant="secondary"
             className={`text-[10px] px-1.5 py-0 rounded-full ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
@@ -141,7 +143,7 @@ export const SourceBlock = memo(function SourceBlock({
 
       {source.expanded && articles.length > 0 && (
         <div className="bg-background/50">
-          <div className="overflow-y-auto max-h-[50vh] sm:max-h-none divide-y divide-border/20">
+          <div className="max-h-none divide-y divide-border/20 sm:overflow-y-auto sm:max-h-none">
             {articles.map(article => (
               <ArticleRow
                 key={article.id}
@@ -160,7 +162,7 @@ export const SourceBlock = memo(function SourceBlock({
 
       {source.expanded && (source.discarded?.length ?? 0) > 0 && (
         <div className="border-t border-dashed bg-muted/20 px-2 py-1">
-          <div className="overflow-y-auto max-h-[50vh] sm:max-h-none">
+          <div className="max-h-none sm:overflow-y-auto sm:max-h-none">
               {discardedGroups.map(([reason, items]) => {
                 const groupLabel = DISCARD_REASON_LABELS[reason] || reason
                 const isExpanded = !collapsedDiscardGroups.has(reason)

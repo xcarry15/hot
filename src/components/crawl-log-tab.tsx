@@ -588,7 +588,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   return (
     <div className="flex flex-col h-full">
       {/* ===== Header ===== */}
-      <div className="border-b bg-muted px-3 py-2 sm:px-4 space-y-2">
+      <div className="border-b bg-muted px-2 py-1.5 sm:px-4 sm:py-2 space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-2 shrink-0">
             <Activity className="h-4 w-4 text-primary" />
@@ -672,7 +672,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
                 className="scale-75"
               />
             )}
-            <span className="hidden sm:inline">自动抓取</span>
+            <span>自动抓取</span>
           </label>
 
           <Button
@@ -738,7 +738,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           {/* 顶部状态与人工审核筛选；选择正常/异常后显示具体流水线状态。 */}
           <div className="flex min-w-0 w-full flex-col gap-1">
             <div
-              className="flex min-w-0 items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+              className="flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5 overscroll-contain"
               role="radiogroup"
               aria-label="任务状态分类"
             >
@@ -803,7 +803,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
             </div>
 
             {secondaryFilterChips.length > 0 && (
-              <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-l-2 border-muted-foreground/30 pl-2 [&::-webkit-scrollbar]:hidden" role="radiogroup" aria-label="具体任务状态">
+              <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-l-2 border-muted-foreground/30 pl-2 pb-0.5 overscroll-contain" role="radiogroup" aria-label="具体任务状态">
                 {secondaryFilterChips.map(chip => {
                   const statusKey = chip.key as StepFilterKey
                   const active = filterState.chips.has(statusKey)
@@ -834,7 +834,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
               {activeTaskView.targetLabel && <span className="min-w-0 flex-1 truncate text-muted-foreground" title={activeTaskView.targetLabel}>{activeTaskView.targetLabel}</span>}
               {activeTaskView.currentPosition > 0 && <span className="shrink-0 tabular-nums text-muted-foreground">阶段 {activeTaskView.currentPosition}/{activeTaskView.stages.length}</span>}
             </div>
-            <div className="flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden">
+            <div className="flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5 overscroll-contain">
               {activeTaskView.stages.map((stage, index) => (
                 <div key={stage.key} className="flex shrink-0 items-center gap-1">
                   {index > 0 && <span className="h-px w-3 bg-border" />}
@@ -905,8 +905,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       </div>
 
       {/* ===== Source List ===== */}
-      <ScrollArea className="flex-1 min-h-0 h-full" ref={scrollRef}>
-        <div className="p-2 sm:p-3 space-y-1.5">
+      <ScrollArea className="flex-1 min-h-0 min-w-0 h-full" ref={scrollRef}>
+        <div className="min-w-0 p-2 sm:p-3 space-y-1.5">
           {filteredSources.map(source => (
             <SourceBlock
               key={source.id}

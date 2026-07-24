@@ -43,15 +43,15 @@ export function DiscardedRow({
   }
 
   return (
-    <div className="group h-[22px] border-l-2 border-l-transparent text-[12px] leading-[22px] text-muted-foreground py-0 transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)]">
-      <div className="flex items-center gap-1">
+    <div className="group min-w-0 border-l-2 border-l-transparent px-2 py-1 text-[12px] leading-5 text-muted-foreground transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)]">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5">
         {pubDate && (
           <span className="text-xs text-muted-foreground/70 shrink-0 tabular-nums font-mono">
             {pubDate}
           </span>
         )}
         <button
-          className="flex-1 min-w-0 truncate text-left text-muted-foreground group-hover:text-foreground"
+          className="min-w-0 flex-1 line-clamp-2 text-left leading-4 text-muted-foreground group-hover:text-foreground sm:truncate sm:leading-5"
           title={item.title}
           onClick={() => onOpen?.(item.id)}
         >

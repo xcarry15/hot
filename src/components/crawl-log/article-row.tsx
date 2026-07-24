@@ -84,34 +84,35 @@ export const ArticleRow = memo(function ArticleRow({
   const isUnknownPushResult = article.technicalErrorReasons.push?.includes('投递结果未知') ?? false
 
   return (
-    <div className={`group flex min-h-6 items-center gap-1 border-l-2 border-l-transparent px-2 py-0.5 text-[12px] leading-5 overflow-hidden whitespace-nowrap transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)] ${
+    <div className={`group flex min-w-0 flex-col gap-0.5 border-l-2 border-l-transparent px-2 py-1 text-[12px] leading-5 transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)] sm:min-h-6 sm:flex-row sm:items-center sm:gap-1 sm:overflow-hidden sm:whitespace-nowrap ${
       isSkipped || article.technicalState === 'ignored' ? 'opacity-50' : ''
     }`}>
-      {pubDate && (
-        <span
-          className="text-[11px] text-muted-foreground/70 shrink-0 tabular-nums font-mono"
-          title={article.publishedAt || ''}
-        >
-          {pubDate}
-        </span>
-      )}
-      {(article.ai === 'done' || businessAiSkipped) && article.score != null && (
-        <span aria-label={`评分 ${article.score} 分`} title={`AI 分析完成${businessAiSkipped ? `，${businessAiSkipLabel}` : ''}，最终评分 ${article.score} 分`}>
-          <ScoreBadge score={article.score} variant="compact-square" />
-        </span>
-      )}
-      <div className="flex min-w-0 flex-1 items-center gap-1">
-        <button
-          type="button"
-          className="min-w-0 flex-1 truncate text-muted-foreground group-hover:text-foreground text-left"
-          title={article.title}
-          onClick={handleOpen}
-          onMouseEnter={handlePrefetch}
-          onMouseLeave={() => cancelArticleDetailPrefetch(article.id)}
-          onFocus={handlePrefetch}
-        >
-          {article.title}
-        </button>
+      <div className="flex min-w-0 items-center gap-1 sm:contents">
+        {pubDate && (
+          <span
+            className="text-[11px] text-muted-foreground/70 shrink-0 tabular-nums font-mono"
+            title={article.publishedAt || ''}
+          >
+            {pubDate}
+          </span>
+        )}
+        {(article.ai === 'done' || businessAiSkipped) && article.score != null && (
+          <span aria-label={`评分 ${article.score} 分`} title={`AI 分析完成${businessAiSkipped ? `，${businessAiSkipLabel}` : ''}，最终评分 ${article.score} 分`}>
+            <ScoreBadge score={article.score} variant="compact-square" />
+          </span>
+        )}
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          <button
+            type="button"
+            className="min-w-0 flex-1 line-clamp-2 text-left leading-4 text-muted-foreground group-hover:text-foreground sm:truncate sm:leading-5"
+            title={article.title}
+            onClick={handleOpen}
+            onMouseEnter={handlePrefetch}
+            onMouseLeave={() => cancelArticleDetailPrefetch(article.id)}
+            onFocus={handlePrefetch}
+          >
+            {article.title}
+          </button>
         {article.anomalyLabels?.includes('ad') && (
           <span className="shrink-0 bg-slate-500 px-1 text-[11px] font-medium leading-5 text-white" title="业务识别：AI 判定为广告或软文">软文</span>
         )}
@@ -162,52 +163,54 @@ export const ArticleRow = memo(function ArticleRow({
         {(isSkipped || article.ai === 'skipped') && article.skipReason && (
           <SkipBadge reason={article.skipReason} />
         )}
+        </div>
       </div>
-      <div className="flex items-center gap-0.5 shrink-0 group-hover:ring-1 group-hover:ring-blue-300 group-hover:ring-offset-1">
-        <StepIndicator label="采集" status={article.crawl} />
-        <StepIndicator
-          label="处理"
-          status={processLoading ? 'running' : article.process}
-          onClick={actionFor('process')}
-          forceLabel={nextAction?.step === 'process' ? (retryWaiting ? '等待' : '重试') : undefined}
-          title={retryWaiting && article.processRetryAt ? `处理将在 ${new Date(article.processRetryAt).toLocaleString('zh-CN')} 自动重试` : article.technicalErrorReasons.process || (article.process === 'failed' ? '点击重试处理' : undefined)}
-        />
-        <StepIndicator
-          label="AI分析"
-          status={aiLoading ? 'running' : businessAiSkipped ? 'done' : article.ai}
-          onClick={actionFor('ai')}
-          forceLabel={nextAction?.step === 'ai' ? (retryWaiting ? '等待' : '重试') : undefined}
-          title={businessAiSkipped
-            ? `AI 分析已完成，但文章${article.skipReason === '无具体事件' ? '没有具体事件' : '属于多事件聚合稿'}`
-            : article.technicalErrorReasons.ai || (article.ai === 'failed' ? '点击重试 AI 分析' : article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined)}
-        />
-        <StepIndicator
-          label="聚类"
-          status={clusterLoading ? 'running' : article.cluster}
-          onClick={actionFor('cluster')}
-          forceLabel={nextAction?.step === 'cluster' ? (retryWaiting ? '等待' : '重试') : undefined}
-          title={article.clusterStatus === 'needs_review'
-            ? '聚类结果存在歧义，点击打开文章工作台复核'
-            : article.technicalErrorReasons.cluster || (article.cluster === 'failed'
-              ? '点击重试聚类'
-              : article.clusterRetryAt
-                ? `聚类将于 ${new Date(article.clusterRetryAt).toLocaleString('zh-CN')} 后自动重试`
-                : undefined)}
-        />
-        <StepIndicator
-          label="公开"
-          status={article.isPublic ? 'done' : 'not_applicable'}
-          title={article.isPublic ? '当前 Event 代表文章已在公开端展示' : '当前文章未在公开端展示'}
-        />
-        <StepIndicator
-          label="推送"
-          status={pushLoading ? 'running' : article.push}
-          onClick={actionFor('push')}
-          forceLabel={nextAction?.step === 'push' && !pushResultUnknown ? (retryWaiting ? '等待' : '重试') : undefined}
-          title={retryWaiting && article.pushRetryAt ? `推送将在 ${new Date(article.pushRetryAt).toLocaleString('zh-CN')} 自动重试` : article.technicalErrorReasons.push || (article.push === 'failed' ? '点击重试投递' : undefined)}
-        />
-      </div>
-      <span className="text-[11px] text-muted-foreground/50 shrink-0 tabular-nums w-14 text-right" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
+      <div className="flex min-w-0 items-center gap-1 sm:contents">
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto pb-0.5 group-hover:ring-1 group-hover:ring-blue-300 group-hover:ring-offset-1 [&>*]:shrink-0 sm:flex-none sm:overflow-visible sm:pb-0">
+          <StepIndicator label="采集" status={article.crawl} />
+          <StepIndicator
+            label="处理"
+            status={processLoading ? 'running' : article.process}
+            onClick={actionFor('process')}
+            forceLabel={nextAction?.step === 'process' ? (retryWaiting ? '等待' : '重试') : undefined}
+            title={retryWaiting && article.processRetryAt ? `处理将在 ${new Date(article.processRetryAt).toLocaleString('zh-CN')} 自动重试` : article.technicalErrorReasons.process || (article.process === 'failed' ? '点击重试处理' : undefined)}
+          />
+          <StepIndicator
+            label="AI分析"
+            status={aiLoading ? 'running' : businessAiSkipped ? 'done' : article.ai}
+            onClick={actionFor('ai')}
+            forceLabel={nextAction?.step === 'ai' ? (retryWaiting ? '等待' : '重试') : undefined}
+            title={businessAiSkipped
+              ? `AI 分析已完成，但文章${article.skipReason === '无具体事件' ? '没有具体事件' : '属于多事件聚合稿'}`
+              : article.technicalErrorReasons.ai || (article.ai === 'failed' ? '点击重试 AI 分析' : article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined)}
+          />
+          <StepIndicator
+            label="聚类"
+            status={clusterLoading ? 'running' : article.cluster}
+            onClick={actionFor('cluster')}
+            forceLabel={nextAction?.step === 'cluster' ? (retryWaiting ? '等待' : '重试') : undefined}
+            title={article.clusterStatus === 'needs_review'
+              ? '聚类结果存在歧义，点击打开文章工作台复核'
+              : article.technicalErrorReasons.cluster || (article.cluster === 'failed'
+                ? '点击重试聚类'
+                : article.clusterRetryAt
+                  ? `聚类将于 ${new Date(article.clusterRetryAt).toLocaleString('zh-CN')} 后自动重试`
+                  : undefined)}
+          />
+          <StepIndicator
+            label="公开"
+            status={article.isPublic ? 'done' : 'not_applicable'}
+            title={article.isPublic ? '当前 Event 代表文章已在公开端展示' : '当前文章未在公开端展示'}
+          />
+          <StepIndicator
+            label="推送"
+            status={pushLoading ? 'running' : article.push}
+            onClick={actionFor('push')}
+            forceLabel={nextAction?.step === 'push' && !pushResultUnknown ? (retryWaiting ? '等待' : '重试') : undefined}
+            title={retryWaiting && article.pushRetryAt ? `推送将在 ${new Date(article.pushRetryAt).toLocaleString('zh-CN')} 自动重试` : article.technicalErrorReasons.push || (article.push === 'failed' ? '点击重试投递' : undefined)}
+          />
+        </div>
+        <span className="ml-auto w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground/50" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
         {article.lastTime ? (() => {
           const d = new Date(article.lastTime)
           const now = new Date()
@@ -215,7 +218,8 @@ export const ArticleRow = memo(function ArticleRow({
           const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
           return isToday ? time : `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${time}`
         })() : ''}
-      </span>
+        </span>
+      </div>
     </div>
   )
 })

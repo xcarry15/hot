@@ -1,6 +1,6 @@
 "use client";
 
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   Eye,
@@ -1103,16 +1103,30 @@ export default function IntelligenceInbox({
       </div>
     </div>
   ) : detail ? (
-    <ScrollArea className="h-full overscroll-contain">
+    <ScrollArea className="h-full w-full min-w-0 overscroll-contain">
       <div className="mx-auto w-full min-w-0 max-w-[960px] space-y-1 p-1 sm:p-1.5">
         <header className="min-w-0 overflow-hidden border bg-background">
           <div>
-            <div className="min-w-0 p-2.5 pr-10">
+            <div className="min-w-0 p-2.5 pr-12 sm:pr-10">
               <div className="mt-1 flex flex-col gap-1">
                 <div className="flex items-start justify-between gap-4">
                   <h1 className="min-w-0 flex-1 line-clamp-2 text-base font-semibold leading-5 text-balance sm:text-lg sm:leading-6">{detail.title}</h1>
                 </div>
-                {(brands.length > 0 || detail.category || detail.eventKey) && <div className="mt-2 overflow-x-auto border"><table className="min-w-[760px] w-full border-collapse text-xs"><tbody><tr className="border-b"><td className="w-[44px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">时间</td><td className="max-w-[160px] truncate border-r px-1.5 py-1 tabular-nums">{fullTimeLabel(detail.publishedAt ?? detail.createdAt)}</td><td className="w-[44px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">来源</td><td className="max-w-[160px] truncate border-r px-1.5 py-1" title={detail.source.name}>{detail.source.name}{detail.originalSource && detail.originalSource !== detail.source.name ? `（原始：${detail.originalSource}）` : ""}</td><td className="w-[44px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">状态</td><td className="max-w-[190px] truncate border-r px-1.5 py-1" title={`${processingLabel(detail)} · ${clusterLabel(detail)}`}>{processingLabel(detail)} · {clusterLabel(detail)}{isRepresentative ? " · 代表文章" : ""}{manualOverrides.length > 0 ? ` · 人工修正${manualOverrides.length}项` : ""}</td><td className="w-[44px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">品牌</td><td className="max-w-[140px] truncate px-1.5 py-1" title={brands.join("、")}>{brands.join("、") || "—"}</td></tr><tr className="border-b"><td className="w-[44px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">分类</td><td className="max-w-[160px] truncate border-r px-1.5 py-1" title={detail.category}>{detail.category || "—"}</td><td className="w-[78px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">事件键（身份置信）</td><td className="max-w-[190px] truncate border-r px-1.5 py-1 font-mono" title={`${detail.eventKey}${detail.eventKeyConfidence == null ? "" : `（事件身份置信度 ${detail.eventKeyConfidence}%）`}`}>{detail.eventKey || "—"}{detail.eventKeyConfidence == null ? "" : `（${detail.eventKeyConfidence}%）`}</td><td className="w-[44px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">总分</td><td className="border-r px-1.5 py-1 font-semibold tabular-nums">{detail.score}</td><td className="w-[58px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">分析置信度</td><td className="px-1.5 py-1 tabular-nums">{detail.aiConfidence == null ? "—" : `${detail.aiConfidence}%`}</td></tr><tr className="border-b"><td className="w-[44px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">相关度</td><td className="border-r px-1.5 py-1 tabular-nums">{detail.relevance}</td><td className="w-[44px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">事件分</td><td className="border-r px-1.5 py-1 tabular-nums">{detail.eventScore ?? "—"}</td><td className="w-[44px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">内容分</td><td className="border-r px-1.5 py-1 tabular-nums">{detail.contentScore ?? "—"}</td><td className="w-[58px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">广告概率</td><td className="px-1.5 py-1 tabular-nums">{detail.adProbability == null ? "—" : `${detail.adProbability}%`}</td></tr><tr><td className="w-[44px] whitespace-nowrap border-r bg-muted/30 px-1.5 py-1 text-muted-foreground">内容</td><td className="px-1.5 py-1">{detail.isAd ? "软文" : "正常"}</td><td colSpan={6} /></tr></tbody></table></div>}
+                {(brands.length > 0 || detail.category || detail.eventKey) && <div className="mt-2 grid min-w-0 gap-px border bg-border text-xs sm:grid-cols-2 lg:grid-cols-4">
+                  <DetailMetaItem label="时间" value={fullTimeLabel(detail.publishedAt ?? detail.createdAt)} mono />
+                  <DetailMetaItem label="来源" value={`${detail.source.name}${detail.originalSource && detail.originalSource !== detail.source.name ? `（原始：${detail.originalSource}）` : ""}`} />
+                  <DetailMetaItem label="状态" value={`${processingLabel(detail)} · ${clusterLabel(detail)}${isRepresentative ? " · 代表文章" : ""}${manualOverrides.length > 0 ? ` · 人工修正${manualOverrides.length}项` : ""}`} />
+                  <DetailMetaItem label="品牌" value={brands.join("、") || "—"} />
+                  <DetailMetaItem label="分类" value={detail.category || "—"} />
+                  <DetailMetaItem label="事件键" value={`${detail.eventKey || "—"}${detail.eventKeyConfidence == null ? "" : `（${detail.eventKeyConfidence}%）`}`} mono />
+                  <DetailMetaItem label="总分" value={String(detail.score)} mono />
+                  <DetailMetaItem label="分析置信" value={detail.aiConfidence == null ? "—" : `${detail.aiConfidence}%`} mono />
+                  <DetailMetaItem label="相关度" value={String(detail.relevance)} mono />
+                  <DetailMetaItem label="事件分" value={detail.eventScore == null ? "—" : String(detail.eventScore)} mono />
+                  <DetailMetaItem label="内容分" value={detail.contentScore == null ? "—" : String(detail.contentScore)} mono />
+                  <DetailMetaItem label="广告概率" value={detail.adProbability == null ? "—" : `${detail.adProbability}%`} mono />
+                  <DetailMetaItem label="内容" value={detail.isAd ? "软文" : "正常"} />
+                </div>}
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-1 border-t pt-2">
                 <Button size="sm" variant="outline" className={WORKSPACE_ACTION_CLASS} disabled={detailAction !== null} onClick={() => setEditing((value) => !value)}>{editing ? "取消编辑" : "人工编辑"}</Button>
@@ -1184,7 +1198,7 @@ export default function IntelligenceInbox({
                       <div><p className="text-xs font-semibold">事件成员对比</p><p className="text-xs text-muted-foreground">勾选当前成员可批量拆分，至少保留一篇；同品牌文章已移至下方单独查看。</p></div>
                       {selectedSplitIds.size > 0 && <Button size="sm" variant="outline" className="ml-auto h-7 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticles([...selectedSplitIds])}><Split className="h-3 w-3" />拆分所选 {selectedSplitIds.size} 篇</Button>}
                     </div>
-                    <div className="min-w-0 max-w-full max-h-[320px] overflow-x-scroll overflow-y-auto overscroll-contain border">
+                    <div className="min-w-0 max-w-full max-h-none overflow-x-auto overscroll-contain border sm:max-h-[320px] sm:overflow-y-auto">
                       <table className={EVENT_TABLE_CLASS}>
                         <EventComparisonTableHeader sourceHeaderRef={eventSourceHeaderRef} sourceWidth={eventSourceColumnWidth} />
                         <tbody>
@@ -1270,7 +1284,7 @@ export default function IntelligenceInbox({
                           </div>
                           <span className="ml-auto shrink-0 text-xs text-muted-foreground">{brandCandidates.length} 篇</span>
                         </div>
-                        <div className="min-w-0 max-w-full max-h-[240px] overflow-x-auto overflow-y-auto overscroll-contain border">
+                        <div className="min-w-0 max-w-full max-h-none overflow-x-auto overscroll-contain border sm:max-h-[240px] sm:overflow-y-auto">
                           <table className={EVENT_TABLE_CLASS}>
                             <EventComparisonTableHeader sourceWidth={eventSourceColumnWidth} />
                             <tbody>
@@ -1321,7 +1335,7 @@ export default function IntelligenceInbox({
               </section>
             )}
 
-            <section className="bg-background"><SectionHeader title="文章全貌" meta={`Article ${detail.id.slice(-8)}`} /><div className="grid grid-cols-2 divide-x border-b"><div className="p-2"><div className="flex items-center gap-1.5"><Eye className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" /><span className="text-xs text-muted-foreground">公开浏览</span></div><p className="mt-0.5 font-mono text-xs font-semibold tabular-nums">{detail.viewCount.toLocaleString("zh-CN")}</p></div><div className="p-2"><div className="flex items-center gap-1.5"><MousePointerClick className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" /><span className="text-xs text-muted-foreground">原文点击 · {clickRate}%</span></div><p className="mt-0.5 font-mono text-xs font-semibold tabular-nums">{detail.originalClickCount.toLocaleString("zh-CN")}</p></div></div><div className="grid gap-x-3 gap-y-1 p-2.5 text-xs sm:grid-cols-2 lg:grid-cols-3"><MetaRow label="详情处理" value={stageStatusLabel("fetch", detail.fetchStatus)} />{detail.fetchError && <MetaRow label="处理失败原因" value={detail.fetchError} />}<MetaRow label="AI 分析" value={stageStatusLabel("ai", detail.aiStatus, detail.skipReason)} />{detail.aiError && <MetaRow label="AI 失败原因" value={detail.aiError} />}<MetaRow label="事件聚类" value={stageStatusLabel("cluster", detail.clusterStatus)} />{detail.clusterError && <MetaRow label="聚类失败原因" value={detail.clusterError} />}{detail.skipReason && <MetaRow label="跳过原因" value={detail.skipReason} />}{detail.pinUntil && <MetaRow label="置顶截止" value={fullTimeLabel(detail.pinUntil)} />}<MetaRow label="原始评分" value={detail.rawScore == null ? "—" : String(detail.rawScore)} mono /><MetaRow label="创建时间" value={fullTimeLabel(detail.createdAt)} /><MetaRow label="更新时间" value={fullTimeLabel(detail.updatedAt)} /><MetaRow label="发布时间" value={fullTimeLabel(detail.publishedAt)} /><MetaRow label="聚类时间" value={fullTimeLabel(detail.clusteredAt)} /><MetaRow label="人工修正" value={detail.manualCorrectedAt ? fullTimeLabel(detail.manualCorrectedAt) : "无"} /><MetaRow label="来源类型" value={detail.source.type} /><div className="min-w-0 sm:col-span-2 lg:col-span-3"><MetaRow label="文章 ID" value={detail.id} mono /></div><div className="min-w-0 sm:col-span-2 lg:col-span-3"><div className="grid min-w-0 grid-cols-[58px_minmax(0,1fr)] gap-2"><span className="text-muted-foreground">来源主页</span><a className="min-w-0 truncate underline-offset-2 hover:underline" href={detail.source.url} target="_blank" rel="noreferrer" title={detail.source.url}>{detail.source.url}</a></div></div></div>{manualOverrides.length > 0 && <div className="border-t p-2.5"><p className="text-xs font-medium text-muted-foreground">人工覆盖字段</p><div className="mt-1.5 flex flex-wrap gap-1">{manualOverrides.map((field) => <Badge key={field} variant="secondary" className="h-5 rounded-none px-1 text-xs">{manualFieldLabel(field)}</Badge>)}</div></div>}</section>
+            <section className="bg-background"><SectionHeader title="文章全貌" meta={`Article ${detail.id.slice(-8)}`} /><div className="grid grid-cols-1 divide-y border-b sm:grid-cols-2 sm:divide-x sm:divide-y-0"><div className="p-2"><div className="flex items-center gap-1.5"><Eye className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" /><span className="text-xs text-muted-foreground">公开浏览</span></div><p className="mt-0.5 font-mono text-xs font-semibold tabular-nums">{detail.viewCount.toLocaleString("zh-CN")}</p></div><div className="p-2"><div className="flex items-center gap-1.5"><MousePointerClick className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" /><span className="text-xs text-muted-foreground">原文点击 · {clickRate}%</span></div><p className="mt-0.5 font-mono text-xs font-semibold tabular-nums">{detail.originalClickCount.toLocaleString("zh-CN")}</p></div></div><div className="grid gap-x-3 gap-y-1 p-2.5 text-xs sm:grid-cols-2 lg:grid-cols-3"><MetaRow label="详情处理" value={stageStatusLabel("fetch", detail.fetchStatus)} />{detail.fetchError && <MetaRow label="处理失败原因" value={detail.fetchError} />}<MetaRow label="AI 分析" value={stageStatusLabel("ai", detail.aiStatus, detail.skipReason)} />{detail.aiError && <MetaRow label="AI 失败原因" value={detail.aiError} />}<MetaRow label="事件聚类" value={stageStatusLabel("cluster", detail.clusterStatus)} />{detail.clusterError && <MetaRow label="聚类失败原因" value={detail.clusterError} />}{detail.skipReason && <MetaRow label="跳过原因" value={detail.skipReason} />}{detail.pinUntil && <MetaRow label="置顶截止" value={fullTimeLabel(detail.pinUntil)} />}<MetaRow label="原始评分" value={detail.rawScore == null ? "—" : String(detail.rawScore)} mono /><MetaRow label="创建时间" value={fullTimeLabel(detail.createdAt)} /><MetaRow label="更新时间" value={fullTimeLabel(detail.updatedAt)} /><MetaRow label="发布时间" value={fullTimeLabel(detail.publishedAt)} /><MetaRow label="聚类时间" value={fullTimeLabel(detail.clusteredAt)} /><MetaRow label="人工修正" value={detail.manualCorrectedAt ? fullTimeLabel(detail.manualCorrectedAt) : "无"} /><MetaRow label="来源类型" value={detail.source.type} /><div className="min-w-0 sm:col-span-2 lg:col-span-3"><MetaRow label="文章 ID" value={detail.id} mono /></div><div className="min-w-0 sm:col-span-2 lg:col-span-3"><div className="grid min-w-0 grid-cols-[58px_minmax(0,1fr)] gap-2"><span className="text-muted-foreground">来源主页</span><a className="min-w-0 break-all underline-offset-2 hover:underline" href={detail.source.url} target="_blank" rel="noreferrer" title={detail.source.url}>{detail.source.url}</a></div></div></div>{manualOverrides.length > 0 && <div className="border-t p-2.5"><p className="text-xs font-medium text-muted-foreground">人工覆盖字段</p><div className="mt-1.5 flex flex-wrap gap-1">{manualOverrides.map((field) => <Badge key={field} variant="secondary" className="h-5 rounded-none px-1 text-xs">{manualFieldLabel(field)}</Badge>)}</div></div>}</section>
           </aside>
 
           <section className="bg-background">
@@ -1337,12 +1351,12 @@ export default function IntelligenceInbox({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full gap-0 p-0 [&>[data-slot=sheet-close]]:z-10 [&>[data-slot=sheet-close]]:rounded-none [&>[data-slot=sheet-close]]:bg-background sm:max-w-[min(987px,65dvw)]">
+      <SheetContent side="right" className="h-[100dvh] w-screen max-w-none min-h-0 gap-0 overflow-hidden p-0 [&>[data-slot=sheet-close]]:z-10 [&>[data-slot=sheet-close]]:rounded-none [&>[data-slot=sheet-close]]:bg-background sm:w-full sm:max-w-[min(987px,65dvw)]">
         <SheetHeader className="sr-only">
           <SheetTitle>文章工作台</SheetTitle>
           <SheetDescription>内容校准、Event 修正、公开与推送</SheetDescription>
         </SheetHeader>
-        <div className="min-h-0 flex-1 bg-muted/10">{detailWorkspace}</div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/10">{detailWorkspace}</div>
       </SheetContent>
     </Sheet>
   );
@@ -1350,9 +1364,28 @@ export default function IntelligenceInbox({
 
 function SectionHeader({ title, meta }: { title: string; meta?: string }) {
   return (
-    <div className="flex min-h-7 items-center gap-2 border-b px-2 py-1">
-      <h2 className="text-xs font-semibold">{title}</h2>
-      {meta && <span className="ml-auto text-xs text-muted-foreground">{meta}</span>}
+    <div className="flex min-h-7 min-w-0 items-center gap-2 border-b px-2 py-1">
+      <h2 className="min-w-0 truncate text-xs font-semibold">{title}</h2>
+      {meta && <span className="ml-auto min-w-0 truncate text-right text-xs text-muted-foreground">{meta}</span>}
+    </div>
+  );
+}
+
+function DetailMetaItem({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0 bg-background px-1.5 py-1">
+      <div className="grid min-w-0 grid-cols-[50px_minmax(0,1fr)] items-start gap-1">
+        <span className="whitespace-nowrap text-muted-foreground">{label}</span>
+        <span className={`min-w-0 break-words ${mono ? "font-mono text-xs tabular-nums break-all" : ""}`}>{value}</span>
+      </div>
     </div>
   );
 }

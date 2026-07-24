@@ -104,7 +104,7 @@ export function StepIndicator({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex h-5 items-center gap-0.5 rounded-none px-1.5 text-[10px] font-medium leading-5
+      className={`inline-flex h-5 shrink-0 items-center gap-0.5 rounded-none px-1.5 text-[10px] font-medium leading-5
         ${pushActionStyle}
         cursor-pointer hover:ring-1 hover:ring-primary/20 hover:brightness-95 active:scale-95 transition-[box-shadow,filter,transform] duration-150
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
@@ -120,7 +120,7 @@ export function StepIndicator({
     </button>
   ) : (
     <span
-      className={`inline-flex h-5 items-center gap-0.5 rounded-none px-1.5 text-[10px] font-medium leading-5
+      className={`inline-flex h-5 shrink-0 items-center gap-0.5 rounded-none px-1.5 text-[10px] font-medium leading-5
         ${pushDisplayStyle}
       `}
       title={title}
