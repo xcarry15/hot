@@ -5,7 +5,7 @@ import {
   keywordsToXlsx, listKeywords,
 } from '@/lib/keyword-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
-import { listKeywordCandidates, listKeywordCandidatesForExport, updateKeywordCandidate } from '@/lib/keyword-candidate-service';
+import { deleteKeywordCandidate, listKeywordCandidates, listKeywordCandidatesForExport, updateKeywordCandidate } from '@/lib/keyword-candidate-service';
 import { runJob } from '@/lib/execution';
 
 // GET /api/keywords - List all keywords
@@ -16,9 +16,8 @@ export async function GET(request: Request) {
     const format = searchParams.get('format');
     if (searchParams.get('candidates') === 'true') return NextResponse.json(await listKeywordCandidates());
 
-    const keywords = await listKeywords();
-
     if (format === 'xlsx') {
+      const keywords = await listKeywords({ includeHitCount: false });
       const candidates = await listKeywordCandidatesForExport();
       const xlsxBuffer = keywordsToXlsx(keywords, candidates);
       const responseBody = new ArrayBuffer(xlsxBuffer.byteLength);
@@ -31,7 +30,7 @@ export async function GET(request: Request) {
       });
     }
 
-    return NextResponse.json(keywords);
+    return NextResponse.json(await listKeywords());
   } catch (error: unknown) {
     return apiError(error, 'Failed to fetch keywords');
   }
@@ -112,12 +111,15 @@ export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
+    const isCandidate = searchParams.get('candidate') === 'true';
 
     if (!id) {
       return NextResponse.json({ error: 'ID is required' }, { status: 400 });
     }
 
-    await runExclusiveMutation('删除关键词', () => deleteKeyword(id));
+    await runExclusiveMutation(isCandidate ? '删除候选关键词' : '删除关键词', () => (
+      isCandidate ? deleteKeywordCandidate(id) : deleteKeyword(id)
+    ));
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
     return apiError(error, 'Failed to delete keyword');

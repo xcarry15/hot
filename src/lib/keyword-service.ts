@@ -9,8 +9,28 @@ import {
 
 const DEFAULT_CATEGORY = 'default';
 
-export async function listKeywords() {
-  return db.keyword.findMany({ orderBy: [{ category: 'asc' }, { word: 'asc' }] });
+async function loadKeywordHitCounts(rows: Array<{ id: string; word: string }>) {
+  if (rows.length === 0) return new Map<string, number>();
+  const hitRows = await db.$queryRaw<Array<{ id: string; hitCount: number | bigint }>>`
+    SELECT k.id AS id, COUNT(a.id) AS hitCount
+    FROM keywords AS k
+    LEFT JOIN articles AS a
+      ON a.keywordMatched = 1
+      AND instr(
+        lower(a.title || ' ' || substr(a.cleanContent, 1, 1000)),
+        lower(k.word)
+      ) > 0
+    WHERE k.word <> ''
+    GROUP BY k.id
+  `;
+  return new Map(hitRows.map(row => [row.id, Number(row.hitCount)]));
+}
+
+export async function listKeywords(options: { includeHitCount?: boolean } = {}) {
+  const rows = await db.keyword.findMany({ orderBy: [{ category: 'asc' }, { word: 'asc' }] });
+  if (options.includeHitCount === false) return rows;
+  const hitCounts = await loadKeywordHitCounts(rows);
+  return rows.map(row => ({ ...row, hitCount: hitCounts.get(row.id) ?? 0 }));
 }
 
 const KEYWORD_SHEET = '关键词';

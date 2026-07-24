@@ -11,6 +11,7 @@ export interface Keyword {
   category: string;
   word: string;
   createdAt?: string;
+  hitCount: number;
   [key: string]: unknown;
 }
 
@@ -26,6 +27,7 @@ export interface KeywordCandidate {
   sampleTitles: string[];
   sourceCount: number;
   recallCount: number;
+  status: 'pending' | 'approved' | 'dismissed';
 }
 
 export async function fetchKeywordCandidates(signal?: AbortSignal): Promise<KeywordCandidate[]> {
@@ -55,6 +57,13 @@ export async function deleteKeyword(
   signal?: AbortSignal,
 ): Promise<unknown> {
   return requestJson('DELETE', `/api/keywords?id=${id}`, { signal });
+}
+
+export async function deleteKeywordCandidate(
+  id: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return requestJson('DELETE', `/api/keywords?id=${id}&candidate=true`, { signal });
 }
 
 export async function bulkClearKeywords(signal?: AbortSignal): Promise<{ deleted: number }> {

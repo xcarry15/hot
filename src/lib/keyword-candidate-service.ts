@@ -96,22 +96,30 @@ export async function listKeywordCandidates() {
     for (const item of discarded) await recordKeywordCandidates(item.title);
   }
   const rows = await db.keywordCandidate.findMany({
-    where: { status: 'pending', occurrences: { gte: 2 } },
+    where: {
+      OR: [
+        { status: 'pending', occurrences: { gte: 2 } },
+        { status: { in: ['approved', 'dismissed'] } },
+      ],
+    },
     orderBy: [{ updatedAt: 'desc' }],
   });
-  return rows.map((row) => {
+  const result = rows.map((row) => {
     const matches = discarded.filter((item) => item.title.toLocaleLowerCase().includes(row.phrase.toLocaleLowerCase()));
     return {
       ...row,
+      status: row.status as KeywordCandidateStatus,
       sampleTitles: [...new Set([...parseSampleTitles(row.sampleTitles), ...matches.slice(0, 5).map((item) => item.title)])].slice(0, 5),
       sourceCount: new Set(matches.map((item) => item.sourceId)).size,
       recallCount: matches.length,
     };
-  }).sort((left, right) => (
-    right.occurrences - left.occurrences
+  });
+  return result.sort((left, right) => (
+    Number(left.status !== 'pending') - Number(right.status !== 'pending')
+    || right.occurrences - left.occurrences
     || right.sourceCount - left.sourceCount
     || right.updatedAt.getTime() - left.updatedAt.getTime()
-  )).slice(0, 100);
+  ));
 }
 
 export async function listKeywordCandidatesForExport(): Promise<KeywordCandidateExportRow[]> {
@@ -187,6 +195,21 @@ export async function updateKeywordCandidate(id: string, action: 'approve' | 'di
     await db.keywordCandidate.update({ where: { id }, data: { status: 'dismissed' } });
   }
   return { id, action, restored: 0, articleIds: [] as string[], restoreLimit: MAX_CANDIDATE_RESTORE };
+}
+
+export async function deleteKeywordCandidate(id: string): Promise<void> {
+  const candidate = await db.keywordCandidate.findUnique({ where: { id } });
+  if (!candidate) return;
+
+  await db.$transaction(async (tx) => {
+    if (candidate.status === 'approved') {
+      await tx.keyword.deleteMany({
+        where: { category: EXTRACTED_KEYWORD_CATEGORY, word: candidate.phrase },
+      });
+    }
+    await tx.keywordCandidate.delete({ where: { id } });
+  });
+  if (candidate.status === 'approved') invalidateKeywordCache();
 }
 
 /** 清空旧候选，并从现有关键词未命中记录重新生成。 */
