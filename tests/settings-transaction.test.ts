@@ -189,4 +189,52 @@ describe('settings PUT 事务化', () => {
     expect(res.status).toBe(400);
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
+
+  it('完整保存时不会用脱敏的 Webhook 空值覆盖已有配置', async () => {
+    const existingWebhook = JSON.stringify([
+      { url: 'https://open.feishu.cn/open-apis/bot/v2/hook/existing', remark: '主群', enabled: true },
+    ]);
+    mocks.settingFindMany.mockResolvedValue([
+      { key: 'feishu_webhook_url', value: existingWebhook },
+    ]);
+
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feishu_webhook_url: '', push_min_score: '60' }),
+    });
+
+    const res = await settingsPUT(req);
+
+    expect(res.status).toBe(200);
+    expect(mocks.settingUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { key: 'feishu_webhook_url' },
+      update: { value: existingWebhook },
+      create: { key: 'feishu_webhook_url', value: existingWebhook },
+    }));
+  });
+
+  it('显式提交空数组时仍允许清空 Webhook 配置', async () => {
+    const existingWebhook = JSON.stringify([
+      { url: 'https://open.feishu.cn/open-apis/bot/v2/hook/existing', remark: '主群', enabled: true },
+    ]);
+    mocks.settingFindMany.mockResolvedValue([
+      { key: 'feishu_webhook_url', value: existingWebhook },
+    ]);
+
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feishu_webhook_url: '[]' }),
+    });
+
+    const res = await settingsPUT(req);
+
+    expect(res.status).toBe(200);
+    expect(mocks.settingUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { key: 'feishu_webhook_url' },
+      update: { value: '[]' },
+      create: { key: 'feishu_webhook_url', value: '[]' },
+    }));
+  });
 });

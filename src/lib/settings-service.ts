@@ -66,15 +66,22 @@ export async function updateSettings(input: unknown): Promise<
   }
   if (validationErrors.length > 0) return { ok: false, error: '设置值校验失败', details: validationErrors };
 
+  // GET /api/settings 会把敏感配置脱敏为 ""。完整保存其他设置时，不能把这个
+  // 占位空值当成用户清空操作；Webhook 的显式清空由客户端提交 "[]" 表示。
+  const preserveRedactedSensitiveKeys = new Set(
+    Object.entries(parsed.data)
+      .filter(([key, value]) => SENSITIVE_SETTING_KEYS.has(key) && value.trim() === '')
+      .map(([key]) => key),
+  );
   let updates = Object.entries(normalizedData) as [string, string][];
   updates = updates.map(([key, value]) => key === SETTING_KEYS.FEISHU_WEBHOOK_URL
     ? [key, serializeWebhookConfigsForServer(parseWebhookConfigs(value))]
     : [key, value]);
-  const keepKeys = updates.filter(([key, value]) => SENSITIVE_SETTING_KEYS.has(key) && value === '').map(([key]) => key);
+  const keepKeys = updates.filter(([key]) => preserveRedactedSensitiveKeys.has(key)).map(([key]) => key);
   if (keepKeys.length > 0) {
     const existing = await db.setting.findMany({ where: { key: { in: keepKeys } } });
     const existingMap = new Map(existing.map((setting) => [setting.key, setting.value]));
-    updates = updates.map(([key, value]) => SENSITIVE_SETTING_KEYS.has(key) && value === '' && existingMap.has(key)
+    updates = updates.map(([key, value]) => preserveRedactedSensitiveKeys.has(key) && existingMap.has(key)
       ? [key, existingMap.get(key)!] : [key, value]);
   }
   const scoreSettingKeys = [

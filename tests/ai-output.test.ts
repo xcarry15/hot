@@ -58,6 +58,28 @@ describe('parseAiAnalysisOutput', () => {
     expect(parsed.key_points).toEqual(['重复']);
   });
 
+  it('保留要点开头的真实数字，只移除明确的列表编号', () => {
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      brand: ['7-Eleven'],
+      key_points: [
+        '6月24日超盒算NB在成都6店同开',
+        '65%销售额来自到店顾客',
+        '1.5万平方米仓储中心投入使用',
+        '1. 门店覆盖核心商圈',
+        '02、首批上线自有品牌',
+      ],
+    }));
+    expect(parsed.brand).toEqual(['7-Eleven']);
+    expect(parsed.key_points).toEqual([
+      '6月24日超盒算NB在成都6店同开',
+      '65%销售额来自到店顾客',
+      '1.5万平方米仓储中心投入使用',
+      '门店覆盖核心商圈',
+      '首批上线自有品牌',
+    ]);
+  });
+
   it('可核验的劳动保障动作不因品牌自述误判为广告', () => {
     const parsed = parseAiAnalysisOutput(JSON.stringify({
       ...validOutput,
