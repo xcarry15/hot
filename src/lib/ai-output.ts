@@ -57,7 +57,14 @@ function decodeJsonArray(value: unknown): unknown {
   }
 }
 
-function normalizeStringArray(value: unknown, maxItems: number): string[] {
+function stripListMarker(value: string): string {
+  return value
+    .trim()
+    .replace(/^(?:[-*•](?=\s|[^\d.])|\d{1,3}(?:[、)．]|\.(?!\d)))\s*/u, '')
+    .trim();
+}
+
+function normalizeStringArray(value: unknown, maxItems: number, stripListMarkers = false): string[] {
   const decoded = decodeJsonArray(value);
   const values = Array.isArray(decoded)
     ? decoded
@@ -66,7 +73,7 @@ function normalizeStringArray(value: unknown, maxItems: number): string[] {
       : [];
   return [...new Set(values
     .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.replace(/^[-*•\d.、)]+\s*/, '').trim())
+    .map((item) => stripListMarkers ? stripListMarker(item) : item.trim())
     .filter(Boolean))]
     .slice(0, maxItems);
 }
@@ -123,7 +130,7 @@ export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
   ].every((keys) => keys.some((key) => key in raw));
   if (!hasCoreScore) throw new Error('LLM 响应缺少核心评分字段');
 
-  const keyPoints = normalizeStringArray(raw.key_points ?? raw.keyPoints, 5);
+  const keyPoints = normalizeStringArray(raw.key_points ?? raw.keyPoints, 5, true);
   const summary = readText(raw.summary ?? raw.insight ?? raw.overview)
     .replace(/\s+/g, ' ')
     .slice(0, 600)

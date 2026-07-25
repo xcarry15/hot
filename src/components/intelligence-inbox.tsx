@@ -508,9 +508,8 @@ export default function IntelligenceInbox({
   useEffect(() => {
     if (!detail || detail.id !== selectedId || !requestedPanel) return;
     if (requestedPanel === "content") setShowFullContent(true);
-    const target = requestedPanel === "cluster" ? clusterPanelRef.current : contentPanelRef.current;
-    requestAnimationFrame(() => target?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }, [detail, eventDetail, requestedPanel, selectedId]);
+    // 面板入口只控制展开状态，不改变抽屉当前滚动位置；所有文章详情统一从顶部开始。
+  }, [detail, requestedPanel, selectedId]);
 
   const loadEventDetail = useCallback(
     async (eventId: string | null | undefined, signal?: AbortSignal) => {

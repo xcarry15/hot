@@ -128,27 +128,49 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   }, [])
 
   const revealSensitiveSettingsForEditor = useCallback(async (tab: 'ai-model' | 'push') => {
+    const capturedSettings = settings
+    const capturedProviders = providerConfigs
     try {
       const revealKeys = tab === 'push'
         ? [SETTING_KEYS.FEISHU_WEBHOOK_URL]
         : (Object.keys(AI_PROVIDERS) as AIProviderId[]).map((id) => providerKey(id, 'api_key'))
       const revealed = await revealSettings(revealKeys)
+      const revealedWebhook = typeof revealed.feishu_webhook_url === 'string'
+        ? revealed.feishu_webhook_url
+        : undefined
       const nextSettings = {
-        ...settings,
-        ...(typeof revealed.feishu_webhook_url === 'string'
-          ? { feishu_webhook_url: revealed.feishu_webhook_url }
-          : {}),
+        ...capturedSettings,
+        ...(revealedWebhook === undefined ? {} : { feishu_webhook_url: revealedWebhook }),
       }
       const nextProviders = Object.fromEntries(
         (Object.keys(AI_PROVIDERS) as AIProviderId[]).map((id) => {
-          const cfg = providerConfigs[id]
+          const cfg = capturedProviders[id]
           const value = revealed[providerKey(id, 'api_key')]
           return [id, { ...cfg, apiKey: typeof value === 'string' ? value : cfg.apiKey }]
         }),
       ) as ProviderConfigs
       pendingRevealBaselineRef.current = settingsFingerprint(nextSettings, nextProviders)
-      setSettings(nextSettings)
-      setProviderConfigs(nextProviders)
+      // 回显请求可能晚于用户输入完成；只回填请求开始时仍未被修改的字段。
+      setSettings((current) => (
+        revealedWebhook !== undefined && current.feishu_webhook_url === capturedSettings.feishu_webhook_url
+          ? { ...current, feishu_webhook_url: revealedWebhook }
+          : current
+      ))
+      setProviderConfigs((current) => {
+        const next = { ...current }
+        for (const id of Object.keys(AI_PROVIDERS) as AIProviderId[]) {
+          const currentConfig = current[id]
+          const capturedConfig = capturedProviders[id]
+          const value = revealed[providerKey(id, 'api_key')]
+          if (
+            typeof value === 'string'
+            && currentConfig.apiKey === capturedConfig.apiKey
+          ) {
+            next[id] = { ...currentConfig, apiKey: value }
+          }
+        }
+        return next
+      })
     } catch (err) {
       // 同一类敏感配置加载失败时允许下一次进入该页重试；另一类配置互不影响。
       revealedSensitiveTabsRef.current.delete(tab)

@@ -120,7 +120,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     window.history.replaceState(null, '', url.toString())
   }, [])
 
-  const openArticleWorkspace = useCallback((articleId: string, panel: ArticleWorkspacePanel) => {
+  const openArticleWorkspace = useCallback((articleId: string, panel: ArticleWorkspacePanel | null) => {
     setDetailOpen(false)
     setDiscardedDetailId(null)
     setArticleDetailId(articleId)
@@ -523,7 +523,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   }, [isOperationBusy, refreshSnapshot])
 
   const handleOpenArticle = useCallback((articleId: string) => {
-    openArticleWorkspace(articleId, 'content')
+    openArticleWorkspace(articleId, null)
   }, [openArticleWorkspace])
 
   const handleOpenArticlePanel = useCallback((articleId: string, panel: ArticleWorkspacePanel) => {
@@ -539,8 +539,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     setDetailOpen(false)
     setDiscardedDetailId(null)
     setArticleDetailId(articleId)
-    setArticleDetailPanel('content')
-    writeArticleDetailUrl(articleId, 'content')
+    setArticleDetailPanel(null)
+    writeArticleDetailUrl(articleId, null)
     setArticleDetailOpen(true)
     setLibraryOpen(false)
   }, [writeArticleDetailUrl])
