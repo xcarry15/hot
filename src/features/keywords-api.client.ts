@@ -72,9 +72,10 @@ export async function bulkClearKeywords(signal?: AbortSignal): Promise<{ deleted
 
 export async function bulkAddKeywords(
   text: string,
+  category?: string,
   signal?: AbortSignal,
 ): Promise<{ imported?: number; skipped?: number; error?: string }> {
-  return requestJson('POST', '/api/keywords', { body: { text }, signal });
+  return requestJson('POST', '/api/keywords', { body: { text, category }, signal });
 }
 
 export async function importKeywordsXlsx(

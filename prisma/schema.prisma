@@ -232,7 +232,7 @@ model InboxSnapshot {
 
 model Keyword {
   id        String   @id @default(cuid())
-  category  String   @default("正面") // 分组标签：如「品牌」用于品牌字典（ai.ts 读取）；其他仅用于管理分组，filter.ts 全部参与白名单命中
+  category  String   @default("正面") // 分组标签；「黑名单」命中后直接拦截，其余分组参与白名单命中
   word      String
   createdAt DateTime @default(now())
 
@@ -343,7 +343,7 @@ model DiscardedItem {
   sourceId        String
   title           String
   url             String
-  reason          String    // "dedup:url" | "dedup:content" | "dedup:near" | "dedup:entity" | "filter:keyword" | "filter:short"
+  reason          String    // "dedup:url" | "dedup:content" | "dedup:near" | "dedup:entity" | "filter:keyword" | "filter:blacklist" | "filter:short"
   detail          String    @default("") // JSON: matched title/url, similarity, etc.
   winnerArticleId String?   // 命中去重时指向「赢家」Article.id（filter:* 拒绝则为空）
   publishedAt     DateTime?

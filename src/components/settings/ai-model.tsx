@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -38,6 +38,34 @@ interface Props {
   setProviderConfigs: React.Dispatch<React.SetStateAction<ProviderConfigs>>
 }
 
+const OPENCODE_MODELS_STORAGE_KEY = 'hot2:opencode-free-models:v1'
+const MAX_CACHED_OPENCODE_MODELS = 50
+
+function normalizeOpencodeModels(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value
+    .filter((model): model is string => typeof model === 'string')
+    .map(model => model.trim())
+    .filter(Boolean))].slice(0, MAX_CACHED_OPENCODE_MODELS)
+}
+
+function readCachedOpencodeModels(): string[] {
+  try {
+    const value = window.localStorage.getItem(OPENCODE_MODELS_STORAGE_KEY)
+    return normalizeOpencodeModels(value ? JSON.parse(value) : null)
+  } catch {
+    return []
+  }
+}
+
+function cacheOpencodeModels(models: string[]): void {
+  try {
+    window.localStorage.setItem(OPENCODE_MODELS_STORAGE_KEY, JSON.stringify(normalizeOpencodeModels(models)))
+  } catch {
+    // localStorage 不可用时仍保留当前页面内的模型列表。
+  }
+}
+
 export default function AiModelTab({ settings, setSettings, providerConfigs, setProviderConfigs }: Props) {
   const [testingAI, setTestingAI] = useState(false)
   const [aiTestResult, setAiTestResult] = useState<AiTestResult | null>(null)
@@ -48,21 +76,34 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   const currentProvider = AI_PROVIDERS[settings.ai_provider as AIProviderId] || AI_PROVIDERS.opencode
   const currentConfig = providerConfigs[currentProvider.id]
 
-  const handleRefreshOpenCodeModels = async () => {
+  const loadOpenCodeModels = useCallback(async (showToast: boolean) => {
     setLoadingOpenCodeModels(true)
     try {
       const result = await fetchOpenCodeModels()
       if (result.models.length === 0) {
-        toast.info('OpenCode 暂无可用的免费模型')
+        if (showToast) toast.info('OpenCode 暂无可用的免费模型')
         return
       }
-      setOpencodeModels(result.models)
-      toast.success(`已更新 ${result.models.length} 个免费模型`)
+      const models = normalizeOpencodeModels(result.models)
+      setOpencodeModels(models)
+      cacheOpencodeModels(models)
+      if (showToast) toast.success(`已更新 ${models.length} 个免费模型`)
     } catch {
-      toast.error('读取 OpenCode 免费模型失败，已保留当前推荐项')
+      if (showToast) toast.error('读取 OpenCode 免费模型失败，已保留当前推荐项')
     } finally {
       setLoadingOpenCodeModels(false)
     }
+  }, [])
+
+  useEffect(() => {
+    const cachedModels = readCachedOpencodeModels()
+    if (cachedModels.length > 0) setOpencodeModels(cachedModels)
+    // 每次进入 AI 模型页后台同步一次最新列表；接口失败时保留上次成功结果。
+    void loadOpenCodeModels(false)
+  }, [loadOpenCodeModels])
+
+  const handleRefreshOpenCodeModels = () => {
+    void loadOpenCodeModels(true)
   }
 
   const updateSetting = (key: keyof Settings, value: string) => {
@@ -327,7 +368,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
               size="sm"
               className="h-6 gap-1 px-1.5 text-[11px]"
               disabled={loadingOpenCodeModels}
-              onClick={() => void handleRefreshOpenCodeModels()}
+              onClick={handleRefreshOpenCodeModels}
             >
               <RefreshCw className={`h-3 w-3 ${loadingOpenCodeModels ? 'animate-spin' : ''}`} />
               {loadingOpenCodeModels ? '读取中' : '刷新推荐'}

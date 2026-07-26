@@ -237,17 +237,17 @@ export default function DataTab() {
             </Button>
             <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleFilePicked} className="hidden" />
           </div>
-          <p className="text-xs text-muted-foreground">⚠️ 导出不含 API 密钥和 Webhook；在新环境导入后，请在「AI 模型」和「推送」重新填写。</p>
+          <p className="text-xs text-muted-foreground">⚠️ 配置备份包含所有可编辑设置、API 密钥和 Webhook，请妥善保管导出的文件。</p>
         </CardContent>
       </Card>
 
-      {/* 数据清理 */}
+      {/* 数据 */}
       <Card className="py-0">
         <CardContent className="space-y-2.5 p-3">
           <div className="flex items-center justify-between border-b pb-2">
             <div className="flex items-center gap-2">
               <Database className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-semibold">数据清理</span>
+              <span className="text-sm font-semibold">数据</span>
             </div>
             <div className="flex items-center gap-3">
               {cleanupStats && <span className="text-xs text-muted-foreground">{cleanupStats.articlesTotal} 篇文章</span>}

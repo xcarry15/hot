@@ -38,7 +38,7 @@ export async function GET(request: Request) {
 
 // POST /api/keywords - Add keyword(s)
 //   { word }              → 单个添加
-//   { text }              → 批量添加（每行一个词，category=default）
+//   { text, category }    → 批量添加（每行一个词，category 默认为 default）
 //   XLSX body       → 导入正式关键词及候选词处理状态
 export async function POST(request: Request) {
   try {
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
         return data ? { kind: 'ok' as const, data } : { kind: 'invalid' as const };
       }
       if (!body.word) return { kind: 'invalid' as const };
-      return { kind: 'created' as const, data: await addKeyword(String(body.word)) };
+      return { kind: 'created' as const, data: await addKeyword(String(body.word), typeof body.category === 'string' ? body.category : undefined) };
     });
     if (result.kind === 'invalid') {
       return NextResponse.json({ error: '未输入任何关键词' }, { status: 400 });

@@ -56,6 +56,19 @@ const sectionLoaders: Record<string, () => Promise<unknown>> = {
   data: loadData,
 }
 
+function buildSettingsSavePayload(settings: SettingsType, providerConfigs: ProviderConfigs): Record<string, string> {
+  const payload: Record<string, string> = { ...settings }
+  // 前端按当前显示值完整保存；提示词空白值由服务端统一归一化为当前默认文本。
+  for (const id of Object.keys(AI_PROVIDERS) as AIProviderId[]) {
+    const config = providerConfigs[id]
+    if (!config) continue
+    payload[providerKey(id, 'api_key')] = config.apiKey
+    payload[providerKey(id, 'base_url')] = config.baseUrl
+    payload[providerKey(id, 'model')] = config.model
+  }
+  return payload
+}
+
 export default function SettingsTab({ active = true }: { active?: boolean }) {
   const [settings, setSettings] = useState<SettingsType>(() => (
     getFrontendSettingDefaults() as unknown as SettingsType
@@ -82,6 +95,12 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   // 用户在「账户」填好 token 后下一次 fetchSettings 会自动恢复明文回显。
   const warnedAuthRef = useRef(false)
   const mountedRef = useRef(true)
+  const latestSettingsRef = useRef(settings)
+  const latestProviderConfigsRef = useRef(providerConfigs)
+
+  // 异步保存期间用户仍可能继续编辑；保存完成时必须以最新状态判断是否还有未保存内容。
+  latestSettingsRef.current = settings
+  latestProviderConfigsRef.current = providerConfigs
 
   useEffect(() => {
     mountedRef.current = true
@@ -96,6 +115,16 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   const currentSettingsFingerprint = settingsFingerprint(settings, providerConfigs)
   const hasUnsavedChanges = settingsBaselineRef.current !== null
     && currentSettingsFingerprint !== settingsBaselineRef.current
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasUnsavedChanges])
 
   const loadSettingsTab = useCallback(async () => {
     try {
@@ -228,21 +257,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     }
   }, [currentSettingsFingerprint])
 
-  const buildSavePayload = useCallback((): Record<string, string> => {
-    const payload: Record<string, string> = { ...settings }
-    // 前端按当前显示值完整保存；提示词空白值由服务端统一归一化为当前默认文本。
-    for (const id of Object.keys(AI_PROVIDERS) as AIProviderId[]) {
-      const config = providerConfigs[id]
-      if (!config) continue
-      payload[providerKey(id, 'api_key')] = config.apiKey
-      payload[providerKey(id, 'base_url')] = config.baseUrl
-      payload[providerKey(id, 'model')] = config.model
-    }
-    return payload
-  }, [settings, providerConfigs])
-
   const saveImportedPrompts = async (patch: Partial<SettingsType>) => {
-    const nextSettings: SettingsType = { ...settings, ...patch }
     const promptPatch = Object.fromEntries(
       Object.entries(patch).filter(([, value]) => typeof value === 'string'),
     ) as Record<string, string>
@@ -250,7 +265,8 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     try {
       await saveSettings(promptPatch)
       if (mountedRef.current) {
-        setSettings(nextSettings)
+        // 使用函数式更新，避免导入请求期间的其它用户输入被旧闭包覆盖。
+        setSettings(current => ({ ...current, ...patch }))
         const baselineSettings = {
           ...(settingsBaselineStateRef.current ?? settings),
           ...patch,
@@ -265,13 +281,18 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   }
 
   const handleSave = async () => {
+    const submittedSettings = latestSettingsRef.current
+    const submittedProviderConfigs = latestProviderConfigsRef.current
+    const submittedFingerprint = settingsFingerprint(submittedSettings, submittedProviderConfigs)
+    const payload = buildSettingsSavePayload(submittedSettings, submittedProviderConfigs)
     setSaving(true)
     try {
-      const result = await saveSettings(buildSavePayload()) as { scoreRecomputed?: number; publicationRebuilt?: boolean }
+      const result = await saveSettings(payload) as { scoreRecomputed?: number; publicationRebuilt?: boolean }
       if (mountedRef.current) {
-        settingsBaselineRef.current = currentSettingsFingerprint
-        settingsBaselineStateRef.current = settings
-        providerBaselineRef.current = providerConfigs
+        // 基线对应本次真正提交的快照；若请求期间继续编辑，后续改动仍会保持“未保存”。
+        settingsBaselineRef.current = submittedFingerprint
+        settingsBaselineStateRef.current = submittedSettings
+        providerBaselineRef.current = submittedProviderConfigs
         const details = [
           result.scoreRecomputed ? `已重算 ${result.scoreRecomputed} 篇评分` : '',
           result.publicationRebuilt ? '已同步公开状态' : '',
@@ -340,7 +361,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
             <TabsTrigger value="prompts" data-value="prompts" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">提示词</TabsTrigger>
             <TabsTrigger value="push" data-value="push" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">推送</TabsTrigger>
             <TabsTrigger value="account" data-value="account" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">账户</TabsTrigger>
-            <TabsTrigger value="data" data-value="data" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">数据清理</TabsTrigger>
+            <TabsTrigger value="data" data-value="data" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">数据</TabsTrigger>
           </TabsList>
         </div>
 

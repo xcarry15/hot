@@ -3,6 +3,7 @@
  *
  * 覆盖:
  * - 全文关键字匹配：不命中 → 删除 + DiscardedItem
+ * - 黑名单命中：删除 + DiscardedItem 写入 filter:blacklist
  * - 详情抓取失败：跳过关键字门控
  * - 关键字 DB 抛错：宁可放过不可误杀（fall through 到 processed++）
  *
@@ -168,6 +169,27 @@ describe('processAllPending 全文关键字匹配', () => {
     const upsertArgs = mocks.discardedItemUpsert.mock.calls[0][0];
     expect(upsertArgs.create.reason).toBe('filter:keyword');
     expect(upsertArgs.create.title).toBe('奈雪发布2026战略');
+  });
+
+  it('正文命中黑名单 → 文章删除 + DiscardedItem 写入 filter:blacklist', async () => {
+    const article = mockPendingArticle();
+    mocks.articleFindMany.mockResolvedValueOnce([article]);
+    const longContent = '该报道涉及赌博活动，属于黑名单内容，应在进入 AI 前拦截。'.repeat(2);
+    mocks.fetchArticleDetail.mockResolvedValueOnce(longContent);
+    mocks.keywordFindMany.mockResolvedValueOnce([
+      { word: '奈雪', category: 'default' },
+      { word: '赌博', category: '黑名单' },
+    ]);
+
+    const result = await processAllPending();
+
+    expect(result.processed).toBe(0);
+    expect(result.errors).toBe(0);
+    expect(mocks.articleDelete).toHaveBeenCalledWith({ where: { id: 'art-001' } });
+    expect(mocks.discardedItemUpsert).toHaveBeenCalledTimes(1);
+    const upsertArgs = mocks.discardedItemUpsert.mock.calls[0][0];
+    expect(upsertArgs.create.reason).toBe('filter:blacklist');
+    expect(upsertArgs.create.detail).toContain('赌博');
   });
 
   it('白名单不命中，但标题是明确行业事件 → 保留进入 AI 筛选', async () => {

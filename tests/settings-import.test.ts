@@ -18,6 +18,25 @@ describe('parseSettingsImport', () => {
     if (r.ok) expect(r.settings).toEqual({ ai_provider: 'deepseek', push_min_score: '60' });
   });
 
+  it('支持导入 API 密钥和 Webhook', () => {
+    const r = parseSettingsImport(JSON.stringify({
+      type: 'hot2-settings',
+      version: 1,
+      settings: {
+        opencode_api_key: 'sk-opencode-secret',
+        feishu_webhook_url: JSON.stringify([
+          { url: 'https://open.feishu.cn/open-apis/bot/v2/hook/import123456', remark: '', enabled: true },
+        ]),
+      },
+    }));
+
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.settings.opencode_api_key).toBe('sk-opencode-secret');
+      expect(r.settings.feishu_webhook_url).toContain('import123456');
+    }
+  });
+
   it('非法 JSON：ok=false', () => {
     const r = parseSettingsImport('{ not json');
     expect(r.ok).toBe(false);

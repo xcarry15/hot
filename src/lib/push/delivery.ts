@@ -18,6 +18,7 @@ import { PUSH_MAX_RETRIES, PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/p
 import { getPushUrgency, buildFeishuCard } from '@/lib/push/feishu-card';
 import { sendFeishuWebhook } from '@/lib/push/feishu-transport';
 import { getEventReleaseBlockReason, type EventReleaseBlockReason } from '@/lib/event-release-policy';
+import { maskWebhookTarget } from '@/lib/webhook-display';
 
 export type PushDeliveryMode = 'normal' | 'retry_failed' | 'manual_force' | 'repush_all';
 
@@ -49,15 +50,16 @@ function computeUrlHash(url: string): string {
 /** Find or create a PushTarget for a given webhook config. */
 async function resolvePushTarget(config: WebhookConfig): Promise<{ id: string; name: string; urlHash: string }> {
   const urlHash = computeUrlHash(config.url);
+  const targetName = config.remark.trim() || maskWebhookTarget(config.url);
   const existing = await db.pushTarget.findUnique({ where: { urlHash }, select: { id: true, name: true, urlHash: true } });
   if (existing) {
-    if (existing.name !== (config.remark || config.url)) {
-      await db.pushTarget.update({ where: { id: existing.id }, data: { name: config.remark || config.url } });
+    if (existing.name !== targetName) {
+      await db.pushTarget.update({ where: { id: existing.id }, data: { name: targetName } });
     }
     return existing;
   }
   return db.pushTarget.create({
-    data: { name: config.remark || config.url, urlHash, enabled: config.enabled },
+    data: { name: targetName, urlHash, enabled: config.enabled },
     select: { id: true, name: true, urlHash: true },
   });
 }

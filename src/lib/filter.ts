@@ -1,5 +1,6 @@
 import { db } from './db';
 import { createCache } from './cache';
+import { KEYWORD_BLACKLIST_CATEGORY } from '@/features/keywords-catalog';
 
 /**
  * 关键词过滤 — 单一白名单
@@ -11,11 +12,15 @@ import { createCache } from './cache';
 
 interface KeywordCache {
   words: string[];
+  blacklistWords: string[];
 }
 
 export interface KeywordMatchResult {
   configured: boolean;
   matched: boolean;
+  /** 命中黑名单时为 true；黑名单优先于白名单和行业信号。 */
+  blacklisted?: boolean;
+  blacklistWord?: string;
 }
 
 const cache = createCache<KeywordCache>(5 * 60 * 1000);
@@ -26,9 +31,12 @@ const INDUSTRY_TITLE_SIGNALS = [
 
 async function loadKeywordsFromDb(): Promise<KeywordCache> {
   const rows = await db.keyword.findMany({
-    select: { word: true },
+    select: { word: true, category: true },
   });
-  return { words: rows.map(kw => kw.word.toLowerCase()) };
+  return {
+    words: rows.filter(kw => kw.category !== KEYWORD_BLACKLIST_CATEGORY).map(kw => kw.word.toLowerCase()),
+    blacklistWords: rows.filter(kw => kw.category === KEYWORD_BLACKLIST_CATEGORY).map(kw => kw.word.toLowerCase()),
+  };
 }
 
 async function getCachedKeywords(): Promise<KeywordCache> {
@@ -46,7 +54,7 @@ async function getCachedKeywords(): Promise<KeywordCache> {
  */
 export async function matchKeyword(text: string): Promise<boolean> {
   const result = await evaluateKeywordMatch(text);
-  return !result.configured || result.matched;
+  return result.blacklisted !== true && (!result.configured || result.matched);
 }
 
 /**
@@ -54,9 +62,13 @@ export async function matchKeyword(text: string): Promise<boolean> {
  * 与 matchKeyword 不同，空词库不会伪造命中，可安全用于评分加分。
  */
 export async function evaluateKeywordMatch(text: string): Promise<KeywordMatchResult> {
-  const { words } = await getCachedKeywords();
-  if (words.length === 0) return { configured: false, matched: false };
+  const { words, blacklistWords } = await getCachedKeywords();
   const lowerText = text.toLowerCase();
+  const blacklistWord = blacklistWords.find(kw => lowerText.includes(kw));
+  if (blacklistWord) {
+    return { configured: words.length > 0, matched: false, blacklisted: true, blacklistWord };
+  }
+  if (words.length === 0) return { configured: false, matched: false };
   return { configured: true, matched: words.some(kw => lowerText.includes(kw)) };
 }
 

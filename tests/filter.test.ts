@@ -65,6 +65,21 @@ describe('matchKeyword 基本命中', () => {
     mocksHoisted.keywordFindMany.mockResolvedValue([{ word: '奈雪' }]);
     expect(await matchKeyword('星巴克发布新品')).toBe(false);
   });
+
+  it('黑名单命中 → 直接 false，并返回拦截词', async () => {
+    mocksHoisted.keywordFindMany.mockResolvedValue([
+      { word: '奈雪', category: 'default' },
+      { word: '赌博', category: '黑名单' },
+    ]);
+
+    expect(await matchKeyword('这是一篇赌博相关新闻')).toBe(false);
+    expect(await evaluateKeywordMatch('这是一篇赌博相关新闻')).toEqual({
+      configured: true,
+      matched: false,
+      blacklisted: true,
+      blacklistWord: '赌博',
+    });
+  });
 });
 
 describe('matchKeyword 边界条件', () => {

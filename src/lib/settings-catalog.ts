@@ -119,7 +119,8 @@ const prompt = (key: string, defaultValue: string): SettingDefinition => ({
 const AI_PROVIDER_IDS = Object.keys(AI_PROVIDERS) as [AIProviderId, ...AIProviderId[]];
 
 const providerSettingDefinitions: SettingDefinition[] = Object.values(AI_PROVIDERS).flatMap((provider) => [
-  { key: providerSettingKey(provider.id, 'api_key'), defaultValue: '', schema: text, sensitive: true, exportable: false, frontend: false, seed: false },
+  // 设置备份是受保护的整机迁移操作，API 密钥需要随备份导出。
+  { key: providerSettingKey(provider.id, 'api_key'), defaultValue: '', schema: text, sensitive: true, exportable: true, frontend: false, seed: false },
   { key: providerSettingKey(provider.id, 'base_url'), defaultValue: provider.baseUrl, schema: text, sensitive: false, exportable: true, frontend: false, seed: false },
   { key: providerSettingKey(provider.id, 'model'), defaultValue: provider.defaultModel, schema: text, sensitive: false, exportable: true, frontend: false, seed: false },
 ]);
@@ -130,7 +131,7 @@ const definitions: SettingDefinition[] = [
     defaultValue: '[]',
     schema: text,
     sensitive: true,
-    exportable: false,
+    exportable: true,
     frontend: true,
     seed: true,
   },
@@ -183,6 +184,13 @@ for (const id of PROMPT_BLOCK_ORDER) {
   const key = PROMPT_BLOCK_META[id].key;
   if (!definitions.some((definition) => definition.key === key)) {
     throw new Error(`Prompt setting is missing from catalog: ${key}`);
+  }
+}
+
+// 所有设置页可编辑字段都必须进入配置备份，避免新增字段后导出/导入静默遗漏。
+for (const definition of definitions) {
+  if (definition.frontend && !definition.exportable) {
+    throw new Error(`Frontend setting is missing from export catalog: ${definition.key}`);
   }
 }
 

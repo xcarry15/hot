@@ -38,6 +38,7 @@ vi.mock('@/lib/event-service', () => ({
 
 import { PUT as settingsPUT } from '@/app/api/settings/route';
 import { DEFAULT_BLOCK_SUMMARY } from '@/lib/prompts';
+import { decryptWebhookConfigsForRuntime } from '@/lib/settings-crypto';
 
 describe('settings PUT 事务化', () => {
   beforeEach(() => {
@@ -207,11 +208,12 @@ describe('settings PUT 事务化', () => {
     const res = await settingsPUT(req);
 
     expect(res.status).toBe(200);
-    expect(mocks.settingUpsert).toHaveBeenCalledWith(expect.objectContaining({
+    const webhookUpsert = mocks.settingUpsert.mock.calls.find((call) => call[0].where.key === 'feishu_webhook_url')?.[0];
+    expect(webhookUpsert).toEqual(expect.objectContaining({
       where: { key: 'feishu_webhook_url' },
-      update: { value: existingWebhook },
-      create: { key: 'feishu_webhook_url', value: existingWebhook },
     }));
+    expect(webhookUpsert.update.value).toMatch(/^enc:v1:6:isting:/);
+    expect(decryptWebhookConfigsForRuntime(webhookUpsert.update.value)).toBe(existingWebhook);
   });
 
   it('显式提交空数组时仍允许清空 Webhook 配置', async () => {

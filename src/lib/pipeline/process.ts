@@ -95,9 +95,11 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
             // 品牌白名单命中，或标题本身已是明确的餐饮/零售业态事件，均保留。
             // 便利店、超市、餐厅等行业报道不应因未提及已知品牌而在 AI 前被误删。
             const keywordMatch = await evaluateKeywordMatch(text);
-            const retained = !keywordMatch.configured
+            const retained = keywordMatch.blacklisted !== true && (
+              !keywordMatch.configured
               || keywordMatch.matched
-              || matchIndustryTitleSignal(article.title);
+              || matchIndustryTitleSignal(article.title)
+            );
             await db.article.update({
               where: { id: article.id },
               data: { keywordMatched: keywordMatch.matched },
@@ -113,8 +115,10 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
                 sourceId: article.sourceId,
                 title: article.title,
                 url: article.url,
-                reason: 'filter:keyword',
-                detail: { sample: text.slice(0, 200) },
+                reason: keywordMatch.blacklisted ? 'filter:blacklist' : 'filter:keyword',
+                detail: keywordMatch.blacklisted
+                  ? { matchedKeyword: keywordMatch.blacklistWord || '', sample: text.slice(0, 200) }
+                  : { sample: text.slice(0, 200) },
                 publishedAt: article.publishedAt?.toISOString(),
               });
               if (!recorded) {

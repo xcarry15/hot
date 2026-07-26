@@ -1,12 +1,11 @@
-import { db } from '@/lib/db';
-import { SETTING_KEYS } from '@/lib/settings';
+import { getWebhookConfigs } from '@/lib/settings';
 
 export async function testWebhook(inputUrl?: string) {
   let url = inputUrl;
   if (!url) {
-    const setting = await db.setting.findUnique({ where: { key: SETTING_KEYS.FEISHU_WEBHOOK_URL } });
-    if (!setting?.value) return { success: false, error: 'Webhook URL not configured', status: 400 };
-    url = setting.value;
+    const config = (await getWebhookConfigs()).find((item) => item.url.trim() !== '');
+    if (!config) return { success: false, error: 'Webhook URL not configured', status: 400 };
+    url = config.url;
   }
   if (!url.startsWith('https://open.feishu.cn/open-apis/bot/v2/hook/')) {
     return { success: false, error: 'URL格式不正确，应以 https://open.feishu.cn/open-apis/bot/v2/hook/ 开头', status: 400 };

@@ -34,6 +34,7 @@ import {
   parseWebhookConfigs,
   serializeWebhookConfigsForServer,
 } from '@/contracts/webhook';
+import { decryptWebhookConfigsForRuntime } from '@/lib/settings-crypto';
 
 // ── 读写函数 ──────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ export function serializeWebhookConfigs(configs: WebhookConfig[]): string {
 /** 从数据库读取并解析 webhook 配置 */
 export async function getWebhookConfigs(): Promise<WebhookConfig[]> {
   const raw = await getSetting(SETTING_KEYS.FEISHU_WEBHOOK_URL);
-  return parseWebhookConfigs(raw);
+  return parseWebhookConfigs(decryptWebhookConfigsForRuntime(raw));
 }
 
 /** 便捷方法：返回所有启用的 webhook URL 列表 */

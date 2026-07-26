@@ -1,7 +1,7 @@
 /**
  * Pipeline / collect 阶段应用服务。
  *
- * 单一职责：URL 去重 → 长度门控 → 入库（包含单条 collectItem、单源 crawlSource、
+ * 单一职责：URL 去重 → 黑名单拦截 → 长度门控 → 入库（包含单条 collectItem、单源 crawlSource、
  * 全源 collectAllSources、与 source 预览 testCrawlSource）。
  *
  * 历史：
@@ -13,6 +13,7 @@
  *   - discarded / failure / circuit-breaker 写作迁移至独立模块。
  */
 import { db } from '@/lib/db';
+import { evaluateKeywordMatch } from '@/lib/filter';
 import { dispatchParser } from '@/lib/parser-registry';
 import { cleanContent, extractArticleBody, meaningfulTextLength } from '@/lib/cleaner';
 import { withTimeout } from '@/lib/shared/async';
@@ -39,6 +40,7 @@ const COLLECT_CONCURRENCY = 4;
  * 单条 crawlItem 入口：
  *   - URL 精确去重（命中则按需更新 title 或重置 fetchStatus）
  *   - DiscardedItem 短路（命中已丢弃记录直接 skip）
+ *   - 黑名单命中在已有列表字段时直接拦截；详情阶段再兜底
  *   - 长度门控（title < 10 且无 summary/detail content → filter:short）
  *   - 写 Article（P2002 race → 记 dedup:url 后短路）
  */
@@ -104,6 +106,28 @@ export async function collectItem(
   if (discarded) {
     console.log(`[collectItem] skipping previously discarded: "${item.title}" (reason: ${discarded.reason})`);
     return;
+  }
+
+  // 黑名单在入库前优先拦截；列表页已有标题/摘要/正文时无需创建 Article。
+  try {
+    const blacklistMatch = await evaluateKeywordMatch(
+      `${item.title} ${item.summary || ''} ${item.content || ''}`,
+    );
+    if (blacklistMatch.blacklisted) {
+      await recordDiscardedItem({
+        sourceId,
+        title: item.title,
+        url: normalizedUrl,
+        reason: 'filter:blacklist',
+        detail: { matchedKeyword: blacklistMatch.blacklistWord || '' },
+        publishedAt: item.publishedAt,
+      });
+      console.log(`[collectItem] blacklist match, skipped before save: "${item.title}"`);
+      return;
+    }
+  } catch (error) {
+    // 关键词 DB 异常时保持现有“放过不可误杀”策略。
+    console.error(`[collectItem] blacklist check failed for article="${item.title}":`, error);
   }
 
   // ---- Step 3: Length gate ----

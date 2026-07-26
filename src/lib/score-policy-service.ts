@@ -1,6 +1,6 @@
 import { db } from './db';
 import { applyScorePolicy } from './score-policy';
-import { SETTING_KEYS } from './settings-catalog';
+import { getWebhookConfigs } from './settings';
 
 export async function previewScorePolicy(weightEvent: number, weightContent: number, keywordBonus: number) {
   const articles = await db.article.findMany({
@@ -66,13 +66,6 @@ export async function previewPushDelivery(minScore: number, minRelevance: number
       OR: [{ nextPushRetryAt: null }, { nextPushRetryAt: { lte: new Date() } }],
     },
   });
-  const webhooks = await db.setting.findUnique({ where: { key: SETTING_KEYS.FEISHU_WEBHOOK_URL }, select: { value: true } });
-  let webhookCount = 0;
-  try {
-    const parsed = JSON.parse(webhooks?.value ?? '[]') as unknown;
-    webhookCount = Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object' && (item as { enabled?: unknown }).enabled === true && typeof (item as { url?: unknown }).url === 'string' && (item as { url: string }).url.trim()).length : 0;
-  } catch {
-    webhookCount = 0;
-  }
+  const webhookCount = (await getWebhookConfigs()).filter((config) => config.enabled && config.url.trim()).length;
   return { pushMode, pushable, webhookCount, willPush: pushMode !== 'off' && webhookCount > 0 ? pushable : 0 };
 }

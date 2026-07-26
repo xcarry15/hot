@@ -6,8 +6,9 @@ import {
   type ImportedKeywordCandidate,
   type KeywordCandidateExportRow,
 } from '@/lib/keyword-candidate-service';
+import { KEYWORD_DEFAULT_CATEGORY } from '@/features/keywords-catalog';
 
-const DEFAULT_CATEGORY = 'default';
+const DEFAULT_CATEGORY = KEYWORD_DEFAULT_CATEGORY;
 
 async function loadKeywordHitCounts(rows: Array<{ id: string; word: string }>) {
   if (rows.length === 0) return new Map<string, number>();
@@ -150,8 +151,8 @@ export async function addKeywordsText(text: string, category?: string) {
   return { imported, skipped };
 }
 
-export async function addKeyword(word: string) {
-  const keyword = await db.keyword.create({ data: { category: DEFAULT_CATEGORY, word } });
+export async function addKeyword(word: string, category?: string) {
+  const keyword = await db.keyword.create({ data: { category: category?.trim() || DEFAULT_CATEGORY, word } });
   invalidateKeywordCache();
   return keyword;
 }

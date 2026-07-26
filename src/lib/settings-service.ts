@@ -7,6 +7,7 @@ import {
 import { SETTING_KEYS } from '@/lib/settings-catalog';
 import { applyScorePolicy, buildScorePolicySnapshot } from '@/lib/score-policy';
 import { parseWebhookConfigs, serializeWebhookConfigsForServer } from '@/contracts/webhook';
+import { decryptWebhookConfigsForRuntime, encryptWebhookConfigsForStorage } from '@/lib/settings-crypto';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { PUBLIC_PUBLICATION_REBUILD_KEYS, rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
 import { DEFAULT_PROMPT_SETTINGS, SCORE_WEIGHT_META } from '@/lib/prompts';
@@ -31,7 +32,11 @@ export async function getSettings() {
 export async function exportSettings() {
   const rows = await db.setting.findMany({ where: { key: { in: Array.from(EXPORTABLE_SETTING_KEYS) } } });
   const settings = getExportableSettingDefaults();
-  for (const row of rows) settings[row.key] = row.value;
+  for (const row of rows) {
+    settings[row.key] = row.key === SETTING_KEYS.FEISHU_WEBHOOK_URL
+      ? decryptWebhookConfigsForRuntime(row.value)
+      : row.value;
+  }
   return { type: 'hot2-settings', version: 1, exportedAt: new Date().toISOString(), settings };
 }
 
@@ -40,7 +45,12 @@ export async function revealSensitiveSettings(requestedKeys?: string[]) {
     ? requestedKeys.filter((key) => SENSITIVE_SETTING_KEYS.has(key))
     : Array.from(SENSITIVE_SETTING_KEYS);
   const rows = await db.setting.findMany({ where: { key: { in: keys } } });
-  return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  return Object.fromEntries(rows.map((row) => [
+    row.key,
+    row.key === SETTING_KEYS.FEISHU_WEBHOOK_URL
+      ? decryptWebhookConfigsForRuntime(row.value)
+      : row.value,
+  ]));
 }
 
 export async function updateSettings(input: unknown): Promise<
@@ -67,7 +77,8 @@ export async function updateSettings(input: unknown): Promise<
   if (validationErrors.length > 0) return { ok: false, error: '设置值校验失败', details: validationErrors };
 
   // GET /api/settings 会把敏感配置脱敏为 ""。完整保存其他设置时，不能把这个
-  // 占位空值当成用户清空操作；Webhook 的显式清空由客户端提交 "[]" 表示。
+  // 占位空值当成用户清空操作；Webhook 的显式清空由客户端提交 "[]" 表示，真实 URL
+  // 在进入事务前统一加密。
   const preserveRedactedSensitiveKeys = new Set(
     Object.entries(parsed.data)
       .filter(([key, value]) => SENSITIVE_SETTING_KEYS.has(key) && value.trim() === '')
@@ -75,14 +86,17 @@ export async function updateSettings(input: unknown): Promise<
   );
   let updates = Object.entries(normalizedData) as [string, string][];
   updates = updates.map(([key, value]) => key === SETTING_KEYS.FEISHU_WEBHOOK_URL
-    ? [key, serializeWebhookConfigsForServer(parseWebhookConfigs(value))]
+    ? [key, encryptWebhookConfigsForStorage(serializeWebhookConfigsForServer(parseWebhookConfigs(value)))]
     : [key, value]);
   const keepKeys = updates.filter(([key]) => preserveRedactedSensitiveKeys.has(key)).map(([key]) => key);
   if (keepKeys.length > 0) {
     const existing = await db.setting.findMany({ where: { key: { in: keepKeys } } });
     const existingMap = new Map(existing.map((setting) => [setting.key, setting.value]));
     updates = updates.map(([key, value]) => preserveRedactedSensitiveKeys.has(key) && existingMap.has(key)
-      ? [key, existingMap.get(key)!] : [key, value]);
+      ? [key, key === SETTING_KEYS.FEISHU_WEBHOOK_URL
+        ? encryptWebhookConfigsForStorage(existingMap.get(key)!)
+        : existingMap.get(key)!]
+      : [key, value]);
   }
   const scoreSettingKeys = [
     SETTING_KEYS.AI_WEIGHT_EVENT,

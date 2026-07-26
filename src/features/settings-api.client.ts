@@ -82,7 +82,7 @@ export async function revealSettings(
 }
 
 /**
- * 设置导出：返回完整 payload（含明文密钥），用于下载为 JSON。
+ * 设置导出：返回完整 payload（含明文 API 密钥和 Webhook），用于下载为 JSON。
  * 返回结构：{ type, version, exportedAt, settings: SettingsMap }。
  */
 export interface SettingsExportPayload {

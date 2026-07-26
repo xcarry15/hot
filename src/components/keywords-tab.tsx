@@ -8,6 +8,13 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -28,7 +35,11 @@ import {
   Search,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { KEYWORD_CATEGORIES } from '@/features/keywords-catalog'
+import {
+  KEYWORD_BLACKLIST_CATEGORY,
+  KEYWORD_CATEGORIES,
+  KEYWORD_DEFAULT_CATEGORY,
+} from '@/features/keywords-catalog'
 import { EmptyState } from '@/components/ui/empty-state'
 import {
   bulkAddKeywords,
@@ -68,6 +79,7 @@ export default function KeywordsTab() {
   const [clearAllDialogOpen, setClearAllDialogOpen] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkText, setBulkText] = useState('')
+  const [bulkCategory, setBulkCategory] = useState(KEYWORD_DEFAULT_CATEGORY)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -142,13 +154,13 @@ export default function KeywordsTab() {
     if (!bulkText.trim()) return
     setBulkLoading(true)
     try {
-      const data = await bulkAddKeywords(bulkText)
+      const data = await bulkAddKeywords(bulkText, bulkCategory)
       if (data.error) {
         toast.error(data.error)
         return
       }
       const skippedHint = data.skipped && data.skipped > 0 ? `（${data.skipped} 个重复已在词库）` : ''
-      toast.success(`已添加 ${data.imported} 个关键词${skippedHint}`)
+      toast.success(`已添加 ${data.imported} 个关键词到「${bulkCategory}」${skippedHint}`)
       setBulkText('')
       loadKeywords()
     } catch {
@@ -198,6 +210,20 @@ export default function KeywordsTab() {
     acc[kw.category].push(kw)
     return acc
   }, {})
+  const keywordCategoryOptions = Array.from(new Set([
+    KEYWORD_DEFAULT_CATEGORY,
+    KEYWORD_BLACKLIST_CATEGORY,
+    ...KEYWORD_CATEGORIES,
+    ...keywords.map(keyword => keyword.category),
+  ])).sort((left, right) => {
+    const priority = (category: string) => {
+      if (category === KEYWORD_DEFAULT_CATEGORY) return 0
+      if (category === KEYWORD_BLACKLIST_CATEGORY) return 1
+      const index = KEYWORD_CATEGORIES.indexOf(category as (typeof KEYWORD_CATEGORIES)[number])
+      return index === -1 ? KEYWORD_CATEGORIES.length + 1 : index + 2
+    }
+    return priority(left) - priority(right) || left.localeCompare(right)
+  })
   // 先按组内数量排序，数量相同再沿用目录顺序。
   const groupKeys = Object.keys(grouped).sort((a, b) => {
     const countDifference = grouped[b].length - grouped[a].length
@@ -211,16 +237,17 @@ export default function KeywordsTab() {
   })
   const pendingCandidates = candidates.filter(candidate => candidate.status === 'pending')
   const reviewedCandidates = candidates.filter(candidate => candidate.status !== 'pending')
+  // 采用候选词后会同步写入“提取”关键词；“已采用”只是同一条记录的历史状态，不再重复展示。
   const reviewedCandidateGroups = [
-    { key: 'approved', label: '已采用', items: reviewedCandidates.filter(candidate => candidate.status === 'approved') },
     { key: 'dismissed', label: '永久忽略', items: reviewedCandidates.filter(candidate => candidate.status === 'dismissed') },
   ]
+  const displayedReviewedCandidateCount = reviewedCandidateGroups.reduce((total, group) => total + group.items.length, 0)
   const getGroupPriority = (group: KeywordGroup) => {
+    if (group.kind === 'keywords' && group.label === KEYWORD_BLACKLIST_CATEGORY) return -1
     if (group.key === 'dismissed') return 0
     if (group.kind === 'keywords' && group.label === '提取') return 1
-    if (group.key === 'approved') return 2
-    if (group.kind === 'keywords' && group.label === 'default') return 3
-    return 4
+    if (group.kind === 'keywords' && group.label === 'default') return 2
+    return 3
   }
   const keywordGroups: KeywordGroup[] = [
     ...groupKeys.map(group => ({ key: `keyword-${group}`, label: group, kind: 'keywords' as const, items: grouped[group] })),
@@ -240,9 +267,9 @@ export default function KeywordsTab() {
   ))
 
   const getGroupClassName = (group: KeywordGroup) => {
+    if (group.kind === 'keywords' && group.label === KEYWORD_BLACKLIST_CATEGORY) return 'border-red-300 bg-red-50/70 dark:border-red-900/50 dark:bg-red-950/25'
     if (group.key === 'dismissed') return 'border-rose-200 bg-rose-50/60 dark:border-rose-900/50 dark:bg-rose-950/20'
     if (group.kind === 'keywords' && group.label === '提取') return 'border-sky-200 bg-sky-50/60 dark:border-sky-900/50 dark:bg-sky-950/20'
-    if (group.key === 'approved') return 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/50 dark:bg-emerald-950/20'
     if (group.kind === 'keywords' && group.label === 'default') return 'border-amber-200 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-950/20'
     return 'border-border/50 bg-background'
   }
@@ -325,7 +352,7 @@ export default function KeywordsTab() {
           <Tag className="h-3.5 w-3.5 text-primary shrink-0" />
           <span className="text-xs font-semibold">关键词管理</span>
           <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">{keywords.length}</Badge>
-          <span className="hidden text-[10px] text-muted-foreground sm:inline">命中即抓取；未命中丢弃；XLSX 同步候选词状态</span>
+          <span className="hidden text-[10px] text-muted-foreground sm:inline">黑名单命中直接拦截；其余关键词命中即抓取；未命中丢弃；XLSX 同步候选词状态</span>
           <div className="flex-1" />
           <div className="flex items-center gap-1 flex-wrap">
             <input
@@ -380,6 +407,22 @@ export default function KeywordsTab() {
                 onChange={(e) => setBulkText(e.target.value)}
                 className="h-8 min-h-8 min-w-0 flex-1 resize-y py-1.5 text-xs focus-visible:border-foreground/50 focus-visible:ring-0 focus-visible:ring-offset-0"
               />
+              <Select value={bulkCategory} onValueChange={setBulkCategory}>
+                <SelectTrigger
+                  size="sm"
+                  className="h-8 w-24 shrink-0 rounded-none px-2 text-xs focus-visible:border-foreground/50 focus-visible:ring-0"
+                  aria-label="关键词分组"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {keywordCategoryOptions.map(category => (
+                    <SelectItem key={category} value={category} className="text-xs">
+                      {category}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button size="sm" variant="outline" onClick={handleBulkAdd} disabled={!bulkText.trim() || bulkLoading} className="h-8 shrink-0 gap-1 px-2 text-xs">
                 {bulkLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                 添加
@@ -426,14 +469,14 @@ export default function KeywordsTab() {
             <section className="min-w-0 overflow-hidden border bg-background">
               <div className="flex h-7 items-center gap-1.5 border-b px-1.5">
                 <span className="shrink-0 text-xs font-medium">关键词分组</span>
-                <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">{keywords.length + reviewedCandidates.length}</Badge>
+                <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">{keywords.length + displayedReviewedCandidateCount}</Badge>
               </div>
 
               <div className="max-h-[520px] overflow-auto p-1">
-                {keywords.length === 0 && reviewedCandidates.length === 0 ? (
+                {keywords.length === 0 && displayedReviewedCandidateCount === 0 ? (
                   <EmptyState
                     title="暂无关键词"
-                    description="请添加要抓取的关键词（命中即入库）；词库为空时不过滤"
+                    description="请添加要抓取的关键词（黑名单命中会拦截）；词库为空时不过滤"
                     className="py-6"
                   />
                 ) : keywordGroups.length === 0 ? (

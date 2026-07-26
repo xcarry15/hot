@@ -30,10 +30,15 @@ describe('EXPORTABLE_SETTING_KEYS', () => {
     }
   });
 
-  it('排除运行态与敏感凭证', () => {
-    for (const k of ['scheduler_last_crawl_at', 'scheduler_last_push_date', 'api_token',
-      'opencode_api_key', 'deepseek_api_key', 'feishu_webhook_url']) {
+  it('排除运行态与非设置凭证', () => {
+    for (const k of ['scheduler_last_crawl_at', 'scheduler_last_push_date', 'api_token']) {
       expect(set.has(k), `不应包含 ${k}`).toBe(false);
+    }
+  });
+
+  it('包含 API 密钥和 Webhook，支持完整设置迁移', () => {
+    for (const k of ['opencode_api_key', 'deepseek_api_key', 'feishu_webhook_url']) {
+      expect(set.has(k), `缺少敏感配置键 ${k}`).toBe(true);
     }
   });
 

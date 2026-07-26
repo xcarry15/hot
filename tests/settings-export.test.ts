@@ -11,14 +11,20 @@ vi.mock('@/lib/db', () => ({
 
 import { POST as exportPOST } from '@/app/api/settings/export/route';
 import { EXPORTABLE_SETTING_KEYS } from '@/lib/settings';
+import { encryptWebhookConfigsForStorage } from '@/lib/settings-crypto';
 
 describe('POST /api/settings/export', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('返回信封和可导出配置，不包含敏感凭证', async () => {
+  it('返回信封和完整配置，包含 API 密钥和 Webhook', async () => {
+    const webhook = JSON.stringify([
+      { url: 'https://open.feishu.cn/open-apis/bot/v2/hook/export123456', remark: '主群', enabled: true },
+    ]);
     mocks.settingFindMany.mockResolvedValue([
       { key: 'ai_provider', value: 'deepseek' },
       { key: 'push_min_score', value: '60' },
+      { key: 'deepseek_api_key', value: 'sk-export-secret' },
+      { key: 'feishu_webhook_url', value: encryptWebhookConfigsForStorage(webhook) },
     ]);
 
     const res = await exportPOST();
@@ -28,8 +34,8 @@ describe('POST /api/settings/export', () => {
     expect(body.type).toBe('hot2-settings');
     expect(body.version).toBe(1);
     expect(typeof body.exportedAt).toBe('string');
-    expect(body.settings.deepseek_api_key).toBeUndefined();
-    expect(body.settings.feishu_webhook_url).toBeUndefined();
+    expect(body.settings.deepseek_api_key).toBe('sk-export-secret');
+    expect(body.settings.feishu_webhook_url).toBe(webhook);
     expect(body.settings.ai_provider).toBe('deepseek');
     expect(body.settings.push_min_score).toBe('60');
   });

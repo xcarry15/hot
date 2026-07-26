@@ -36,11 +36,13 @@ Windows 需要完全重建本地数据库时，可直接双击 `bat/本地一键
 ```env
 DATABASE_URL=file:../db/custom.db
 API_TOKEN=
+SETTINGS_ENCRYPTION_KEY=
 NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 ```
 
 - `DATABASE_URL`：SQLite 路径，默认指向 `db/custom.db`。
 - `API_TOKEN`：生产环境必填，用于后台登录和受保护 API；未配置时生产环境拒绝访问。
+- `SETTINGS_ENCRYPTION_KEY`：用于加密数据库中的 Webhook 等敏感配置，生产环境建议单独配置并在部署间保持不变；未配置时使用 `API_TOKEN`，本地无令牌时使用稳定的开发回退值。
 - `NEXT_PUBLIC_SITE_URL`：正式站点地址，用于 canonical、Open Graph 和 sitemap。
 
 本地开发如需通过代理访问 OpenCode 等外部服务，可在启动 `npm run dev` 的终端设置 `HTTP_PROXY` / `HTTPS_PROXY`（可选 `NO_PROXY`）。开发服务器会自动使用这些变量；生产环境不会启用此逻辑。
@@ -108,6 +110,10 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 - `retry_failed`：仅重试失败目标
 - `manual_force`：人工强制推送，但不绕过 Event 完整性门禁
 - `repush_all`：对当前 Event 的启用目标完整重推
+
+设置页中的飞书 Webhook URL 持久化时使用 AES-256-GCM 加密，仅保留末 6 位作为目标识别标记；设置页回显和推送运行时由服务端解密，推送目标名称不保存完整 URL。
+
+设置页「数据」中的配置导入/导出用于完整设置迁移，包含所有可编辑设置、AI API 密钥和 Webhook；导出文件包含可恢复的明文敏感配置，必须妥善保管。
 
 ## 代码结构
 
@@ -212,7 +218,7 @@ bash scripts/init-production.sh
 
 ## 关键词工作簿
 
-关键词页使用 XLSX 导入/导出，工作簿包含正式关键词、已采用候选词、永久忽略候选词和待确认候选词四个 Sheet；导入会恢复候选词状态，并对已采用词继续恢复本机未入库文章。
+关键词页使用 XLSX 导入/导出，工作簿包含正式关键词、已采用候选词、永久忽略候选词和待确认候选词四个 Sheet；导入会恢复候选词状态，并对已采用词继续恢复本机未入库文章。正式关键词中的「黑名单」分组拥有最高优先级，命中后会在入库前拦截文章。
 
 ## 安全规则
 
