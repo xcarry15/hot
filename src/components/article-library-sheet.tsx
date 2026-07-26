@@ -21,9 +21,6 @@ function timeLabel(value: string): string {
 function statusLabel(item: ArticleListItemDto): string | null {
   if (item.clusterStatus === 'needs_review') return '聚类待复核'
   if (item.aiStatus === 'done' && item.aiConfidence != null && item.aiConfidence < 70) return '低分析置信度'
-  if (item.reviewStatus === 'important') return '重要'
-  if (item.reviewStatus === 'general') return '一般'
-  if (item.reviewStatus === 'irrelevant') return '无关'
   return null
 }
 
@@ -115,7 +112,7 @@ export default function ArticleLibrarySheet({
       <SheetContent side="right" className="w-full gap-0 p-0 [&>[data-slot=sheet-close]]:z-10 [&>[data-slot=sheet-close]]:rounded-none [&>[data-slot=sheet-close]]:bg-background sm:max-w-2xl">
         <SheetHeader className="border-b px-4 py-3 pr-12">
           <SheetTitle className="text-base">全部文章</SheetTitle>
-          <SheetDescription>搜索历史文章或进入完整人工待办队列</SheetDescription>
+          <SheetDescription>搜索历史文章或进入异常处理队列</SheetDescription>
         </SheetHeader>
         <div className="space-y-1.5 border-b p-2.5">
           <div className="flex gap-2">
@@ -133,7 +130,7 @@ export default function ArticleLibrarySheet({
           <div className="flex gap-1 overflow-x-auto">
             {([
               ['all', '全部文章', null],
-              ['attention', '全部人工待办', counts?.total],
+              ['attention', '全部异常', counts?.total],
               ['cluster_review', '聚类复核', counts?.clusterReview],
               ['low_confidence', '低分析置信度', counts?.lowConfidence],
             ] as const).map(([key, label, count]) => (

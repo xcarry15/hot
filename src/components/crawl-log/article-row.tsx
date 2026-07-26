@@ -84,7 +84,7 @@ export const ArticleRow = memo(function ArticleRow({
   const isUnknownPushResult = article.technicalErrorReasons.push?.includes('投递结果未知') ?? false
 
   return (
-    <div className={`group flex min-w-0 flex-col gap-0.5 border-l-2 border-l-transparent px-2 py-1 text-[12px] leading-5 transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)] sm:min-h-6 sm:flex-row sm:items-center sm:gap-1 sm:overflow-hidden sm:whitespace-nowrap ${
+    <div className={`group flex min-w-0 flex-col gap-0 border-l-2 border-l-transparent px-1 py-0.5 text-[12px] leading-4 transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)] sm:min-h-6 sm:flex-row sm:items-center sm:gap-1 sm:overflow-hidden sm:whitespace-nowrap ${
       isSkipped || article.technicalState === 'ignored' ? 'opacity-50' : ''
     }`}>
       <div className="flex min-w-0 items-center gap-1 sm:contents">
@@ -104,7 +104,7 @@ export const ArticleRow = memo(function ArticleRow({
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <button
             type="button"
-            className="min-w-0 flex-1 line-clamp-2 text-left leading-4 text-muted-foreground group-hover:text-foreground sm:truncate sm:leading-5"
+            className="min-w-0 flex-1 line-clamp-2 text-left leading-4 text-muted-foreground group-hover:text-foreground sm:truncate sm:leading-4"
             title={article.title}
             onClick={handleOpen}
             onMouseEnter={handlePrefetch}

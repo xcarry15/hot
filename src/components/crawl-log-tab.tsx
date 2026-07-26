@@ -19,7 +19,6 @@ import {
   ANOMALY_FILTER_CHIPS,
   NORMAL_FILTER_CHIPS,
   PRIMARY_FILTER_CHIPS,
-  REVIEW_FILTER_CHIPS,
   STEP_FILTER_CHIPS,
   type FilterChipKey,
   URL_PARAM_DETAIL,
@@ -735,7 +734,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           </Button>
         </div>
 
-          {/* 顶部状态与人工审核筛选；选择正常/异常后显示具体流水线状态。 */}
+        {/* 顶部流水线状态筛选；选择正常/异常后显示具体状态。 */}
           <div className="flex min-w-0 w-full flex-col gap-1">
             <div
               className="flex min-w-0 items-center gap-1 overflow-x-auto pb-0.5 overscroll-contain"
@@ -769,30 +768,6 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
                     <span>{chip.label}</span>
                     <span className={`text-[11px] tabular-nums ${active ? 'opacity-80' : 'text-muted-foreground/70'}`}>
                       ({n})
-                    </span>
-                  </button>
-                )
-              })}
-              {REVIEW_FILTER_CHIPS.map(chip => {
-                const statusKey = chip.key as StepFilterKey
-                const active = filterState.chips.has(statusKey)
-                return (
-                  <button
-                    key={chip.key}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    title={chip.description}
-                    onClick={() => setFilterState(prev => ({ ...prev, chips: new Set([statusKey]) }))}
-                    className={`flex h-7 shrink-0 items-center gap-1.5 border px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                      active
-                        ? 'border-sky-600 bg-sky-600 font-medium text-white'
-                        : 'border-border bg-background text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <span>{chip.label}</span>
-                    <span className={`text-[11px] tabular-nums ${active ? 'opacity-80' : 'text-muted-foreground/70'}`}>
-                      ({filterCounts[chip.key] ?? 0})
                     </span>
                   </button>
                 )
@@ -898,9 +873,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           </div>
         )}
         <div className="flex flex-wrap items-center gap-2 border bg-background px-3 py-2 text-xs">
-          <span className="font-medium">人工待办</span>
+          <span className="font-medium">异常复核</span>
           <span className="text-muted-foreground">共 {humanQueue.total} 篇 · 聚类复核 {humanQueue.clusterReview} · 低分析置信 {humanQueue.lowConfidence}</span>
-          <Button size="sm" variant="outline" className="ml-auto h-7 px-2 text-xs" onClick={() => openLibrary('attention')}>打开待办队列</Button>
+          <Button size="sm" variant="outline" className="ml-auto h-7 px-2 text-xs" onClick={() => openLibrary('attention')}>打开复核队列</Button>
         </div>
       </div>
 

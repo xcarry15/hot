@@ -24,7 +24,6 @@ import {
 } from '@/lib/job-progress';
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
 import { recordKeywordCandidates } from '@/lib/keyword-candidate-service';
-import { captureInboxSnapshot } from '@/lib/inbox-snapshot-service';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
 
 const FETCH_TIMEOUT_MS = 30_000;
@@ -158,8 +157,6 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
 
   // 修复已抓取文章的 publishedAt：从 rawContent 提取精确时间覆盖列表页的日期-only
   await repairPublishedDates(signal);
-  await captureInboxSnapshot().catch((error) => console.error('[processAllPending] inbox snapshot failed:', error));
-
   return { total, processed, errors, capped: false };
 }
 

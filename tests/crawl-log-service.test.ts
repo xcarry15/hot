@@ -386,7 +386,7 @@ describe('crawl-log-service', () => {
     const record = {
       id: 'a-error', title: '失败文章', publishedAt: new Date(), sourceId: 's1',
       fetchStatus: 'failed', fetchError: '正文请求超时', clusterStatus: 'failed', clusterError: '聚类服务异常',
-      aiStatus: 'failed', aiError: 'AI 限流', aiConfidence: null, score: 0, isAd: false, reviewStatus: 'general',
+      aiStatus: 'failed', aiError: 'AI 限流', aiConfidence: null, score: 0, isAd: false,
       eventId: null, event: null, nextFetchRetryAt: null, nextClusterRetryAt: null, nextAiRetryAt: null,
       relevance: 0, createdAt: new Date(), updatedAt: new Date(), summary: '', skipReason: null, technicalIgnoredAt: null,
       source: { name: 'S' },
@@ -405,7 +405,7 @@ describe('crawl-log-service', () => {
     const record = {
       id: 'a-push-error', title: '推送失败文章', publishedAt: new Date(), sourceId: 's1',
       fetchStatus: 'fetched', fetchError: null, clusterStatus: 'clustered', clusterError: null,
-      aiStatus: 'done', aiError: null, aiConfidence: 90, score: 90, isAd: false, reviewStatus: 'general',
+      aiStatus: 'done', aiError: null, aiConfidence: 90, score: 90, isAd: false,
       eventId: 'e1', event: { articleCount: 1, pushedAt: null, nextPushRetryAt: null, representativeArticleId: 'a-push-error', publicStatus: 'unpublished' },
       nextFetchRetryAt: null, nextClusterRetryAt: null, nextAiRetryAt: null,
       relevance: 90, createdAt: new Date(), updatedAt: new Date(), summary: '', skipReason: null, technicalIgnoredAt: null,

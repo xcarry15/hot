@@ -38,7 +38,6 @@ function article(partial: Partial<ArticleProgress>): ArticleProgress {
     technicalErrorReasons: {},
     isEventRepresentative: true,
     isPublic: false,
-    reviewStatus: 'general',
   }
 
   if (partial.crawl === 'failed') {
@@ -77,11 +76,6 @@ describe('matchStepChip 单谓词命中', () => {
     expect(matchStepChip(article({ anomalyLabels: ['duplicate'] }), 'anomaly-duplicate')).toBe(true)
   })
 
-  it('未人工审核不再被归为异常', () => {
-    expect(matchStepChip(article({ reviewStatus: 'unreviewed' }), 'anomaly-all')).toBe(false)
-    expect(matchStepChip(article({ reviewStatus: 'unreviewed' }), 'normal-all')).toBe(true)
-  })
-
   it('无具体事件是正常跳过，不是流程失败', () => {
     const skipped = article({ ai: 'skipped', cluster: 'not_applicable', push: 'not_applicable', skipReason: '无具体事件' })
     expect(matchStepChip(skipped, 'anomaly-failure')).toBe(false)
@@ -108,13 +102,6 @@ describe('matchStepChip 单谓词命中', () => {
     expect(item.technicalErrorReasons.process).toBe('正文页请求超时')
   })
 
-  it('人工审核通过与人工忽略独立于流水线正常/异常状态', () => {
-    expect(matchStepChip(article({ reviewStatus: 'important' }), 'review-passed')).toBe(true)
-    expect(matchStepChip(article({ reviewStatus: 'general' }), 'review-passed')).toBe(true)
-    expect(matchStepChip(article({ reviewStatus: 'irrelevant' }), 'review-passed')).toBe(false)
-    expect(matchStepChip(article({ reviewStatus: 'irrelevant' }), 'review-ignored')).toBe(true)
-    expect(matchStepChip(article({ reviewStatus: 'unreviewed' }), 'review-ignored')).toBe(false)
-  })
 })
 
 // ── 2. applyFilterState ──

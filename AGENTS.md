@@ -37,7 +37,7 @@ Use `npm run db:migrate:deploy` for production migrations. Do not use `db:push` 
 
 ## Coding Style & Naming Conventions
 
-Use strict TypeScript, two-space indentation, single quotes, semicolons, and the `@/*` import alias. Prefer small typed functions and existing service boundaries. Name components and types in PascalCase, functions and variables in camelCase, and tests as `*.test.ts`. Keep public visibility rules in `src/lib/public-article-service.ts`, setting definitions in `src/lib/settings-catalog.ts`, and review workflows in `src/lib/review-service.ts`. Run ESLint before submitting.
+Use strict TypeScript, two-space indentation, single quotes, semicolons, and the `@/*` import alias. Prefer small typed functions and existing service boundaries. Name components and types in PascalCase, functions and variables in camelCase, and tests as `*.test.ts`. Keep public visibility rules in `src/lib/public-article-service.ts`, setting definitions in `src/lib/settings-catalog.ts`, and manual correction feedback in `src/lib/feedback-service.ts`. Run ESLint before submitting.
 
 ## Testing Guidelines
 

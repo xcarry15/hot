@@ -5,14 +5,6 @@ export const DEFAULT_PARSER_CONFIGS: Record<string, string> = {
   canyin88: JSON.stringify({}, null, 2),
 }
 
-export const CATEGORY_ICONS: Record<string, string> = {
-  '餐饮': '🍜',
-  '零售': '🛒',
-  '食品': '🍿',
-  '品牌': '⭐',
-  '综合': '📰',
-}
-
 export const TYPE_LABELS: Record<string, string> = {
   'html': 'HTML',
   'rss': 'RSS',

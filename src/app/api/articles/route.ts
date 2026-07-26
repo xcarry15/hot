@@ -27,9 +27,7 @@ export async function GET(request: Request) {
       maxConfidence: parseOptionalInt(searchParams.get('maxConfidence')),
       sourceId: searchParams.get('sourceId') ?? undefined,
       search: searchParams.get('search') ?? undefined,
-      reviewStatus: searchParams.get('reviewStatus') ?? undefined,
       fetchStatus: searchParams.get('fetchStatus') ?? undefined,
-      inbox: searchParams.get('inbox') === 'true',
       anomaly: searchParams.get('anomaly') === 'needs_attention' || searchParams.get('anomaly') === 'technical'
         ? searchParams.get('anomaly') as 'needs_attention' | 'technical'
         : undefined,

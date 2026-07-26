@@ -38,11 +38,6 @@ export const SETTING_KEYS = {
   PUBLIC_MIN_SCORE: 'public_min_score',
   PUBLIC_MIN_RELEVANCE: 'public_min_relevance',
   PUBLIC_HIDE_ADS: 'public_hide_ads',
-  PUBLIC_IMPORTANT_RULE: 'public_important_rule',
-  PUBLIC_GENERAL_RULE: 'public_general_rule',
-  PUBLIC_IRRELEVANT_RULE: 'public_irrelevant_rule',
-  PUBLIC_PIN_HOURS: 'public_pin_hours',
-
   AUTO_CRAWL_ENABLED: 'auto_crawl_enabled',
   CRAWL_INTERVAL_MIN: 'crawl_interval_min',
   SCHEDULER_LAST_CRAWL_AT: 'scheduler_last_crawl_at',
@@ -142,11 +137,6 @@ const definitions: SettingDefinition[] = [
   { key: SETTING_KEYS.PUBLIC_MIN_SCORE, defaultValue: '70', schema: intRange(0, 100, '公开最低评分'), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUBLIC_MIN_RELEVANCE, defaultValue: '50', schema: intRange(0, 100, '公开最低相关度'), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUBLIC_HIDE_ADS, defaultValue: 'true', schema: z.enum(['true', 'false']), sensitive: false, exportable: true, frontend: true, seed: true },
-  { key: SETTING_KEYS.PUBLIC_IMPORTANT_RULE, defaultValue: 'public', schema: z.enum(['auto', 'public', 'hidden']), sensitive: false, exportable: true, frontend: true, seed: true },
-  { key: SETTING_KEYS.PUBLIC_GENERAL_RULE, defaultValue: 'auto', schema: z.enum(['auto', 'public', 'hidden']), sensitive: false, exportable: true, frontend: true, seed: true },
-  { key: SETTING_KEYS.PUBLIC_IRRELEVANT_RULE, defaultValue: 'hidden', schema: z.enum(['auto', 'public', 'hidden']), sensitive: false, exportable: true, frontend: true, seed: true },
-  { key: SETTING_KEYS.PUBLIC_PIN_HOURS, defaultValue: '24', schema: intRange(1, 720, '重要文章置顶时长'), sensitive: false, exportable: true, frontend: true, seed: true },
-
   { key: SETTING_KEYS.AUTO_CRAWL_ENABLED, defaultValue: 'false', schema: z.enum(['true', 'false']), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.CRAWL_INTERVAL_MIN, defaultValue: '120', schema: intRange(5, 10080, '爬取间隔（分钟）'), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.SCHEDULER_LAST_CRAWL_AT, defaultValue: '', schema: text, sensitive: false, exportable: false, frontend: false, seed: false },

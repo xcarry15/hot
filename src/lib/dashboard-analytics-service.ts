@@ -1,5 +1,4 @@
 import { db } from '@/lib/db';
-import { captureInboxSnapshotForDashboard, listInboxSnapshots } from '@/lib/inbox-snapshot-service';
 
 export type DashboardAnalyticsRange = 'today' | '3d' | '7d' | '30d';
 
@@ -197,10 +196,7 @@ async function buildDashboardAnalytics(
   const timeWhere = { gte: window.startAt, lte: window.endAt };
   const sourceFilter = sourceId ? { sourceId } : {};
 
-  // 积压趋势是派生快照，不阻塞主统计；采集/归类任务完成后也会更新同一快照。
-  void captureInboxSnapshotForDashboard().catch(() => undefined);
-
-  const [sources, articles, discardedItems, fetchLogs, inboxPending, inboxSnapshots] = await Promise.all([
+  const [sources, articles, discardedItems, fetchLogs] = await Promise.all([
     db.source.findMany({
       where: { deletedAt: null, ...(sourceId ? { id: sourceId } : {}) },
       select: { id: true, name: true, status: true, enabled: true, lastFetchedAt: true },
@@ -238,8 +234,6 @@ async function buildDashboardAnalytics(
       where: { createdAt: timeWhere, ...sourceFilter },
       select: { sourceId: true, createdAt: true, status: true, itemsFound: true },
     }),
-    db.article.count({ where: { fetchStatus: 'fetched', reviewStatus: 'unreviewed' } }),
-    listInboxSnapshots(7),
   ]);
 
   const recentJobs = await db.job.findMany({
@@ -438,13 +432,6 @@ async function buildDashboardAnalytics(
       pageSize: CRAWL_PAGE_SIZE,
       total: totalCrawlRecords,
       totalPages: totalCrawlPages,
-    },
-    inbox: {
-      pending: inboxPending,
-      trend: inboxSnapshots.map((snapshot) => ({
-        date: dateKey(snapshot.capturedOn),
-        pending: snapshot.pendingCount,
-      })),
     },
   };
 }

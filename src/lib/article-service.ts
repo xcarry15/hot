@@ -60,9 +60,7 @@ export interface ArticleListFilter {
   maxConfidence?: number;
   sourceId?: string;
   search?: string;
-  reviewStatus?: string;
   fetchStatus?: string;
-  inbox?: boolean;
   anomaly?: 'needs_attention' | 'technical';
   clusterView?: 'needs_review' | 'multi_source' | 'representative';
   manualOnly?: boolean;
@@ -78,12 +76,7 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
   if (Number.isFinite(filter.minRelevance)) where.relevance = { gte: filter.minRelevance };
   if (Number.isFinite(filter.maxConfidence)) where.aiConfidence = { lt: filter.maxConfidence };
   if (filter.sourceId) where.sourceId = filter.sourceId;
-  if (filter.reviewStatus) where.reviewStatus = filter.reviewStatus;
   if (filter.fetchStatus) where.fetchStatus = filter.fetchStatus as 'pending' | 'fetched' | 'failed';
-  if (filter.inbox) {
-    where.fetchStatus = 'fetched';
-    where.reviewStatus = 'unreviewed';
-  }
   if (filter.anomaly === 'needs_attention') {
     where.OR = [
       { clusterStatus: 'needs_review' },
@@ -201,9 +194,7 @@ export async function listArticles(
                               ? [{ aiConfidence: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
                               : params.filter?.sort === 'confidence_asc'
                                 ? [{ aiConfidence: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
-                                : params.filter?.inbox
-                                  ? [{ createdAt: 'asc' }]
-                                  : [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+                                : [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

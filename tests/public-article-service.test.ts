@@ -37,7 +37,6 @@ function eventRow(id: string, publishedAt: string, sourceCount = 1) {
       category: '行业',
       keyPoints: '[]',
       score: 82,
-      pinUntil: null,
       publishedAt: new Date(publishedAt),
       createdAt: new Date(publishedAt),
       publicContentUpdatedAt: new Date(publishedAt),

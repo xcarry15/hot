@@ -86,36 +86,12 @@ export default function PublicTab({ settings, setSettings }: Props) {
             </div>
             <span className="text-xs text-muted-foreground">默认 70 / 50；人工公开可绕过</span>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <Label className="text-xs">软文处理</Label>
-              <Select value={settings.public_hide_ads} onValueChange={(value) => updateSetting('public_hide_ads', value)}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent className="rounded-none shadow-sm"><SelectItem value="true">隐藏软文</SelectItem><SelectItem value="false">允许公开</SelectItem></SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">重要文章置顶时长</Label>
-              <div className="flex items-center gap-2"><Input type="number" min={1} max={720} value={settings.public_pin_hours} onChange={(event) => updateSetting('public_pin_hours', event.target.value)} className="h-8 w-24 text-xs" /><span className="text-xs text-muted-foreground">小时</span></div>
-            </div>
-          </div>
-          <div className="space-y-2 border-t pt-3">
-            <div><p className="text-sm font-medium">人工归类与公开映射</p><p className="text-xs text-muted-foreground">归类后单篇覆盖自动规则；重要文章默认公开并置顶。</p></div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {([
-                ['important', '重要（固定公开）', 'public_important_rule'],
-                ['general', '一般', 'public_general_rule'],
-                ['irrelevant', '无关', 'public_irrelevant_rule'],
-              ] as const).map(([, label, key]) => (
-                <div key={key} className="flex items-center justify-between gap-2 border px-2.5 py-1.5">
-                  <span className="text-xs font-medium">{label}</span>
-                  <Select value={key === 'public_important_rule' ? 'public' : settings[key]} onValueChange={(value) => updateSetting(key, value)} disabled={key === 'public_important_rule'}>
-                    <SelectTrigger className="h-7 w-24 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent className="rounded-none shadow-sm"><SelectItem value="auto">自动</SelectItem><SelectItem value="public">公开</SelectItem><SelectItem value="hidden">隐藏</SelectItem></SelectContent>
-                  </Select>
-                </div>
-              ))}
-            </div>
+          <div className="max-w-sm space-y-1">
+            <Label className="text-xs">软文处理</Label>
+            <Select value={settings.public_hide_ads} onValueChange={(value) => updateSetting('public_hide_ads', value)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent className="rounded-none shadow-sm"><SelectItem value="true">隐藏软文</SelectItem><SelectItem value="false">允许公开</SelectItem></SelectContent>
+            </Select>
           </div>
           <div className="flex flex-wrap items-center gap-2 border-t pt-3">
             <button type="button" onClick={() => void previewRules()} disabled={previewing} className="h-7 border px-2.5 text-xs font-medium hover:bg-muted disabled:opacity-60">{previewing ? '预览中…' : '预览公开结果'}</button>

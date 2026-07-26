@@ -628,11 +628,10 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
             <RefreshCw className="h-3.5 w-3.5" />刷新
           </Button>
         </div>
-        <div className="grid min-w-[420px] flex-1 grid-cols-2 gap-px sm:grid-cols-4">
+        <div className="grid min-w-[360px] flex-1 grid-cols-3 gap-px">
           <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">公开浏览</span><strong className="text-base tabular-nums">{formatNumber(summary.views)}</strong></div>
           <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">查看原文</span><strong className="text-base tabular-nums">{formatNumber(summary.originalClicks)}</strong></div>
           <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">点击率</span><strong className="text-base tabular-nums">{formatPercent(summary.clickRate)}</strong></div>
-          <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">待归类</span><strong className="text-base tabular-nums">{formatNumber(analytics.inbox.pending)}</strong></div>
         </div>
       </div>
 

@@ -100,11 +100,6 @@ vi.mock('@/lib/db', () => ({
       updateMany: vi.fn(),
       deleteMany: vi.fn(),
     },
-    inboxSnapshot: {
-      create: vi.fn(),
-      findFirst: vi.fn(),
-      findMany: vi.fn(),
-    },
     pushTarget: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),

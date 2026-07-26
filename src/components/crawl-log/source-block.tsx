@@ -71,7 +71,6 @@ export const SourceBlock = memo(function SourceBlock({
 
   // 稳定引用：source.articles 缺失时 `|| []` 会返回新数组，破坏下游 useMemo 的依赖判断
   const articles = useMemo(() => source.articles ?? [], [source.articles])
-  const [collapsedDiscardGroups, setCollapsedDiscardGroups] = useState<Set<string>>(() => new Set())
   const summaryArticles = summarySource?.articles ?? articles
   const totalCount = summaryArticles.length
   const manualCount = summaryArticles.filter(a => a.technicalState === 'manual').length
@@ -79,8 +78,9 @@ export const SourceBlock = memo(function SourceBlock({
   const publicCount = summaryArticles.filter(a => a.isPublic).length
   const pushedCount = summaryArticles.filter(a => a.push === 'done').length
   const anomalyCount = summaryArticles.filter(hasArticleAnomaly).length
-  const discardedCount = summarySource?.discarded?.length ?? source.discarded?.length ?? 0
+  const visibleDiscardedCount = source.discarded?.length ?? 0
 
+  const [collapsedArticleGroups, setCollapsedArticleGroups] = useState<Set<string>>(() => new Set())
   // 按 reason 分组，组内按 publishedAt desc 排序
   const discardedGroups = useMemo(() => {
     const discarded = source.discarded || []
@@ -104,14 +104,39 @@ export const SourceBlock = memo(function SourceBlock({
     })
   }, [source.discarded])
 
-  const toggleDiscardGroup = useCallback((reason: string) => {
-    setCollapsedDiscardGroups(prev => {
+  const blacklistItems = useMemo(
+    () => discardedGroups.find(([reason]) => reason === 'filter:blacklist')?.[1] ?? [],
+    [discardedGroups],
+  )
+  const normalDiscardGroups = useMemo(
+    () => discardedGroups.filter(([reason]) => reason !== 'filter:blacklist'),
+    [discardedGroups],
+  )
+
+  const toggleArticleGroup = useCallback((group: string) => {
+    setCollapsedArticleGroups(prev => {
       const next = new Set(prev)
-      if (next.has(reason)) next.delete(reason)
-      else next.add(reason)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
       return next
     })
   }, [])
+
+  const renderGroupHeader = (group: string, label: string, count: number) => {
+    const isExpanded = !collapsedArticleGroups.has(group)
+    return (
+      <button
+        type="button"
+        className="flex w-full items-center gap-1 border-b border-border/40 px-2 py-0.5 text-left text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => toggleArticleGroup(group)}
+        aria-expanded={isExpanded}
+      >
+        <span>{isExpanded ? '▾' : '▸'}</span>
+        <span className="font-medium">{label}</span>
+        <span className="text-muted-foreground/60">({count})</span>
+      </button>
+    )
+  }
 
   return (
     <div className="rounded-lg border border-border overflow-hidden bg-card">
@@ -137,61 +162,72 @@ export const SourceBlock = memo(function SourceBlock({
           <span className={`text-xs ${anomalyCount > 0 ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>异常 {anomalyCount}</span>
           {manualCount > 0 && <span className="text-xs font-medium text-red-700">需处理 {manualCount}</span>}
           {autoRetryCount > 0 && <span className="text-xs font-medium text-blue-700">自动恢复 {autoRetryCount}</span>}
-          {discardedCount > 0 && <span className="text-xs text-muted-foreground">未入库 {discardedCount}</span>}
         </div>
       </button>
 
-      {source.expanded && articles.length > 0 && (
+      {source.expanded && (articles.length > 0 || visibleDiscardedCount > 0) && (
         <div className="bg-background/50">
-          <div className="max-h-none divide-y divide-border/20 sm:overflow-y-auto sm:max-h-none">
-            {articles.map(article => (
-              <ArticleRow
-                key={article.id}
-                article={article}
-                onStepAction={onStepAction}
-                onStepActionLoading={onStepActionLoading}
-                onTechnicalStatus={onTechnicalStatus}
-                onOpenArticle={onOpenArticle}
-                onOpenArticlePanel={onOpenArticlePanel}
-                isJobRunning={isJobRunning}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+          {articles.length > 0 && (
+            <div className="border-t border-border/40">
+              {renderGroupHeader('articles', '正常文章', articles.length)}
+              {!collapsedArticleGroups.has('articles') && (
+                <div className="max-h-none divide-y divide-border/20 sm:overflow-y-auto sm:max-h-none">
+                  {articles.map(article => (
+                    <ArticleRow
+                      key={article.id}
+                      article={article}
+                      onStepAction={onStepAction}
+                      onStepActionLoading={onStepActionLoading}
+                      onTechnicalStatus={onTechnicalStatus}
+                      onOpenArticle={onOpenArticle}
+                      onOpenArticlePanel={onOpenArticlePanel}
+                      isJobRunning={isJobRunning}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
-      {source.expanded && (source.discarded?.length ?? 0) > 0 && (
-        <div className="border-t border-dashed bg-muted/20 px-2 py-1">
-          <div className="max-h-none sm:overflow-y-auto sm:max-h-none">
-              {discardedGroups.map(([reason, items]) => {
-                const groupLabel = DISCARD_REASON_LABELS[reason] || reason
-                const isExpanded = !collapsedDiscardGroups.has(reason)
-                return (
-                  <div key={reason}>
-                    <button
-                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground w-full py-0.5"
-                      onClick={() => toggleDiscardGroup(reason)}
-                    >
-                      <span>{isExpanded ? '▾' : '▸'}</span>
-                      <span>{groupLabel}</span>
-                      <span className="text-muted-foreground/60">({items.length})</span>
-                    </button>
-                    {isExpanded && (
-                      <div className="divide-y divide-border/30 ml-2">
-                        {items.map(item => (
-                          <DiscardedRow
-                            key={item.id}
-                            item={item}
-                            onOpen={onOpenDiscarded}
-                            onRetried={onDiscardedRetried}
-                          />
-                        ))}
-                      </div>
-                    )}
+          {normalDiscardGroups.map(([reason, items]) => {
+            const group = `discarded:${reason}`
+            const groupLabel = DISCARD_REASON_LABELS[reason] || reason
+            return (
+              <div key={reason} className="border-t border-dashed bg-muted/20">
+                {renderGroupHeader(group, groupLabel, items.length)}
+                {!collapsedArticleGroups.has(group) && (
+                  <div className="divide-y divide-border/30 px-1 py-0.5">
+                    {items.map(item => (
+                      <DiscardedRow
+                        key={item.id}
+                        item={item}
+                        onOpen={onOpenDiscarded}
+                        onRetried={onDiscardedRetried}
+                      />
+                    ))}
                   </div>
-                )
-              })}
-          </div>
+                )}
+              </div>
+            )
+          })}
+
+          {blacklistItems.length > 0 && (
+            <div className="border-t border-dashed bg-red-50/30 dark:bg-red-950/10">
+              {renderGroupHeader('blacklist', '黑名单', blacklistItems.length)}
+              {!collapsedArticleGroups.has('blacklist') && (
+                <div className="divide-y divide-border/30 px-1 py-0.5">
+                  {blacklistItems.map(item => (
+                    <DiscardedRow
+                      key={item.id}
+                      item={item}
+                      onOpen={onOpenDiscarded}
+                      onRetried={onDiscardedRetried}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -38,7 +38,6 @@ const representativeListSelect = {
   brand: true,
   category: true,
   score: true,
-  pinUntil: true,
   publishedAt: true,
   createdAt: true,
   source: { select: { id: true, name: true, type: true } },
@@ -85,7 +84,6 @@ type SortablePublicEventRow = {
   firstSeenAt: Date;
   representativeArticle: {
     publishedAt: Date | null;
-    pinUntil: Date | null;
   } | null;
 };
 
@@ -113,10 +111,6 @@ function serializeEvent(row: PublicEventListRow, cleanContent = ''): PublicArtic
 function sortEvents(left: SortablePublicEventRow, right: SortablePublicEventRow): number {
   const dateKey = getPublicDateKey(effectiveDate(right)).localeCompare(getPublicDateKey(effectiveDate(left)));
   if (dateKey !== 0) return dateKey;
-  const now = Date.now();
-  const leftPinned = (left.representativeArticle?.pinUntil?.getTime() ?? 0) > now;
-  const rightPinned = (right.representativeArticle?.pinUntil?.getTime() ?? 0) > now;
-  if (leftPinned !== rightPinned) return Number(rightPinned) - Number(leftPinned);
   return effectiveDate(right).getTime() - effectiveDate(left).getTime();
 }
 
@@ -258,7 +252,7 @@ async function buildPublicArticleDetail(id: string): Promise<PublicArticleDetail
       select: {
         id: true,
         firstSeenAt: true,
-        representativeArticle: { select: { title: true, publishedAt: true, pinUntil: true } },
+        representativeArticle: { select: { title: true, publishedAt: true } },
       },
       orderBy: [{ publicSortAt: 'desc' }, { id: 'desc' }],
       take: PUBLIC_MAX_ROWS_PER_DATE,

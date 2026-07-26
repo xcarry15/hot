@@ -43,13 +43,9 @@ export const ARTICLE_LIST_SELECT = {
   clusterError: true,
   skipReason: true,
   isAd: true,
-  reviewStatus: true,
-  reviewReasonTags: true,
-  reviewedAt: true,
   publicOverride: true,
   publicStatus: true,
   publicPublicationReason: true,
-  pinUntil: true,
   aiSnapshot: true,
   manualOverrides: true,
   manualCorrectedAt: true,
@@ -118,13 +114,9 @@ export interface ArticleListFieldsDto {
   clusterError: string | null;
   skipReason: string | null;
   isAd: boolean;
-  reviewStatus: string;
-  reviewReasonTags: string;
-  reviewedAt: string | null;
   publicOverride: string;
   publicStatus: string;
   publicPublicationReason: string;
-  pinUntil: string | null;
   aiSnapshot: string;
   manualOverrides: string;
   manualCorrectedAt: string | null;
@@ -187,9 +179,7 @@ export interface ArticleListResponseDto extends ArticlePaginationDto {
 
 type ListDates = {
   publishedAt: NullableDateValue;
-  reviewedAt: NullableDateValue;
   manualCorrectedAt: NullableDateValue;
-  pinUntil: NullableDateValue;
   createdAt: DateValue;
   updatedAt: DateValue;
   clusteredAt: NullableDateValue;
@@ -197,7 +187,7 @@ type ListDates = {
 
 export type ArticleListRecord = Omit<
   ArticleListFieldsDto,
-  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'manualCorrectedAt' | 'pinUntil' | 'clusteredAt' | 'event' | 'createdAt' | 'updatedAt'
+  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'manualCorrectedAt' | 'clusteredAt' | 'event' | 'createdAt' | 'updatedAt'
 > & ListDates & {
   cleanContent?: string;
   source: ArticleSourceSummaryDto;
@@ -211,7 +201,7 @@ export type ArticleListRecord = Omit<
 
 export type ArticleDetailRecord = Omit<
   ArticleFieldsDto,
-  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'reviewedAt' | 'manualCorrectedAt' | 'pinUntil' | 'clusteredAt' | 'event' | 'createdAt' | 'updatedAt'
+  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'manualCorrectedAt' | 'clusteredAt' | 'event' | 'createdAt' | 'updatedAt'
 > & ListDates & {
   source: ArticleSourceDetailDto;
   pushLogs: ArticlePushLogRecord[];
@@ -287,13 +277,9 @@ function serializeArticleListFields(
     clusterError: article.clusterError,
     skipReason: article.skipReason,
     isAd: article.isAd,
-    reviewStatus: article.reviewStatus,
-    reviewReasonTags: article.reviewReasonTags,
-    reviewedAt: toIso(article.reviewedAt),
     publicOverride: article.publicOverride,
     publicStatus: article.publicStatus,
     publicPublicationReason: article.publicPublicationReason,
-    pinUntil: toIso(article.pinUntil),
     aiSnapshot: article.aiSnapshot,
     manualOverrides: article.manualOverrides,
     manualCorrectedAt: toIso(article.manualCorrectedAt),

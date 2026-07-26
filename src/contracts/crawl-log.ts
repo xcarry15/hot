@@ -41,7 +41,6 @@ export interface ArticleProgress {
   technicalIgnoredAt?: string | null;
   /** 当前技术失败的可展示原因，按步骤键保存。 */
   technicalErrorReasons: Partial<Record<'process' | 'ai' | 'cluster' | 'push', string>>;
-  reviewStatus: string;
   isEventRepresentative: boolean;
   /** 当前 Event 的代表文章已处于公开状态。 */
   isPublic: boolean;

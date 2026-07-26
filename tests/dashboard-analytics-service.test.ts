@@ -7,8 +7,6 @@ const mocks = vi.hoisted(() => ({
   discardedFindMany: vi.fn(),
   fetchLogFindMany: vi.fn(),
   jobFindMany: vi.fn(),
-  captureInboxSnapshot: vi.fn(),
-  listInboxSnapshots: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -21,19 +19,12 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-vi.mock('@/lib/inbox-snapshot-service', () => ({
-  captureInboxSnapshotForDashboard: mocks.captureInboxSnapshot,
-  listInboxSnapshots: mocks.listInboxSnapshots,
-}));
-
 import { getDashboardAnalytics, invalidateDashboardAnalyticsCache } from '@/lib/dashboard-analytics-service';
 
 describe('运营统计重复口径', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invalidateDashboardAnalyticsCache();
-    mocks.captureInboxSnapshot.mockResolvedValue(undefined);
-    mocks.listInboxSnapshots.mockResolvedValue([]);
     mocks.articleCount.mockResolvedValue(0);
     mocks.discardedFindMany.mockResolvedValue([]);
     mocks.fetchLogFindMany.mockResolvedValue([]);

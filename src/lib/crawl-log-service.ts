@@ -56,7 +56,6 @@ const crawlLogArticleSelect = {
   aiConfidence: true,
   score: true,
   isAd: true,
-  reviewStatus: true,
   eventId: true,
   event: { select: { articleCount: true, pushedAt: true, nextPushRetryAt: true, representativeArticleId: true, publicStatus: true } },
   nextAiRetryAt: true,
@@ -383,7 +382,6 @@ export async function getCrawlLogSnapshot(
             : `推送失败：${pushFailureReason.webhookRemark || '投递目标'}${pushFailureReason.latestError ? `：${pushFailureReason.latestError}` : ''}`,
         } : {}),
       },
-      reviewStatus: a.reviewStatus,
       isEventRepresentative: isRepresentative,
       isPublic: isRepresentative && a.event?.publicStatus === 'published',
     };

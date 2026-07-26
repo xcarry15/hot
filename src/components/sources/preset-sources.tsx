@@ -6,13 +6,6 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { LoadingList } from '@/components/ui/loading-list'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   Plus,
   CheckCircle2,
   Loader2,
@@ -21,7 +14,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/ui/empty-state'
-import { CATEGORY_ICONS, TYPE_LABELS } from './constants'
+import { TYPE_LABELS } from './constants'
 import type { PresetSourceItem } from './types'
 import {
   addPresetSource as addPresetSourceApi,
@@ -34,7 +27,6 @@ export function PresetSourcesManagement() {
   const [presets, setPresets] = useState<PresetSourceItem[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [adding, setAdding] = useState(false)
 
   const loadPresets = useCallback(async () => {
@@ -66,7 +58,7 @@ export function PresetSourcesManagement() {
   }
 
   const toggleSelectAll = () => {
-    const available = filteredPresets.filter(p => !p.isAdded)
+    const available = presets.filter(p => !p.isAdded)
     const allAvailableSelected = available.every(p => selectedIds.has(p.id))
     if (allAvailableSelected) {
       setSelectedIds(new Set())
@@ -139,22 +131,6 @@ export function PresetSourcesManagement() {
     }
   }
 
-  const filteredPresets = presets.filter(p => {
-    if (categoryFilter !== 'all' && p.category !== categoryFilter) return false
-    return true
-  })
-
-  const grouped = filteredPresets.reduce<Record<string, PresetSourceItem[]>>((acc, p) => {
-    if (!acc[p.category]) acc[p.category] = []
-    acc[p.category].push(p)
-    return acc
-  }, {})
-
-  const categoryOrder = ['餐饮', '零售', '食品', '品牌', '综合']
-  const sortedCategories = Object.keys(grouped).sort(
-    (a, b) => categoryOrder.indexOf(a) - categoryOrder.indexOf(b)
-  )
-
   const addedCount = presets.filter(p => p.isAdded).length
   const availableCount = presets.filter(p => !p.isAdded).length
 
@@ -188,17 +164,6 @@ export function PresetSourcesManagement() {
           </Button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="h-7 w-[120px] text-xs">
-              <SelectValue placeholder="分类" />
-            </SelectTrigger>
-            <SelectContent className="rounded-none shadow-sm">
-              <SelectItem value="all">全部分类</SelectItem>
-              {categoryOrder.map(c => (
-                <SelectItem key={c} value={c}>{CATEGORY_ICONS[c]} {c}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           {selectedIds.size > 0 && (
             <>
               <span className="text-xs text-muted-foreground">已选 {selectedIds.size} 项</span>
@@ -236,84 +201,61 @@ export function PresetSourcesManagement() {
 
       {/* Preset List */}
       <ScrollArea className="flex-1 h-full">
-        {sortedCategories.length === 0 ? (
+        {presets.length === 0 ? (
           <EmptyState title="暂无预设源" />
         ) : (
-          <div className="space-y-2 p-2">
-            {sortedCategories.map(category => (
-              <div key={category}>
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="text-base">{CATEGORY_ICONS[category] || '📌'}</span>
-                  <span className="text-sm font-semibold">{category}</span>
-                  <Badge variant="secondary" className="text-xs px-2 py-0">
-                    {grouped[category].filter(p => p.isAdded).length}/{grouped[category].length}
+          <div className="space-y-1 p-2">
+            {presets.map(preset => (
+              <div
+                key={preset.id}
+                className={`flex min-w-0 items-center gap-2 border px-2 py-1 text-xs transition-colors ${
+                  preset.isAdded
+                    ? 'border-emerald-200 bg-emerald-50/50'
+                    : selectedIds.has(preset.id)
+                      ? 'border-primary/30 bg-primary/5'
+                      : 'hover:bg-muted/40'
+                }`}
+              >
+                {!preset.isAdded ? (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(preset.id)}
+                    onChange={() => toggleSelect(preset.id)}
+                    className="h-4 w-4 shrink-0 accent-primary"
+                  />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                )}
+
+                <span className={`min-w-0 max-w-32 shrink-0 truncate font-medium sm:max-w-48 ${preset.isAdded ? 'text-emerald-700' : ''}`} title={preset.name}>
+                  {preset.name}
+                </span>
+                <Badge variant="outline" className="h-5 shrink-0 px-1.5 py-0 text-[10px]">
+                  {TYPE_LABELS[preset.type] || preset.type}
+                </Badge>
+                <span className="hidden min-w-0 flex-1 truncate text-[11px] text-muted-foreground md:block" title={preset.description}>
+                  {preset.description}
+                </span>
+                <span className="hidden max-w-[28rem] min-w-0 flex-1 truncate text-[10px] text-muted-foreground/70 lg:block" title={preset.url}>
+                  {preset.url}
+                </span>
+                {preset.isAdded && (
+                  <Badge className="h-5 shrink-0 border-emerald-200 bg-emerald-100 px-2 py-0 text-[10px] text-emerald-700">
+                    已添加
                   </Badge>
-                </div>
-                <div className="space-y-1">
-                  {grouped[category].map(preset => (
-                    <div
-                      key={preset.id}
-                      className={`border px-2 py-1.5 text-xs transition-colors ${
-                        preset.isAdded
-                          ? 'bg-emerald-50/50 border-emerald-200'
-                          : selectedIds.has(preset.id)
-                            ? 'bg-primary/5 border-primary/30'
-                            : 'hover:bg-muted/40'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        {!preset.isAdded && (
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(preset.id)}
-                            onChange={() => toggleSelect(preset.id)}
-                            className="h-4 w-4 shrink-0 accent-primary"
-                          />
-                        )}
-                        {preset.isAdded && (
-                          <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                        )}
-
-                        {/* Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`font-medium truncate ${preset.isAdded ? 'text-emerald-700' : ''}`}>
-                              {preset.name}
-                            </span>
-                            <Badge variant="outline" className="text-xs px-1.5 py-0 h-5">
-                              {TYPE_LABELS[preset.type] || preset.type}
-                            </Badge>
-                            {preset.isAdded && (
-                              <Badge className="text-xs px-2 py-0 h-5 bg-emerald-100 text-emerald-700 border-emerald-200">
-                                已添加
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                            {preset.description}
-                          </div>
-                          <div className="truncate text-[10px] text-muted-foreground/70">
-                            {preset.url}
-                          </div>
-                        </div>
-
-                        {/* Action */}
-                        {!preset.isAdded && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 shrink-0 px-2.5 text-xs"
-                            onClick={() => handleAddSingle(preset)}
-                            disabled={adding}
-                          >
-                            <Plus className="h-3.5 w-3.5 mr-1" />
-                            添加
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                )}
+                {!preset.isAdded && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 shrink-0 px-2 text-[11px]"
+                    onClick={() => handleAddSingle(preset)}
+                    disabled={adding}
+                  >
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    添加
+                  </Button>
+                )}
               </div>
             ))}
           </div>

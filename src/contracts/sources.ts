@@ -32,7 +32,6 @@ export interface PresetSourceItemDto {
   type: SourceType;
   url: string;
   parserConfig: string;
-  category: string;
   description: string;
   isAdded: boolean;
 }

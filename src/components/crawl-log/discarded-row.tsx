@@ -43,21 +43,21 @@ export function DiscardedRow({
   }
 
   return (
-    <div className="group min-w-0 border-l-2 border-l-transparent px-2 py-1 text-[12px] leading-5 text-muted-foreground transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)]">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5">
+    <div className="group min-w-0 overflow-hidden border-l-2 border-l-transparent px-1 py-0.5 text-[11px] leading-4 text-muted-foreground transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)]">
+      <div className="flex min-w-0 flex-nowrap items-center gap-x-1">
         {pubDate && (
-          <span className="text-xs text-muted-foreground/70 shrink-0 tabular-nums font-mono">
+          <span className="shrink-0 font-mono text-[10px] leading-4 tabular-nums text-muted-foreground/70">
             {pubDate}
           </span>
         )}
         <button
-          className="min-w-0 flex-1 line-clamp-2 text-left leading-4 text-muted-foreground group-hover:text-foreground sm:truncate sm:leading-5"
+          className="min-w-0 flex-1 truncate text-left text-[12px] leading-4 text-muted-foreground group-hover:text-foreground"
           title={item.title}
           onClick={() => onOpen?.(item.id)}
         >
           {item.title}
         </button>
-        <span className="shrink-0 px-1 py-0 rounded-full text-[10px] leading-5 bg-amber-100 text-amber-700">
+        <span className="shrink-0 rounded-full bg-amber-100 px-1 py-0 text-[10px] leading-4 text-amber-700">
           {label}
         </span>
         {canRetry && (
@@ -65,7 +65,7 @@ export function DiscardedRow({
             onClick={handleRetry}
             disabled={retrying}
             title="手动采集此文章"
-            className="shrink-0 inline-flex items-center justify-center h-6 w-6 rounded-full text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition-colors"
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700"
           >
             {retrying ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

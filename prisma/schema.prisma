@@ -92,12 +92,8 @@ model Article {
   aiRetryCount  Int       @default(0) // AI 失败累计重试次数；≥5 次标 skipped 放弃（防 provider 故障持续烧 token）
   nextAiRetryAt DateTime? // AI 失败后的下次允许重试时间（指数退避：2^n 分钟，上限 6h）
   isAd          Boolean   @default(false) // AI 判定为软文/广告时为 true（分数会被 clamp 到 0-34，标题加 [软文] 标记）
-  // 人工审核与公开控制
-  reviewStatus       String    @default("unreviewed") // unreviewed, important, general, irrelevant
-  reviewReasonTags   String    @default("[]") // JSON array；只允许预设标签
-  reviewedAt         DateTime?
+  // 人工公开控制
   publicOverride     String    @default("auto") // auto, public, hidden
-  pinUntil           DateTime?
   publicStatus       String    @default("unpublished") // unpublished, published, revoked
   publicPublishedAt  DateTime?
   publicRevokedAt    DateTime?
@@ -128,8 +124,7 @@ model Article {
   // AI worker filters by status + retry window, then processes oldest rows first.
   @@index([aiStatus, nextAiRetryAt, createdAt])
   @@index([brand, createdAt])
-  @@index([reviewStatus, aiStatus, fetchStatus, createdAt])
-  @@index([publicOverride, pinUntil, publishedAt])
+  @@index([publicOverride, publishedAt])
   @@index([publicStatus, publishedAt])
   @@index([publicStatus, publicContentUpdatedAt])
   @@map("articles")
@@ -218,16 +213,6 @@ model TuningSuggestion {
 
   @@index([status, createdAt])
   @@map("tuning_suggestions")
-}
-
-model InboxSnapshot {
-  id           String   @id @default(cuid())
-  capturedOn   DateTime @unique
-  pendingCount Int
-  createdAt    DateTime @default(now())
-
-  @@index([capturedOn])
-  @@map("inbox_snapshots")
 }
 
 model Keyword {

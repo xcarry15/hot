@@ -454,7 +454,7 @@ export default function KeywordsTab() {
             </div>
           </section>
 
-          <div className={pendingCandidates.length > 0 ? 'grid min-h-0 gap-1.5 lg:grid-cols-[minmax(300px,360px)_minmax(0,1fr)]' : 'min-h-0'}>
+          <div className={pendingCandidates.length > 0 ? 'grid min-h-0 gap-1.5 lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)]' : 'min-h-0'}>
             {pendingCandidates.length > 0 && <section className="min-w-0 overflow-hidden border border-amber-300 bg-amber-50/50 dark:bg-amber-950/10">
               <div className="flex h-7 items-center gap-1.5 border-b border-amber-300 px-1.5">
                 <span className="text-xs font-medium">待确认候选</span>

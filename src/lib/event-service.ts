@@ -15,7 +15,6 @@ export type RepresentativeCandidate = {
   id: string;
   clusterStatus: string;
   aiStatus: string;
-  reviewStatus: string;
   score: number;
   relevance: number;
   cleanContent: string;
@@ -68,7 +67,6 @@ async function getSameBrandCandidates(eventId: string, brand: string) {
     score: true,
     relevance: true,
     brand: true,
-    reviewStatus: true,
     publicStatus: true,
     publishedAt: true,
     createdAt: true,
@@ -140,8 +138,6 @@ export function selectRepresentativeCandidate(articles: RepresentativeCandidate[
 function compareRepresentative(left: RepresentativeCandidate, right: RepresentativeCandidate): number {
   const ready = Number(isReleaseRepresentativeEligible(right)) - Number(isReleaseRepresentativeEligible(left));
   if (ready !== 0) return ready;
-  const important = Number(right.reviewStatus === 'important') - Number(left.reviewStatus === 'important');
-  if (important !== 0) return important;
   if (right.score !== left.score) return right.score - left.score;
   if (right.relevance !== left.relevance) return right.relevance - left.relevance;
   if (right.cleanContent.length !== left.cleanContent.length) return right.cleanContent.length - left.cleanContent.length;
@@ -158,7 +154,7 @@ async function chooseRepresentative(client: EventTransaction, eventId: string): 
     const manual = await client.article.findFirst({
       where: { id: event.representativeArticleId, eventId },
       select: {
-        id: true, clusterStatus: true, aiStatus: true, reviewStatus: true, score: true, relevance: true,
+        id: true, clusterStatus: true, aiStatus: true, score: true, relevance: true,
         cleanContent: true, publishedAt: true, createdAt: true,
         source: { select: { publicEnabled: true, deletedAt: true } },
       },
@@ -171,7 +167,6 @@ async function chooseRepresentative(client: EventTransaction, eventId: string): 
       id: true,
       clusterStatus: true,
       aiStatus: true,
-      reviewStatus: true,
       score: true,
       relevance: true,
       cleanContent: true,
@@ -342,7 +337,6 @@ export async function getEventArticles(eventId: string, articleId?: string) {
           isAd: true,
           brand: true,
           category: true,
-          reviewStatus: true,
           clusterStatus: true,
           publishedAt: true,
           createdAt: true,
@@ -375,7 +369,6 @@ export async function getEventArticles(eventId: string, articleId?: string) {
                   eventKey: true,
                   score: true,
                   brand: true,
-                  reviewStatus: true,
                   publishedAt: true,
                   createdAt: true,
                   source: { select: { name: true, type: true, publicEnabled: true, deletedAt: true } },
@@ -681,7 +674,7 @@ export async function setEventRepresentative(eventId: string, articleId: string)
     db.article.findFirst({
       where: { id: articleId, eventId },
       select: {
-        id: true, clusterStatus: true, aiStatus: true, reviewStatus: true, score: true, relevance: true,
+        id: true, clusterStatus: true, aiStatus: true, score: true, relevance: true,
         cleanContent: true, publishedAt: true, createdAt: true,
         source: { select: { publicEnabled: true, deletedAt: true } },
       },

@@ -16,24 +16,18 @@ export interface PresetSource {
   type: SourceType;
   url: string;
   parserConfig: string; // JSON string with CSS selectors or RSS config
-  category: string; // 餐饮/零售/品牌
   description: string;
 }
 
 export const PRESET_SOURCES: PresetSource[] = [
-  // ========== 餐饮 ==========
-
   {
     id: 'canyin88',
     name: '餐饮88',
     type: 'canyin88',
     url: 'https://m.canyin88.com/zixun/',
     parserConfig: '{}',
-    category: '餐饮',
     description: '餐饮行业资讯门户，涵盖餐饮动态、品牌创新、供应链等',
   },
-
-  // ========== 零售 ==========
 
   {
     id: 'linkshop',
@@ -47,7 +41,6 @@ export const PRESET_SOURCES: PresetSource[] = [
       summary: 'p.text_overflow',
       date: '.time',
     }),
-    category: '零售',
     description: '零售行业综合门户，品牌动态与行业资讯',
   },
 
@@ -64,7 +57,6 @@ export const PRESET_SOURCES: PresetSource[] = [
       date: '.win-new-tab',
       fetchDetailPublishedAt: true,
     }),
-    category: '品牌',
     description: '赢商网品牌动态与行业资讯',
   },
 
@@ -75,12 +67,4 @@ export const PRESET_SOURCES: PresetSource[] = [
  */
 export function getPresetSourceById(id: string): PresetSource | undefined {
   return PRESET_SOURCES.find(s => s.id === id);
-}
-
-/**
- * Get all available categories
- */
-export function getPresetCategories(): string[] {
-  const cats = new Set(PRESET_SOURCES.map(s => s.category));
-  return Array.from(cats);
 }

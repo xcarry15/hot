@@ -75,9 +75,7 @@ export interface ArticleListFilter {
   minScore?: number;
   minRelevance?: number;
   maxConfidence?: number;
-  reviewStatus?: string;
   fetchStatus?: string;
-  inbox?: boolean;
   sourceId?: string;
   anomaly?: 'needs_attention' | 'technical';
   clusterView?: 'needs_review' | 'multi_source' | 'representative';
@@ -97,9 +95,7 @@ export async function fetchArticleList(
   if (typeof filter.minScore === 'number') params.set('minScore', String(filter.minScore));
   if (typeof filter.minRelevance === 'number') params.set('minRelevance', String(filter.minRelevance));
   if (typeof filter.maxConfidence === 'number') params.set('maxConfidence', String(filter.maxConfidence));
-  if (filter.reviewStatus) params.set('reviewStatus', filter.reviewStatus);
   if (filter.fetchStatus) params.set('fetchStatus', filter.fetchStatus);
-  if (filter.inbox) params.set('inbox', 'true');
   if (filter.sourceId) params.set('sourceId', filter.sourceId);
   if (filter.anomaly) params.set('anomaly', filter.anomaly);
   if (filter.clusterView) params.set('clusterView', filter.clusterView);
@@ -116,26 +112,6 @@ export async function updateArticleEditorial(
   const article = await requestJson<ArticleDetailDto>('PATCH', `/api/articles/${articleId}`, { body: input });
   primeArticleDetailCache(article);
   return article;
-}
-
-export async function reviewArticle(
-  articleId: string,
-  status: string,
-  reasonTags: string[] = [],
-): Promise<unknown> {
-  const result = await requestJson('POST', '/api/articles/review', { body: { articleId, status, reasonTags } });
-  invalidateArticleDetailCache(articleId);
-  return result;
-}
-
-export async function reviewArticles(
-  articleIds: string[],
-  status: string,
-  reasonTags: string[] = [],
-): Promise<{ updated: number }> {
-  const result = await requestJson<{ updated: number }>('POST', '/api/articles/review', { body: { articleIds, status, reasonTags } });
-  for (const articleId of articleIds) invalidateArticleDetailCache(articleId);
-  return result;
 }
 
 export async function fetchArticleDetail(
@@ -192,4 +168,3 @@ export async function updateArticleTechnicalStatus(
   await requestJson('POST', `/api/articles/${encodeURIComponent(articleId)}/technical-status`, { body: { action } });
   invalidateArticleDetailCache(articleId);
 }
-

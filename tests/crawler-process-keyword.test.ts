@@ -30,8 +30,6 @@ const mocks = vi.hoisted(() => ({
   keywordCandidateFindMany: vi.fn(),
   keywordCandidateUpsert: vi.fn(),
   transaction: vi.fn(),
-  inboxSnapshotUpsert: vi.fn(),
-  inboxSnapshotDeleteMany: vi.fn(),
   // detail-fetcher
   fetchArticleDetail: vi.fn(),
   // utils-shared
@@ -66,10 +64,6 @@ vi.mock('@/lib/db', () => ({
       upsert: mocks.keywordCandidateUpsert,
     },
     $transaction: mocks.transaction,
-    inboxSnapshot: {
-      upsert: mocks.inboxSnapshotUpsert,
-      deleteMany: mocks.inboxSnapshotDeleteMany,
-    },
   },
 }));
 
@@ -116,8 +110,6 @@ beforeEach(() => {
   mocks.keywordCandidateFindMany.mockResolvedValue([]);
   mocks.keywordCandidateUpsert.mockResolvedValue({});
   mocks.transaction.mockImplementation(async (writes: Array<Promise<unknown>>) => Promise.all(writes));
-  mocks.inboxSnapshotUpsert.mockResolvedValue({});
-  mocks.inboxSnapshotDeleteMany.mockResolvedValue({ count: 0 });
 });
 
 // 触发 processAllPending 的最小数据：一条 pending article

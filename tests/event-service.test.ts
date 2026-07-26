@@ -95,7 +95,7 @@ describe('Event 人工纠错', () => {
       .mockResolvedValueOnce({ representativeArticleId: 'a1' });
     mocks.articleFindMany
       .mockResolvedValueOnce([{ id: 'a1', publishedAt: pushedAt, createdAt: pushedAt }])
-      .mockResolvedValueOnce([{ id: 'a1', clusterStatus: 'clustered', aiStatus: 'done', reviewStatus: 'important', score: 90, relevance: 90, cleanContent: '正文', publishedAt: pushedAt, createdAt: pushedAt, source: { publicEnabled: true, deletedAt: null } }]);
+      .mockResolvedValueOnce([{ id: 'a1', clusterStatus: 'clustered', aiStatus: 'done', score: 90, relevance: 90, cleanContent: '正文', publishedAt: pushedAt, createdAt: pushedAt, source: { publicEnabled: true, deletedAt: null } }]);
     await expect(mergeEvents('source', 'target')).resolves.toBe(true);
     // P0-5: 不再复制 pushedAt
     expect(mocks.eventUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pushedAt: expect.anything() }) }));
@@ -107,8 +107,8 @@ describe('Event 人工纠错', () => {
   it('自动代表文章优先选择可发布成员而不是待复核高分成员', () => {
     const now = new Date();
     const selected = selectRepresentativeCandidate([
-      { id: 'review', clusterStatus: 'needs_review', aiStatus: 'done', reviewStatus: 'important', score: 100, relevance: 100, cleanContent: '更长正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
-      { id: 'ready', clusterStatus: 'clustered', aiStatus: 'done', reviewStatus: 'general', score: 60, relevance: 60, cleanContent: '正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
+      { id: 'review', clusterStatus: 'needs_review', aiStatus: 'done', score: 100, relevance: 100, cleanContent: '更长正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
+      { id: 'ready', clusterStatus: 'clustered', aiStatus: 'done', score: 60, relevance: 60, cleanContent: '正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
     ]);
     expect(selected).toBe('ready');
   });
@@ -124,9 +124,9 @@ describe('Event 人工纠错', () => {
     mocks.articleFindMany
       .mockResolvedValueOnce([{ id: 'split', publishedAt: articleDate, createdAt: articleDate }])
       .mockResolvedValueOnce([{ id: 'remaining', publishedAt: articleDate, createdAt: articleDate }])
-      .mockResolvedValueOnce([{ id: 'remaining', clusterStatus: 'clustered', aiStatus: 'done', reviewStatus: 'general', score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }])
+      .mockResolvedValueOnce([{ id: 'remaining', clusterStatus: 'clustered', aiStatus: 'done', score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }])
       .mockResolvedValueOnce([{ id: 'split', publishedAt: articleDate, createdAt: articleDate }])
-      .mockResolvedValueOnce([{ id: 'split', clusterStatus: 'clustered', aiStatus: 'done', reviewStatus: 'general', score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }]);
+      .mockResolvedValueOnce([{ id: 'split', clusterStatus: 'clustered', aiStatus: 'done', score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }]);
     mocks.articleCount.mockResolvedValue(2);
     mocks.eventCreate.mockResolvedValue({ id: 'new-event' });
     await expect(splitEventArticles('source', ['split'])).resolves.toBe('new-event');
@@ -161,7 +161,7 @@ describe('Event 人工纠错', () => {
   it('待复核文章不能被人工设为代表文章', async () => {
     mocks.eventFindUnique.mockResolvedValueOnce({ status: 'active' });
     mocks.articleFindFirst.mockResolvedValueOnce({
-      id: 'a1', clusterStatus: 'needs_review', aiStatus: 'done', reviewStatus: 'important',
+      id: 'a1', clusterStatus: 'needs_review', aiStatus: 'done',
       score: 100, relevance: 100, cleanContent: '正文', publishedAt: null, createdAt: new Date(),
       source: { publicEnabled: true, deletedAt: null },
     });

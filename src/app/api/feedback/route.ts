@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
-import { applyTuningSuggestion, dismissTuningSuggestion, generateTuningSuggestions, listTuningSuggestions } from '@/lib/review-service';
+import { applyTuningSuggestion, dismissTuningSuggestion, generateTuningSuggestions, listTuningSuggestions } from '@/lib/feedback-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 
 export async function GET() {
