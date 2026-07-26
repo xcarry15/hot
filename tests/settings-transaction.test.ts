@@ -37,6 +37,7 @@ vi.mock('@/lib/event-service', () => ({
 }));
 
 import { PUT as settingsPUT } from '@/app/api/settings/route';
+import { parseWebhookConfigs } from '@/contracts/webhook';
 import { DEFAULT_BLOCK_SUMMARY } from '@/lib/prompts';
 import { decryptWebhookConfigsForRuntime } from '@/lib/settings-crypto';
 
@@ -212,7 +213,9 @@ describe('settings PUT 事务化', () => {
     expect(webhookUpsert).toEqual(expect.objectContaining({
       where: { key: 'feishu_webhook_url' },
     }));
-    expect(webhookUpsert.update.value).toMatch(/^enc:v1:6:isting:/);
+    const storedWebhook = parseWebhookConfigs(webhookUpsert.update.value);
+    expect(storedWebhook).toHaveLength(1);
+    expect(storedWebhook[0].url).toMatch(/^enc:v1:6:isting:/);
     expect(decryptWebhookConfigsForRuntime(webhookUpsert.update.value)).toBe(existingWebhook);
   });
 
