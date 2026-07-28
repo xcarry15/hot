@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildStep2Prompt } from '@/lib/prompts';
+import { buildEventIdentityRepairPrompt, buildStep2Prompt } from '@/lib/prompts';
 
 describe('buildStep2Prompt', () => {
   const blocks = {
@@ -56,8 +56,9 @@ describe('buildStep2Prompt', () => {
     expect(prompt).toContain('event_action');
     expect(prompt).toContain('event_object');
     expect(prompt).toContain('原子动作词');
-    expect(prompt).toContain('event_subjects 单项不超过 16 个汉字');
-    expect(prompt).toContain('event_object 不超过 16 个汉字');
+    expect(prompt).toContain('event_subjects：1个直接参与方，≤4字，正式名称/常用简称');
+    expect(prompt).toContain('event_subjects 不超过 4 个汉字');
+    expect(prompt).toContain('event_object 不超过 4 个汉字');
     expect(prompt).toContain('一个辨识词或短语');
     expect(prompt).toContain('brand 只服务展示/搜索');
     expect(prompt).toContain('不得反向覆盖 event_subjects');
@@ -91,5 +92,16 @@ describe('buildStep2Prompt', () => {
     expect(prompt).toContain('创始人/CEO级人事突变');
     expect(prompt).toContain('千店级以上闭店或万店规模达成');
     expect(prompt).toContain('基层人事变动、单店开闭、常规节日营销、新品上新');
+  });
+});
+
+describe('buildEventIdentityRepairPrompt', () => {
+  it('只要求修复身份，不重复生成整篇分析', () => {
+    const prompt = buildEventIdentityRepairPrompt('幸运咖开出首店', '正文内容');
+    expect(prompt).toContain('只从下面这篇文章中修复事件身份');
+    expect(prompt).toContain('无法确认时返回空数组、空字符串和 confidence 0');
+    expect(prompt).toContain('幸运咖开出首店');
+    expect(prompt).toContain('正文内容');
+    expect(prompt).not.toContain('event_key":');
   });
 });

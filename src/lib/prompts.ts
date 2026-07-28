@@ -106,7 +106,7 @@ export const DEFAULT_BLOCK_EVENT_IDENTITY = `【事件身份字段｜用于跨�
 
 - 只提取一个具体事实，不写主题、趋势、战略或摘要
 - 三字段为短词，来自标题+正文共同指向的核心事件；一篇多事件只取核心事件
-  - event_subjects：1-3个直接参与方，每项≤4字，正式名称/稳定简称
+  - event_subjects：1个直接参与方，≤4字，正式名称/常用简称
   - event_action：1个2-4字原子动作词，保留阶段（计划/正式/完成等）
   - event_object：1个≤4字辨识词，可与同类事件区分
 - brand为展示字段，可含其他提及品牌，不得覆盖event_subjects
@@ -270,6 +270,27 @@ interface PromptBlockInput {
   blockBrand?: string;
 }
 
+/**
+ * 首次分析只缺事件身份时使用的轻量修复 prompt。
+ * 不重复生成摘要和评分，避免把一次字段缺失放大成整篇文章失败。
+ */
+export function buildEventIdentityRepairPrompt(title: string, content: string): string {
+  return [
+    '任务：只从下面这篇文章中修复事件身份，不要输出摘要、评分或其他字段。',
+    '只有文章正文明确描述一个可定位的具体事件时才填写身份；行业趋势、观点、方法论、人物特写、日报/周报或多事件汇总必须全部留空。',
+    'event_subjects：一个直接参与方，正式名称或常用简称，最多 4 个汉字；event_action：一个 2-4 字原子动作词，保留计划/正式/完成等阶段；event_object：一个最多 4 个汉字的辨识词。',
+    '三字段必须共同指向同一个具体事实，不得从 brand、摘要或多个条目拼接，不得编造。无法确认时返回空数组、空字符串和 confidence 0。',
+    'event_key 由程序生成，不要输出。',
+    '只输出 JSON：{"event_subjects":["主体"],"event_action":"动作","event_object":"事项","event_key_confidence":0}',
+    '',
+    '<<<标题>>>',
+    title,
+    '<<<正文>>>',
+    content,
+    '<<<结束>>>',
+  ].join('\n');
+}
+
 function pickBlock(custom: string | undefined, id: PromptBlockId): string {
   const meta = PROMPT_BLOCK_META[id];
   return custom && custom.trim() ? custom : meta.defaultBlock;
@@ -310,7 +331,7 @@ export function buildStep2Prompt(
     '',
     eventIdentityBlock,
     '',
-    '事件身份硬约束（不可被评判块覆盖）：event_subjects 只写具体事件的直接参与主体，brand 只服务展示/搜索，不得反向覆盖 event_subjects。聚合快讯只能选一个子事件，event_subjects、event_action、event_object 必须共同指向它，不得跨条目拼接。开头提及某个具体事实、但正文大部分在分析赛道、长期战略或多个案例时，该事实只是引子，不代表整篇文章；event_score 必须为 0-9 并留空事件身份。event_subjects 每项只写一个名称词，event_action 只写一个动作词，event_object 只写一个辨识词或短语；三者都禁止完整句、并列词和解释文字，event_subjects 单项不超过 16 个汉字，event_action 不超过 8 个字符，event_object 不超过 16 个汉字；身份宽泛或缺少限定时 event_key_confidence 不得高于 60。',
+    '事件身份硬约束（不可被评判块覆盖）：event_subjects 只写一个具体事件的直接参与方，brand 只服务展示/搜索，不得反向覆盖 event_subjects。聚合快讯只能选一个子事件，event_subjects、event_action、event_object 必须共同指向它，不得跨条目拼接。开头提及某个具体事实、但正文大部分在分析赛道、长期战略或多个案例时，该事实只是引子，不代表整篇文章；event_score 必须为 0-9 并留空事件身份。event_subjects 只写一个名称词，event_action 只写一个动作词，event_object 只写一个辨识词或短语；三者都禁止完整句、并列词和解释文字，event_subjects 不超过 4 个汉字，event_action 不超过 4 个字，event_object 不超过 4 个汉字；身份宽泛或缺少限定时 event_key_confidence 不得高于 60。',
     '',
     keyPointsBlock,
     '',
@@ -337,7 +358,7 @@ export function buildStep2Prompt(
     '  "content_score": <0-100整数>,',
     '  "summary": "<100-150字：一针见血、直指本质>",',
     '  "brand": ["<品牌1>", "<品牌2>"],',
-    '  "event_subjects": ["<核心主体1>", "<联合主体2>"],',
+    '  "event_subjects": ["<核心主体>"],',
     '  "event_action": "<一个动作词>",',
     '  "event_object": "<一个辨识词或短语>",',
     '  "event_key_confidence": <0-100整数>,',

@@ -1,4 +1,5 @@
 import { buildCanonicalEventKey, capEventIdentityConfidence, isCompleteEventIdentity, normalizeEventIdentity } from '@/contracts/event-identity';
+import type { EventIdentity } from '@/contracts/event-identity';
 import { extractJsonObject } from './ai-helpers';
 
 const CATEGORIES = new Set([
@@ -114,6 +115,106 @@ function legacyEventKeyParts(value: unknown): [unknown, unknown, unknown] {
   return [parts[0], parts[1], parts.slice(2).join(' ')];
 }
 
+function firstDefined(...values: unknown[]): unknown {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+/**
+ * 兼容不同模型对同一结构的命名习惯，但不从 brand/summary 猜测身份。
+ * 身份字段仍必须由模型明确返回，最终 eventKey 仍由程序生成。
+ */
+function readEventIdentity(raw: Record<string, unknown>): {
+  identity: EventIdentity;
+  confidence: number | null;
+} {
+  const nestedIdentity = readObject(firstDefined(raw.event_identity, raw.eventIdentity, raw.identity));
+  const nestedEvent = readObject(raw.event);
+  const [legacySubjects, legacyAction, legacyObject] = legacyEventKeyParts(
+    firstDefined(raw.event_key, raw.eventKey, nestedIdentity.event_key, nestedIdentity.eventKey),
+  );
+  const explicitIdentity = normalizeEventIdentity({
+    subjects: firstDefined(
+      raw.event_subjects,
+      raw.eventSubjects,
+      raw.event_subject,
+      raw.eventSubject,
+      raw.subjects,
+      raw.subject,
+      raw['事件主体'],
+      raw['主体'],
+      nestedIdentity.event_subjects,
+      nestedIdentity.eventSubjects,
+      nestedIdentity.subjects,
+      nestedIdentity.subject,
+      nestedIdentity.actor,
+      nestedEvent.event_subjects,
+      nestedEvent.eventSubjects,
+      nestedEvent.subjects,
+      nestedEvent.subject,
+      nestedEvent.actor,
+    ),
+    action: firstDefined(
+      raw.event_action,
+      raw.eventAction,
+      raw.event_verb,
+      raw.eventVerb,
+      raw.action,
+      raw.verb,
+      raw['事件行为'],
+      raw['行为'],
+      nestedIdentity.event_action,
+      nestedIdentity.eventAction,
+      nestedIdentity.action,
+      nestedIdentity.verb,
+      nestedEvent.event_action,
+      nestedEvent.eventAction,
+      nestedEvent.action,
+      nestedEvent.verb,
+    ),
+    object: firstDefined(
+      raw.event_object,
+      raw.eventObject,
+      raw.event_matter,
+      raw.eventMatter,
+      raw.object,
+      raw.matter,
+      raw['具体事项'],
+      raw['事项'],
+      nestedIdentity.event_object,
+      nestedIdentity.eventObject,
+      nestedIdentity.event_matter,
+      nestedIdentity.eventMatter,
+      nestedIdentity.object,
+      nestedIdentity.matter,
+      nestedEvent.event_object,
+      nestedEvent.eventObject,
+      nestedEvent.object,
+      nestedEvent.matter,
+    ),
+  });
+  const identity = normalizeEventIdentity({
+    subjects: explicitIdentity.subjects.length > 0 ? explicitIdentity.subjects : legacySubjects,
+    action: explicitIdentity.action || legacyAction,
+    object: explicitIdentity.object || legacyObject,
+  });
+  const rawConfidence = firstDefined(
+    raw.event_key_confidence,
+    raw.eventKeyConfidence,
+    nestedIdentity.event_key_confidence,
+    nestedIdentity.eventKeyConfidence,
+    nestedIdentity.confidence,
+  );
+  return {
+    identity,
+    confidence: rawConfidence == null ? null : clampScore(rawConfidence),
+  };
+}
+
+export interface ParseAiAnalysisOptions {
+  /** 定向修复前允许保留评分和摘要，禁止直接把不完整身份落库。 */
+  allowIncompleteIdentity?: boolean;
+}
+
 /**
  * 结构化 AI 分析结果的唯一入口。
  *
@@ -121,7 +222,7 @@ function legacyEventKeyParts(value: unknown): [unknown, unknown, unknown] {
  * 当成整篇分析失败。这里只对 JSON、核心字段和数值范围做保护，其余内容
  * 统一归一化后落库；真正没有可用 JSON/评分字段时才让上层进入失败重试。
  */
-export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
+export function parseAiAnalysisOutput(text: string, options: ParseAiAnalysisOptions = {}): AiAnalysisOutput {
   const raw = extractJsonObject(text);
   const hasCoreScore = [
     ['event_score', 'eventScore'],
@@ -144,28 +245,7 @@ export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
 
   const confidence = clampScore(raw.confidence);
   const brand = normalizeStringArray(raw.brand ?? raw.brands, 2);
-  const nestedIdentity = readObject(raw.event_identity ?? raw.eventIdentity);
-  const [legacySubjects, legacyAction, legacyObject] = legacyEventKeyParts(raw.event_key ?? raw.eventKey);
-  const explicitIdentity = normalizeEventIdentity({
-    subjects: raw.event_subjects
-      ?? raw.eventSubjects
-      ?? nestedIdentity.subjects
-      ?? nestedIdentity.subject,
-    action: raw.event_action
-      ?? raw.eventAction
-      ?? nestedIdentity.action
-      ?? '',
-    object: raw.event_object
-      ?? raw.eventObject
-      ?? nestedIdentity.object
-      ?? nestedIdentity.matter
-      ?? '',
-  });
-  const identity = normalizeEventIdentity({
-    subjects: explicitIdentity.subjects.length > 0 ? explicitIdentity.subjects : legacySubjects,
-    action: explicitIdentity.action || legacyAction,
-    object: explicitIdentity.object || legacyObject,
-  });
+  const { identity, confidence: identityConfidence } = readEventIdentity(raw);
   const eventScore = clampScore(raw.event_score ?? raw.eventScore);
   const normalizedAd = normalizeAdDecision({
     isAd,
@@ -201,14 +281,15 @@ export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
       key_points: keyPoints,
     };
   }
-  if (!isCompleteEventIdentity(identity)) {
+  if (!isCompleteEventIdentity(identity) && !options.allowIncompleteIdentity) {
     throw new Error('LLM 响应缺少完整事件身份（主体/行为/具体事项）');
   }
   const eventKeyConfidence = capEventIdentityConfidence(
     identity,
     clampScore(raw.event_key_confidence
       ?? raw.eventKeyConfidence
-      ?? nestedIdentity.confidence,
+      ?? identityConfidence
+      ?? confidence,
       confidence),
   );
 
@@ -231,5 +312,32 @@ export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
     event_key: buildCanonicalEventKey(identity),
     event_key_confidence: eventKeyConfidence,
     key_points: keyPoints,
+  };
+}
+
+/** 解析定向身份修复的最小 JSON 响应。 */
+export function parseEventIdentityOutput(text: string): {
+  event_subjects: string[];
+  event_action: string;
+  event_object: string;
+  event_key_confidence: number;
+} {
+  const raw = extractJsonObject(text);
+  const identityFields = [
+    'event_subjects', 'eventSubjects', 'event_subject', 'eventSubject', 'subjects', 'subject',
+    'event_action', 'eventAction', 'event_verb', 'eventVerb', 'action', 'verb',
+    'event_object', 'eventObject', 'event_matter', 'eventMatter', 'object', 'matter',
+    '事件主体', '主体', '事件行为', '行为', '具体事项', '事项',
+    'event_identity', 'eventIdentity', 'identity', 'event', 'event_key', 'eventKey',
+  ];
+  if (!identityFields.some((field) => field in raw)) {
+    throw new Error('LLM 定向修复缺少事件身份字段');
+  }
+  const { identity, confidence } = readEventIdentity(raw);
+  return {
+    event_subjects: identity.subjects,
+    event_action: identity.action,
+    event_object: identity.object,
+    event_key_confidence: capEventIdentityConfidence(identity, confidence ?? 0),
   };
 }

@@ -34,6 +34,15 @@ export async function listKeywords(options: { includeHitCount?: boolean } = {}) 
   return rows.map(row => ({ ...row, hitCount: hitCounts.get(row.id) ?? 0 }));
 }
 
+export async function listKeywordCategories() {
+  const rows = await db.keyword.findMany({
+    select: { category: true },
+    distinct: ['category'],
+    orderBy: { category: 'asc' },
+  });
+  return rows.map(row => row.category);
+}
+
 const KEYWORD_SHEET = '关键词';
 const CANDIDATE_SHEETS: Array<{ name: string; status: ImportedKeywordCandidate['status'] }> = [
   { name: '候选词-已采用', status: 'approved' },

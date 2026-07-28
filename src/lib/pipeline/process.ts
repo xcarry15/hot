@@ -37,7 +37,7 @@ const PROCESS_MAX_RETRIES = 5;
  * Stage 2: Fetch detail pages for all articles with fetchStatus='pending'.
  * Updates fetchStatus='fetched' after a successful fetch with meaningful cleaned text.
  */
-export async function processAllPending(signal?: AbortSignal, jobId?: string): Promise<{ total: number; processed: number; errors: number; capped: boolean }> {
+export async function processAllPending(signal?: AbortSignal, jobId?: string, forceRetry = false): Promise<{ total: number; processed: number; errors: number; capped: boolean }> {
   assertNotAborted(signal);
 
   // 重置"已抓取但正文为空"的文章，让它们重新进详情页流程。
@@ -52,8 +52,8 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string): P
     where: {
       fetchStatus: 'failed',
       fetchRetryCount: { lt: PROCESS_MAX_RETRIES },
-      nextFetchRetryAt: { lte: new Date() },
       technicalIgnoredAt: null,
+      ...(forceRetry ? {} : { nextFetchRetryAt: { lte: new Date() } }),
     },
     data: { fetchStatus: 'pending' },
   });

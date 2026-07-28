@@ -163,6 +163,9 @@ export const ArticleRow = memo(function ArticleRow({
         {(isSkipped || article.ai === 'skipped') && article.skipReason && (
           <SkipBadge reason={article.skipReason} />
         )}
+        {article.technicalState === 'waiting' && (
+          <span className="shrink-0 bg-slate-600 px-1 text-[11px] font-medium leading-5 text-white" title={article.aiRetryAt ? `将在 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 自动继续 AI 分析` : '等待 AI 服务恢复'}>AI 等待</span>
+        )}
         </div>
       </div>
       <div className="flex min-w-0 items-center gap-1 sm:contents">

@@ -10,7 +10,7 @@
  *     - 间隔未到 → 不调 runJob
  *     - 间隔已到 → 调 runJob('full')
  *     - 上次从未抓过 → 调 runJob('full')
- *  5. /api/crawl 不再传 force 参数给 runJob。
+ *  5. 单源与单阶段 /api/crawl 不扩大为全流程；手动全流程允许提前恢复技术失败。
  *
  * 直接 import scheduler 模块的 maybeEnqueueCrawl 测试,而不是重复公式。
  */
@@ -28,10 +28,11 @@ vi.mock('@/lib/worker-stop', () => ({
 }));
 
 // 用 vi.hoisted 把 mock 引用提到 vi.mock 之前,避免"在初始化前访问"的错误。
-const { mockRunJob, mockSettingStore } = vi.hoisted(() => {
+const { mockRunJob, mockSettingStore, mockHasDueTechnicalRecovery } = vi.hoisted(() => {
   const mockRunJob = vi.fn().mockResolvedValue({ queued: true, jobId: 'j-test' });
   const mockSettingStore: Record<string, string> = {};
-  return { mockRunJob, mockSettingStore };
+  const mockHasDueTechnicalRecovery = vi.fn().mockResolvedValue(false);
+  return { mockRunJob, mockSettingStore, mockHasDueTechnicalRecovery };
 });
 
 vi.mock('@/lib/execution', async (importOriginal) => {
@@ -58,10 +59,13 @@ vi.mock('node-cron', () => {
     validate: () => true,
   };
 });
+vi.mock('@/lib/technical-work-queue-service', () => ({
+  hasDueTechnicalRecovery: mockHasDueTechnicalRecovery,
+}));
 
 import { collectAllSources } from '@/lib/pipeline/collect';
 import { db } from '@/lib/db';
-import { maybeEnqueueCrawl } from '@/lib/scheduler';
+import { maybeEnqueueCrawl, maybeEnqueueTechnicalRetry } from '@/lib/scheduler';
 
 const sourceFindMany = vi.mocked(db.source.findMany);
 
@@ -84,6 +88,7 @@ function makeSource(over: Partial<{
 beforeEach(() => {
   vi.clearAllMocks();
   mockRunJob.mockResolvedValue({ queued: true, jobId: 'j-test' });
+  mockHasDueTechnicalRecovery.mockResolvedValue(false);
   Object.keys(mockSettingStore).forEach(k => delete mockSettingStore[k]);
 });
 
@@ -194,5 +199,26 @@ describe('Manual entry — runJob contract', () => {
     const res = await runJob('collect');
     expect(res.queued).toBe(true);
     expect(mockRunJob).toHaveBeenCalledWith('collect');
+  });
+});
+
+describe('Scheduler — technical recovery', () => {
+  it('没有到期技术失败时不启动恢复任务', async () => {
+    mockHasDueTechnicalRecovery.mockResolvedValue(false);
+
+    await maybeEnqueueTechnicalRetry();
+
+    expect(mockRunJob).not.toHaveBeenCalled();
+  });
+
+  it('到期技术失败时启动不采集数据源的全流程', async () => {
+    mockHasDueTechnicalRecovery.mockResolvedValue(true);
+
+    await maybeEnqueueTechnicalRetry();
+
+    expect(mockRunJob).toHaveBeenCalledWith('full', {
+      trigger: 'auto_retry',
+      skipCollect: true,
+    });
   });
 });

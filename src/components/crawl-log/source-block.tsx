@@ -31,6 +31,8 @@ export const SourceBlock = memo(function SourceBlock({
   onOpenArticlePanel,
   onOpenDiscarded,
   onDiscardedRetried,
+  keywordCategories,
+  onKeywordAdded,
   onRetrySource,
   isJobRunning,
 }: {
@@ -45,6 +47,8 @@ export const SourceBlock = memo(function SourceBlock({
   onOpenArticlePanel?: (articleId: string, panel: ArticleWorkspacePanel) => void
   onOpenDiscarded?: (id: string) => void
   onDiscardedRetried?: () => void
+  keywordCategories?: string[]
+  onKeywordAdded?: (category: string) => void
   onRetrySource?: (sourceId: string) => void
   /** 批量 Job 运行时禁用单篇动作。 */
   isJobRunning?: boolean
@@ -203,6 +207,8 @@ export const SourceBlock = memo(function SourceBlock({
                         item={item}
                         onOpen={onOpenDiscarded}
                         onRetried={onDiscardedRetried}
+                        keywordCategories={keywordCategories}
+                        onKeywordAdded={onKeywordAdded}
                       />
                     ))}
                   </div>
@@ -222,6 +228,8 @@ export const SourceBlock = memo(function SourceBlock({
                       item={item}
                       onOpen={onOpenDiscarded}
                       onRetried={onDiscardedRetried}
+                      keywordCategories={keywordCategories}
+                      onKeywordAdded={onKeywordAdded}
                     />
                   ))}
                 </div>

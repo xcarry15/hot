@@ -41,4 +41,12 @@ describe('POST /api/crawl input boundary', () => {
     expect(res.status).toBe(200);
     expect(runJob).toHaveBeenCalledWith('cluster', { trigger: 'manual' });
   });
+
+  it('运行全流程时允许提前触发自动恢复中的文章', async () => {
+    const res = await POST(new Request('http://localhost/api/crawl', {
+      method: 'POST', body: JSON.stringify({ stage: 'all' }),
+    }));
+    expect(res.status).toBe(200);
+    expect(runJob).toHaveBeenCalledWith('full', { trigger: 'manual', forceRetry: true });
+  });
 });

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   articleUpdateMany: vi.fn(),
   articleUpdate: vi.fn(),
   eventFindUnique: vi.fn(),
+  eventFindMany: vi.fn(),
   eventCreate: vi.fn(),
   eventUpdate: vi.fn(),
   eventUpdateMany: vi.fn(),
@@ -33,6 +34,7 @@ function transactionClient() {
     },
     event: {
       findUnique: mocks.eventFindUnique,
+      findMany: mocks.eventFindMany,
       create: mocks.eventCreate,
       update: mocks.eventUpdate,
       updateMany: mocks.eventUpdateMany,
@@ -53,12 +55,13 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/public-publication-service', () => ({ refreshEventPublicPublication: mocks.refresh }));
 
-import { deriveEventClusterReviewStatus, mergeEvents, moveArticleToEvent, reconcileEventAfterArticleDeletion, selectRepresentativeCandidate, setEventRepresentative, sharedBrands, splitEventArticles } from '@/lib/event-service';
+import { deriveEventClusterReviewStatus, mergeEvents, moveArticleToEvent, reconcileEventAfterArticleDeletion, repairStaleEventRepresentatives, selectRepresentativeCandidate, setEventRepresentative, sharedBrands, splitEventArticles } from '@/lib/event-service';
 
 describe('Event 人工纠错', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.eventFindUnique.mockReset();
+    mocks.eventFindMany.mockReset();
     mocks.articleFindMany.mockReset();
     mocks.articleFindUnique.mockReset();
     mocks.transaction.mockImplementation((operation: (client: ReturnType<typeof transactionClient>) => unknown) => operation(transactionClient()));
@@ -138,6 +141,25 @@ describe('Event 人工纠错', () => {
     }));
     expect(mocks.refresh).toHaveBeenCalledWith('source');
     expect(mocks.refresh).toHaveBeenCalledWith('new-event');
+  });
+
+  it('聚类前清理已经不再属于当前 Event 的代表文章指针', async () => {
+    mocks.eventFindMany.mockResolvedValueOnce([
+      { id: 'stale-event', representativeArticleId: 'a1', representativeArticle: { eventId: 'new-event' } },
+      { id: 'valid-event', representativeArticleId: 'a2', representativeArticle: { eventId: 'valid-event' } },
+    ]);
+    mocks.articleFindMany.mockResolvedValueOnce([]);
+
+    await expect(repairStaleEventRepresentatives()).resolves.toBe(1);
+
+    expect(mocks.eventUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['stale-event'] } },
+      data: { representativeArticleId: null, representativeManual: false },
+    });
+    expect(mocks.eventUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'stale-event' },
+      data: expect.objectContaining({ representativeArticleId: null }),
+    }));
   });
 
   it('删除最后一篇 Article 后归档空 Event 并保留投递审计', async () => {

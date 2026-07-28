@@ -112,7 +112,7 @@ describe('createChatCompletion', () => {
       .mockResolvedValueOnce(makeOkResponse('ok'));
 
     const promise = createChatCompletion([{ role: 'user', content: 'hi' }]);
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(15000);
     const res = await promise;
     expect(res.content).toBe('ok');
     expect(global.fetch).toHaveBeenCalledTimes(2);

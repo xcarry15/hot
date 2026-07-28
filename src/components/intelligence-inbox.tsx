@@ -138,7 +138,7 @@ const EVENT_TITLE_HEADER_CLASS = "md:sticky z-[3] min-w-[150px] max-w-[240px] bo
 const EVENT_SOURCE_CELL_CLASS = "md:sticky md:left-[52px] z-[2] w-[1%] max-w-[88px] border-r px-2 py-1.5 align-middle";
 const EVENT_TITLE_CELL_CLASS = "md:sticky z-[2] min-w-[150px] border-r px-2 py-1.5 align-middle";
 
-function MobileEventArticleCard({
+function EventArticleCard({
   index,
   time,
   score,
@@ -190,7 +190,7 @@ function MobileEventArticleCard({
       ) : (
         <p className={`mt-1 break-words text-sm font-medium leading-5 ${titleClassName}`} title={title}>{title}</p>
       )}
-      <div className="mt-1.5 grid min-w-0 grid-cols-2 gap-x-3 gap-y-1 border-t border-current/10 pt-1.5 text-[11px] leading-4">
+      <div className="mt-1.5 grid min-w-0 grid-cols-2 gap-x-3 gap-y-1 border-t border-current/10 pt-1.5 text-[11px] leading-4 md:grid-cols-4">
         <MobileEventMeta label="来源" value={source} />
         <MobileEventMeta label="代表关系" value={representative} />
         <MobileEventMeta label="品牌" value={brand} />
@@ -1205,12 +1205,12 @@ export default function IntelligenceInbox({
                       <div><p className="text-xs font-semibold">事件成员对比</p><p className="text-xs text-muted-foreground">勾选当前成员可批量拆分，至少保留一篇；同品牌文章已移至下方单独查看。</p></div>
                       {selectedSplitIds.size > 0 && <Button size="sm" variant="outline" className="ml-auto h-7 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticles([...selectedSplitIds])}><Split className="h-3 w-3" />拆分所选 {selectedSplitIds.size} 篇</Button>}
                     </div>
-                    <div className="space-y-1.5 md:hidden">
+                    <div className="space-y-1.5">
                       {eventComparisonRows.map((row) => {
                         if (row.kind === "recommended") {
                           const article = row.event?.representativeArticle;
                           return (
-                            <MobileEventArticleCard
+                            <EventArticleCard
                               key={`mobile-recommended-event-${row.eventId}`}
                               index="推荐"
                               time={article ? timeLabel(article.publishedAt || article.createdAt) : "—"}
@@ -1244,7 +1244,7 @@ export default function IntelligenceInbox({
                               ? "border-emerald-200 bg-emerald-50/60"
                               : "bg-background";
                         return (
-                          <MobileEventArticleCard
+                          <EventArticleCard
                             key={`mobile-member-${article.id}`}
                             index={row.memberIndex}
                             time={timeLabel(article.publishedAt || article.createdAt)}
@@ -1270,7 +1270,7 @@ export default function IntelligenceInbox({
                         );
                       })}
                     </div>
-                    <div className="hidden min-w-0 max-w-full overflow-x-auto overscroll-contain border md:block md:max-h-[320px] md:overflow-y-auto">
+                    <div className="hidden">
                       <table className={EVENT_TABLE_CLASS}>
                         <EventComparisonTableHeader sourceHeaderRef={eventSourceHeaderRef} sourceWidth={eventSourceColumnWidth} />
                         <tbody>
@@ -1354,7 +1354,7 @@ export default function IntelligenceInbox({
                           </div>
                           <span className="ml-auto shrink-0 text-xs text-muted-foreground">{brandCandidates.length} 篇</span>
                         </div>
-                        <div className="space-y-1.5 md:hidden">
+                        <div className="space-y-1.5 md:grid md:grid-cols-2 md:items-start md:gap-1.5">
                           {brandCandidates.map((candidate, index) => {
                             const sourceStatus = candidate.source.deleted
                               ? "已删除"
@@ -1369,7 +1369,7 @@ export default function IntelligenceInbox({
                               ? articleBrands
                               : `${articleBrands} · 匹配 ${matchedBrands}`;
                             return (
-                              <MobileEventArticleCard
+                              <EventArticleCard
                                 key={`mobile-brand-candidate-${candidate.id}`}
                                 index={index + 1}
                                 time={timeLabel(candidate.publishedAt || candidate.createdAt)}
@@ -1390,7 +1390,7 @@ export default function IntelligenceInbox({
                             );
                           })}
                         </div>
-                        <div className="hidden min-w-0 max-w-full overflow-x-auto overscroll-contain border md:block md:max-h-[240px] md:overflow-y-auto">
+                        <div className="hidden">
                           <table className={EVENT_TABLE_CLASS}>
                             <EventComparisonTableHeader sourceWidth={eventSourceColumnWidth} />
                             <tbody>

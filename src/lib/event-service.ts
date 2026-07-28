@@ -178,6 +178,28 @@ async function chooseRepresentative(client: EventTransaction, eventId: string): 
   return { id: selectRepresentativeCandidate(articles), manual: false };
 }
 
+/**
+ * representativeArticleId 是跨 Event 唯一的所有权指针。
+ * 文章移动/拆分或并发重算期间，旧 Event 可能短暂保留旧指针；
+ * 设置新代表前先释放其他 Event 的过期占用，避免 P2002 阻断整批聚类。
+ */
+async function releaseRepresentativeOwnership(
+  client: EventTransaction,
+  eventId: string,
+  articleId: string,
+): Promise<void> {
+  await client.event.updateMany({
+    where: {
+      representativeArticleId: articleId,
+      id: { not: eventId },
+    },
+    data: {
+      representativeArticleId: null,
+      representativeManual: false,
+    },
+  });
+}
+
 async function recalculateEvent(client: EventTransaction, eventId: string): Promise<void> {
   const articles = await client.article.findMany({
     where: { eventId },
@@ -204,6 +226,9 @@ async function recalculateEvent(client: EventTransaction, eventId: string): Prom
   const representative = clusterReviewStatus === 'confirmed'
     ? await chooseRepresentative(client, eventId)
     : { id: null, manual: false };
+  if (representative.id) {
+    await releaseRepresentativeOwnership(client, eventId, representative.id);
+  }
   await client.event.update({
     where: { id: eventId },
     data: {
@@ -239,6 +264,44 @@ export async function recalculateEventById(eventId: string): Promise<void> {
   await db.$transaction((tx) => recalculateEvent(tx, eventId));
   await refreshEventPublicPublication(eventId);
   invalidatePublicArticleCache();
+}
+
+/**
+ * 修复历史或异常并发留下的代表文章指针：
+ * Event 的 representativeArticleId 必须指向自身 articles 中的成员。
+ * 在聚类批处理前执行一次，避免旧指针与新聚类结果争抢唯一约束。
+ */
+export async function repairStaleEventRepresentatives(): Promise<number> {
+  const eventIds = await db.$transaction(async (tx) => {
+    const rows = await tx.event.findMany({
+      where: { representativeArticleId: { not: null } },
+      select: {
+        id: true,
+        representativeArticleId: true,
+        representativeArticle: { select: { eventId: true } },
+      },
+    });
+    const staleIds = rows
+      .filter((event) => event.representativeArticle?.eventId !== event.id)
+      .map((event) => event.id);
+    if (staleIds.length === 0) return [];
+
+    // 先统一释放，再按当前成员重新选择，避免修复顺序之间互相触发唯一约束。
+    await tx.event.updateMany({
+      where: { id: { in: staleIds } },
+      data: { representativeArticleId: null, representativeManual: false },
+    });
+    for (const staleId of staleIds) {
+      await recalculateEvent(tx, staleId);
+    }
+    return staleIds;
+  });
+
+  if (eventIds.length > 0) {
+    await Promise.all(eventIds.map((eventId) => refreshEventPublicPublication(eventId)));
+    invalidatePublicArticleCache();
+  }
+  return eventIds.length;
 }
 
 export interface ArticleDeletionEventResult {
@@ -682,6 +745,7 @@ export async function setEventRepresentative(eventId: string, articleId: string)
   ]);
   if (event?.status !== 'active' || event.clusterReviewStatus !== 'confirmed' || !member || !isReleaseRepresentativeEligible(member)) return false;
   await db.$transaction(async (tx) => {
+    await releaseRepresentativeOwnership(tx, eventId, articleId);
     await tx.event.update({
       where: { id: eventId },
       data: { representativeArticleId: articleId, representativeManual: true },
@@ -791,6 +855,8 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
         });
       }
     }
+    // 先重算源 Event，释放被拆出的代表文章，再重算新 Event。
+    await recalculateEvent(tx, eventId);
     await recalculateEvent(tx, created.id);
     for (const article of articles) {
       await tx.eventClusterAudit.create({
@@ -806,7 +872,6 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
         },
       });
     }
-    await recalculateEvent(tx, eventId);
     await tx.eventDirty.createMany({
       data: [
         { eventId: created.id, reason: `split from ${eventId}` },

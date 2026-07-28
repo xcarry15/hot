@@ -298,10 +298,11 @@ async function createOpenAICompatibleCompletion(
       continue;
     }
 
-    // 429 与 5xx 服务端错误：指数退避重试
+    // 429 与 5xx 服务端错误：指数退避重试。免费模型的限流恢复通常不是
+    // 3 秒级，过短等待只会把同一配额窗口内的请求全部浪费掉。
     if ((response.status === 429 || response.status >= 500) && attempt < retries) {
       const isRateLimit = response.status === 429;
-      const baseDelay = Math.min(isRateLimit ? 3000 : 2000 * Math.pow(2, attempt), 15000);
+      const baseDelay = Math.min(isRateLimit ? 10_000 * Math.pow(2, attempt) : 2000 * Math.pow(2, attempt), 30_000);
       const jitter = isRateLimit ? Math.floor(Math.random() * 1000) : 0;
       const delayMs = baseDelay + jitter;
       console.warn(`[ai-client] ${settings.provider} ${response.status} ${isRateLimit ? 'rate limit' : 'server error'}, retry ${attempt + 1}/${retries} in ${delayMs}ms`);

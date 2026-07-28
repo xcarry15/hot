@@ -36,8 +36,8 @@ export interface ArticleProgress {
   processRetryAt?: string | null;
   clusterStatus: 'pending' | 'clustered' | 'failed' | 'needs_review';
   clusterRetryAt?: string | null;
-  technicalIssues: Array<'process_failed' | 'ai_failed' | 'cluster_failed' | 'push_failed'>;
-  technicalState?: 'auto_retry' | 'manual' | 'ignored' | null;
+  technicalIssues: Array<'process_failed' | 'ai_failed' | 'ai_waiting' | 'cluster_failed' | 'push_failed'>;
+  technicalState?: 'auto_retry' | 'waiting' | 'manual' | 'ignored' | null;
   technicalIgnoredAt?: string | null;
   /** 当前技术失败的可展示原因，按步骤键保存。 */
   technicalErrorReasons: Partial<Record<'process' | 'ai' | 'cluster' | 'push', string>>;

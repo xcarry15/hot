@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import {
   addKeyword, addKeywordsText, clearKeywords, deleteKeyword, importKeywordsXlsx,
-  keywordsToXlsx, listKeywords,
+  keywordsToXlsx, listKeywordCategories, listKeywords,
 } from '@/lib/keyword-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 import { deleteKeywordCandidate, listKeywordCandidates, listKeywordCandidatesForExport, updateKeywordCandidate } from '@/lib/keyword-candidate-service';
@@ -10,11 +10,13 @@ import { runJob } from '@/lib/execution';
 
 // GET /api/keywords - List all keywords
 //   ?format=xlsx  → export keywords and candidate decisions as XLSX
+//   ?categories=true → 只返回关键词分组，不计算命中次数
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const format = searchParams.get('format');
     if (searchParams.get('candidates') === 'true') return NextResponse.json(await listKeywordCandidates());
+    if (searchParams.get('categories') === 'true') return NextResponse.json(await listKeywordCategories());
 
     if (format === 'xlsx') {
       const keywords = await listKeywords({ includeHitCount: false });

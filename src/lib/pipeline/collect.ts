@@ -26,9 +26,6 @@ import {
   startJobStage,
 } from '@/lib/job-progress';
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
-import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
-import { refreshPublicPublication } from '@/lib/public-publication-service';
-import { recalculateEventById } from '@/lib/event-service';
 import { recordFailure, restoreBreakerIfElapsed } from '@/lib/pipeline/source-health';
 import type { CrawlItem, CrawlResult } from '@/contracts/crawl';
 import type { Article } from '@prisma/client';
@@ -38,7 +35,7 @@ const COLLECT_CONCURRENCY = 4;
 
 /**
  * 单条 crawlItem 入口：
- *   - URL 精确去重（命中则按需更新 title 或重置 fetchStatus）
+ *   - URL 精确去重（命中已处理 URL 仅更新列表元数据，不重置处理状态）
  *   - DiscardedItem 短路（命中已丢弃记录直接 skip）
  *   - 黑名单命中在已有列表字段时直接拦截；详情阶段再兜底
  *   - 长度门控（title < 10 且无 summary/detail content → filter:short）
@@ -59,39 +56,24 @@ export async function collectItem(
     ? await db.article.findUnique({ where: { url: normalizedUrl } })
     : knownExisting;
   if (existing) {
-    // 同 URL 重新抓取 → 更新标题和日期
-    // 如果标题变了，重置 fetchStatus 以触发详情重抓
+    // 同 URL 视为同一篇文章：采集阶段绝不因列表标题/日期变化重跑详情、AI 或聚类。
+    // 重新抓取只能由失败重试或管理员显式操作触发，避免常规采集反复消耗资源。
     const titleChanged = existing.title !== item.title;
     const nextPublishedAt = item.publishedAt ? parseChineseDate(item.publishedAt) : undefined;
     const publishedAtChanged = nextPublishedAt !== undefined
       && existing.publishedAt?.getTime() !== nextPublishedAt.getTime();
-    const resetData = titleChanged ? {
-      ...buildAiResetDataForArticle(existing),
-      event: { disconnect: true },
-      clusterStatus: 'pending',
-      clusteredAt: null,
-      clusterError: null,
-      clusterRetryCount: 0,
-      nextClusterRetryAt: null,
-      eventKey: '',
-      fetchStatus: 'pending' as const,
-      fetchError: null,
-      fetchRetryCount: 0,
-      nextFetchRetryAt: null,
-    } : {};
-    await db.article.update({
-      where: { id: existing.id },
-      data: {
-        title: item.title,
-        publishedAt: nextPublishedAt,
-        ...resetData,
-      },
-    });
     if (titleChanged || publishedAtChanged) {
-      await refreshPublicPublication(existing.id, db, { contentChanged: titleChanged });
+      await db.article.update({
+        where: { id: existing.id },
+        data: {
+          ...(titleChanged ? { title: item.title } : {}),
+          ...(publishedAtChanged ? { publishedAt: nextPublishedAt } : {}),
+        },
+      });
+      console.log(`[dedup] URL exact match, metadata updated: "${item.title}"`);
+    } else {
+      console.log(`[dedup] URL exact match, skipped: "${item.title}"`);
     }
-    if (titleChanged && existing.eventId) await recalculateEventById(existing.eventId);
-    console.log(`[dedup] URL exact match, updated: "${item.title}"${titleChanged ? ' (title changed, reset fetchStatus)' : ''}`);
     return existing.id;
   }
 

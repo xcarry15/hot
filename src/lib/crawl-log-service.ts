@@ -366,7 +366,7 @@ export async function getCrawlLogSnapshot(
       // P1-6: 推送/AI 重试时间，方便管理员判断"何时自动重试"
       pushRetryAt: projection.pushRetryAt ?? (a.event?.nextPushRetryAt ? a.event.nextPushRetryAt.toISOString() : null),
       processRetryAt: a.fetchStatus === 'failed' && a.nextFetchRetryAt ? a.nextFetchRetryAt.toISOString() : null,
-      aiRetryAt: a.aiStatus === 'failed' && a.nextAiRetryAt ? a.nextAiRetryAt.toISOString() : null,
+      aiRetryAt: a.nextAiRetryAt ? a.nextAiRetryAt.toISOString() : null,
       clusterStatus: a.clusterStatus as ArticleProgress['clusterStatus'],
       clusterRetryAt: a.clusterStatus === 'failed' && a.nextClusterRetryAt ? a.nextClusterRetryAt.toISOString() : null,
       technicalIssues: technicalItem?.issues ?? [],
@@ -441,6 +441,6 @@ export async function getCrawlLogSnapshot(
     sources,
     fetchedAt: Date.now(),
     technicalTotal: visibleTechnicalItems.filter((item) => item.state === 'manual').length,
-    autoRetryTotal: visibleTechnicalItems.filter((item) => item.state === 'auto_retry').length,
+    autoRetryTotal: visibleTechnicalItems.filter((item) => item.state === 'auto_retry' || item.state === 'waiting').length,
   };
 }

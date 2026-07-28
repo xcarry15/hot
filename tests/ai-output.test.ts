@@ -121,6 +121,30 @@ describe('parseAiAnalysisOutput', () => {
     }))).toThrow('完整事件身份');
   });
 
+  it('兼容模型返回的单数事件身份字段', () => {
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      event_subjects: undefined,
+      event_action: undefined,
+      event_object: undefined,
+      event_subject: '幸运咖',
+      action: '正式开业',
+      object: '郑州首店',
+    }));
+    expect(parsed.event_subjects).toEqual(['幸运咖']);
+    expect(parsed.event_action).toBe('正式开店');
+    expect(parsed.event_object).toBe('郑州首店');
+  });
+
+  it('定向修复前允许读取评分和摘要，但默认仍不允许不完整身份落库', () => {
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      event_object: '',
+    }), { allowIncompleteIdentity: true });
+    expect(parsed.event_score).toBe(validOutput.event_score);
+    expect(parsed.event_key).toBe('');
+  });
+
   it('纯观点文章缺少事件身份时识别为无具体事件', () => {
     const parsed = parseAiAnalysisOutput(JSON.stringify({
       ...validOutput,

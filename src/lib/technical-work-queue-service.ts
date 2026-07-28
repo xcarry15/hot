@@ -2,13 +2,13 @@ import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { getPushTargetStatesForEvents } from '@/lib/push/delivery';
 
-export type TechnicalIssue = 'process_failed' | 'ai_failed' | 'cluster_failed' | 'push_failed';
+export type TechnicalIssue = 'process_failed' | 'ai_failed' | 'ai_waiting' | 'cluster_failed' | 'push_failed';
 
 export interface TechnicalWorkItem {
   articleId: string;
   issues: TechnicalIssue[];
   retryAvailableAt: string | null;
-  state: 'auto_retry' | 'manual';
+  state: 'auto_retry' | 'waiting' | 'manual';
 }
 
 const articleFailureWhere: Prisma.ArticleWhereInput = {
@@ -18,6 +18,7 @@ const articleFailureWhere: Prisma.ArticleWhereInput = {
     { fetchStatus: 'failed' },
     { clusterStatus: 'failed' },
     { aiStatus: 'failed' },
+    { aiStatus: 'pending', nextAiRetryAt: { not: null } },
     { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
   ],
 };
@@ -27,6 +28,30 @@ let technicalQueueCache: { expiresAt: number; value: Promise<TechnicalWorkItem[]
 
 export function invalidateTechnicalWorkQueueCache(): void {
   technicalQueueCache = null;
+}
+
+/**
+ * 判断是否存在已经到达重试时间的技术失败文章。
+ *
+ * 该查询只服务于后台恢复调度，不包含来源采集失败：采集失败没有现成
+ * Article 可处理，仍由下一次正常采集或人工采集触发。到达最大重试次数
+ * 后 next*RetryAt 会被清空，因此自然转为人工处理，不会被自动任务反复捞取。
+ */
+export async function hasDueTechnicalRecovery(now = new Date()): Promise<boolean> {
+  const article = await db.article.findFirst({
+    where: {
+      technicalIgnoredAt: null,
+      source: { is: { enabled: true, deletedAt: null } },
+      OR: [
+        { fetchStatus: 'failed', nextFetchRetryAt: { lte: now } },
+        { aiStatus: 'failed', nextAiRetryAt: { lte: now } },
+        { aiStatus: 'pending', nextAiRetryAt: { lte: now } },
+        { clusterStatus: 'failed', nextClusterRetryAt: { lte: now } },
+      ],
+    },
+    select: { id: true },
+  });
+  return Boolean(article);
 }
 
 export async function getTechnicalWorkQueue(): Promise<TechnicalWorkItem[]> {
@@ -71,6 +96,10 @@ async function buildTechnicalWorkQueue(): Promise<TechnicalWorkItem[]> {
       if (article.nextAiRetryAt) retryDates.push(article.nextAiRetryAt);
       else requiresManual = true;
     }
+    if (article.aiStatus === 'pending' && article.nextAiRetryAt) {
+      issues.push('ai_waiting');
+      retryDates.push(article.nextAiRetryAt);
+    }
     if (article.clusterStatus === 'failed') {
       issues.push('cluster_failed');
       if (article.nextClusterRetryAt) retryDates.push(article.nextClusterRetryAt);
@@ -80,7 +109,7 @@ async function buildTechnicalWorkQueue(): Promise<TechnicalWorkItem[]> {
       articleId: article.id,
       issues,
       retryAvailableAt: retryDates.length > 0 ? new Date(Math.max(...retryDates.map((date) => date.getTime()))).toISOString() : null,
-      state: requiresManual ? 'manual' : 'auto_retry',
+      state: requiresManual ? 'manual' : issues.includes('ai_waiting') ? 'waiting' : 'auto_retry',
     });
   }
   const targetStatesByEvent = await getPushTargetStatesForEvents(events.map((event) => event.id));

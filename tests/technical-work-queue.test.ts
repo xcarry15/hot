@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ articleFindMany: vi.fn(), eventFindMany: vi.fn(), targetStates: vi.fn() }));
-vi.mock('@/lib/db', () => ({ db: { article: { findMany: mocks.articleFindMany }, event: { findMany: mocks.eventFindMany } } }));
+const mocks = vi.hoisted(() => ({ articleFindMany: vi.fn(), articleFindFirst: vi.fn(), eventFindMany: vi.fn(), targetStates: vi.fn() }));
+vi.mock('@/lib/db', () => ({ db: { article: { findMany: mocks.articleFindMany, findFirst: mocks.articleFindFirst }, event: { findMany: mocks.eventFindMany } } }));
 vi.mock('@/lib/push/delivery', () => ({ getPushTargetStatesForEvents: mocks.targetStates }));
 
-import { getTechnicalWorkQueue, invalidateTechnicalWorkQueueCache } from '@/lib/technical-work-queue-service';
+import { getTechnicalWorkQueue, hasDueTechnicalRecovery, invalidateTechnicalWorkQueueCache } from '@/lib/technical-work-queue-service';
 
 describe('technical work queue', () => {
   beforeEach(() => {
@@ -50,6 +50,33 @@ describe('technical work queue', () => {
     expect(mocks.eventFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         representativeArticle: { is: { source: { is: { enabled: true, deletedAt: null } } } },
+      }),
+    }));
+  });
+
+  it('AI 服务冷却中的 pending 文章显示为等待，不计为失败', async () => {
+    mocks.articleFindMany.mockResolvedValue([{
+      id: 'a-waiting', fetchStatus: 'fetched', clusterStatus: 'pending',
+      aiStatus: 'pending', skipReason: null, nextFetchRetryAt: null,
+      nextClusterRetryAt: null, nextAiRetryAt: new Date(Date.now() + 60_000),
+    }]);
+    mocks.eventFindMany.mockResolvedValue([]);
+    mocks.targetStates.mockResolvedValue(new Map());
+
+    await expect(getTechnicalWorkQueue()).resolves.toEqual([
+      expect.objectContaining({ articleId: 'a-waiting', issues: ['ai_waiting'], state: 'waiting' }),
+    ]);
+  });
+
+  it('AI 等待到期后会触发独立恢复任务', async () => {
+    mocks.articleFindFirst.mockResolvedValue({ id: 'a-waiting' });
+
+    await expect(hasDueTechnicalRecovery(new Date('2026-07-27T12:00:00Z'))).resolves.toBe(true);
+    expect(mocks.articleFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([
+          { aiStatus: 'pending', nextAiRetryAt: { lte: new Date('2026-07-27T12:00:00Z') } },
+        ]),
       }),
     }));
   });

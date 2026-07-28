@@ -38,6 +38,12 @@ import ArticleWorkspaceDrawer from './article-workspace-drawer'
 import ArticleLibrarySheet from './article-library-sheet'
 import { fetchSettings, saveSettings, subscribeToSettingsChanged } from '@/features/settings-api.client'
 import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
+import { fetchKeywordCategories } from '@/features/keywords-api.client'
+import {
+  KEYWORD_BLACKLIST_CATEGORY,
+  KEYWORD_CATEGORIES,
+  KEYWORD_DEFAULT_CATEGORY,
+} from '@/features/keywords-catalog'
 import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
 import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
 import { retrySource, retrySources } from '@/features/sources-api.client'
@@ -51,6 +57,29 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     enabled: active,
   })
   const sources: SourceProgress[] = useMemo(() => snapshot?.sources ?? [], [snapshot?.sources])
+  const [keywordCategories, setKeywordCategories] = useState<string[]>(() => Array.from(new Set([
+    KEYWORD_DEFAULT_CATEGORY,
+    KEYWORD_BLACKLIST_CATEGORY,
+    ...KEYWORD_CATEGORIES,
+  ])))
+
+  useEffect(() => {
+    if (!active) return
+    let cancelled = false
+    fetchKeywordCategories()
+      .then((categories) => {
+        if (cancelled) return
+        setKeywordCategories((current) => Array.from(new Set([...current, ...categories])))
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [active])
+
+  const handleKeywordCategoryAdded = useCallback((category: string) => {
+    const normalized = category.trim()
+    if (!normalized) return
+    setKeywordCategories((current) => current.includes(normalized) ? current : [...current, normalized])
+  }, [])
 
   const [autoCrawl, setAutoCrawl] = useState<boolean | null>(null)
   const [autoCrawlSaving, setAutoCrawlSaving] = useState(false)
@@ -895,6 +924,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
               onOpenArticlePanel={handleOpenArticlePanel}
               onOpenDiscarded={handleOpenDiscarded}
               onDiscardedRetried={() => { void refreshSnapshot() }}
+              keywordCategories={keywordCategories}
+              onKeywordAdded={handleKeywordCategoryAdded}
               onRetrySource={handleRetrySource}
               isJobRunning={isOperationBusy}
             />

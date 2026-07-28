@@ -1,9 +1,32 @@
 import { useState } from 'react'
 import { Plus, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { formatPubDate, DISCARD_REASON_LABELS } from './helpers'
 import type { DiscardedRow as DiscardedRowType } from './types'
 import { retryDiscarded } from '@/features/jobs-api.client'
+import { bulkAddKeywords } from '@/features/keywords-api.client'
+import {
+  KEYWORD_BLACKLIST_CATEGORY,
+  KEYWORD_CATEGORIES,
+  KEYWORD_DEFAULT_CATEGORY,
+} from '@/features/keywords-catalog'
 
 // ========== Discarded Row ==========
 
@@ -11,29 +34,60 @@ export function DiscardedRow({
   item,
   onRetried,
   onOpen,
+  keywordCategories,
+  onKeywordAdded,
 }: {
   item: DiscardedRowType
   onRetried?: () => void
   onOpen?: (id: string) => void
+  keywordCategories?: string[]
+  onKeywordAdded?: (category: string) => void
 }) {
   const label = DISCARD_REASON_LABELS[item.reason] || item.reason
   const pubDate = formatPubDate(item.publishedAt || item.createdAt)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [keyword, setKeyword] = useState('')
+  const [keywordCategory, setKeywordCategory] = useState(KEYWORD_DEFAULT_CATEGORY)
   const [retrying, setRetrying] = useState(false)
   const isKeywordFiltered = item.reason === 'filter:keyword'
   const canRetry = isKeywordFiltered
+  const categoryOptions = Array.from(new Set([
+    KEYWORD_DEFAULT_CATEGORY,
+    KEYWORD_BLACKLIST_CATEGORY,
+    ...KEYWORD_CATEGORIES,
+    ...(keywordCategories ?? []),
+  ]))
 
-  const handleRetry = async (e: React.MouseEvent) => {
+  const openRetryDialog = (e: React.MouseEvent) => {
     e.stopPropagation()
+    setKeyword('')
+    setKeywordCategory(KEYWORD_DEFAULT_CATEGORY)
+    setDialogOpen(true)
+  }
+
+  const handleRetry = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
     setRetrying(true)
     try {
+      const nextKeyword = keyword.trim()
+      let keywordHint = ''
+      if (nextKeyword) {
+        const keywordResult = await bulkAddKeywords(nextKeyword, keywordCategory)
+        if (keywordResult.error) throw new Error(keywordResult.error)
+        onKeywordAdded?.(keywordCategory)
+        keywordHint = keywordResult.imported && keywordResult.imported > 0
+          ? `已添加关键词「${nextKeyword}」到「${keywordCategory}」；`
+          : `关键词「${nextKeyword}」已在「${keywordCategory}」；`
+      }
       const data = (await retryDiscarded(item.id)) as { title?: string; error?: string; existed?: boolean }
       if (data.error) throw new Error(data.error)
       // P1-5: 区分 existing 和 created 两种结果
       if (data.existed) {
-        toast.success(`URL 已存在，已清理未入库记录「${data.title}」`, { duration: 3000 })
+        toast.success(`${keywordHint}URL 已存在，已清理未入库记录「${data.title}」`, { duration: 3000 })
       } else {
-        toast.success(`已创建待处理文章「${data.title}」`, { duration: 3000 })
+        toast.success(`${keywordHint}已创建待处理文章「${data.title}」`, { duration: 3000 })
       }
+      setDialogOpen(false)
       onRetried?.()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '采集失败')
@@ -62,9 +116,9 @@ export function DiscardedRow({
         </span>
         {canRetry && (
           <button
-            onClick={handleRetry}
+            onClick={openRetryDialog}
             disabled={retrying}
-            title="手动采集此文章"
+            title="手动采集此文章，可先添加关键词"
             className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700"
           >
             {retrying ? (
@@ -75,6 +129,50 @@ export function DiscardedRow({
           </button>
         )}
       </div>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!retrying) setDialogOpen(open) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>手动采集此文章</DialogTitle>
+            <DialogDescription className="break-words">
+              关键词和分组均可不填。填写后会先保存到设置中的关键词，再采集当前文章。
+              <span className="mt-1 block text-foreground/80">{item.title}</span>
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleRetry} className="space-y-3">
+            <div className="space-y-1.5">
+              <label htmlFor={`manual-keyword-${item.id}`} className="text-sm font-medium">关键词（可选）</label>
+              <Input
+                id={`manual-keyword-${item.id}`}
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="例如：首店、涨价、融资"
+                disabled={retrying}
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <span className="text-sm font-medium">分组</span>
+              <Select value={keywordCategory} onValueChange={setKeywordCategory} disabled={retrying}>
+                <SelectTrigger className="w-full" aria-label="关键词分组">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {categoryOptions.map((category) => (
+                    <SelectItem key={category} value={category}>{category}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={retrying}>取消</Button>
+              <Button type="submit" disabled={retrying}>
+                {retrying && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {retrying ? '处理中…' : '采集此文章'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

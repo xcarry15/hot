@@ -14,6 +14,7 @@ import { runJob, resetOrphanedJobs } from './execution';
 import { getSetting, setSetting, readAllSettings, SETTING_KEYS } from './settings';
 import { parsePushMode } from '@/contracts/push';
 import { cleanupExpiredSendingDeliveries } from './push/delivery';
+import { hasDueTechnicalRecovery } from './technical-work-queue-service';
 
 // HMR-safe guard: only start one scheduler per process. State itself is persisted in DB.
 declare global {
@@ -56,9 +57,21 @@ async function maybeEnqueueCrawl(settings: Record<string, string>): Promise<void
   }
 }
 
+/**
+ * 技术失败恢复独立于自动采集开关：只处理已有 Article，不重新请求数据源。
+ */
+async function maybeEnqueueTechnicalRetry(): Promise<void> {
+  if (!await hasDueTechnicalRecovery()) return;
+
+  const res = await runJob('full', { trigger: 'auto_retry', skipCollect: true });
+  if (res.queued) {
+    console.log('[scheduler] started technical recovery job', res.jobId);
+  }
+}
+
 // 暴露给测试:scheduler 内部不导出其他启动逻辑,只把"是否入队 full job"这个
 // 决策函数提出来。生产代码仍通过 startScheduler 内部的 cron tick 调用。
-export { maybeEnqueueCrawl };
+export { maybeEnqueueCrawl, maybeEnqueueTechnicalRetry };
 
 function syncPushSchedule(settings: Record<string, string>): void {
   const pushMode = parsePushMode(settings[SETTING_KEYS.PUSH_MODE]);
@@ -121,6 +134,7 @@ export function startScheduler(): void {
     try {
       const settings = await readAllSettings();
       await maybeEnqueueCrawl(settings);
+      await maybeEnqueueTechnicalRetry();
       syncPushSchedule(settings);
     } catch (err) {
       console.error('[scheduler] crawl tick failed:', err instanceof Error ? err.message : err);
@@ -134,4 +148,5 @@ export function startScheduler(): void {
   console.log('  - Crawl interval: reads from settings.crawl_interval_min (default 120 min)');
   console.log('  - Push time: reads from settings.push_time (default 08:30)');
   console.log('  - Auto-crawl switch: reads from settings.auto_crawl_enabled (default off)');
+  console.log('  - Technical recovery: checks due failed articles every minute');
 }

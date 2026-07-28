@@ -76,6 +76,10 @@ function computeIdempotencyKey(type: JobType, payload: Record<string, unknown>):
     return payload.idempotencyKey;
   }
   const trigger = typeof payload.trigger === 'string' ? payload.trigger : 'manual';
+  if (trigger === 'auto_retry') {
+    const minute = new Date().toISOString().slice(0, 16);
+    return `technical-retry:${minute}`;
+  }
   if (trigger === 'auto') {
     const now = new Date();
     if (type === 'push') return `daily-push:${now.toISOString().slice(0, 10)}`;
@@ -309,37 +313,41 @@ const JOB_EXECUTORS: Record<JobType, JobExecutor> = {
 };
 
 async function executeFullJob(
-  _payload: Record<string, unknown>,
+  payload: Record<string, unknown>,
   signal?: AbortSignal,
   jobId?: string,
 ): Promise<Record<string, unknown>> {
   assertNotAborted(signal);
   if (jobId) await assertJobNotCancelled(jobId);
 
-  const collectResult = await collectAllSources(signal, jobId);
+  const skipCollect = payload.skipCollect === true;
+  const forceRetry = payload.forceRetry === true;
+  const collectResult = skipCollect ? null : await collectAllSources(signal, jobId);
 
   assertNotAborted(signal);
   if (jobId) await assertJobNotCancelled(jobId);
-  const processResult = await processAllPending(signal, jobId);
+  const processResult = await processAllPending(signal, jobId, forceRetry);
 
   assertNotAborted(signal);
   if (jobId) await assertJobNotCancelled(jobId);
   let aiResult: Awaited<ReturnType<typeof analyzeAllPending>>;
   try {
-    aiResult = await analyzeAllPending(signal, jobId);
+    aiResult = await analyzeAllPending(signal, jobId, forceRetry);
   } catch (error) {
     if (!signal?.aborted) await clusterAllPending(signal, jobId);
     throw error;
   }
   assertNotAborted(signal);
   if (jobId) await assertJobNotCancelled(jobId);
-  const clusterResult = await clusterAllPending(signal, jobId);
+  const clusterResult = await clusterAllPending(signal, jobId, forceRetry);
   assertNotAborted(signal);
   if (jobId) await assertJobNotCancelled(jobId);
 
   const result: Record<string, unknown> = {
     stages: {
-      collect: summarizeCollectResult(collectResult),
+      collect: collectResult
+        ? summarizeCollectResult(collectResult)
+        : { skipped: true, reason: 'technical-retry' },
       process: processResult,
       ai: aiResult,
       cluster: clusterResult,

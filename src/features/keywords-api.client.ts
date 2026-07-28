@@ -52,6 +52,10 @@ export async function fetchKeywords(
   return requestJson<Keyword[]>('GET', `/api/keywords${search.toString() ? `?${search}` : ''}`, { signal });
 }
 
+export async function fetchKeywordCategories(signal?: AbortSignal): Promise<string[]> {
+  return requestJson<string[]>('GET', '/api/keywords?categories=true', { signal });
+}
+
 export async function deleteKeyword(
   id: string,
   signal?: AbortSignal,

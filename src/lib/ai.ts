@@ -6,12 +6,13 @@ import type { ChatMessage } from './ai-client';
 import { fetchArticleDetail } from './detail-fetcher';
 import { cleanContentMarkdown, extractArticleBody, meaningfulTextLength } from './cleaner';
 import { MIN_MEANINGFUL_CHARS } from './shared/content-policy';
-import { buildStep2Prompt } from './prompts';
+import { buildEventIdentityRepairPrompt, buildStep2Prompt } from './prompts';
 import { buildSystemContent } from './ai-helpers';
 import { isMultiTopicTitle } from '@/contracts/event-clustering';
 import {
   buildCanonicalEventKey,
   capEventIdentityConfidence,
+  isCompleteEventIdentity,
   normalizeEventIdentity,
   serializeEventSubjects,
 } from '@/contracts/event-identity';
@@ -28,13 +29,13 @@ import {
   type ArticleAiSnapshot,
   type ManualCalibrationValues,
 } from './article-calibration';
-import { parseAiAnalysisOutput } from './ai-output';
+import { parseAiAnalysisOutput, parseEventIdentityOutput } from './ai-output';
 
-// v19：区分“核心事件报道”与“拿事件当引子的行业分析”，并收窄广告硬兜底。
-const PROMPT_VERSION = 'v19';
+// v20：事件身份缺失时增加定向修复，无法定位具体事件则正常跳过。
+const PROMPT_VERSION = 'v20';
 
 // AI 失败最大重试次数。超过后标 skipped 放弃，防止 provider 持续故障时无限重试烧 token。
-const AI_MAX_RETRIES = 5;
+export const AI_MAX_RETRIES = 5;
 
 /**
  * Deep analysis with full article content
@@ -105,7 +106,62 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
 
     const result = await createChatCompletion(messages, { responseFormat: 'json_object', signal });
     assertNotAborted(signal);
-    const parsed = parseAiAnalysisOutput(result.content);
+    let parsed = parseAiAnalysisOutput(result.content, { allowIncompleteIdentity: true });
+    let promptHashInput = messages;
+
+    // 模型经常能完成评分和摘要，但漏掉三段式事件身份。此时只补问身份，
+    // 不重跑整篇分析；若补问确认没有可定位事件，则按正常跳过处理。
+    if (parsed.event_score > 9 && !isCompleteEventIdentity({
+      subjects: parsed.event_subjects,
+      action: parsed.event_action,
+      object: parsed.event_object,
+    })) {
+      const repairMessages: ChatMessage[] = [
+        { role: 'system', content: buildSystemContent(settings.systemPrompt) },
+        { role: 'user', content: buildEventIdentityRepairPrompt(article.title, truncated) },
+      ];
+      const repairResult = await createChatCompletion(repairMessages, {
+        responseFormat: 'json_object',
+        temperature: 0,
+        maxTokens: 512,
+        signal,
+      });
+      assertNotAborted(signal);
+      const repaired = parseEventIdentityOutput(repairResult.content);
+      const repairedIdentity = normalizeEventIdentity({
+        subjects: repaired.event_subjects,
+        action: repaired.event_action,
+        object: repaired.event_object,
+      });
+      const hasPartialIdentity = repairedIdentity.subjects.length > 0
+        || Boolean(repairedIdentity.action)
+        || Boolean(repairedIdentity.object);
+      promptHashInput = [...messages, ...repairMessages];
+      if (isCompleteEventIdentity(repairedIdentity)) {
+        parsed = {
+          ...parsed,
+          event_subjects: repairedIdentity.subjects,
+          event_action: repairedIdentity.action,
+          event_object: repairedIdentity.object,
+          event_key: buildCanonicalEventKey(repairedIdentity),
+          event_key_confidence: repaired.event_key_confidence,
+        };
+      } else if (!hasPartialIdentity) {
+        // 两次判断都无法定位唯一事件：把它作为内容判断结果正常跳过，
+        // 避免反复进入“自动恢复中”并占用技术失败队列。
+        parsed = {
+          ...parsed,
+          event_score: 0,
+          event_subjects: [],
+          event_action: '',
+          event_object: '',
+          event_key: '',
+          event_key_confidence: 0,
+        };
+      } else {
+        throw new Error('LLM 定向修复仍缺少完整事件身份（主体/行为/具体事项）');
+      }
+    }
     return {
       eventScore: parsed.event_score,
       isAd: parsed.is_ad,
@@ -124,7 +180,7 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
       keyPoints: parsed.key_points,
       model: result.model,
       provider: result.provider,
-      promptHash: createHash('sha256').update(messages.map(x => `${x.role}:${x.content}`).join('\n')).digest('hex'),
+      promptHash: createHash('sha256').update(promptHashInput.map(x => `${x.role}:${x.content}`).join('\n')).digest('hex'),
     };
   } catch (err) {
     if (signal?.aborted) throw err;
@@ -141,7 +197,12 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
  * @param article 从 analyzeAllPending 批量查询中传递的文章对象（已 select 所需字段，避免 N+1 查询）
  * 打分：原始特征经本地策略引擎加权，并按广告概率扣分/封顶。
  */
-export type AIProcessResult = { status: 'done' | 'skipped' | 'failed'; errorKind?: string; globalError?: boolean };
+export type AIProcessResult = {
+  status: 'done' | 'skipped' | 'failed' | 'deferred';
+  errorKind?: string;
+  globalError?: boolean;
+  retryable?: boolean;
+};
 type AIProcessArticle = Pick<Article, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'publishedAt'> &
   Partial<Omit<Article, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'publishedAt' | 'summary'>> & {
     summary: string | null;
@@ -177,14 +238,16 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
 
   // Deep analysis: 一次性生成全部字段（复用已查询的 article 对象，无额外 DB 查询）
   let step2;
-  let aiFailure: { message: string; kind?: string; global?: boolean } | null = null;
+  let aiFailure: { message: string; kind?: string; global?: boolean; retryable?: boolean } | null = null;
   try {
     step2 = await deepAnalyze(article as Article, settings, signal);
   } catch (error) {
     if (signal?.aborted) throw error;
     aiFailure = {
       message: error instanceof Error ? error.message : String(error),
-      ...(error instanceof AIClientError ? { kind: error.kind, global: error.global } : {}),
+      ...(error instanceof AIClientError
+        ? { kind: error.kind, global: error.global, retryable: error.retryable }
+        : {}),
     };
   }
   assertNotAborted(signal);
@@ -285,6 +348,29 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
 
     return { status: noConcreteEvent ? 'skipped' : 'done' };
   } else {
+    // 限流、短暂网络波动和上游 5xx 都是 Provider 级可恢复问题，和文章本身
+    // 无关。保留为 pending 并由批处理统一暂停，不能让每一篇都消耗重试次数。
+    if (aiFailure?.global && aiFailure.retryable) {
+      const retryDelayMs = aiFailure.kind === 'rate_limit'
+        ? 5 * 60 * 1000
+        : 2 * 60 * 1000;
+      assertNotAborted(signal);
+      await db.article.update({
+        where: { id: articleId },
+        data: {
+          aiStatus: 'pending',
+          aiError: null,
+          nextAiRetryAt: new Date(Date.now() + retryDelayMs),
+        },
+      });
+      return {
+        status: 'deferred',
+        errorKind: aiFailure.kind,
+        globalError: true,
+        retryable: true,
+      };
+    }
+
     // AI 调用完全失败 — 指数退避 + 失败计数。
     // provider 故障时整批 failed，nextAiRetryAt 防止下一轮 cron 全量重试烧 token。
     // 超限（≥5 次）标 skipped 放弃，避免死循环占用重试池。
@@ -316,7 +402,12 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         },
       });
     }
-    return { status: 'failed', errorKind: aiFailure?.kind ?? 'content', globalError: aiFailure?.global };
+    return {
+      status: 'failed',
+      errorKind: aiFailure?.kind ?? 'content',
+      globalError: aiFailure?.global,
+      retryable: aiFailure?.retryable,
+    };
   }
 }
 
