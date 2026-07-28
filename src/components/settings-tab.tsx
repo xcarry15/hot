@@ -255,7 +255,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
       providerBaselineRef.current = providerConfigs
       pendingRevealBaselineRef.current = null
     }
-  }, [currentSettingsFingerprint])
+  }, [currentSettingsFingerprint, providerConfigs, settings])
 
   const saveImportedPrompts = async (patch: Partial<SettingsType>) => {
     const promptPatch = Object.fromEntries(
@@ -287,15 +287,18 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     const payload = buildSettingsSavePayload(submittedSettings, submittedProviderConfigs)
     setSaving(true)
     try {
-      const result = await saveSettings(payload) as { scoreRecomputed?: number; publicationRebuilt?: boolean }
+      const result = await saveSettings(payload) as { rebuildQueued?: boolean; rebuildJobQueued?: boolean }
       if (mountedRef.current) {
         // 基线对应本次真正提交的快照；若请求期间继续编辑，后续改动仍会保持“未保存”。
         settingsBaselineRef.current = submittedFingerprint
         settingsBaselineStateRef.current = submittedSettings
         providerBaselineRef.current = submittedProviderConfigs
         const details = [
-          result.scoreRecomputed ? `已重算 ${result.scoreRecomputed} 篇评分` : '',
-          result.publicationRebuilt ? '已同步公开状态' : '',
+          result.rebuildQueued
+            ? result.rebuildJobQueued
+              ? '后台正在同步评分和公开状态'
+              : '评分和公开状态将在当前任务结束后自动同步'
+            : '',
         ].filter(Boolean).join('，')
         toast.success(details ? `设置已保存，${details}` : '设置已保存')
       }

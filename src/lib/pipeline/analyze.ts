@@ -64,8 +64,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
       ],
     }),
   };
-  const pendingIds = await db.article.findMany({ where: pendingWhere, select: { id: true }, orderBy: { createdAt: 'asc' } });
-  const total = pendingIds.length;
+  const total = await db.article.count({ where: pendingWhere });
   if (jobId) await startJobStage(jobId, { stage: 'ai', total });
 
   const articleSelect = {
@@ -114,21 +113,19 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
     Math.min(MAX_AI_CONCURRENCY, Number.isFinite(rawConcurrency) ? rawConcurrency : DEFAULT_AI_CONCURRENCY),
   );
 
-  const attemptedIds = new Set<string>();
-  const retryablePausedIds = new Set<string>();
-  let providerPause: { retryable: boolean; errorKind?: string } | null = null;
+  let providerPause: { retryable: boolean; errorKind?: string; message?: string } | null = null;
   let providerUnavailable = false;
-  for (let pageStart = 0; pageStart < pendingIds.length && !providerPause; pageStart += MAX_BATCH_SIZE) {
-    const pageIds = pendingIds.slice(pageStart, pageStart + MAX_BATCH_SIZE).map((article) => article.id);
+  while (!providerPause) {
     const pending = await db.article.findMany({
-      where: { id: { in: pageIds } },
+      where: pendingWhere,
       select: articleSelect,
       orderBy: { createdAt: 'asc' },
+      take: MAX_BATCH_SIZE,
     });
+    if (pending.length === 0) break;
     for (let i = 0; i < pending.length; i += concurrency) {
       assertNotAborted(signal);
       const batch = pending.slice(i, i + concurrency);
-      batch.forEach((article) => attemptedIds.add(article.id));
       const results = await Promise.allSettled(batch.map(a => withTimeout(
         timeoutSignal => processWithAI(a as Article, timeoutSignal),
         AI_TIMEOUT_MS,
@@ -137,10 +134,9 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
       )));
       assertNotAborted(signal);
       let batchErrors = 0;
-      for (const [index, r] of results.entries()) {
+      for (const r of results) {
         if (r.status === 'rejected') {
           if (isTransientBatchError(r.reason)) {
-            retryablePausedIds.add(batch[index].id);
             providerPause ??= { retryable: true, errorKind: 'timeout' };
           } else {
             errors++;
@@ -161,6 +157,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
           providerPause ??= {
             retryable: r.value.retryable === true,
             errorKind: r.value.errorKind,
+            message: r.value.globalMessage,
           };
         }
       }
@@ -179,30 +176,20 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   if (providerPause) {
     // Provider/配置级故障下，不再对剩余文章发起必然失败的 AI 请求。
     // 可恢复错误只暂缓队列，不能把未请求文章批量标失败或消耗各自重试次数。
-    const remainingIds = pendingIds
-      .map((article) => article.id)
-      .filter((id) => !attemptedIds.has(id));
-    const pausedIds = providerPause.retryable
-      ? [...new Set([...remainingIds, ...retryablePausedIds])]
-      : remainingIds;
     providerUnavailable = !providerPause.retryable;
-    if (pausedIds.length > 0) {
-      const commonWhere: Prisma.ArticleWhereInput = {
-        id: { in: pausedIds },
-        aiStatus: { in: ['pending', 'failed'] },
-        fetchStatus: 'fetched',
-        technicalIgnoredAt: null,
-        eventId: null,
-        clusterStatus: 'pending',
-      };
+    {
+      // 不再依赖开头预读的全部 ID；仅把此轮仍符合原待处理条件的文章统一延迟。
+      // 已完成、已失败退避或已聚类的记录都不会被误改。
       const retryDelayMs = providerPause.retryable
         ? (providerPause.errorKind === 'rate_limit' ? AI_RATE_LIMIT_RETRY_DELAY_MS : AI_PROVIDER_RETRY_DELAY_MS)
         : 30 * 60 * 1000;
       const paused = await db.article.updateMany({
-        where: commonWhere,
+        where: pendingWhere,
         data: {
           aiStatus: 'pending',
-          aiError: null,
+          aiError: providerPause.retryable
+            ? null
+            : (providerPause.message?.slice(0, 1000) || 'AI 配置或服务状态需要处理'),
           nextAiRetryAt: new Date(Date.now() + retryDelayMs),
         },
       });

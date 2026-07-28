@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readResponseText } from '@/lib/http';
 
 const OPENCODE_MODELS_URL = 'https://opencode.ai/zen/v1/models';
 
@@ -55,7 +56,7 @@ export async function GET() {
       return NextResponse.json({ error: `OpenCode 模型列表请求失败（${response.status}）` }, { status: 502 });
     }
 
-    const models = getFreeModelIds(await response.json());
+    const models = getFreeModelIds(JSON.parse(await readResponseText(response)));
     return NextResponse.json({ models }, {
       headers: { 'Cache-Control': 'no-store' },
     });

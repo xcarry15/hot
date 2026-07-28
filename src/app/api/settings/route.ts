@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { getSettings, updateSettings } from '@/lib/settings-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
+import { runJob } from '@/lib/execution';
 import { previewPushDelivery, previewPublicPublication, previewScorePolicy } from '@/lib/score-policy-service';
 import { z } from 'zod';
 
@@ -28,7 +29,29 @@ export async function PUT(request: Request) {
       );
     }
 
-    return NextResponse.json(result);
+    // 设置事务已经完成；后台重算的即时唤醒失败不能反向把“保存成功”报成失败。
+    // 标记保留在 Setting 中，调度器会在下一次 tick 自动续跑。
+    let rebuildJobQueued = false;
+    let rebuildDeferred = false;
+    if (result.rebuildQueued) {
+      try {
+        const rebuildJob = await runJob('full', {
+          trigger: 'settings-rebuild',
+          skipCollect: true,
+          settingsRebuild: true,
+        });
+        rebuildJobQueued = rebuildJob.queued;
+        rebuildDeferred = !rebuildJobQueued;
+      } catch (error) {
+        rebuildDeferred = true;
+        console.error('[settings] rebuild wake-up failed; scheduler will retry:', error);
+      }
+    }
+    return NextResponse.json({
+      ...result,
+      rebuildJobQueued,
+      rebuildDeferred,
+    });
   } catch (error: unknown) {
     return apiError(error, 'Failed to update settings');
   }

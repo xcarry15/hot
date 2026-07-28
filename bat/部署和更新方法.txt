@@ -33,7 +33,10 @@ PM2 应用：h2-hot2（只能运行一个实例）
   cd /www/wwwroot/hot.kfxz.cn
   echo 'DATABASE_URL=file:../db/custom.db' > .env
   echo "API_TOKEN=$(openssl rand -hex 32)" >> .env
-  echo 'NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn' >> .env
+   echo "SETTINGS_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> .env
+   echo 'NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn' >> .env
+
+   SETTINGS_ENCRYPTION_KEY 用于解密已保存的 Webhook；初始化后必须长期保持不变，不能随 API_TOKEN 一起轮换。
 
 4. 在宝塔终端完整复制下面这段命令。
 
@@ -101,10 +104,10 @@ Windows 生成的 zip 可能让 unzip 返回“使用反斜杠路径”的警告
 
 5. 执行一键初始化：
 
-  cd /www/wwwroot/hot.kfxz.cn
-  bash scripts/init-production.sh
+   cd /www/wwwroot/hot.kfxz.cn
+   bash scripts/init-production.sh
 
-输入 RESET 确认。脚本会自动完成：
+输入 RESET 确认；非交互环境使用 `CONFIRM_RESET=YES bash scripts/init-production.sh`。脚本会自动完成：
 
 - 再次确认旧 PM2 应用已停止（可重复执行）
 - 备份并删除旧 SQLite
@@ -130,10 +133,12 @@ Windows 生成的 zip 可能让 unzip 返回“使用反斜杠路径”的警告
 
 正常情况下不需要登录宝塔，也不需要手工上传 zip。
 
-  推送或合并到 master
-    -> GitHub Actions 自动测试
-    -> 测试成功
-    -> 自动备份数据库并部署生产环境；如检测到旧公开发布快照，会自动执行一次 db:rebuild-public
+   推送或合并到 master
+     -> GitHub Actions 自动测试
+     -> 测试成功
+     -> 自动备份数据库并部署生产环境
+
+本轮 migration 已压缩为当前 schema 的单一基线，不提供旧 migration 或历史业务数据兼容层。基线发布后的第一次线上更新，必须先执行上面的“首次初始化或完全重建”并重新采集；日常自动部署只接受已经记录 `20260728120000_current_schema_baseline` 的数据库，否则会在停机前拒绝执行。
 
 查看运行状态：
 

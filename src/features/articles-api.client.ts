@@ -13,6 +13,7 @@ import { requestJson } from '@/lib/request-json.client';
 import type {
   ArticleDetailDto,
   ArticleListResponseDto,
+  ArticleListSort,
 } from '@/contracts/articles';
 import type { ManualOverrideField } from '@/lib/shared/article-calibration';
 
@@ -80,7 +81,7 @@ export interface ArticleListFilter {
   anomaly?: 'needs_attention' | 'technical';
   clusterView?: 'needs_review' | 'multi_source' | 'representative';
   manualOnly?: boolean;
-  sort?: 'newest' | 'oldest' | 'score_desc' | 'score_asc' | 'relevance_desc' | 'relevance_asc' | 'event_desc' | 'event_asc' | 'content_desc' | 'content_asc' | 'ad_desc' | 'ad_asc' | 'confidence_desc' | 'confidence_asc';
+  sort?: ArticleListSort;
 }
 export async function fetchArticleList(
   filter: ArticleListFilter,

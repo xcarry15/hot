@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import { getZAI } from './zai';
-import { fetchHtml, BROWSER_HEADERS } from './http';
+import { ensureResponseTextWithinLimit, fetchHtml, BROWSER_HEADERS } from './http';
+import { assertSafeOutboundUrl } from './outbound-url';
 import { resolveUrl } from './url-utils';
 import { extractMetaPublishedAt } from './date-utils';
 import type { CrawlResult } from '@/contracts/crawl';
@@ -39,10 +40,11 @@ export async function parseHtml(url: string, parserConfigStr: string, signal?: A
     // Step 2: Fall back to ZAI page_reader if direct fetch returned nothing
     if (!html) {
       try {
+        await assertSafeOutboundUrl(url);
         const zai = await getZAI();
         const result = await zai.functions.invoke('page_reader', { url });
         assertNotAborted(signal);
-        html = result?.data?.html || null;
+        html = result?.data?.html ? ensureResponseTextWithinLimit(result.data.html) : null;
         if (html) fetchMethod = 'zai';
       } catch (error) {
         if (signal?.aborted) throw error;
@@ -88,10 +90,11 @@ async function fetchDetailHtml(url: string, signal?: AbortSignal): Promise<strin
   if (directHtml) return directHtml;
 
   try {
+    await assertSafeOutboundUrl(url);
     const zai = await getZAI();
     const result = await zai.functions.invoke('page_reader', { url });
     assertNotAborted(signal);
-    return result?.data?.html || null;
+    return result?.data?.html ? ensureResponseTextWithinLimit(result.data.html) : null;
   } catch (error) {
     if (signal?.aborted) throw error;
     return null;

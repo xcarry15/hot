@@ -21,6 +21,7 @@ import {
   serializeArticleListItem,
   type ArticleDetailDto,
   type ArticleListResponseDto,
+  type ArticleListSort,
 } from '@/contracts/articles';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshEventPublicPublication, refreshPublicPublication } from '@/lib/public-publication-service';
@@ -64,7 +65,28 @@ export interface ArticleListFilter {
   anomaly?: 'needs_attention' | 'technical';
   clusterView?: 'needs_review' | 'multi_source' | 'representative';
   manualOnly?: boolean;
-  sort?: 'newest' | 'oldest' | 'score_desc' | 'score_asc' | 'relevance_desc' | 'relevance_asc' | 'event_desc' | 'event_asc' | 'content_desc' | 'content_asc' | 'ad_desc' | 'ad_asc' | 'confidence_desc' | 'confidence_asc';
+  sort?: ArticleListSort;
+}
+
+const ARTICLE_LIST_ORDER: Record<ArticleListSort, Prisma.ArticleOrderByWithRelationInput[]> = {
+  newest: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+  oldest: [{ publishedAt: 'asc' }, { createdAt: 'asc' }],
+  score_desc: [{ score: 'desc' }, { createdAt: 'desc' }],
+  score_asc: [{ score: 'asc' }, { createdAt: 'desc' }],
+  relevance_desc: [{ relevance: 'desc' }, { createdAt: 'desc' }],
+  relevance_asc: [{ relevance: 'asc' }, { createdAt: 'desc' }],
+  event_desc: [{ eventScore: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+  event_asc: [{ eventScore: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }],
+  content_desc: [{ contentScore: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+  content_asc: [{ contentScore: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }],
+  ad_desc: [{ adProbability: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+  ad_asc: [{ adProbability: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }],
+  confidence_desc: [{ aiConfidence: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+  confidence_asc: [{ aiConfidence: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }],
+};
+
+export function buildArticleListOrder(sort?: ArticleListSort): Prisma.ArticleOrderByWithRelationInput[] {
+  return ARTICLE_LIST_ORDER[sort ?? 'newest'];
 }
 
 export function buildArticleListWhere(filter: ArticleListFilter): Prisma.ArticleWhereInput {
@@ -168,33 +190,7 @@ export async function listArticles(
         ...ARTICLE_LIST_SELECT,
         source: { select: { name: true, type: true } },
       },
-      orderBy: params.filter?.sort === 'oldest'
-        ? [{ publishedAt: 'asc' }, { createdAt: 'asc' }]
-        : params.filter?.sort === 'score_desc'
-          ? [{ score: 'desc' }, { createdAt: 'desc' }]
-          : params.filter?.sort === 'score_asc'
-            ? [{ score: 'asc' }, { createdAt: 'desc' }]
-            : params.filter?.sort === 'relevance_desc'
-              ? [{ relevance: 'desc' }, { createdAt: 'desc' }]
-              : params.filter?.sort === 'relevance_asc'
-                ? [{ relevance: 'asc' }, { createdAt: 'desc' }]
-                : params.filter?.sort === 'event_desc'
-                  ? [{ eventScore: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
-                  : params.filter?.sort === 'event_asc'
-                    ? [{ eventScore: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
-                    : params.filter?.sort === 'content_desc'
-                      ? [{ contentScore: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
-                      : params.filter?.sort === 'content_asc'
-                        ? [{ contentScore: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
-                        : params.filter?.sort === 'ad_desc'
-                          ? [{ adProbability: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
-                          : params.filter?.sort === 'ad_asc'
-                            ? [{ adProbability: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
-                            : params.filter?.sort === 'confidence_desc'
-                              ? [{ aiConfidence: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
-                              : params.filter?.sort === 'confidence_asc'
-                                ? [{ aiConfidence: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
-                                : [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: buildArticleListOrder(params.filter?.sort),
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

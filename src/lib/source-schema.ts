@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isBlockedOutboundHostname } from '@/lib/outbound-url';
 
 export const SOURCE_TYPES = ['html', 'rss', 'websearch', 'canyin88'] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
@@ -15,11 +16,14 @@ const sourceUrl = z
   .refine((value) => {
     try {
       const parsed = new URL(value);
-      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+      return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+        && !parsed.username
+        && !parsed.password
+        && !isBlockedOutboundHostname(parsed.hostname);
     } catch {
       return false;
     }
-  }, 'URL 必须是 http 或 https 地址');
+  }, 'URL 必须是可访问的公网 http 或 https 地址');
 
 /** UI 当前提交 JSON 字符串；服务端也接受对象，统一在 source-config.ts 序列化。 */
 export const parserConfigInput = z.union([

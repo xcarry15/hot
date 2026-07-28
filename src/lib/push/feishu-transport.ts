@@ -5,6 +5,7 @@
  * 不感知文章状态、PushLog 写入、并发去重。
  */
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
+import { fetchSafe, readResponseText } from '@/lib/http';
 import type { WebhookConfig } from '@/lib/settings';
 import { assertNotAborted } from '@/lib/worker-stop';
 
@@ -45,13 +46,14 @@ export async function sendFeishuWebhook(
     try {
       const response = await withTimeout(
         async (timeoutSignal) => {
-          const rawResponse = await fetch(config.url, {
+          const rawResponse = await fetchSafe(config.url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(card),
             signal: timeoutSignal,
           });
-          const bodyText = rawResponse.ok ? '' : await rawResponse.text();
+          const bodyText = rawResponse.ok ? '' : await readResponseText(rawResponse);
+          if (rawResponse.ok) await rawResponse.body?.cancel();
           return { ok: rawResponse.ok, status: rawResponse.status, bodyText };
         },
         PUSH_REQUEST_TIMEOUT_MS,

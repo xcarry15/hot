@@ -3,8 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   jobCreate: vi.fn(),
   jobFindFirst: vi.fn(),
+  jobFindMany: vi.fn(),
+  jobFindUnique: vi.fn(),
   jobUpdate: vi.fn(),
   jobUpdateMany: vi.fn(),
+  jobDeleteMany: vi.fn(),
   sourceFindUnique: vi.fn(),
   markJobCompleted: vi.fn(),
   markJobFailed: vi.fn(),
@@ -12,6 +15,10 @@ const mocks = vi.hoisted(() => ({
   collectAllSources: vi.fn(),
   crawlSource: vi.fn(),
   pushAllPendingArticles: vi.fn(),
+  acquireJobRunnerLease: vi.fn(),
+  clearExpiredJobRunnerLease: vi.fn(),
+  runnerLeaseRenew: vi.fn(),
+  runnerLeaseRelease: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -19,9 +26,11 @@ vi.mock('@/lib/db', () => ({
     job: {
       create: mocks.jobCreate,
       findFirst: mocks.jobFindFirst,
-      findUnique: vi.fn(),
+      findMany: mocks.jobFindMany,
+      findUnique: mocks.jobFindUnique,
       update: mocks.jobUpdate,
       updateMany: mocks.jobUpdateMany,
+      deleteMany: mocks.jobDeleteMany,
     },
     source: {
       findUnique: mocks.sourceFindUnique,
@@ -37,6 +46,10 @@ vi.mock('@/lib/pipeline/process', () => ({ processAllPending: vi.fn() }));
 vi.mock('@/lib/pipeline/analyze', () => ({ analyzeAllPending: vi.fn() }));
 vi.mock('@/lib/pipeline/push-bridge', () => ({ pushAllPendingArticles: mocks.pushAllPendingArticles }));
 vi.mock('@/lib/push/policy', () => ({ shouldPushAtPipelineEnd: vi.fn().mockResolvedValue(false) }));
+vi.mock('@/lib/job-runner-lease', () => ({
+  acquireJobRunnerLease: mocks.acquireJobRunnerLease,
+  clearExpiredJobRunnerLease: mocks.clearExpiredJobRunnerLease,
+}));
 vi.mock('@/lib/job-progress', () => ({
   markJobCompleted: mocks.markJobCompleted,
   markJobFailed: mocks.markJobFailed,
@@ -47,7 +60,7 @@ vi.mock('@/lib/job-progress', () => ({
   advanceJobProgress: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { abortRunningJob, runJob } from '@/lib/execution';
+import { abortRunningJob, resetOrphanedJobs, resumeQueuedJob, runJob } from '@/lib/execution';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -66,8 +79,17 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 describe.sequential('global job execution invariant', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mocks.jobFindFirst.mockReset().mockResolvedValue(null);
+    mocks.jobFindMany.mockReset().mockResolvedValue([]);
+    mocks.jobFindUnique.mockReset().mockResolvedValue(null);
     mocks.jobUpdateMany.mockReset().mockResolvedValue({ count: 1 }); // needed for claimAndRunJob
+    mocks.jobDeleteMany.mockReset().mockResolvedValue({ count: 1 });
+    mocks.acquireJobRunnerLease.mockResolvedValue({
+      renew: mocks.runnerLeaseRenew.mockResolvedValue(true),
+      release: mocks.runnerLeaseRelease.mockResolvedValue(undefined),
+    });
+    mocks.clearExpiredJobRunnerLease.mockResolvedValue(undefined);
   });
 
   it('persists a stop request when the executor is in another module instance', async () => {
@@ -113,6 +135,20 @@ describe.sequential('global job execution invariant', () => {
     await waitFor(() => mocks.markJobCompleted.mock.calls.some(call => call[0] === 'job-after-failure'));
   });
 
+  it('领取新建 Job 失败时删除队列记录，避免后续调度器误执行', async () => {
+    mocks.jobCreate.mockResolvedValueOnce({ id: 'job-unclaimed' });
+    mocks.jobUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(runJob('collect')).resolves.toEqual({
+      queued: false,
+      reason: 'failed to claim queued job',
+    });
+
+    expect(mocks.jobDeleteMany).toHaveBeenCalledWith({
+      where: { id: 'job-unclaimed', status: 'queued', attempt: 0 },
+    });
+  });
+
   it('requests cooperative cancellation without racing the pipeline status update', async () => {
     mocks.jobCreate.mockResolvedValueOnce({ id: 'job-stop' });
     mocks.collectAllSources.mockImplementationOnce((_signal?: AbortSignal) => {
@@ -151,5 +187,44 @@ describe.sequential('global job execution invariant', () => {
       sourceId: 'src-1',
       result: { success: true, itemsFound: 1, error: undefined },
     });
+  });
+
+  it('requeues a crashed batch job instead of marking it terminal on the first attempt', async () => {
+    mocks.jobCreate.mockResolvedValueOnce({ id: 'job-retry' });
+    mocks.collectAllSources.mockRejectedValueOnce(new Error('sqlite busy'));
+    mocks.jobFindUnique.mockResolvedValueOnce({ status: 'running', attempt: 1, maxAttempts: 3 });
+
+    await expect(runJob('collect')).resolves.toEqual({ queued: true, jobId: 'job-retry' });
+
+    await waitFor(() => mocks.jobUpdateMany.mock.calls.some(([input]) => input?.data?.status === 'queued'));
+    expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'job-retry', status: 'running', attempt: 1 },
+      data: expect.objectContaining({ status: 'queued', availableAt: expect.any(Date) }),
+    }));
+    expect(mocks.markJobFailed).not.toHaveBeenCalledWith('job-retry', expect.anything());
+  });
+
+  it('resumes a ready queued job with its persisted payload', async () => {
+    mocks.jobFindFirst.mockResolvedValueOnce({
+      id: 'queued-push',
+      type: 'push',
+      payload: JSON.stringify({ trigger: 'recovery' }),
+    });
+    mocks.pushAllPendingArticles.mockResolvedValueOnce({ total: 0, processed: 0, errors: 0 });
+
+    await expect(resumeQueuedJob()).resolves.toEqual({ queued: true, jobId: 'queued-push' });
+    await waitFor(() => mocks.markJobCompleted.mock.calls.some(call => call[0] === 'queued-push'));
+  });
+
+  it('requeues an expired running job while attempts remain', async () => {
+    mocks.jobFindMany.mockResolvedValueOnce([
+      { id: 'orphan-1', status: 'running', attempt: 1, maxAttempts: 3 },
+    ]);
+
+    await expect(resetOrphanedJobs()).resolves.toEqual({ requeued: 1, failed: 0, cancelled: 0 });
+    expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'orphan-1', status: 'running', attempt: 1 }),
+      data: expect.objectContaining({ status: 'queued', availableAt: expect.any(Date) }),
+    }));
   });
 });

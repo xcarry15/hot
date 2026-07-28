@@ -65,7 +65,12 @@ export async function saveSettings(
   return result;
 }
 
-export interface SettingsSaveResult { ok: true; scoreRecomputed?: number; publicationRebuilt?: boolean; success?: boolean }
+export interface SettingsSaveResult {
+  ok: true;
+  success?: boolean;
+  rebuildQueued?: boolean;
+  rebuildJobQueued?: boolean;
+}
 
 /**
  * 解密指定敏感字段。服务端仍会以 SENSITIVE_SETTING_KEYS 做白名单过滤，

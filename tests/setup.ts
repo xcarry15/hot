@@ -120,6 +120,7 @@ vi.mock('@/lib/db', () => ({
     eventDirty: {
       create: vi.fn(),
       createMany: vi.fn(),
+      upsert: vi.fn(),
       findMany: vi.fn(),
       deleteMany: vi.fn(),
       count: vi.fn(),

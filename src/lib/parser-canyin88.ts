@@ -1,5 +1,5 @@
 import type { CrawlItem, CrawlResult } from '@/contracts/crawl';
-import { BROWSER_HEADERS, fetchWithRetry, hostFromUrl } from './http';
+import { BROWSER_HEADERS, fetchWithRetry, hostFromUrl, readResponseText } from './http';
 import { resolveUrl } from './url-utils';
 
 /**
@@ -42,7 +42,7 @@ export async function parseCanyin88(baseUrl: string, signal?: AbortSignal): Prom
         return { success: false, items: [], error: `HTTP ${response.status} fetching list page` };
       }
 
-      html = await response.text();
+      html = await readResponseText(response);
     } catch (fetchError: unknown) {
       if (signal?.aborted) throw fetchError;
       const msg = fetchError instanceof Error ? fetchError.message : 'Network error fetching list page';
@@ -184,7 +184,7 @@ export async function fetchCanyin88Detail(url: string, signal?: AbortSignal): Pr
       return null;
     }
 
-    const html = await response.text();
+    const html = await readResponseText(response);
     if (!html || html.length < 200) {
       console.error(`[fetchCanyin88Detail] Empty response for ${url}`);
       return null;

@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   Eye,
@@ -49,6 +49,7 @@ import {
   stripHtml,
 } from "@/lib/shared/article-codecs";
 import { parseEventSubjects } from "@/contracts/event-identity";
+import { EventArticleList, type EventArticleRowModel } from "@/components/article-workspace/event-article-list";
 
 type DetailPanel = ArticleWorkspacePanel;
 type EventComparisonRow =
@@ -132,121 +133,6 @@ type EventDetail = {
 };
 
 const WORKSPACE_ACTION_CLASS = "min-h-7 h-auto max-w-full rounded-none px-2 text-left text-xs font-medium leading-4 whitespace-normal sm:whitespace-nowrap";
-const EVENT_TABLE_CLASS = "w-max min-w-[1120px] table-auto border-separate border-spacing-0 text-xs";
-const EVENT_SOURCE_HEADER_CLASS = "md:sticky md:left-[52px] z-[3] w-[1%] max-w-[88px] border-b border-r bg-muted px-2 py-1 text-left font-medium";
-const EVENT_TITLE_HEADER_CLASS = "md:sticky z-[3] min-w-[150px] max-w-[240px] border-b border-r bg-muted px-2 py-1 text-left font-medium";
-const EVENT_SOURCE_CELL_CLASS = "md:sticky md:left-[52px] z-[2] w-[1%] max-w-[88px] border-r px-2 py-1.5 align-middle";
-const EVENT_TITLE_CELL_CLASS = "md:sticky z-[2] min-w-[150px] border-r px-2 py-1.5 align-middle";
-
-function EventArticleCard({
-  index,
-  time,
-  score,
-  source,
-  title,
-  titleClassName = "text-sky-950",
-  representative,
-  brand,
-  eventKey,
-  sourceStatus,
-  publicStatus,
-  pushStatus,
-  selection,
-  action,
-  className = "bg-background",
-  onTitleClick,
-}: {
-  index: ReactNode;
-  time: string;
-  score: ReactNode;
-  source: string;
-  title: string;
-  titleClassName?: string;
-  representative: ReactNode;
-  brand: string;
-  eventKey: string;
-  sourceStatus: string;
-  publicStatus: string;
-  pushStatus: string;
-  selection?: ReactNode;
-  action?: ReactNode;
-  className?: string;
-  onTitleClick?: () => void;
-}) {
-  return (
-    <article className={`min-w-0 border p-2 text-xs ${className}`}>
-      <div className="flex min-w-0 items-center justify-between gap-2 text-muted-foreground">
-        <div className="flex min-w-0 items-center gap-1.5">
-          {selection}
-          <span className="shrink-0 tabular-nums">#{index}</span>
-          <span className="min-w-0 truncate font-mono tabular-nums">{time}</span>
-        </div>
-        <span className="shrink-0 font-semibold tabular-nums text-foreground">总分 {score}</span>
-      </div>
-      {onTitleClick ? (
-        <button type="button" onClick={onTitleClick} className={`mt-1 block w-full break-words text-left text-sm font-medium leading-5 hover:underline ${titleClassName}`} title={title}>
-          {title}
-        </button>
-      ) : (
-        <p className={`mt-1 break-words text-sm font-medium leading-5 ${titleClassName}`} title={title}>{title}</p>
-      )}
-      <div className="mt-1.5 grid min-w-0 grid-cols-2 gap-x-3 gap-y-1 border-t border-current/10 pt-1.5 text-[11px] leading-4 md:grid-cols-4">
-        <MobileEventMeta label="来源" value={source} />
-        <MobileEventMeta label="代表关系" value={representative} />
-        <MobileEventMeta label="品牌" value={brand} />
-        <MobileEventMeta label="事件键" value={eventKey} mono />
-        <MobileEventMeta label="状态" value={sourceStatus} />
-        <MobileEventMeta label="公开" value={publicStatus} />
-        <MobileEventMeta label="推送" value={pushStatus} />
-      </div>
-      {action && <div className="mt-1.5 flex min-w-0 flex-wrap gap-1 border-t border-current/10 pt-1.5">{action}</div>}
-    </article>
-  );
-}
-
-function MobileEventMeta({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <div className="min-w-0">
-      <span className="mr-1 text-muted-foreground">{label}</span>
-      <span className={`break-words ${mono ? "font-mono break-all" : ""}`}>{value}</span>
-    </div>
-  );
-}
-
-function EventComparisonTableHeader({
-  sourceHeaderRef,
-  sourceWidth,
-}: {
-  sourceHeaderRef?: RefObject<HTMLTableCellElement | null>;
-  sourceWidth: number;
-}) {
-  return (
-    <thead className="sticky top-0 z-[1] bg-muted/60 text-muted-foreground">
-      <tr>
-        <th className="md:sticky md:left-0 z-[3] w-[52px] border-b border-r bg-muted px-1 py-1 text-center font-medium">序号</th>
-        <th className="w-[1%] whitespace-nowrap border-b border-r bg-muted px-2 py-1 text-left font-medium">发布时间</th>
-        <th className="border-b border-r px-1 py-1 text-center font-medium">总分</th>
-        <th ref={sourceHeaderRef} className={EVENT_SOURCE_HEADER_CLASS}><div className="max-w-[72px] truncate">来源</div></th>
-        <th style={{ left: 52 + sourceWidth }} className={EVENT_TITLE_HEADER_CLASS}>标题</th>
-        <th className="border-b border-r px-1 py-1 text-center font-medium">代表关系</th>
-        <th className="border-b border-r px-2 py-1 text-left font-medium">品牌</th>
-        <th className="border-b border-r px-2 py-1 text-left font-medium">事件键</th>
-        <th className="border-b border-r px-2 py-1 text-left font-medium">状态</th>
-        <th className="border-b border-r px-2 py-1 text-left font-medium">公开</th>
-        <th className="border-b border-r px-2 py-1 text-left font-medium">推送</th>
-        <th className="md:sticky md:right-0 z-[3] border-b bg-muted px-2 py-1 text-left font-medium">操作</th>
-      </tr>
-    </thead>
-  );
-}
 
 const FULL_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
@@ -1083,6 +969,80 @@ export default function IntelligenceInbox({
     }
     return rows;
   }, [eventMembers, recommendedEvent, recommendedEventId]);
+  const eventComparisonModels: EventArticleRowModel[] = eventComparisonRows.map((row) => {
+    if (row.kind === "recommended") {
+      const article = row.event?.representativeArticle;
+      return {
+        id: `recommended:${row.eventId}`,
+        index: "推荐",
+        time: article ? timeLabel(article.publishedAt || article.createdAt) : "—",
+        score: article?.score ?? "—",
+        source: article?.source.name || "—",
+        title: article?.title || `Event ${row.eventId.slice(-8)}`,
+        representative: <span className="bg-foreground px-1 py-0.5 text-background">推荐代表</span>,
+        brand: article?.brand ? splitBrands(article.brand).join(" / ") : "—",
+        eventKey: article?.eventKey || "—",
+        sourceStatus: !article ? "—" : article.source.deleted ? "已删除" : article.source.publicEnabled ? "可公开" : "不公开",
+        publicStatus: row.event?.publicStatus === "published" ? "已公开" : "未公开",
+        pushStatus: row.event?.pushedAt ? "已推送" : "未推送",
+        actions: <Button size="sm" variant="outline" className="h-7 rounded-none border-sky-400 px-2 text-xs text-sky-800 hover:bg-sky-100" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(row.eventId)}>并入当前 Event</Button>,
+        tone: "recommended",
+      };
+    }
+    const article = row.article;
+    const representative = eventDetail?.representativeArticleId === article.id;
+    const selected = selectedSplitIds.has(article.id);
+    return {
+      id: article.id,
+      index: row.memberIndex,
+      time: timeLabel(article.publishedAt || article.createdAt),
+      score: article.score,
+      source: article.source.name,
+      title: article.title,
+      representative: representative ? <span className="bg-foreground px-1 py-0.5 text-background">当前代表</span> : "—",
+      brand: article.brand ? splitBrands(article.brand).join(" / ") : "—",
+      eventKey: article.eventKey || "—",
+      sourceStatus: article.source.deleted ? "已删除" : article.source.publicEnabled ? "可公开" : "不公开",
+      publicStatus: article.publicStatus === "published" ? "已公开" : "未公开",
+      pushStatus: articlePushStatusLabel(article.pushStatus),
+      selection: <input type="checkbox" aria-label={`选择拆分 ${article.title}`} checked={selected} disabled={(eventDetail?.articleCount ?? 0) <= 1 || eventAction !== null} onChange={() => toggleSplitSelection(article.id)} />,
+      actions: <>
+        {!representative && <Button size="sm" variant="ghost" className="h-7 rounded-none px-2 text-xs" disabled={eventAction !== null || article.clusterStatus !== "clustered" || article.aiStatus !== "done" || article.source.deleted} onClick={() => void setRepresentative(article.id)}>设为代表</Button>}
+        {!representative && (eventDetail?.articleCount ?? 0) > 1 && <Button size="sm" variant="ghost" className="h-7 rounded-none px-2 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticle(article.id)}>单独拆分</Button>}
+      </>,
+      tone: "member",
+      highlight: article.id === detail?.id ? "current" : selected ? "selected" : representative ? "representative" : undefined,
+      onTitleClick: () => selectArticle(article.id, "cluster"),
+    };
+  });
+  const brandCandidateModels: EventArticleRowModel[] = brandCandidates.map((candidate, index) => {
+    const articleBrands = candidate.brand ? splitBrands(candidate.brand).join(" / ") : "—";
+    const matchedBrands = candidate.matchedBrands.join(" / ") || "—";
+    const brandLabel = matchedBrands === "—" || matchedBrands === articleBrands
+      ? articleBrands
+      : `${articleBrands} · 匹配 ${matchedBrands}`;
+    return {
+      id: `brand:${candidate.id}`,
+      index: index + 1,
+      time: timeLabel(candidate.publishedAt || candidate.createdAt),
+      score: candidate.score,
+      source: candidate.source.name,
+      title: candidate.title,
+      titleClassName: "text-amber-950",
+      representative: candidate.isEventRepresentative ? <span className="bg-foreground px-1 py-0.5 text-background">其他 Event 代表</span> : "—",
+      brand: brandLabel,
+      eventKey: candidate.eventKey || "—",
+      sourceStatus: candidate.source.deleted ? "已删除" : candidate.source.publicEnabled ? "可公开" : "不公开",
+      publicStatus: candidate.publicStatus === "published" ? "已公开" : "未公开",
+      pushStatus: candidate.eventPushedAt ? "已推送" : "未推送",
+      actions: <>
+        <Button size="sm" variant="outline" className="h-7 rounded-none border-amber-400 px-2 text-xs text-amber-800 hover:bg-amber-100" title="将这篇候选文章移入当前文章所属 Event" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>候选移入当前</Button>
+        <Button size="sm" variant="ghost" className="h-7 rounded-none px-2 text-xs text-sky-800 hover:bg-sky-100" title="将当前文章移入这篇文章所属 Event" disabled={eventAction !== null} onClick={() => void moveCurrentArticleToBrandEvent(candidate)}>本篇移入该 Event</Button>
+      </>,
+      tone: "brand",
+      onTitleClick: () => selectArticle(candidate.id, "cluster"),
+    };
+  });
   useEffect(() => {
     const element = eventSourceHeaderRef.current;
     if (!element) return;
@@ -1205,145 +1165,7 @@ export default function IntelligenceInbox({
                       <div><p className="text-xs font-semibold">事件成员对比</p><p className="text-xs text-muted-foreground">勾选当前成员可批量拆分，至少保留一篇；同品牌文章已移至下方单独查看。</p></div>
                       {selectedSplitIds.size > 0 && <Button size="sm" variant="outline" className="ml-auto h-7 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticles([...selectedSplitIds])}><Split className="h-3 w-3" />拆分所选 {selectedSplitIds.size} 篇</Button>}
                     </div>
-                    <div className="space-y-1.5">
-                      {eventComparisonRows.map((row) => {
-                        if (row.kind === "recommended") {
-                          const article = row.event?.representativeArticle;
-                          return (
-                            <EventArticleCard
-                              key={`mobile-recommended-event-${row.eventId}`}
-                              index="推荐"
-                              time={article ? timeLabel(article.publishedAt || article.createdAt) : "—"}
-                              score={article?.score ?? "—"}
-                              source={article?.source.name || "—"}
-                              title={article?.title || `Event ${row.eventId.slice(-8)}`}
-                              representative={<span className="bg-foreground px-1 py-0.5 text-background">推荐代表</span>}
-                              brand={article?.brand ? splitBrands(article.brand).join(" / ") : "—"}
-                              eventKey={article?.eventKey || "—"}
-                              sourceStatus={!article ? "—" : article.source.deleted ? "已删除" : article.source.publicEnabled ? "可公开" : "不公开"}
-                              publicStatus={row.event?.publicStatus === "published" ? "已公开" : "未公开"}
-                              pushStatus={row.event?.pushedAt ? "已推送" : "未推送"}
-                              className="border-sky-200 bg-sky-50"
-                              action={<Button size="sm" variant="outline" className="h-7 rounded-none border-sky-400 px-2 text-xs text-sky-800 hover:bg-sky-100" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(row.eventId)}>并入当前 Event</Button>}
-                            />
-                          );
-                        }
-                        const article = row.article;
-                        const representative = eventDetail.representativeArticleId === article.id;
-                        const selected = selectedSplitIds.has(article.id);
-                        const sourceStatus = article.source.deleted
-                          ? "已删除"
-                          : article.source.publicEnabled
-                            ? "可公开"
-                            : "不公开";
-                        const rowBackground = article.id === detail.id
-                          ? "border-sky-200 bg-sky-50"
-                          : selected
-                            ? "border-amber-200 bg-amber-50"
-                            : representative
-                              ? "border-emerald-200 bg-emerald-50/60"
-                              : "bg-background";
-                        return (
-                          <EventArticleCard
-                            key={`mobile-member-${article.id}`}
-                            index={row.memberIndex}
-                            time={timeLabel(article.publishedAt || article.createdAt)}
-                            score={article.score}
-                            source={article.source.name}
-                            title={article.title}
-                            representative={representative ? <span className="bg-foreground px-1 py-0.5 text-background">当前代表</span> : "—"}
-                            brand={article.brand ? splitBrands(article.brand).join(" / ") : "—"}
-                            eventKey={article.eventKey || "—"}
-                            sourceStatus={sourceStatus}
-                            publicStatus={article.publicStatus === "published" ? "已公开" : "未公开"}
-                            pushStatus={articlePushStatusLabel(article.pushStatus)}
-                            selection={<input type="checkbox" aria-label={`选择拆分 ${article.title}`} checked={selected} disabled={eventDetail.articleCount <= 1 || eventAction !== null} onChange={() => toggleSplitSelection(article.id)} />}
-                            className={rowBackground}
-                            onTitleClick={() => selectArticle(article.id, "cluster")}
-                            action={
-                              <>
-                                {!representative && <Button size="sm" variant="ghost" className="h-7 rounded-none px-2 text-xs" disabled={eventAction !== null || article.clusterStatus !== "clustered" || article.aiStatus !== "done" || article.source.deleted} onClick={() => void setRepresentative(article.id)}>设为代表</Button>}
-                                {!representative && eventDetail.articleCount > 1 && <Button size="sm" variant="ghost" className="h-7 rounded-none px-2 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticle(article.id)}>单独拆分</Button>}
-                              </>
-                            }
-                          />
-                        );
-                      })}
-                    </div>
-                    <div className="hidden">
-                      <table className={EVENT_TABLE_CLASS}>
-                        <EventComparisonTableHeader sourceHeaderRef={eventSourceHeaderRef} sourceWidth={eventSourceColumnWidth} />
-                        <tbody>
-                          {eventComparisonRows.map((row) => {
-                            if (row.kind === "recommended") {
-                              const article = row.event?.representativeArticle;
-                              const sourceStatus = !article
-                                ? "—"
-                                : article.source.deleted
-                                  ? "已删除"
-                                  : article.source.publicEnabled
-                                    ? "可公开"
-                                    : "不公开";
-                              const stickyRowBackground = "bg-sky-50";
-                              return (
-                                <tr key={`recommended-event-${row.eventId}`} className="group whitespace-nowrap border-b border-sky-200 bg-sky-50">
-                                  <td className={`md:sticky md:left-0 z-[2] border-r px-1 py-1.5 align-middle ${stickyRowBackground}`}><div className="flex items-center justify-center"><span className="font-medium text-sky-800">—</span></div></td>
-                                  <td className="w-[1%] whitespace-nowrap border-r px-2 py-1.5 font-mono tabular-nums align-middle text-muted-foreground">{article ? timeLabel(article.publishedAt || article.createdAt) : "—"}</td>
-                                  <td className="border-r px-1 py-1.5 text-center font-semibold tabular-nums align-middle">{article?.score ?? "—"}</td>
-                                  <td className={`${EVENT_SOURCE_CELL_CLASS} ${stickyRowBackground}`} title={article?.source.name || "未知来源"}><div className="max-w-[72px] truncate text-muted-foreground">{article?.source.name || "—"}</div></td>
-                                  <td style={{ left: 52 + eventSourceColumnWidth }} className={`${EVENT_TITLE_CELL_CLASS} ${stickyRowBackground}`}><div className="block max-w-[240px] truncate text-left font-medium text-sky-950" title={article?.title || `Event ${row.eventId}`}>{article?.title || `Event ${row.eventId.slice(-8)}`}</div></td>
-                                  <td className="border-r px-1 py-1.5 text-center align-middle"><span className="bg-foreground px-1.5 py-0.5 text-background">推荐代表</span></td>
-                                  <td className="border-r px-2 py-1.5 align-middle text-muted-foreground" title={article?.brand ? splitBrands(article.brand).join(" / ") : "无"}><div className="max-w-[160px] truncate">{article?.brand ? splitBrands(article.brand).join(" / ") : "—"}</div></td>
-                                  <td className="border-r px-2 py-1.5 font-mono align-middle text-muted-foreground" title={article?.eventKey || "未生成"}><div className="max-w-[260px] truncate">{article?.eventKey || "—"}</div></td>
-                                  <td className="border-r px-2 py-1.5 align-middle text-muted-foreground">{sourceStatus}</td>
-                                  <td className="border-r px-2 py-1.5 align-middle text-muted-foreground">{row.event?.publicStatus === "published" ? "已公开" : "未公开"}</td>
-                                  <td className="border-r px-2 py-1.5 align-middle text-muted-foreground">{row.event?.pushedAt ? "已推送" : "未推送"}</td>
-                                  <td className={`md:sticky md:right-0 z-[2] px-1 py-1 align-middle ${stickyRowBackground}`}><div className="flex items-center whitespace-nowrap"><Button size="sm" variant="outline" className="h-6 rounded-none border-sky-400 px-1.5 text-xs text-sky-800 hover:bg-sky-100" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(row.eventId)}>并入</Button></div></td>
-                                </tr>
-                              );
-                            }
-                            const article = row.article;
-                            const representative = eventDetail.representativeArticleId === article.id;
-                            const selected = selectedSplitIds.has(article.id);
-                            const sourceStatus = article.source.deleted
-                              ? "已删除"
-                              : article.source.publicEnabled
-                                ? "可公开"
-                                : "不公开";
-                            const rowBackground = article.id === detail.id
-                              ? "bg-sky-50"
-                              : selected
-                                ? "bg-amber-50"
-                                : representative
-                                  ? "bg-emerald-50/60"
-                                  : "bg-background group-hover:bg-muted/20";
-                            const stickyRowBackground = article.id === detail.id
-                              ? "bg-sky-50"
-                              : selected
-                                ? "bg-amber-50"
-                                : representative
-                                  ? "bg-emerald-50"
-                                  : "bg-background group-hover:bg-muted";
-                            return (
-                              <tr key={article.id} className={`group whitespace-nowrap border-b last:border-b-0 ${rowBackground}`}>
-                                <td className={`md:sticky md:left-0 z-[2] border-r px-1 py-1.5 align-middle ${stickyRowBackground}`}><div className="flex items-center justify-center gap-1"><input type="checkbox" aria-label={`选择拆分 ${article.title}`} checked={selected} disabled={eventDetail.articleCount <= 1 || eventAction !== null} onChange={() => toggleSplitSelection(article.id)} /><span className="tabular-nums text-muted-foreground">{row.memberIndex}</span></div></td>
-                                <td className="w-[1%] whitespace-nowrap border-r px-2 py-1.5 font-mono tabular-nums align-middle text-muted-foreground">{timeLabel(article.publishedAt || article.createdAt)}</td>
-                                <td className="border-r px-1 py-1.5 text-center font-semibold tabular-nums align-middle">{article.score}</td>
-                                <td className={`${EVENT_SOURCE_CELL_CLASS} ${stickyRowBackground}`} title={article.source.name}><div className="max-w-[72px] truncate text-muted-foreground">{article.source.name}</div></td>
-                                <td style={{ left: 52 + eventSourceColumnWidth }} className={`${EVENT_TITLE_CELL_CLASS} ${stickyRowBackground}`}><button type="button" onClick={() => selectArticle(article.id, "cluster")} className="block max-w-[240px] truncate text-left font-medium hover:underline" title={article.title}>{article.title}</button></td>
-                                <td className="border-r px-1 py-1.5 text-center align-middle">{representative ? <span className="bg-foreground px-1.5 py-0.5 max-w-[160px] text-background">当前代表</span> : "—"}</td>
-                                <td className="border-r px-2 py-1.5 align-middle text-muted-foreground" title={article.brand ? splitBrands(article.brand).join(" / ") : "无"}><div className="max-w-[160px] truncate">{article.brand ? splitBrands(article.brand).join(" / ") : "—"}</div></td>
-                                <td className="border-r px-2 py-1.5 font-mono align-middle text-muted-foreground" title={article.eventKey || "未生成"}><div className="max-w-[260px] truncate">{article.eventKey || "—"}</div></td>
-                                <td className={`border-r px-2 py-1.5 align-middle ${article.source.deleted ? "text-red-700" : article.source.publicEnabled ? "text-emerald-700" : "text-muted-foreground"}`}>{sourceStatus}</td>
-                                <td className={`border-r px-2 py-1.5 align-middle ${article.publicStatus === "published" ? "text-emerald-700" : "text-muted-foreground"}`}>{article.publicStatus === "published" ? "已公开" : "未公开"}</td>
-                                <td className={`border-r px-2 py-1.5 align-middle ${article.pushStatus === "success" ? "text-emerald-700" : article.pushStatus === "failure" ? "text-red-700" : article.pushStatus === "partial" ? "text-amber-700" : "text-muted-foreground"}`}>{articlePushStatusLabel(article.pushStatus)}</td>
-                                <td className={`md:sticky md:right-0 z-[2] px-1 py-1 align-middle ${stickyRowBackground}`}><div className="flex items-center gap-1 whitespace-nowrap">{!representative && <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs" disabled={eventAction !== null || article.clusterStatus !== "clustered" || article.aiStatus !== "done" || article.source.deleted} onClick={() => void setRepresentative(article.id)}>设为代表</Button>}{!representative && eventDetail.articleCount > 1 && <Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticle(article.id)}>单独拆分</Button>}</div></td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                    <EventArticleList rows={eventComparisonModels} sourceHeaderRef={eventSourceHeaderRef} sourceWidth={eventSourceColumnWidth} />
 
                     {brandCandidates.length > 0 && (
                       <section className="mt-2 border-t pt-2">
@@ -1354,80 +1176,7 @@ export default function IntelligenceInbox({
                           </div>
                           <span className="ml-auto shrink-0 text-xs text-muted-foreground">{brandCandidates.length} 篇</span>
                         </div>
-                        <div className="space-y-1.5 md:grid md:grid-cols-2 md:items-start md:gap-1.5">
-                          {brandCandidates.map((candidate, index) => {
-                            const sourceStatus = candidate.source.deleted
-                              ? "已删除"
-                              : candidate.source.publicEnabled
-                                ? "可公开"
-                                : "不公开";
-                            const articleBrands = candidate.brand
-                              ? splitBrands(candidate.brand).join(" / ")
-                              : "—";
-                            const matchedBrands = candidate.matchedBrands.join(" / ") || "—";
-                            const brandLabel = matchedBrands === "—" || matchedBrands === articleBrands
-                              ? articleBrands
-                              : `${articleBrands} · 匹配 ${matchedBrands}`;
-                            return (
-                              <EventArticleCard
-                                key={`mobile-brand-candidate-${candidate.id}`}
-                                index={index + 1}
-                                time={timeLabel(candidate.publishedAt || candidate.createdAt)}
-                                score={candidate.score}
-                                source={candidate.source.name}
-                                title={candidate.title}
-                                titleClassName="text-amber-950"
-                                representative={candidate.isEventRepresentative ? <span className="bg-foreground px-1 py-0.5 text-background">其他 Event 代表</span> : "—"}
-                                brand={brandLabel}
-                                eventKey={candidate.eventKey || "—"}
-                                sourceStatus={sourceStatus}
-                                publicStatus={candidate.publicStatus === "published" ? "已公开" : "未公开"}
-                                pushStatus={candidate.eventPushedAt ? "已推送" : "未推送"}
-                                className="border-amber-200 bg-amber-50/60"
-                                onTitleClick={() => selectArticle(candidate.id, "cluster")}
-                                action={<><Button size="sm" variant="outline" className="h-7 rounded-none border-amber-400 px-2 text-xs text-amber-800 hover:bg-amber-100" title="将这篇候选文章移入当前文章所属 Event" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>候选移入当前</Button><Button size="sm" variant="ghost" className="h-7 rounded-none px-2 text-xs text-sky-800 hover:bg-sky-100" title="将当前文章移入这篇文章所属 Event" disabled={eventAction !== null} onClick={() => void moveCurrentArticleToBrandEvent(candidate)}>本篇移入该 Event</Button></>}
-                              />
-                            );
-                          })}
-                        </div>
-                        <div className="hidden">
-                          <table className={EVENT_TABLE_CLASS}>
-                            <EventComparisonTableHeader sourceWidth={eventSourceColumnWidth} />
-                            <tbody>
-                              {brandCandidates.map((candidate, index) => {
-                                const sourceStatus = candidate.source.deleted
-                                  ? "已删除"
-                                  : candidate.source.publicEnabled
-                                    ? "可公开"
-                                    : "不公开";
-                                const articleBrands = candidate.brand
-                                  ? splitBrands(candidate.brand).join(" / ")
-                                  : "—";
-                                const matchedBrands = candidate.matchedBrands.join(" / ") || "—";
-                                const brandLabel = matchedBrands === "—" || matchedBrands === articleBrands
-                                  ? articleBrands
-                                  : `${articleBrands} · 匹配 ${matchedBrands}`;
-                                const stickyRowBackground = "bg-amber-50";
-                                return (
-                                  <tr key={`brand-candidate-${candidate.id}`} className="group whitespace-nowrap border-b border-amber-200 bg-amber-50/60 last:border-b-0">
-                                    <td className={`md:sticky md:left-0 z-[2] w-[52px] border-r px-1 py-1.5 align-middle ${stickyRowBackground}`}><div className="flex items-center justify-center"><span className="tabular-nums text-muted-foreground">{index + 1}</span></div></td>
-                                    <td className="w-[1%] whitespace-nowrap border-r px-2 py-1.5 font-mono tabular-nums align-middle text-muted-foreground">{timeLabel(candidate.publishedAt || candidate.createdAt)}</td>
-                                    <td className="border-r px-1 py-1.5 text-center font-semibold tabular-nums align-middle">{candidate.score}</td>
-                                    <td className={`${EVENT_SOURCE_CELL_CLASS} ${stickyRowBackground}`} title={candidate.source.name}><div className="max-w-[72px] truncate text-muted-foreground">{candidate.source.name}</div></td>
-                                    <td style={{ left: 52 + eventSourceColumnWidth }} className={`${EVENT_TITLE_CELL_CLASS} ${stickyRowBackground}`}><button type="button" onClick={() => selectArticle(candidate.id, "cluster")} className="block max-w-[240px] truncate text-left font-medium text-amber-950 hover:underline" title={candidate.title}>{candidate.title}</button></td>
-                                    <td className="border-r px-1 py-1.5 text-center align-middle">{candidate.isEventRepresentative ? <span className="bg-foreground px-1.5 py-0.5 text-background">其他 Event 代表</span> : "—"}</td>
-                                    <td className="border-r px-2 py-1.5 align-middle text-muted-foreground" title={`文章品牌：${articleBrands}；匹配品牌：${matchedBrands}`}><div className="max-w-[160px] truncate">{brandLabel}</div></td>
-                                    <td className="border-r px-2 py-1.5 font-mono align-middle text-muted-foreground" title={candidate.eventKey || "未生成"}><div className="max-w-[260px] truncate">{candidate.eventKey || "—"}</div></td>
-                                    <td className={`border-r px-2 py-1.5 align-middle ${candidate.source.deleted ? "text-red-700" : candidate.source.publicEnabled ? "text-emerald-700" : "text-muted-foreground"}`}>{sourceStatus}</td>
-                                    <td className={`border-r px-2 py-1.5 align-middle ${candidate.publicStatus === "published" ? "text-emerald-700" : "text-muted-foreground"}`}>{candidate.publicStatus === "published" ? "已公开" : "未公开"}</td>
-                                    <td className={`border-r px-2 py-1.5 align-middle ${candidate.eventPushedAt ? "text-emerald-700" : "text-muted-foreground"}`}>{candidate.eventPushedAt ? "已推送" : "未推送"}</td>
-                                    <td className={`md:sticky md:right-0 z-[2] px-1 py-1 align-middle ${stickyRowBackground}`}><div className="flex items-center gap-1 whitespace-nowrap"><Button size="sm" variant="outline" className="h-6 rounded-none border-amber-400 px-1.5 text-xs text-amber-800 hover:bg-amber-100" title="将这篇候选文章移入当前文章所属 Event" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>候选移入当前</Button><Button size="sm" variant="ghost" className="h-6 rounded-none px-1.5 text-xs text-sky-800 hover:bg-sky-100" title="将当前文章移入这篇文章所属 Event" disabled={eventAction !== null} onClick={() => void moveCurrentArticleToBrandEvent(candidate)}>本篇移入该 Event</Button></div></td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
+                        <EventArticleList rows={brandCandidateModels} sourceWidth={eventSourceColumnWidth} />
                       </section>
                     )}
 

@@ -143,19 +143,19 @@ export const SourceBlock = memo(function SourceBlock({
   }
 
   return (
-    <div className="rounded-lg border border-border overflow-hidden bg-card">
+    <div className="rounded-none border border-border overflow-hidden bg-card">
       <button
         onClick={onToggle}
-        className={`w-full flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2 py-1.5 text-left text-sm border-b ${statusBg} hover:opacity-80 transition-opacity sm:flex-nowrap`}
+        className={`w-full flex flex-wrap items-center gap-x-1 gap-y-0.5 px-2 py-1.5 text-left text-sm border-b ${statusBg} hover:opacity-80 transition-opacity`}
       >
-        <div className="flex min-w-0 basis-full items-center gap-1.5 sm:basis-auto sm:flex-1">
+        <div className="flex min-w-0 items-center gap-1.5">
           {statusIcon}
           <span className="min-w-0 truncate font-semibold">{source.name}</span>
         </div>
-        <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-2 gap-y-0.5 pl-5 sm:basis-auto sm:flex-1 sm:pl-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
           <Badge
             variant="secondary"
-            className={`text-[10px] px-1.5 py-0 rounded-full ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
+            className={`text-[10px] px-1.5 py-0 rounded-none ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
             title={humanizeSourceError(source.lastRunError) || '源级最近一次采集结果'}
           >
             {lastRunLabel}
@@ -246,7 +246,7 @@ export const SourceBlock = memo(function SourceBlock({
             {onRetrySource && (
               <button
                 type="button"
-                className="shrink-0 rounded border border-destructive/30 px-1.5 py-0.5 hover:bg-red-100"
+                className="shrink-0 rounded-none border border-destructive/30 px-1.5 py-0.5 hover:bg-red-100"
                 onClick={(event) => { event.stopPropagation(); onRetrySource(source.id) }}
                 disabled={isJobRunning}
               >

@@ -49,6 +49,8 @@ grep -Eq "^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*['\"]?file:\.\./db/c
   || fail ".env 中 DATABASE_URL 必须为 file:../db/custom.db"
 grep -Eq '^[[:space:]]*API_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]]+' .env \
   || fail ".env 中 API_TOKEN 不能为空"
+grep -Eq '^[[:space:]]*SETTINGS_ENCRYPTION_KEY[[:space:]]*=[[:space:]]*[^[:space:]]+' .env \
+  || fail ".env 中 SETTINGS_ENCRYPTION_KEY 不能为空"
 grep -Eq '^[[:space:]]*NEXT_PUBLIC_SITE_URL[[:space:]]*=[[:space:]]*https?://' .env \
   || fail ".env 中 NEXT_PUBLIC_SITE_URL 必须是完整站点地址"
 

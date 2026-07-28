@@ -5,13 +5,12 @@ import {
   EXPORTABLE_SETTING_KEYS, WRITABLE_SETTING_KEYS, SETTING_DEFINITION_MAP, SENSITIVE_SETTING_KEYS, getSettingDefaults, getExportableSettingDefaults,
 } from '@/lib/settings';
 import { SETTING_KEYS } from '@/lib/settings-catalog';
-import { applyScorePolicy, buildScorePolicySnapshot } from '@/lib/score-policy';
 import { parseWebhookConfigs, serializeWebhookConfigsForServer } from '@/contracts/webhook';
 import { decryptWebhookConfigsForRuntime, encryptWebhookConfigsForStorage } from '@/lib/settings-crypto';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
-import { PUBLIC_PUBLICATION_REBUILD_KEYS, rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
+import { PUBLIC_PUBLICATION_REBUILD_KEYS } from '@/lib/public-publication-service';
 import { DEFAULT_PROMPT_SETTINGS, SCORE_WEIGHT_META } from '@/lib/prompts';
-import { recalculateEventsInTransaction } from '@/lib/event-service';
+import { mergeSettingsRebuildPlan, SETTINGS_REBUILD_KEY } from '@/lib/settings-rebuild-service';
 
 const settingsUpdateSchema = z.record(z.string(), z.string());
 
@@ -54,7 +53,7 @@ export async function revealSensitiveSettings(requestedKeys?: string[]) {
 }
 
 export async function updateSettings(input: unknown): Promise<
-  | { ok: true; success?: boolean; scoreRecomputed?: number; publicationRebuilt?: boolean }
+  | { ok: true; success?: boolean; rebuildQueued?: boolean }
   | { ok: false; error: string; details: unknown[] }
 > {
   const parsed = settingsUpdateSchema.safeParse(input);
@@ -109,7 +108,6 @@ export async function updateSettings(input: unknown): Promise<
   const previousScoreMap = Object.fromEntries(previousScoreSettings.map(x => [x.key, x.value]));
   const requestedEventWeight = parsed.data[SETTING_KEYS.AI_WEIGHT_EVENT];
   const requestedContentWeight = parsed.data[SETTING_KEYS.AI_WEIGHT_CONTENT];
-  const requestedKeywordBonus = parsed.data[SETTING_KEYS.AI_KEYWORD_MATCH_BONUS];
   const effectiveEventWeight = Number(
     requestedEventWeight
       ?? previousScoreMap[SETTING_KEYS.AI_WEIGHT_EVENT]
@@ -119,11 +117,6 @@ export async function updateSettings(input: unknown): Promise<
     requestedContentWeight
       ?? previousScoreMap[SETTING_KEYS.AI_WEIGHT_CONTENT]
       ?? SCORE_WEIGHT_META.content.defaultWeight,
-  );
-  const effectiveKeywordBonus = Number(
-    requestedKeywordBonus
-      ?? previousScoreMap[SETTING_KEYS.AI_KEYWORD_MATCH_BONUS]
-      ?? 5,
   );
   if (effectiveEventWeight + effectiveContentWeight !== 100) {
     return { ok: false, error: '设置值校验失败', details: ['评分权重合计必须为 100'] };
@@ -138,58 +131,30 @@ export async function updateSettings(input: unknown): Promise<
     return Number(previousScoreMap[key] ?? fallback) !== Number(value);
   });
   const publicationNeedsRebuild = scorePolicyChanged || updates.some(([key]) => PUBLIC_PUBLICATION_REBUILD_KEYS.has(key));
-  const updateMap = Object.fromEntries(updates);
-  const nextWeightEvent = Number(updateMap[SETTING_KEYS.AI_WEIGHT_EVENT] ?? effectiveEventWeight);
-  const nextWeightContent = Number(updateMap[SETTING_KEYS.AI_WEIGHT_CONTENT] ?? effectiveContentWeight);
-  const nextKeywordBonus = Number(updateMap[SETTING_KEYS.AI_KEYWORD_MATCH_BONUS] ?? effectiveKeywordBonus);
-
-  // 设置与历史文章重算在同一事务提交，避免“权重已保存、文章只更新一部分”。
-  const scoreRecomputed = scorePolicyChanged ? await db.$transaction(async tx => {
+  // 只把用户设置及“派生状态待重建”标记放进短事务。评分/公开状态由后台
+  // Job 分批处理；这样不会因为一张大 articles 表长期锁住 SQLite。
+  const rebuildQueued = scorePolicyChanged || publicationNeedsRebuild;
+  await db.$transaction(async (tx) => {
     for (const [key, value] of updates) {
       await tx.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
     }
-    let recomputed = 0;
-    const affectedEventIds = new Set<string>();
-    if (scorePolicyChanged) {
-      const articles = await tx.article.findMany({
-        where: { eventScore: { not: null }, contentScore: { not: null } },
-        select: { id: true, eventId: true, eventScore: true, contentScore: true, adProbability: true, isAd: true, keywordMatched: true },
+    if (rebuildQueued) {
+      const marker = await tx.setting.findUnique({
+        where: { key: SETTINGS_REBUILD_KEY },
+        select: { value: true },
       });
-      for (const article of articles) {
-        const result = applyScorePolicy(
-          article.eventScore!, article.contentScore!, article.adProbability ?? (article.isAd ? 100 : 0),
-          article.isAd, nextWeightEvent, nextWeightContent,
-          article.keywordMatched, nextKeywordBonus,
-        );
-        await tx.article.update({
-          where: { id: article.id },
-          data: {
-            score: result.finalScore,
-            rawScore: result.rawScore,
-            scorePolicyVersion: result.version,
-            scorePolicySnapshot: buildScorePolicySnapshot(
-              nextWeightEvent,
-              nextWeightContent,
-              nextKeywordBonus,
-              article.keywordMatched,
-            ),
-          },
-        });
-        if (article.eventId) affectedEventIds.add(article.eventId);
-        recomputed++;
-      }
-      await recalculateEventsInTransaction(tx, [...affectedEventIds]);
+      const plan = mergeSettingsRebuildPlan(marker?.value, {
+        score: scorePolicyChanged,
+        publication: publicationNeedsRebuild,
+      });
+      await tx.setting.upsert({
+        where: { key: SETTINGS_REBUILD_KEY },
+        update: { value: JSON.stringify(plan) },
+        create: { key: SETTINGS_REBUILD_KEY, value: JSON.stringify(plan) },
+      });
     }
-    if (publicationNeedsRebuild) {
-      await rebuildPublicPublicationSnapshot(tx, { contentChanged: scorePolicyChanged });
-    }
-    return { recomputed };
-  }, { maxWait: 10_000, timeout: 120_000 }) : await db.$transaction(async tx => {
-    for (const [key, value] of updates) await tx.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
-    if (publicationNeedsRebuild) await rebuildPublicPublicationSnapshot(tx, { contentChanged: false });
-    return { recomputed: 0 };
-  }, { maxWait: 10_000, timeout: 120_000 });
+  }, { maxWait: 10_000, timeout: 10_000 });
   invalidateAISettingsCache();
   invalidatePublicArticleCache();
-  return { ok: true, success: true, scoreRecomputed: scoreRecomputed.recomputed, publicationRebuilt: publicationNeedsRebuild };
+  return { ok: true, success: true, rebuildQueued };
 }

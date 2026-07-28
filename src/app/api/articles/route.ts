@@ -13,6 +13,7 @@ import {
 } from '@/lib/article-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 import { parsePositiveInt } from '@/lib/pagination';
+import type { ArticleListSort } from '@/contracts/articles';
 
 // GET /api/articles - List articles with filters and pagination
 export async function GET(request: Request) {
@@ -47,7 +48,7 @@ function parseClusterView(raw: string | null): 'needs_review' | 'multi_source' |
   return raw === 'needs_review' || raw === 'multi_source' || raw === 'representative' ? raw : undefined;
 }
 
-function parseSort(raw: string | null): 'newest' | 'oldest' | 'score_desc' | 'score_asc' | 'relevance_desc' | 'relevance_asc' | 'event_desc' | 'event_asc' | 'content_desc' | 'content_asc' | 'ad_desc' | 'ad_asc' | 'confidence_desc' | 'confidence_asc' | undefined {
+function parseSort(raw: string | null): ArticleListSort | undefined {
   return raw === 'newest' || raw === 'oldest' || raw === 'score_desc' || raw === 'score_asc' || raw === 'relevance_desc' || raw === 'relevance_asc' || raw === 'event_desc' || raw === 'event_asc' || raw === 'content_desc' || raw === 'content_asc' || raw === 'ad_desc' || raw === 'ad_asc' || raw === 'confidence_desc' || raw === 'confidence_asc' ? raw : undefined;
 }
 

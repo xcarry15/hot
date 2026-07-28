@@ -202,6 +202,8 @@ const publicationSelect = {
   source: { select: { publicEnabled: true, deletedAt: true } },
 } as const
 
+const PUBLICATION_REBUILD_BATCH_SIZE = 100
+
 export async function refreshPublicPublication(
   articleId: string,
   client: PublicPublicationDb = db,
@@ -274,6 +276,42 @@ export async function refreshPublicPublicationsForSource(
   sourceId: string,
   client: PublicPublicationDb = db,
 ): Promise<number> {
+  // 单篇/事务内调用保留同一事务语义；来源管理的全库同步走下面的分批路径，
+  // 避免一个来源积累大量文章后长期占用 SQLite 写锁。
+  if (client !== db) return refreshPublicPublicationsForSourceWithClient(sourceId, client)
+
+  const config = await getPublicPublicationConfig(db)
+  let cursor: string | undefined
+  let refreshed = 0
+  while (true) {
+    const articles = await db.article.findMany({
+      where: {
+        sourceId,
+        ...(cursor ? { id: { gt: cursor } } : {}),
+      },
+      select: publicationSelect,
+      orderBy: { id: 'asc' },
+      take: PUBLICATION_REBUILD_BATCH_SIZE,
+    })
+    if (articles.length === 0) break
+
+    await db.$transaction(async (tx) => {
+      const eventMap = await getPublicationEventMap(tx, articles)
+      for (const article of articles) {
+        await syncCandidate(article, config, tx, {}, article.eventId ? eventMap.get(article.eventId) ?? null : null)
+      }
+    }, { maxWait: 10_000, timeout: 10_000 })
+    refreshed += articles.length
+    cursor = articles[articles.length - 1]!.id
+  }
+  invalidatePublicArticleCache()
+  return refreshed
+}
+
+async function refreshPublicPublicationsForSourceWithClient(
+  sourceId: string,
+  client: PublicPublicationDb,
+): Promise<number> {
   const articles = await client.article.findMany({
     where: { sourceId },
     select: publicationSelect,
@@ -309,30 +347,50 @@ async function rebuildWithClient(
   return articles?.length ?? 0
 }
 
+/**
+ * 规则调整后的全量公开状态同步。每批独立短事务，避免 SQLite 在大库上被
+ * 一次性事务锁住；任一批失败时调用方保留重建标记并从头幂等重试。
+ */
+export async function rebuildPublicPublicationSnapshotInBatches(
+  options: { contentChanged?: boolean } = {},
+): Promise<number> {
+  const config = await getPublicPublicationConfig(db)
+  let cursor: string | undefined
+  let rebuilt = 0
+
+  while (true) {
+    const articles = await db.article.findMany({
+      where: cursor ? { id: { gt: cursor } } : undefined,
+      select: publicationSelect,
+      orderBy: { id: 'asc' },
+      take: PUBLICATION_REBUILD_BATCH_SIZE,
+    })
+    if (articles.length === 0) break
+
+    await db.$transaction(async (tx) => {
+      const eventMap = await getPublicationEventMap(tx, articles)
+      for (const article of articles) {
+        await syncCandidate(
+          article,
+          config,
+          tx,
+          options,
+          article.eventId ? eventMap.get(article.eventId) ?? null : null,
+        )
+      }
+    }, { maxWait: 10_000, timeout: 10_000 })
+
+    rebuilt += articles.length
+    cursor = articles[articles.length - 1]!.id
+  }
+  invalidatePublicArticleCache()
+  return rebuilt
+}
+
 export async function rebuildPublicPublicationSnapshot(
   client?: PublicPublicationDb,
   options: { contentChanged?: boolean } = {},
 ): Promise<number> {
   if (client) return rebuildWithClient(client, options)
-  const count = await db.$transaction(
-    (tx) => rebuildWithClient(tx, options),
-    { maxWait: 10_000, timeout: 120_000 },
-  )
-  invalidatePublicArticleCache()
-  return count
-}
-
-export async function updatePublicPublicationSetting(key: string, value: string): Promise<boolean> {
-  if (!PUBLIC_PUBLICATION_REBUILD_KEYS.has(key)) return false
-
-  await db.$transaction(async (tx) => {
-    await tx.setting.upsert({
-      where: { key },
-      update: { value },
-      create: { key, value },
-    })
-    await rebuildPublicPublicationSnapshot(tx)
-  }, { maxWait: 10_000, timeout: 120_000 })
-  invalidatePublicArticleCache()
-  return true
+  return rebuildPublicPublicationSnapshotInBatches(options)
 }

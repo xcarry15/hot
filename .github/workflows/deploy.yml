@@ -72,6 +72,12 @@ jobs:
             --exclude=node_modules \
             --exclude=coverage \
             --exclude=db \
+            --exclude=bat \
+            --exclude=docs \
+            --exclude=.agents \
+            --exclude=.codex \
+            --exclude=AGENTS.md \
+            --exclude=README.md \
             --exclude=tests \
             --exclude='*.log' \
             --exclude='.env*' \

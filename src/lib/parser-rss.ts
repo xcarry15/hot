@@ -1,6 +1,8 @@
 import { getZAI } from './zai';
 import type { CrawlResult } from '@/contracts/crawl';
 import { assertNotAborted } from './worker-stop';
+import { ensureResponseTextWithinLimit } from './http';
+import { assertSafeOutboundUrl } from './outbound-url';
 
 interface RssConfig {
   feedUrl?: string;
@@ -17,6 +19,7 @@ export async function parseRss(url: string, parserConfigStr: string, signal?: Ab
     const feedUrl = config.feedUrl || url;
     const maxItems = config.maxItems || 20;
 
+    await assertSafeOutboundUrl(feedUrl);
     const zai = await getZAI();
     const result = await zai.functions.invoke('page_reader', {
       url: feedUrl,
@@ -27,7 +30,7 @@ export async function parseRss(url: string, parserConfigStr: string, signal?: Ab
       return { success: false, items: [], error: 'Failed to fetch RSS feed' };
     }
 
-    const xml = result.data.html;
+    const xml = ensureResponseTextWithinLimit(result.data.html);
 
     // Parse RSS items from XML
     const items = parseRssXml(xml, maxItems);

@@ -15,15 +15,14 @@ const ENVELOPE_PREFIX = 'enc:v1:';
  * 末 6 位只用于人工识别，真正的 URL 使用 AES-256-GCM 加密。
  */
 function getEncryptionKey(): Buffer {
-  const configuredSecret = process.env.SETTINGS_ENCRYPTION_KEY?.trim()
-    || process.env.API_TOKEN?.trim();
+  const configuredSecret = process.env.SETTINGS_ENCRYPTION_KEY?.trim();
   if (configuredSecret) return createHash('sha256').update(configuredSecret).digest();
 
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('生产环境必须配置 SETTINGS_ENCRYPTION_KEY 或 API_TOKEN');
+    throw new Error('生产环境必须配置 SETTINGS_ENCRYPTION_KEY');
   }
 
-  // 本地无 API_TOKEN 时仍保持重启后可解密；生产环境不会使用这个回退值。
+  // 本地开发使用数据库路径派生的稳定值；生产环境绝不依赖可轮换的登录 Token。
   return createHash('sha256')
     .update(`hot2-local-settings:${process.env.DATABASE_URL || 'file:./db/custom.db'}`)
     .digest();
@@ -104,4 +103,3 @@ export function decryptWebhookConfigsForRuntime(value: string): string {
     url: decryptWebhookUrl(config.url),
   } satisfies WebhookConfig)));
 }
-

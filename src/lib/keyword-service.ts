@@ -1,30 +1,40 @@
 import { db } from '@/lib/db';
+import { createCache } from '@/lib/cache';
 import { invalidateKeywordCache } from '@/lib/filter';
+import { invalidateKeywordFilterDiscards } from '@/lib/keyword-filter-state';
 import * as XLSX from 'xlsx';
 import {
   importKeywordCandidate,
   type ImportedKeywordCandidate,
   type KeywordCandidateExportRow,
 } from '@/lib/keyword-candidate-service';
-import { KEYWORD_DEFAULT_CATEGORY } from '@/features/keywords-catalog';
+import { KEYWORD_DEFAULT_CATEGORY } from '@/contracts/keywords';
 
 const DEFAULT_CATEGORY = KEYWORD_DEFAULT_CATEGORY;
+const KEYWORD_HIT_COUNT_WINDOW_DAYS = 90;
+const keywordHitCountCache = createCache<Map<string, number>>(15_000);
 
 async function loadKeywordHitCounts(rows: Array<{ id: string; word: string }>) {
   if (rows.length === 0) return new Map<string, number>();
+  const cached = keywordHitCountCache.get();
+  if (cached) return cached;
+  const cutoff = new Date(Date.now() - KEYWORD_HIT_COUNT_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const hitRows = await db.$queryRaw<Array<{ id: string; hitCount: number | bigint }>>`
     SELECT k.id AS id, COUNT(a.id) AS hitCount
     FROM keywords AS k
     LEFT JOIN articles AS a
       ON a.keywordMatched = 1
+      AND COALESCE(a.publishedAt, a.createdAt) >= ${cutoff}
       AND instr(
-        lower(a.title || ' ' || substr(a.cleanContent, 1, 1000)),
+        lower(a.title || ' ' || a.cleanContent),
         lower(k.word)
       ) > 0
     WHERE k.word <> ''
     GROUP BY k.id
   `;
-  return new Map(hitRows.map(row => [row.id, Number(row.hitCount)]));
+  const result = new Map(hitRows.map(row => [row.id, Number(row.hitCount)]));
+  keywordHitCountCache.set(result);
+  return result;
 }
 
 export async function listKeywords(options: { includeHitCount?: boolean } = {}) {
@@ -134,7 +144,9 @@ export async function importKeywordsXlsx(input: Uint8Array) {
     }
   }
 
+  keywordHitCountCache.invalidate();
   invalidateKeywordCache();
+  await invalidateKeywordFilterDiscards();
   return { imported: keywordWrites.length, skipped: keywordRows.length - keywordWrites.length, importedCandidates, skippedCandidates, restored };
 }
 
@@ -156,23 +168,31 @@ export async function addKeywordsText(text: string, category?: string) {
       } catch { skipped++; }
     }
   }
+  keywordHitCountCache.invalidate();
   invalidateKeywordCache();
+  await invalidateKeywordFilterDiscards();
   return { imported, skipped };
 }
 
 export async function addKeyword(word: string, category?: string) {
   const keyword = await db.keyword.create({ data: { category: category?.trim() || DEFAULT_CATEGORY, word } });
+  keywordHitCountCache.invalidate();
   invalidateKeywordCache();
+  await invalidateKeywordFilterDiscards();
   return keyword;
 }
 
 export async function clearKeywords() {
   const result = await db.keyword.deleteMany({});
+  keywordHitCountCache.invalidate();
   invalidateKeywordCache();
+  await invalidateKeywordFilterDiscards();
   return result.count;
 }
 
 export async function deleteKeyword(id: string) {
   await db.keyword.delete({ where: { id } });
+  keywordHitCountCache.invalidate();
   invalidateKeywordCache();
+  await invalidateKeywordFilterDiscards();
 }

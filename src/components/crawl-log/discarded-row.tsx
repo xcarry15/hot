@@ -24,9 +24,8 @@ import { retryDiscarded } from '@/features/jobs-api.client'
 import { bulkAddKeywords } from '@/features/keywords-api.client'
 import {
   KEYWORD_BLACKLIST_CATEGORY,
-  KEYWORD_CATEGORIES,
   KEYWORD_DEFAULT_CATEGORY,
-} from '@/features/keywords-catalog'
+} from '@/contracts/keywords'
 
 // ========== Discarded Row ==========
 
@@ -47,14 +46,13 @@ export function DiscardedRow({
   const pubDate = formatPubDate(item.publishedAt || item.createdAt)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [keyword, setKeyword] = useState('')
-  const [keywordCategory, setKeywordCategory] = useState(KEYWORD_DEFAULT_CATEGORY)
+  const [keywordCategory, setKeywordCategory] = useState<string>(KEYWORD_DEFAULT_CATEGORY)
   const [retrying, setRetrying] = useState(false)
   const isKeywordFiltered = item.reason === 'filter:keyword'
   const canRetry = isKeywordFiltered
   const categoryOptions = Array.from(new Set([
     KEYWORD_DEFAULT_CATEGORY,
     KEYWORD_BLACKLIST_CATEGORY,
-    ...KEYWORD_CATEGORIES,
     ...(keywordCategories ?? []),
   ]))
 
@@ -111,7 +109,7 @@ export function DiscardedRow({
         >
           {item.title}
         </button>
-        <span className="shrink-0 rounded-full bg-amber-100 px-1 py-0 text-[10px] leading-4 text-amber-700">
+        <span className="shrink-0 rounded-none bg-amber-100 px-1 py-0 text-[10px] leading-4 text-amber-700">
           {label}
         </span>
         {canRetry && (
@@ -119,7 +117,7 @@ export function DiscardedRow({
             onClick={openRetryDialog}
             disabled={retrying}
             title="手动采集此文章，可先添加关键词"
-            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700"
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-none text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700"
           >
             {retrying ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

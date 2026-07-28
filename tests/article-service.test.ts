@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildArticleDeleteWhere, buildArticleListWhere } from '@/lib/article-service';
+import { buildArticleDeleteWhere, buildArticleListOrder, buildArticleListWhere } from '@/lib/article-service';
 
 describe('article-service filters', () => {
   it('全量列表缺省不加待处理条件', () => {
@@ -27,5 +27,16 @@ describe('article-service filters', () => {
       category: '餐饮',
       score: { lte: 40 },
     });
+  });
+
+  it('列表排序使用集中映射，并保留默认稳定排序', () => {
+    expect(buildArticleListOrder('event_desc')).toEqual([
+      { eventScore: { sort: 'desc', nulls: 'last' } },
+      { createdAt: 'desc' },
+    ]);
+    expect(buildArticleListOrder()).toEqual([
+      { publishedAt: 'desc' },
+      { createdAt: 'desc' },
+    ]);
   });
 });

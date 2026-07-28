@@ -12,6 +12,8 @@ vi.mock('@/lib/http', () => ({
   BROWSER_HEADERS: { 'User-Agent': 'test-browser' },
   fetchHtml: mocks.fetchHtml,
   fetchWithRetry: mocks.fetchWithRetry,
+  readResponseText: (response: { text: () => Promise<string> }) => response.text(),
+  ensureResponseTextWithinLimit: (value: string) => value,
   hostFromUrl: (url: string) => new URL(url).origin,
 }));
 

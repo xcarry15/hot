@@ -6,6 +6,7 @@ RELEASE_ARCHIVE="${RELEASE_ARCHIVE:?RELEASE_ARCHIVE is required}"
 APP_NAME="${APP_NAME:-h2-hot2}"
 SITE_URL="${SITE_URL:-https://hot.kfxz.cn}"
 BACKUP_ROOT="${BACKUP_ROOT:-/www/backup/h2-hot2}"
+CURRENT_MIGRATION_NAME="20260728120000_current_schema_baseline"
 RELEASE_DIR="$(mktemp -d /tmp/h2-hot2-release.XXXXXX)"
 SERVICE_WAS_RUNNING=0
 DEPLOY_SUCCEEDED=0
@@ -27,6 +28,26 @@ done
 [[ -f "$RELEASE_ARCHIVE" ]] || { echo "Release archive does not exist: $RELEASE_ARCHIVE" >&2; exit 1; }
 [[ -f "$APP_DIR/.env" ]] || { echo "Production .env is missing: $APP_DIR/.env" >&2; exit 1; }
 [[ -f "$APP_DIR/db/custom.db" ]] || { echo "Production database is missing: $APP_DIR/db/custom.db" >&2; exit 1; }
+grep -Eq '^[[:space:]]*API_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]]+' "$APP_DIR/.env" \
+  || { echo 'Production API_TOKEN is missing or empty.' >&2; exit 1; }
+grep -Eq '^[[:space:]]*SETTINGS_ENCRYPTION_KEY[[:space:]]*=[[:space:]]*[^[:space:]]+' "$APP_DIR/.env" \
+  || { echo 'Production SETTINGS_ENCRYPTION_KEY is missing or empty.' >&2; exit 1; }
+grep -Eq '^[[:space:]]*NEXT_PUBLIC_SITE_URL[[:space:]]*=[[:space:]]*https?://' "$APP_DIR/.env" \
+  || { echo 'Production NEXT_PUBLIC_SITE_URL is missing or invalid.' >&2; exit 1; }
+
+MIGRATION_TABLE_EXISTS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations';")"
+if [[ "$MIGRATION_TABLE_EXISTS" != "1" ]]; then
+  echo "Production database is not initialized with the current migration baseline." >&2
+  echo "Run: CONFIRM_RESET=YES bash scripts/init-production.sh" >&2
+  exit 1
+fi
+UNEXPECTED_MIGRATIONS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name <> '$CURRENT_MIGRATION_NAME';")"
+CURRENT_MIGRATION_COUNT="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name = '$CURRENT_MIGRATION_NAME';")"
+if [[ "$UNEXPECTED_MIGRATIONS" != "0" || "$CURRENT_MIGRATION_COUNT" != "1" ]]; then
+  echo "Production database uses an obsolete migration history; refusing an in-place compatibility upgrade." >&2
+  echo "Back up the database, then run: CONFIRM_RESET=YES bash scripts/init-production.sh" >&2
+  exit 1
+fi
 
 tar -xzf "$RELEASE_ARCHIVE" -C "$RELEASE_DIR"
 [[ -f "$RELEASE_DIR/package.json" ]] || { echo 'Release archive is invalid' >&2; exit 1; }
@@ -58,15 +79,6 @@ npm ci
 npm run db:migrate:deploy
 npm run db:generate
 npm run db:optimize
-
-# The public feed sort migration added persisted snapshot fields with empty
-# defaults. Rebuild only when an existing published Event still has the old
-# empty snapshot, so normal deployments do not rescan the whole article set.
-PUBLIC_REBUILD_NEEDED="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT CASE WHEN EXISTS (SELECT 1 FROM events WHERE publicStatus = 'published' AND (publicDateKey = '' OR publicSortAt IS NULL)) THEN 1 ELSE 0 END;")"
-if [[ "$PUBLIC_REBUILD_NEEDED" == "1" ]]; then
-  echo "检测到旧公开发布快照，执行一次 db:rebuild-public"
-  npm run db:rebuild-public
-fi
 
 npm run build
 

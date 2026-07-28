@@ -6,6 +6,22 @@
  */
 import { maskWebhookTarget } from '@/lib/webhook-display';
 
+export type ArticleListSort =
+  | 'newest'
+  | 'oldest'
+  | 'score_desc'
+  | 'score_asc'
+  | 'relevance_desc'
+  | 'relevance_asc'
+  | 'event_desc'
+  | 'event_asc'
+  | 'content_desc'
+  | 'content_asc'
+  | 'ad_desc'
+  | 'ad_asc'
+  | 'confidence_desc'
+  | 'confidence_asc';
+
 const ARTICLE_SCORE_SELECT = {
   eventScore: true,
   contentScore: true,
@@ -17,14 +33,6 @@ export const ARTICLE_LIST_SELECT = {
   eventId: true,
   clusterStatus: true,
   clusteredAt: true,
-  eventSubjects: true,
-  eventAction: true,
-  eventObject: true,
-  eventKey: true,
-  eventKeyConfidence: true,
-  eventScore: true,
-  contentScore: true,
-  adProbability: true,
   id: true,
   sourceId: true,
   url: true,
@@ -38,19 +46,10 @@ export const ARTICLE_LIST_SELECT = {
   aiConfidence: true,
   aiStatus: true,
   fetchStatus: true,
-  fetchError: true,
-  aiError: true,
-  clusterError: true,
   skipReason: true,
   isAd: true,
   publicOverride: true,
   publicStatus: true,
-  publicPublicationReason: true,
-  aiSnapshot: true,
-  manualOverrides: true,
-  manualCorrectedAt: true,
-  viewCount: true,
-  originalClickCount: true,
   publishedAt: true,
   createdAt: true,
   updatedAt: true,
@@ -67,6 +66,20 @@ export const ARTICLE_LIST_SELECT = {
 export const ARTICLE_DETAIL_SELECT = {
   ...ARTICLE_LIST_SELECT,
   ...ARTICLE_SCORE_SELECT,
+  eventSubjects: true,
+  eventAction: true,
+  eventObject: true,
+  eventKey: true,
+  eventKeyConfidence: true,
+  fetchError: true,
+  aiError: true,
+  clusterError: true,
+  publicPublicationReason: true,
+  aiSnapshot: true,
+  manualOverrides: true,
+  manualCorrectedAt: true,
+  viewCount: true,
+  originalClickCount: true,
   cleanContent: true,
   keyPoints: true,
 } as const;
@@ -79,11 +92,6 @@ export interface ArticleListFieldsDto {
   eventId: string | null;
   clusterStatus: string;
   clusteredAt: string | null;
-  eventSubjects: string;
-  eventAction: string;
-  eventObject: string;
-  eventKey: string;
-  eventKeyConfidence: number | null;
   event: {
     id: string;
     articleCount: number;
@@ -101,27 +109,13 @@ export interface ArticleListFieldsDto {
   brand: string;
   category: string;
   score: number;
-  /** 评分构成（仅 AI 完成后有值） */
-  eventScore: number | null;
-  contentScore: number | null;
-  adProbability: number | null;
   aiConfidence: number | null;
   aiStatus: string;
   fetchStatus: string;
-  /** 各流程阶段最近一次失败原因；成功或未失败时为 null。 */
-  fetchError: string | null;
-  aiError: string | null;
-  clusterError: string | null;
   skipReason: string | null;
   isAd: boolean;
   publicOverride: string;
   publicStatus: string;
-  publicPublicationReason: string;
-  aiSnapshot: string;
-  manualOverrides: string;
-  manualCorrectedAt: string | null;
-  viewCount: number;
-  originalClickCount: number;
   pushedAt: string | null;
   pushUrgency: string;
   publishedAt: string | null;
@@ -129,8 +123,27 @@ export interface ArticleListFieldsDto {
   updatedAt: string;
 }
 
-/** 详情返回正文预览和评分诊断；抓取缓存与重试内部字段不出 API。 */
+/** 详情返回校准、诊断与正文；列表不会下发这些抽屉专用字段。 */
 export interface ArticleFieldsDto extends ArticleListFieldsDto {
+  eventSubjects: string;
+  eventAction: string;
+  eventObject: string;
+  eventKey: string;
+  eventKeyConfidence: number | null;
+  /** 评分构成（仅 AI 完成后有值） */
+  eventScore: number | null;
+  contentScore: number | null;
+  adProbability: number | null;
+  /** 各流程阶段最近一次失败原因；成功或未失败时为 null。 */
+  fetchError: string | null;
+  aiError: string | null;
+  clusterError: string | null;
+  publicPublicationReason: string;
+  aiSnapshot: string;
+  manualOverrides: string;
+  manualCorrectedAt: string | null;
+  viewCount: number;
+  originalClickCount: number;
   cleanContent: string;
   keyPoints: string;
   rawScore: number | null;
@@ -179,17 +192,19 @@ export interface ArticleListResponseDto extends ArticlePaginationDto {
 
 type ListDates = {
   publishedAt: NullableDateValue;
-  manualCorrectedAt: NullableDateValue;
   createdAt: DateValue;
   updatedAt: DateValue;
   clusteredAt: NullableDateValue;
 };
 
+type DetailDates = ListDates & {
+  manualCorrectedAt: NullableDateValue;
+};
+
 export type ArticleListRecord = Omit<
   ArticleListFieldsDto,
-  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'manualCorrectedAt' | 'clusteredAt' | 'event' | 'createdAt' | 'updatedAt'
+  'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'clusteredAt' | 'event' | 'createdAt' | 'updatedAt'
 > & ListDates & {
-  cleanContent?: string;
   source: ArticleSourceSummaryDto;
   event: {
     id: string;
@@ -202,7 +217,7 @@ export type ArticleListRecord = Omit<
 export type ArticleDetailRecord = Omit<
   ArticleFieldsDto,
   'excerpt' | 'pushUrgency' | 'pushedAt' | 'publishedAt' | 'manualCorrectedAt' | 'clusteredAt' | 'event' | 'createdAt' | 'updatedAt'
-> & ListDates & {
+> & DetailDates & {
   source: ArticleSourceDetailDto;
   pushLogs: ArticlePushLogRecord[];
   event: {
@@ -247,11 +262,6 @@ function serializeArticleListFields(
     eventId: article.eventId,
     clusterStatus: article.clusterStatus,
     clusteredAt: toIso(article.clusteredAt),
-    eventSubjects: article.eventSubjects,
-    eventAction: article.eventAction,
-    eventObject: article.eventObject,
-    eventKey: article.eventKey,
-    eventKeyConfidence: article.eventKeyConfidence,
     event: article.event ? {
       ...article.event,
       pushedAt: toIso(article.event.pushedAt),
@@ -260,31 +270,19 @@ function serializeArticleListFields(
     url: article.url,
     title: article.title,
     originalSource: article.originalSource,
-    excerpt: toExcerpt(article.summary, article.cleanContent),
+    excerpt: toExcerpt(article.summary),
     relevance: article.relevance,
     summary: article.summary,
     brand: article.brand,
     category: article.category,
     score: article.score,
-    eventScore: article.eventScore ?? null,
-    contentScore: article.contentScore ?? null,
-    adProbability: article.adProbability ?? null,
     aiConfidence: article.aiConfidence ?? null,
     aiStatus: article.aiStatus,
     fetchStatus: article.fetchStatus,
-    fetchError: article.fetchError,
-    aiError: article.aiError,
-    clusterError: article.clusterError,
     skipReason: article.skipReason,
     isAd: article.isAd,
     publicOverride: article.publicOverride,
     publicStatus: article.publicStatus,
-    publicPublicationReason: article.publicPublicationReason,
-    aiSnapshot: article.aiSnapshot,
-    manualOverrides: article.manualOverrides,
-    manualCorrectedAt: toIso(article.manualCorrectedAt),
-    viewCount: article.viewCount,
-    originalClickCount: article.originalClickCount,
     pushedAt: toIso(article.event?.pushedAt ?? null),
     // 紧急度是评分的派生状态，不读取可能过期的数据库缓存。
     pushUrgency: article.score >= 95 ? 'urgent' : 'normal',
@@ -304,6 +302,23 @@ export function serializeArticleListItem(article: ArticleListRecord): ArticleLis
 export function serializeArticleDetail(article: ArticleDetailRecord): ArticleDetailDto {
   return {
     ...serializeArticleListFields(article),
+    eventSubjects: article.eventSubjects,
+    eventAction: article.eventAction,
+    eventObject: article.eventObject,
+    eventKey: article.eventKey,
+    eventKeyConfidence: article.eventKeyConfidence ?? null,
+    eventScore: article.eventScore ?? null,
+    contentScore: article.contentScore ?? null,
+    adProbability: article.adProbability ?? null,
+    fetchError: article.fetchError,
+    aiError: article.aiError,
+    clusterError: article.clusterError,
+    publicPublicationReason: article.publicPublicationReason,
+    aiSnapshot: article.aiSnapshot,
+    manualOverrides: article.manualOverrides,
+    manualCorrectedAt: toIso(article.manualCorrectedAt),
+    viewCount: article.viewCount,
+    originalClickCount: article.originalClickCount,
     cleanContent: article.cleanContent,
     keyPoints: article.keyPoints,
     rawScore: article.rawScore ?? null,

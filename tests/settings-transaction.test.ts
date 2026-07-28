@@ -6,10 +6,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   settingFindMany: vi.fn(),
+  settingFindUnique: vi.fn(),
   settingUpsert: vi.fn(),
   articleFindMany: vi.fn(),
   articleUpdate: vi.fn(),
   transaction: vi.fn(),
+  runJob: vi.fn(),
 }));
 
 mocks.settingUpsert.mockImplementation((args) => ({ _op: 'setting.upsert', args }));
@@ -18,6 +20,7 @@ vi.mock('@/lib/db', () => ({
   db: {
     setting: {
       findMany: mocks.settingFindMany,
+      findUnique: mocks.settingFindUnique,
       upsert: mocks.settingUpsert,
     },
     article: {
@@ -36,6 +39,10 @@ vi.mock('@/lib/event-service', () => ({
   recalculateEventById: vi.fn(),
 }));
 
+vi.mock('@/lib/execution', () => ({
+  runJob: mocks.runJob,
+}));
+
 import { PUT as settingsPUT } from '@/app/api/settings/route';
 import { parseWebhookConfigs } from '@/contracts/webhook';
 import { DEFAULT_BLOCK_SUMMARY } from '@/lib/prompts';
@@ -45,12 +52,14 @@ describe('settings PUT 事务化', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.settingFindMany.mockResolvedValue([]);
+    mocks.settingFindUnique.mockResolvedValue(null);
     mocks.articleFindMany.mockResolvedValue([]);
+    mocks.runJob.mockResolvedValue({ queued: false, reason: 'another job is active' });
     mocks.settingUpsert.mockImplementation((args) => ({ _op: 'setting.upsert', args }));
     mocks.transaction.mockImplementation(async (operation) => {
       if (Array.isArray(operation)) return Promise.all(operation);
       return operation({
-        setting: { upsert: mocks.settingUpsert },
+        setting: { upsert: mocks.settingUpsert, findUnique: mocks.settingFindUnique },
         article: { findMany: mocks.articleFindMany, update: mocks.articleUpdate },
       });
     });
@@ -217,6 +226,26 @@ describe('settings PUT 事务化', () => {
     expect(storedWebhook).toHaveLength(1);
     expect(storedWebhook[0].url).toMatch(/^enc:v1:6:isting:/);
     expect(decryptWebhookConfigsForRuntime(webhookUpsert.update.value)).toBe(existingWebhook);
+  });
+
+  it('后台重算唤醒失败不影响已经提交的公开设置，标记留给调度器续跑', async () => {
+    mocks.runJob.mockRejectedValueOnce(new Error('runner lease unavailable'));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ public_min_score: '71' }),
+    });
+
+    const res = await settingsPUT(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ success: true, rebuildQueued: true, rebuildJobQueued: false, rebuildDeferred: true });
+    expect(mocks.settingUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { key: '__runtime_settings_rebuild__' },
+    }));
+    errorSpy.mockRestore();
   });
 
   it('显式提交空数组时仍允许清空 Webhook 配置', async () => {

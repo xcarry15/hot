@@ -202,6 +202,8 @@ export type AIProcessResult = {
   errorKind?: string;
   globalError?: boolean;
   retryable?: boolean;
+  /** Provider 级暂停的可展示原因；不得包含请求正文或密钥。 */
+  globalMessage?: string;
 };
 type AIProcessArticle = Pick<Article, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'publishedAt'> &
   Partial<Omit<Article, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'publishedAt' | 'summary'>> & {
@@ -348,18 +350,20 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
 
     return { status: noConcreteEvent ? 'skipped' : 'done' };
   } else {
-    // 限流、短暂网络波动和上游 5xx 都是 Provider 级可恢复问题，和文章本身
-    // 无关。保留为 pending 并由批处理统一暂停，不能让每一篇都消耗重试次数。
-    if (aiFailure?.global && aiFailure.retryable) {
+    // 所有 Provider 级错误（包括鉴权/配置）都与文章无关。保留为 pending 并
+    // 由批处理统一暂停，不能让同一配置问题逐篇耗尽重试次数、误标为已放弃。
+    if (aiFailure?.global) {
       const retryDelayMs = aiFailure.kind === 'rate_limit'
         ? 5 * 60 * 1000
-        : 2 * 60 * 1000;
+        : aiFailure.retryable
+          ? 2 * 60 * 1000
+          : 30 * 60 * 1000;
       assertNotAborted(signal);
       await db.article.update({
         where: { id: articleId },
         data: {
           aiStatus: 'pending',
-          aiError: null,
+          aiError: aiFailure.retryable ? null : aiFailure.message.slice(0, 1000),
           nextAiRetryAt: new Date(Date.now() + retryDelayMs),
         },
       });
@@ -367,7 +371,8 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         status: 'deferred',
         errorKind: aiFailure.kind,
         globalError: true,
-        retryable: true,
+        retryable: aiFailure.retryable === true,
+        globalMessage: aiFailure.message.slice(0, 1000),
       };
     }
 

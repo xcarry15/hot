@@ -58,17 +58,21 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
     data: { fetchStatus: 'pending' },
   });
 
-  const pending = await db.article.findMany({
-    where: { fetchStatus: 'pending', technicalIgnoredAt: null },
-    select: { id: true, title: true, url: true, sourceId: true, publishedAt: true },
-    orderBy: { createdAt: 'desc' },
-  });
-  const total = pending.length;
+  const pendingWhere = { fetchStatus: 'pending' as const, technicalIgnoredAt: null };
+  const total = await db.article.count({ where: pendingWhere });
   if (jobId) await startJobStage(jobId, { stage: 'process', total });
   let processed = 0;
   let errors = 0;
-  for (let pageStart = 0; pageStart < pending.length; pageStart += MAX_BATCH_SIZE) {
-    const page = pending.slice(pageStart, pageStart + MAX_BATCH_SIZE);
+  // 每轮只取固定窗口。详情抓取会把 Article 转为 fetched/failed，因此已处理的
+  // 项自然离开 where；不会因积压量把整张待处理列表留在 Node 内存中。
+  while (true) {
+    const page = await db.article.findMany({
+      where: pendingWhere,
+      select: { id: true, title: true, url: true, sourceId: true, publishedAt: true },
+      orderBy: { createdAt: 'desc' },
+      take: MAX_BATCH_SIZE,
+    });
+    if (page.length === 0) break;
     for (let i = 0; i < page.length; i += PROCESS_CONCURRENCY) {
       assertNotAborted(signal);
       const batch = page.slice(i, i + PROCESS_CONCURRENCY);
@@ -86,11 +90,10 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
             return;
           }
 
-          // ---- 全文关键字匹配 ----
-          // 标题 + cleaned 前 1000 字（与 fingerprint 取窗一致，便于对称），
-          // 子串命中即通过。
-          try {
-            const text = `${article.title} ${content.slice(0, 1000)}`;
+            // ---- 全文关键字匹配 ----
+            // 关键词是入库门槛，不能沿用聚类指纹的前窗截断；命中正文后部也必须保留。
+            try {
+              const text = `${article.title} ${content}`;
             // 品牌白名单命中，或标题本身已是明确的餐饮/零售业态事件，均保留。
             // 便利店、超市、餐厅等行业报道不应因未提及已知品牌而在 AI 前被误删。
             const keywordMatch = await evaluateKeywordMatch(text);

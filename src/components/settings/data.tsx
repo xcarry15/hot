@@ -367,8 +367,7 @@ export default function DataTab() {
           <AlertDialogHeader>
             <AlertDialogTitle>确认导入配置？</AlertDialogTitle>
             <AlertDialogDescription>
-              将覆盖模型参数、提示词、推送规则、调度和去重等非敏感配置。
-              API 密钥和 Webhook 不会导入。
+              将覆盖导出文件中的所有可编辑设置，包括模型参数、提示词、推送规则、API 密钥和 Webhook。
               文件中未包含的参数保持不变。导入后页面将自动刷新。
             </AlertDialogDescription>
           </AlertDialogHeader>

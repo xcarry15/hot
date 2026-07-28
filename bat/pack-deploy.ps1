@@ -47,10 +47,9 @@ $ExcludePatterns = @(
     "nul",
     "next-env.d.ts",
     "worklog.md",
-    # 根目录 Markdown 由下方路径级规则排除；bat/ 内部署文档继续保留
     "config.toml",
-    # bat/ 部署文档保留
     "docs",
+    "bat",
     "skills",
     "tests",
     "vitest.config.ts",
@@ -66,18 +65,8 @@ $ExcludePatterns = @(
     "*.db-journal",
     "*.db-wal",
     "*.db-shm",
-    "*.db.bak.*",
-    # 仅根目录和 bat/ 下的旧部署 zip 由下方路径级规则排除
-    # scripts/ 整体不再排除;只按文件名精确排除一次性 dev 脚本,
-    # 保留 db-baseline.ts(部署存量库首次切换时必需)。
-    "scripts/backfill-prompt-defaults.ts",
-    "scripts/cleanup-legacy-settings.ts",
-    # bat/ 目录里只排除打包工具脚本，部署/Nginx 文档继续随包发布
-    "bat/run.bat",
-    "bat/pack-deploy.ps1",
-    "bat/启动.vbs",
-    "bat/本地一键初始化.bat",
-    "bat/local-init.ps1"
+    "*.db.bak.*"
+    # 部署包只包含生产运行所需文件；Windows 工具和说明保留在本地仓库。
 )
 
 function Test-ShouldExclude($relativePath, $patterns) {
@@ -86,8 +75,7 @@ function Test-ShouldExclude($relativePath, $patterns) {
     # 拆成路径段数组，便于按目录名匹配
     $segments = $p -split '\\'
     $leaf = $segments[-1]
-    if ($segments.Count -eq 1 -and $leaf -like '*.md') { return $true }
-    if (($segments.Count -eq 1 -or $segments[0].Equals('bat', [System.StringComparison]::OrdinalIgnoreCase)) -and $leaf -like '*.zip') { return $true }
+    if ($segments.Count -eq 1 -and ($leaf -like '*.md' -or $leaf -like '*.zip')) { return $true }
     foreach ($exc in $patterns) {
         $e = $exc -replace '/', '\'
         if ($e.Contains('*')) {
@@ -138,7 +126,9 @@ Write-Host "  copied: $copied   skipped: $skipped" -ForegroundColor Gray
 $RequiredReleaseFiles = @(
     "package.json",
     "package-lock.json",
-    "scripts\init-production.sh"
+    "scripts\init-production.sh",
+    "prisma\schema.prisma",
+    "prisma\migrations\20260728120000_current_schema_baseline\migration.sql"
 )
 foreach ($requiredFile in $RequiredReleaseFiles) {
     $requiredPath = Join-Path $TempDir $requiredFile
@@ -182,8 +172,8 @@ Write-Host "  2. 全新服务器：正确解压并同步到项目根目录后执
 Write-Host "  3. 日常更新默认由 GitHub Actions 自动完成，无需手工上传 ZIP。" -ForegroundColor Yellow
 Write-Host "     手工更新时先停止 h2-hot2 并备份数据库，再用 rsync --delete 收敛同步。" -ForegroundColor Yellow
 Write-Host "     不要直接在应用目录执行 unzip -o，避免已删除的旧代码残留。" -ForegroundColor Red
-Write-Host "  4. 顺序执行 migrate:deploy -> generate -> optimize -> build，再以单实例启动 PM2。" -ForegroundColor Yellow
-Write-Host "  5. 已有数据库首次跨过 20260718230000 migration 时，自动部署会检测旧公开快照并重建；手工 rsync 更新需在迁移后执行 db:rebuild-public。" -ForegroundColor Yellow
+Write-Host "  4. 日常手工更新只适用于当前 baseline 数据库；旧 migration 历史请备份后全新初始化。" -ForegroundColor Yellow
+Write-Host "  5. 顺序执行 migrate:deploy -> generate -> optimize -> build，再以单实例启动 PM2。" -ForegroundColor Yellow
 Write-Host "  6. 普通应用更新不清空全局 Nginx 缓存，也不需要 reload Nginx。" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  完整可复制命令: bat/部署和更新方法.txt" -ForegroundColor Gray

@@ -42,7 +42,7 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 
 - `DATABASE_URL`：SQLite 路径，默认指向 `db/custom.db`。
 - `API_TOKEN`：生产环境必填，用于后台登录和受保护 API；未配置时生产环境拒绝访问。
-- `SETTINGS_ENCRYPTION_KEY`：用于加密数据库中的 Webhook 等敏感配置，生产环境建议单独配置并在部署间保持不变；未配置时使用 `API_TOKEN`，本地无令牌时使用稳定的开发回退值。
+- `SETTINGS_ENCRYPTION_KEY`：用于加密数据库中的 Webhook 等敏感配置，生产环境必填且部署间必须保持不变；本地未配置时仅使用稳定的开发回退值，绝不回退到可轮换的 `API_TOKEN`。
 - `NEXT_PUBLIC_SITE_URL`：正式站点地址，用于 canonical、Open Graph 和 sitemap。
 
 本地开发如需通过代理访问 OpenCode 等外部服务，可在启动 `npm run dev` 的终端设置 `HTTP_PROXY` / `HTTPS_PROXY`（可选 `NO_PROXY`）。开发服务器会自动使用这些变量；生产环境不会启用此逻辑。
@@ -56,9 +56,10 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 ### 数据模型
 
 - `Source`：采集源及解析配置。
-- `Article`：原始报道、正文、AI 结果和人工校准记录。
+- `Article`：原始报道、正文、AI 结果和人工校准记录；归一化 URL 是采集去重的唯一标识。
 - `Event`：同一事件的聚合单元，也是公开展示和推送去重的唯一边界。
-- `Job`：批量或单篇任务的状态、进度、租约与取消事实。
+- `EventDirty`：每个 Event 至多一条事务后修复标记，防止公开快照异常造成重复恢复任务。
+- `Job`：批量或单篇任务的状态、进度、租约、取消事实与有限恢复次数。
 - `PushDelivery`：每个 Event 对每个推送目标的最新投递状态；`PushLog` 只保存历史审计。
 - `DiscardedItem`：未进入 Article 的采集结果和重试记录。
 - `Setting`、`Keyword`、`PushTarget`：运行配置、筛选词和推送目标。
@@ -93,7 +94,11 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 | cluster | `src/lib/pipeline/cluster.ts` | 把 Article 归入 Event 或标记待复核 |
 | push | `src/lib/pipeline/push-bridge.ts` | 按 Event 和目标执行推送 |
 
-`src/lib/execution.ts` 是 Job 的统一编排入口。批量阶段会分块处理全部当前积压；分块大小不是任务完成边界。任务中心会在当前运行阶段显示该阶段的实时完成数和总数；文章步骤会显示 Event 代表文章的公开状态，正常筛选也支持按已公开查看；异常筛选只聚焦待复核、流程失败、软文、重复和低分析置信，文章行同步展示原因。正文抓取、AI 和聚类失败原因会持久化并显示在对应文章；单篇正文重跑失败会中断后续 AI/聚类并将 Job 标记失败；最近任务失败时会在任务区显示失败原因。数据源成功请求但解析为 0 篇会作为警告而非失败显示。调度器位于 `src/lib/scheduler.ts`，自动采集默认关闭，配置从数据库读取；每分钟还会独立检查到期的技术失败，只运行不重新采集数据源的恢复全流程。聚类批处理开始前会校正失效的 Event 代表文章指针，保证 `representativeArticleId` 的唯一所有权。
+`src/lib/execution.ts` 是 Job 的统一编排入口，固定阶段通过 `src/lib/pipeline/stage-runner.ts` 共享执行前取消检查、阶段顺序和失败补偿语义。批量阶段会分块处理全部当前积压；分块大小不是任务完成边界。任务中心会在当前运行阶段显示该阶段的实时完成数和总数；文章步骤会显示 Event 代表文章的公开状态，正常筛选也支持按已公开查看；异常筛选只聚焦待复核、流程失败、软文、重复和低分析置信，文章行同步展示原因。正文抓取、AI 和聚类失败原因会持久化并显示在对应文章；单篇正文重跑失败会中断后续 AI/聚类并将 Job 标记失败；最近任务失败时会在任务区显示失败原因。数据源成功请求但解析为 0 篇会作为警告而非失败显示。调度器位于 `src/lib/scheduler.ts`，自动采集默认关闭，配置从数据库读取；每分钟还会独立检查到期的技术失败，只运行不重新采集数据源的恢复全流程。聚类批处理开始前会校正失效的 Event 代表文章指针，保证 `representativeArticleId` 的唯一所有权；聚类候选 Event 和 AI 候选均有显式上限，避免数据增长时单篇任务无限放大。
+
+Event 归属和代表文章重算在同一事务提交；事务后的公开快照异常以每个 Event 一条最新脏标记进入受控修复队列，不会无限累积重复恢复记录。
+
+采集阶段会先按归一化 URL 批量检查已入库和已丢弃条目；同 URL 不会重新抓取正文、执行 AI 或聚类，仅在标题、发布日期变化时更新列表元数据。
 
 ### 发布与推送边界
 
@@ -114,6 +119,8 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 
 设置页中的飞书 Webhook URL 持久化时使用 AES-256-GCM 加密，仅保留末 6 位作为目标识别标记；设置页回显和推送运行时由服务端解密，推送目标名称不保存完整 URL。
 
+影响评分或公开规则的设置只在短事务内保存并写入重建标记；重算由专用 Job 分批执行。即时入队受当前任务占用或临时故障影响时，设置仍保存成功，调度器会在下一次 tick 自动续跑。
+
 设置页「数据」中的配置导入/导出用于完整设置迁移，包含所有可编辑设置、AI API 密钥和 Webhook；导出文件包含可恢复的明文敏感配置，必须妥善保管。
 
 ## 代码结构
@@ -121,10 +128,13 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 ```text
 src/app/                 页面、Route Handler、robots 和 sitemap
 src/components/          公开端与管理后台 UI
+src/components/article-workspace/ 文章抽屉 Event 成员/候选共享列表
 src/features/            浏览器端 API 客户端
-src/contracts/           前后端共享 DTO 和领域契约
+src/contracts/           前后端共享 DTO、关键词和流程状态契约
 src/lib/                 服务、流水线、调度、公开和推送逻辑
-prisma/                  Schema、seed 和有序 migration
+src/lib/event/            Event 查询、代表选择和聚类证据
+src/lib/pipeline/         阶段实现与共享 stage runner
+prisma/                  Schema、seed 和当前单一 baseline migration
 tests/                   Vitest 测试
 scripts/                 生产初始化、部署和数据库维护脚本
 bat/                     Windows 初始化、打包和运维文档
@@ -136,7 +146,7 @@ bat/                     Windows 初始化、打包和运维文档
 - Route Handler 只处理鉴权、参数和响应转换，业务规则放在 `src/lib/`。
 - API 不直接向浏览器返回 Prisma Model，应通过 `src/contracts/` 中的 DTO。
 - 设置定义集中在 `src/lib/settings-catalog.ts`。
-- Event 校准集中在 `src/lib/event-service.ts`。
+- `src/lib/event-service.ts` 保留稳定 facade；只读查询和纯聚类证据分别位于 `src/lib/event/`，事务重算与人工变更仍保持在 Event 领域服务边界内。
 - 人工字段修正反馈集中在 `src/lib/feedback-service.ts`。
 - 公开规则和推送规则不得复制到 React 组件。
 
@@ -167,7 +177,7 @@ npm run db:optimize         # 启用/检查 WAL 并执行 PRAGMA optimize
 npm run db:cleanup-logs     # 清理过期运行日志
 ```
 
-日常生产部署禁止使用 `db:push` 或 `db:reset`。本项目不为历史业务数据维护兼容层；结构或规则变化按重新采集新数据处理。
+日常生产部署禁止使用 `db:push` 或 `db:reset`。当前仓库只有 `prisma/migrations/20260728120000_current_schema_baseline` 一个 migration；首次切换到该基线必须备份后执行 `CONFIRM_RESET=YES bash scripts/init-production.sh`，之后日常更新才使用 `npm run db:migrate:deploy`。本项目不为历史业务数据维护兼容层；结构或规则变化按重新采集新数据处理。
 
 ## 管理后台
 
@@ -198,6 +208,8 @@ AI 遇到限流、超时或临时上游错误时，会暂停未开始的分析�
 - 后台详情按需加载，轮询在页面隐藏时暂停。
 - Job、公开统计和技术待办使用短缓存合并重复读取。
 - 批处理按固定 chunk 消费全部积压，避免一次加载无限数据。
+- Event 详情查询和聚类证据分别位于 `src/lib/event/event-query-service.ts`、`src/lib/event/event-cluster-evidence.ts`；文章抽屉的成员与同品牌列表共用 `EventArticleRowModel`。
+- 关键词命中数采用 15 秒短缓存，并只统计最近 90 天已命中的文章，避免关键词页每次加载都执行全历史 N×M 正文扫描。
 
 在有明确性能数据前，不引入 Redis、消息队列、微服务或多实例 PM2。
 
@@ -208,7 +220,7 @@ GitHub Actions 配置：
 - `.github/workflows/ci.yml`：`master` push、Pull Request 或手动触发；执行 lint、类型检查、单元测试、migration smoke 和生产构建。
 - `.github/workflows/deploy.yml`：`master` 的 CI 成功后自动部署生产；也支持手动重新部署。
 
-部署流程会停止 PM2、备份 SQLite、同步并删除旧代码、安装依赖、应用 migration、按需重建旧公开发布快照、构建、以单实例启动 PM2，并检查 `/api/health`。服务器上的 `.env` 和 `db/` 不会被发布包覆盖。
+部署流程会在停机前确认数据库已记录当前 baseline；随后停止 PM2、备份 SQLite、同步并删除旧代码、安装依赖、应用 migration、构建、以单实例启动 PM2，并检查 `/api/health`。旧 migration 历史会被明确拒绝，不执行隐式兼容升级；服务器上的 `.env` 和 `db/` 不会被发布包覆盖，且部署前会校验 `API_TOKEN`、`SETTINGS_ENCRYPTION_KEY` 和 `NEXT_PUBLIC_SITE_URL`。
 
 服务器全新初始化使用：
 
@@ -216,6 +228,8 @@ GitHub Actions 配置：
 cd /www/wwwroot/hot.kfxz.cn
 bash scripts/init-production.sh
 ```
+
+交互终端输入 `RESET` 确认；自动化环境需显式使用 `CONFIRM_RESET=YES bash scripts/init-production.sh`。
 
 完整步骤见 `bat/部署和更新方法.txt`，Nginx 模板见 `bat/本项目的nginx.txt`。
 
@@ -226,7 +240,8 @@ bash scripts/init-production.sh
 ## 安全规则
 
 - 不提交 `.env`、API Token、Webhook、SSH 私钥、SQLite 数据或部署压缩包。
-- 生产环境必须设置强随机 `API_TOKEN`。
+- 生产环境必须设置强随机 `API_TOKEN` 和稳定的 `SETTINGS_ENCRYPTION_KEY`。
+- 数据源、正文抓取和 Webhook 只允许访问公网地址；本地/内网地址和超大响应会被拦截。
 - PM2 只能运行一个 `h2-hot2` 实例，禁止 `-i max` 和 cluster 模式。
 - 普通发布不清理服务器全局 Nginx 缓存，也不 reload Nginx。
 - migration 前先备份数据库；出现 drift 时停止操作，不要 reset 用户数据库。

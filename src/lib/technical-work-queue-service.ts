@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { getPushTargetStatesForEvents } from '@/lib/push/delivery';
+import { isAiRetryWaiting, isTechnicalAiFailure } from '@/contracts/workflow';
 
 export type TechnicalIssue = 'process_failed' | 'ai_failed' | 'ai_waiting' | 'cluster_failed' | 'push_failed';
 
@@ -91,14 +92,14 @@ async function buildTechnicalWorkQueue(): Promise<TechnicalWorkItem[]> {
       if (article.nextFetchRetryAt) retryDates.push(article.nextFetchRetryAt);
       else requiresManual = true;
     }
-    if (article.aiStatus === 'failed' || (article.aiStatus === 'skipped' && article.skipReason?.startsWith('AI 连续失败'))) {
+    if (isTechnicalAiFailure(article)) {
       issues.push('ai_failed');
       if (article.nextAiRetryAt) retryDates.push(article.nextAiRetryAt);
       else requiresManual = true;
     }
-    if (article.aiStatus === 'pending' && article.nextAiRetryAt) {
+    if (isAiRetryWaiting(article)) {
       issues.push('ai_waiting');
-      retryDates.push(article.nextAiRetryAt);
+      if (article.nextAiRetryAt) retryDates.push(article.nextAiRetryAt);
     }
     if (article.clusterStatus === 'failed') {
       issues.push('cluster_failed');

@@ -5,7 +5,8 @@ import { fetchCanyin88Detail } from './parser-canyin88';
 import { cleanContent, extractArticleBody, meaningfulTextLength } from './cleaner';
 import { abortableDelay, withTimeout } from './shared/async';
 import { MIN_MEANINGFUL_CHARS } from './shared/content-policy';
-import { fetchHtml, BROWSER_HEADERS } from './http';
+import { ensureResponseTextWithinLimit, fetchHtml, BROWSER_HEADERS } from './http';
+import { assertSafeOutboundUrl } from './outbound-url';
 import { extractMetaPublishedAt } from './date-utils';
 import { computeContentFingerprint } from './content-fingerprint';
 import { assertNotAborted } from './worker-stop';
@@ -76,6 +77,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
         // Step 2: Fall back to ZAI page_reader if direct returned nothing
         if (!html) {
           try {
+            await assertSafeOutboundUrl(article.url);
             const zai = await getZAI();
             const pageResult = await withTimeout(
               async timeoutSignal => {
@@ -87,7 +89,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
               `ZAI page_reader timeout: ${article.url}`,
               signal,
             );
-            html = pageResult?.data?.html || null;
+            html = pageResult?.data?.html ? ensureResponseTextWithinLimit(pageResult.data.html) : null;
             if (html) fetchMethod = 'zai';
           } catch (error) {
             if (signal?.aborted) throw error;

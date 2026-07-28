@@ -305,11 +305,10 @@ model PushDelivery {
 
 model EventDirty {
   id        String   @id @default(cuid())
-  eventId   String
+  eventId   String   @unique
   reason    String
   createdAt DateTime @default(now())
 
-  @@index([eventId])
   @@map("event_dirty")
 }
 
@@ -374,7 +373,6 @@ enum JobType {
   cluster  // only cluster AI-analyzed articles into events
   ai       // only run AI on pending articles
   push     // only push unpushed articles
-  fastProcess  // @deprecated 已移除，仅保留以兼容历史 Job 记录
 }
 
 enum JobStatus {

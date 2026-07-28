@@ -18,6 +18,7 @@ import { createCache } from './cache';
 import { readAllSettings, SETTING_KEYS } from './settings';
 import { getSettingDefinition } from './settings-catalog';
 import { abortableDelay, withTimeout } from './shared/async';
+import { fetchSafe, readResponseText } from './http';
 import { AI_PROVIDERS, providerSettingKey } from '@/contracts/ai-provider';
 import type { AIProviderId } from '@/contracts/ai-provider';
 
@@ -230,7 +231,7 @@ async function createOpenAICompatibleCompletion(
     let response: { ok: boolean; status: number; bodyText: string };
     try {
       response = await withTimeout(async signal => {
-        const rawResponse = await fetch(url, {
+        const rawResponse = await fetchSafe(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -239,7 +240,7 @@ async function createOpenAICompatibleCompletion(
           body: JSON.stringify(body),
           signal,
         });
-        const bodyText = await rawResponse.text();
+        const bodyText = await readResponseText(rawResponse);
         return { ok: rawResponse.ok, status: rawResponse.status, bodyText };
       }, timeoutMs, `${settings.provider} request timeout`, parentSignal);
     } catch (fetchError) {
@@ -270,11 +271,19 @@ async function createOpenAICompatibleCompletion(
       throw new AIClientError(`${settings.provider}: 请求失败 - ${errMsg.substring(0, 200)}`, 'network', true, true);
     }
     if (response.ok) {
-      const data = JSON.parse(response.bodyText || '{}');
-      const content = data?.choices?.[0]?.message?.content || '';
+      let data: { choices?: Array<{ message?: { content?: unknown } }> };
+      try {
+        data = JSON.parse(response.bodyText || '{}') as { choices?: Array<{ message?: { content?: unknown } }> };
+      } catch {
+        recordProviderFailure(settings.provider, '响应不是 JSON');
+        throw new AIClientError(`${settings.provider}: API 返回无效 JSON`, 'provider', true, true);
+      }
+      const rawContent = data?.choices?.[0]?.message?.content;
+      const content = typeof rawContent === 'string' ? rawContent : '';
 
       if (!content) {
-        console.warn(`[ai-client] ${settings.provider} returned empty content. Response:`, JSON.stringify(data).substring(0, 300));
+        recordProviderFailure(settings.provider, '响应为空');
+        throw new AIClientError(`${settings.provider}: API 返回空响应`, 'provider', true, true);
       }
 
       recordProviderSuccess(settings.provider);

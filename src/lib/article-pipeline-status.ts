@@ -11,6 +11,7 @@
 
 import type { FetchStatus } from '@prisma/client';
 import type { PushMode } from '@/contracts/push';
+import { isArticleAiStatus, isArticleClusterStatus } from '@/contracts/workflow';
 
 export type StepStatus =
   | 'done'
@@ -96,11 +97,11 @@ export function projectArticleSteps(
   let ai: StepStatus;
   if (process !== 'done') {
     ai = 'blocked';
-  } else if (article.aiStatus === 'done') {
+  } else if (isArticleAiStatus(article.aiStatus) && article.aiStatus === 'done') {
     ai = 'done';
-  } else if (article.aiStatus === 'skipped') {
+  } else if (isArticleAiStatus(article.aiStatus) && article.aiStatus === 'skipped') {
     ai = 'skipped';
-  } else if (article.aiStatus === 'failed') {
+  } else if (isArticleAiStatus(article.aiStatus) && article.aiStatus === 'failed') {
     ai = 'failed';
   } else {
     ai = 'pending';
@@ -109,9 +110,9 @@ export function projectArticleSteps(
   let cluster: StepStatus;
   if (ai !== 'done') {
     cluster = ai === 'failed' || ai === 'skipped' ? 'not_applicable' : 'blocked';
-  } else if (article.clusterStatus === 'clustered' || article.clusterStatus === 'needs_review') {
+  } else if (isArticleClusterStatus(article.clusterStatus) && (article.clusterStatus === 'clustered' || article.clusterStatus === 'needs_review')) {
     cluster = 'done';
-  } else if (article.clusterStatus === 'failed') {
+  } else if (isArticleClusterStatus(article.clusterStatus) && article.clusterStatus === 'failed') {
     cluster = 'failed';
   } else {
     cluster = 'pending';

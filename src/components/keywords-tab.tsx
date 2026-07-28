@@ -37,9 +37,8 @@ import {
 import { toast } from 'sonner'
 import {
   KEYWORD_BLACKLIST_CATEGORY,
-  KEYWORD_CATEGORIES,
   KEYWORD_DEFAULT_CATEGORY,
-} from '@/features/keywords-catalog'
+} from '@/contracts/keywords'
 import { EmptyState } from '@/components/ui/empty-state'
 import {
   bulkAddKeywords,
@@ -79,7 +78,7 @@ export default function KeywordsTab() {
   const [clearAllDialogOpen, setClearAllDialogOpen] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkText, setBulkText] = useState('')
-  const [bulkCategory, setBulkCategory] = useState(KEYWORD_DEFAULT_CATEGORY)
+  const [bulkCategory, setBulkCategory] = useState<string>(KEYWORD_DEFAULT_CATEGORY)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -213,26 +212,19 @@ export default function KeywordsTab() {
   const keywordCategoryOptions = Array.from(new Set([
     KEYWORD_DEFAULT_CATEGORY,
     KEYWORD_BLACKLIST_CATEGORY,
-    ...KEYWORD_CATEGORIES,
     ...keywords.map(keyword => keyword.category),
   ])).sort((left, right) => {
     const priority = (category: string) => {
       if (category === KEYWORD_DEFAULT_CATEGORY) return 0
       if (category === KEYWORD_BLACKLIST_CATEGORY) return 1
-      const index = KEYWORD_CATEGORIES.indexOf(category as (typeof KEYWORD_CATEGORIES)[number])
-      return index === -1 ? KEYWORD_CATEGORIES.length + 1 : index + 2
+      return 2
     }
     return priority(left) - priority(right) || left.localeCompare(right)
   })
-  // 先按组内数量排序，数量相同再沿用目录顺序。
+  // 先按组内数量排序，数量相同再按名称稳定排序。
   const groupKeys = Object.keys(grouped).sort((a, b) => {
     const countDifference = grouped[b].length - grouped[a].length
     if (countDifference !== 0) return countDifference
-    const ai = KEYWORD_CATEGORIES.indexOf(a as (typeof KEYWORD_CATEGORIES)[number])
-    const bi = KEYWORD_CATEGORIES.indexOf(b as (typeof KEYWORD_CATEGORIES)[number])
-    if (ai !== -1 && bi !== -1) return ai - bi
-    if (ai !== -1) return -1
-    if (bi !== -1) return 1
     return a.localeCompare(b)
   })
   const pendingCandidates = candidates.filter(candidate => candidate.status === 'pending')

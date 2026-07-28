@@ -17,6 +17,7 @@
 
 import iconv from 'iconv-lite';
 import { abortableDelay, withTimeout } from './shared/async';
+import { assertSafeOutboundUrl } from './outbound-url';
 
 const CHARSET_RE = /charset\s*=\s*([^"'\s;>]+)/i;
 const META_CHARSET_RE = /<meta[^>]+charset\s*=\s*["']?([^"'\s;>]+)/i;
@@ -35,6 +36,61 @@ const BROWSER_HEADERS = {
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const MAX_RETRIES = 2; // total 3 attempts
+export const MAX_HTTP_RESPONSE_BYTES = 5 * 1024 * 1024;
+const MAX_REDIRECTS = 5;
+
+export async function fetchSafe(
+  rawUrl: string,
+  options: RequestInit & { signal?: AbortSignal },
+): Promise<Response> {
+  let target = await assertSafeOutboundUrl(rawUrl);
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
+    const response = await fetch(target, { ...options, redirect: 'manual' });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const location = response.headers.get('location');
+    if (!location) throw new Error(`重定向缺少 Location: ${target}`);
+    await response.body?.cancel();
+    target = await assertSafeOutboundUrl(new URL(location, target).toString());
+  }
+  throw new Error(`重定向次数超过 ${MAX_REDIRECTS}`);
+}
+
+async function readResponseBuffer(response: Response, maxBytes = MAX_HTTP_RESPONSE_BYTES): Promise<Buffer> {
+  const contentLength = Number(response.headers.get('content-length') || '0');
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    await response.body?.cancel();
+    throw new Error(`响应体超过 ${maxBytes} 字节限制`);
+  }
+  if (!response.body) return Buffer.alloc(0);
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new Error(`响应体超过 ${maxBytes} 字节限制`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), size);
+}
+
+export async function readResponseText(response: Response, maxBytes = MAX_HTTP_RESPONSE_BYTES): Promise<string> {
+  return (await readResponseBuffer(response, maxBytes)).toString('utf-8');
+}
+
+export function ensureResponseTextWithinLimit(value: string, maxBytes = MAX_HTTP_RESPONSE_BYTES): string {
+  if (Buffer.byteLength(value, 'utf-8') > maxBytes) throw new Error(`响应体超过 ${maxBytes} 字节限制`);
+  return value;
+}
 
 /**
  * fetch with exponential-backoff retry.
@@ -54,7 +110,7 @@ async function fetchWithRetry(
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await withTimeout(
-        signal => fetch(url, { ...rest, signal }),
+        signal => fetchSafe(url, { ...rest, signal }),
         timeoutMs,
         `HTTP timeout: ${url}`,
         parentSignal ?? undefined,
@@ -65,6 +121,7 @@ async function fetchWithRetry(
         console.warn(
           `[http] ${url} -> HTTP ${response.status}, retry ${attempt + 1}/${retries} in ${delay}ms`,
         );
+        await response.body?.cancel();
         await abortableDelay(delay, parentSignal ?? undefined);
         continue;
       }
@@ -130,16 +187,15 @@ async function fetchHtml(
   const { timeoutMs = 20_000, signal: parentSignal, ...rest } = options;
 
   try {
-    const response = await withTimeout(
-      signal => fetch(url, { ...rest, signal }),
+    const response = await fetchWithRetry(url, {
+      ...rest,
+      signal: parentSignal ?? undefined,
       timeoutMs,
-      `HTML fetch timeout: ${url}`,
-      parentSignal ?? undefined,
-    );
+    });
 
     if (!response.ok) return null;
 
-    const buffer = Buffer.from(await response.arrayBuffer());
+    const buffer = await readResponseBuffer(response);
     const bodyStart = buffer.slice(0, 4096).toString('ascii').toLowerCase();
     const charset = detectCharset(response, bodyStart);
 

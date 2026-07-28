@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { retryDiscardedItem } from '@/lib/discarded-retry-service';
 import { invalidateKeywordCache } from '@/lib/filter';
+import { invalidateKeywordFilterDiscards } from '@/lib/keyword-filter-state';
 
 const MAX_CANDIDATE_RESTORE = 50;
 const MAX_PHRASES_PER_TITLE = 12;
@@ -190,6 +191,9 @@ export async function updateKeywordCandidate(id: string, action: 'approve' | 'di
         articleIds.push(result.articleId);
       }
     }
+    // 候选词已正式采用，剩余未命中的 filter:* 记录同样需要失效，
+    // 否则超过即时恢复上限的 URL 会一直被采集层跳过。
+    await invalidateKeywordFilterDiscards();
     return { id, action, restored, articleIds, restoreLimit: MAX_CANDIDATE_RESTORE };
   } else {
     await db.keywordCandidate.update({ where: { id }, data: { status: 'dismissed' } });
@@ -209,7 +213,10 @@ export async function deleteKeywordCandidate(id: string): Promise<void> {
     }
     await tx.keywordCandidate.delete({ where: { id } });
   });
-  if (candidate.status === 'approved') invalidateKeywordCache();
+  if (candidate.status === 'approved') {
+    invalidateKeywordCache();
+    await invalidateKeywordFilterDiscards();
+  }
 }
 
 /** 清空旧候选，并从现有关键词未命中记录重新生成。 */

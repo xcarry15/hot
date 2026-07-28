@@ -16,8 +16,7 @@ const mocks = vi.hoisted(() => ({
   auditCreate: vi.fn(),
   auditDeleteMany: vi.fn(),
   pushLogDeleteMany: vi.fn(),
-  eventDirtyCreate: vi.fn(),
-  eventDirtyCreateMany: vi.fn(),
+  eventDirtyUpsert: vi.fn(),
   transaction: vi.fn(),
   refresh: vi.fn(),
 }));
@@ -42,7 +41,7 @@ function transactionClient() {
     },
     eventClusterAudit: { create: mocks.auditCreate, deleteMany: mocks.auditDeleteMany },
     pushLog: { deleteMany: mocks.pushLogDeleteMany },
-    eventDirty: { create: mocks.eventDirtyCreate, createMany: mocks.eventDirtyCreateMany },
+    eventDirty: { upsert: mocks.eventDirtyUpsert },
   };
 }
 
@@ -114,6 +113,16 @@ describe('Event 人工纠错', () => {
       { id: 'ready', clusterStatus: 'clustered', aiStatus: 'done', score: 60, relevance: 60, cleanContent: '正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
     ]);
     expect(selected).toBe('ready');
+  });
+
+  it('自动代表文章优先选择最早发布的合格成员', () => {
+    const early = new Date('2026-07-17T08:00:00Z');
+    const late = new Date('2026-07-17T09:00:00Z');
+    const selected = selectRepresentativeCandidate([
+      { id: 'late-high-score', clusterStatus: 'clustered', aiStatus: 'done', score: 100, relevance: 100, cleanContent: '更长正文', publishedAt: late, createdAt: late, source: { publicEnabled: true, deletedAt: null } },
+      { id: 'early-low-score', clusterStatus: 'clustered', aiStatus: 'done', score: 60, relevance: 60, cleanContent: '正文', publishedAt: early, createdAt: early, source: { publicEnabled: true, deletedAt: null } },
+    ]);
+    expect(selected).toBe('early-low-score');
   });
 
   it('从已推送 Event 拆分时新 Event 保持未推送', async () => {
@@ -223,6 +232,13 @@ describe('Event 人工纠错', () => {
     expect(moveUpdate?.data).not.toHaveProperty('eventAction');
     expect(moveUpdate?.data).not.toHaveProperty('eventObject');
     expect(moveUpdate?.data).not.toHaveProperty('eventKey');
+    expect(mocks.eventDirtyUpsert).toHaveBeenCalledTimes(2);
+    expect(mocks.eventDirtyUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { eventId: 'source' },
+    }));
+    expect(mocks.eventDirtyUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { eventId: 'target' },
+    }));
   });
 
   it('移动文章必须与路径中的源 Event 一致', async () => {

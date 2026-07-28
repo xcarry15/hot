@@ -4,8 +4,6 @@
  * 统一管理 localStorage 中的 `api_token` 读写。客户端请求 helper 在请求边界
  * 显式读取它并注入 Authorization，避免篡改全局 fetch。
  *
- * 历史：此文件早期还导出过 `apiFetch()` helper；请求统一由
- * `request-json.client.ts` 处理。
  */
 
 const TOKEN_STORAGE_KEY = 'api_token';

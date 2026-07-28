@@ -3,14 +3,6 @@
  *
  * 单一职责：URL 去重 → 黑名单拦截 → 长度门控 → 入库（包含单条 collectItem、单源 crawlSource、
  * 全源 collectAllSources、与 source 预览 testCrawlSource）。
- *
- * 历史：
- *   - 逻辑原先全部内联在 `crawler.ts` 中（798 行）；B12 抽离后保留：
- *     · 并发数（COLLECT_CONCURRENCY=4）、超时（CRAWL_SOURCE_TIMEOUT_MS=60_000）
- *     · URL / DiscardedItem / length gate 的判定顺序与日志文案
- *     · fetchLog(success|warning|failure) 的 status 与字段
- *     · source update（reset / increment / 熔断恢复）的字段与值
- *   - discarded / failure / circuit-breaker 写作迁移至独立模块。
  */
 import { db } from '@/lib/db';
 import { evaluateKeywordMatch } from '@/lib/filter';
@@ -36,7 +28,7 @@ const COLLECT_CONCURRENCY = 4;
 /**
  * 单条 crawlItem 入口：
  *   - URL 精确去重（命中已处理 URL 仅更新列表元数据，不重置处理状态）
- *   - DiscardedItem 短路（命中已丢弃记录直接 skip）
+ *   - DiscardedItem 短路（关键词配置变更时会清理 filter:*，其余记录直接 skip）
  *   - 黑名单命中在已有列表字段时直接拦截；详情阶段再兜底
  *   - 长度门控（title < 10 且无 summary/detail content → filter:short）
  *   - 写 Article（P2002 race → 记 dedup:url 后短路）
@@ -78,8 +70,7 @@ export async function collectItem(
   }
 
   // ---- Step 2: DiscardedItem blocking ----
-  // 如果该 URL 在之前采集周期已被丢弃（去重/关键词未命中），本次直接跳过，
-  // 避免反复抓取→丢弃的死循环。
+  // filter:* 记录在关键词配置变更时会被清理；未变更时仍短路，避免反复抓取→丢弃。
   const discarded = knownDiscarded === undefined
     ? await db.discardedItem.findFirst({ where: { url: normalizedUrl } })
     : knownDiscarded

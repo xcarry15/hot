@@ -75,6 +75,18 @@ describe('createChatCompletion', () => {
     expect(res.content).toBe('hello');
   });
 
+  it('HTTP 成功但返回非 JSON 时按 Provider 全局故障处理', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response('<html>gateway error</html>', { status: 200 }));
+
+    await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).rejects.toThrow('API 返回无效 JSON');
+  });
+
+  it('HTTP 成功但响应为空时按 Provider 全局故障处理', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse(''));
+
+    await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).rejects.toThrow('API 返回空响应');
+  });
+
   it('只读取当前 provider 配置，不再读取旧版全局配置', async () => {
     mocks.readAllSettings.mockResolvedValueOnce({
       ai_provider: 'opencode',

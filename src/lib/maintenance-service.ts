@@ -51,6 +51,7 @@ export async function getCleanupStats(): Promise<CleanupStats> {
     pushLogs,
     discardedTotal,
     jobsTotal,
+    dbSizeBytes,
   ] = await Promise.all([
     db.article.count(),
     db.article.count({
@@ -67,6 +68,7 @@ export async function getCleanupStats(): Promise<CleanupStats> {
     db.pushLog.count(),
     db.discardedItem.count(),
     db.job.count(),
+    getDbFileSize(),
   ]);
 
   return {
@@ -79,7 +81,7 @@ export async function getCleanupStats(): Promise<CleanupStats> {
     pushLogs,
     discardedTotal,
     jobsTotal,
-    dbSizeBytes: getDbFileSize(),
+    dbSizeBytes,
   };
 }
 
@@ -118,7 +120,7 @@ async function restoreAutoCrawl(prevWasEnabled: boolean): Promise<void> {
 }
 
 function pauseAndResetOps() {
-  // 历史顺序：AUTO_CRAWL → LAST_CRAWL_AT → Source 重置
+  // 先暂停自动抓取，再清空上次抓取时间和数据源状态。
   return [
     db.setting.upsert({
       where: { key: SETTING_KEYS.AUTO_CRAWL_ENABLED },
@@ -356,6 +358,3 @@ export async function executeMaintenanceAction(
       return runVacuum();
   }
 }
-
-// 显式保留 getDbFileSize 的服务端别名，方便快速回滚 / 兼容旧测试
-export { getDbFileSize };

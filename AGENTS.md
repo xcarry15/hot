@@ -8,7 +8,7 @@ Hot2 is a Next.js 16 App Router application with React 19, TypeScript, Prisma, a
 - `src/components/`: UI; `intelligence-inbox.tsx` is the default admin workbench, while `src/features/` and `src/contracts/` contain client helpers and shared contracts.
 - `src/lib/`: server services and pipeline code. Collection, processing, analysis, event clustering, push, review, and public visibility rules live here; keep business rules in services rather than components or Route Handlers. AI must extract the structured event identity (`subjects/action/object`) before clustering, and the application deterministically builds `eventKey` from that identity. Article remains the AI/manual-calibration record; Event is the only public/push deduplication gate and `Event.publicStatus` is the public truth. Article publication fields are only the current representative projection; non-representative members stay unpublished. Representative selection must require `clustered`, AI done, and a non-deleted source; source public enablement remains an independent publication gate. Manual representative changes must satisfy the same base eligibility.
 - `prisma/`: schema, seed data, and ordered migrations; `tests/`: Vitest tests.
-- `scripts/`: maintenance/migration utilities; `bat/`: Windows deployment and operations files; `public/`: static assets. Production releases are unpacked outside the application directory and synchronized with deletion so removed code cannot remain on the server; preserve `.env*`, `db/`, and `node_modules/` during this sync. Stop PM2 and create a consistent SQLite `.backup` before migrations. Existing databases crossing `20260718230000_add_public_feed_sort` must run `npm run db:rebuild-public` once. Routine application releases must not clear the server-wide Nginx cache or reload Nginx.
+- `scripts/`: maintenance/migration utilities; `bat/`: Windows deployment and operations files; `public/`: static assets. Production releases are unpacked outside the application directory and synchronized with deletion so removed code cannot remain on the server; preserve `.env*`, `db/`, and `node_modules/` during this sync. Stop PM2 and create a consistent SQLite `.backup` before migrations. The repository uses one current baseline migration and has no historical database bridge; obsolete migration history must be backed up and rebuilt with `scripts/init-production.sh`. Routine application releases must not clear the server-wide Nginx cache or reload Nginx.
 
 The admin navigation is intentionally limited to `工作台` and `设置`. `工作台` keeps the existing task-center source/job layout; clicking an Article opens the complete Article/Event calibration workspace in a right-side drawer. Full-library search and human-review queues use server-side pagination and open the same drawer instead of recreating a second article-management page. The public `工具` route exists as a placeholder page (`/tools`); `数据` remains a planned future entry.
 
@@ -25,7 +25,7 @@ Install dependencies and copy `.env.example` to `.env` for local setup. Use:
 - `npm run dev` — start the development server at `http://localhost:3011`.
 - `npm run lint` — run ESLint.
 - `npm run typecheck` — type-check without emitting files.
-- `npm test` — run the default Vitest suite (excluding the database baseline test).
+- `npm test` — run the default Vitest suite (excluding the migration smoke test).
 - `npm run test:critical` — run the critical business suite; `npm run test:migrations` validates a clean SQLite migration path; `npm run test:all` runs both the normal suite and migration smoke.
 - `npm run verify` — run lint, type-check, all automated tests, and the production build.
 - `npm run build` — create the production build; `npm run start` — serve it.
@@ -33,7 +33,7 @@ Install dependencies and copy `.env.example` to `.env` for local setup. Use:
 - `npm run db:migrate:status` — verify migration state before delivery.
 - `npm run db:optimize` — enable/verify SQLite WAL runtime settings and run `PRAGMA optimize` after migrations.
 
-Use `npm run db:migrate:deploy` for production migrations. Do not use `db:push` or `db:reset` for routine production work.
+Use `npm run db:migrate:deploy` for routine production migrations. The only migration is `20260728120000_current_schema_baseline`; production databases with any other migration history must be backed up and fully reinitialized. Do not use `db:push` or `db:reset` in production.
 
 ## Coding Style & Naming Conventions
 
@@ -41,7 +41,7 @@ Use strict TypeScript, two-space indentation, single quotes, semicolons, and the
 
 ## Testing Guidelines
 
-Vitest discovers tests under `tests/`. Add or update regression tests for pipeline, deduplication, API, database, cancellation, or push-delivery changes. Run the relevant file first, then `npm test`; run `npm run test:migrations` for schema/migration changes. `npm run test:legacy-baseline` is only for the historical db-push baseline workflow. No coverage threshold is configured.
+Vitest discovers tests under `tests/`. Add or update regression tests for pipeline, deduplication, API, database, cancellation, or push-delivery changes. Run the relevant file first, then `npm test`; run `npm run test:migrations` for schema/migration changes. No historical database bridge is maintained. No coverage threshold is configured.
 
 ## Commit & Pull Request Guidelines
 
@@ -49,4 +49,4 @@ Follow the existing Conventional Commit style, such as `feat: add source retry` 
 
 ## Security & Configuration
 
-Never commit `.env`, API keys, Webhook URLs, SQLite data, or deployment archives. Production requires `API_TOKEN`; set `NEXT_PUBLIC_SITE_URL` for canonical URLs and sitemap generation. Back up the database before migrations, and never reset a user database to resolve drift.
+Never commit `.env`, API keys, Webhook URLs, SQLite data, or deployment archives. Production requires stable `API_TOKEN` and `SETTINGS_ENCRYPTION_KEY`; set `NEXT_PUBLIC_SITE_URL` for canonical URLs and sitemap generation. Back up the database before reinitialization; do not attempt an in-place compatibility upgrade for obsolete migration history.

@@ -41,9 +41,8 @@ import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
 import { fetchKeywordCategories } from '@/features/keywords-api.client'
 import {
   KEYWORD_BLACKLIST_CATEGORY,
-  KEYWORD_CATEGORIES,
   KEYWORD_DEFAULT_CATEGORY,
-} from '@/features/keywords-catalog'
+} from '@/contracts/keywords'
 import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
 import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
 import { retrySource, retrySources } from '@/features/sources-api.client'
@@ -60,7 +59,6 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const [keywordCategories, setKeywordCategories] = useState<string[]>(() => Array.from(new Set([
     KEYWORD_DEFAULT_CATEGORY,
     KEYWORD_BLACKLIST_CATEGORY,
-    ...KEYWORD_CATEGORIES,
   ])))
 
   useEffect(() => {
@@ -349,11 +347,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       ? singleStages[startStage]
       : activeJob.type === 'full'
         ? ['collect', 'process', 'ai', 'cluster', 'push']
-        : activeJob.type === 'fastProcess'
-          ? ['process']
-          : activeJob.type === 'collect' || activeJob.type === 'process' || activeJob.type === 'ai' || activeJob.type === 'cluster' || activeJob.type === 'push'
-            ? [activeJob.type]
-            : []
+        : [activeJob.type]
     const currentStage = activeJob.currentStage ?? startStage
     const currentIndex = currentStage ? stages.indexOf(currentStage) : -1
     const targetArticle = activeJob.activeArticleId
@@ -614,7 +608,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     stageRequestLoading[stage] || stageLoading[stage]
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full [&_[data-slot=button]]:rounded-none [&_[data-slot=badge]]:rounded-none">
       {/* ===== Header ===== */}
       <div className="border-b bg-muted px-2 py-1.5 sm:px-4 sm:py-2 space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
@@ -861,9 +855,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
             </div>
             <div className="flex items-center gap-3">
               {progressView.pct != null && <span className="w-9 shrink-0 text-right tabular-nums text-xs text-muted-foreground">{progressView.pct}%</span>}
-              <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+              <div className="flex-1 h-1.5 bg-muted rounded-none overflow-hidden">
                 <div
-                  className={`h-full rounded-full bg-primary transition-[width] duration-300 ease-out ${progressView.pct == null ? 'w-1/3 animate-pulse' : ''}`}
+                  className={`h-full rounded-none bg-primary transition-[width] duration-300 ease-out ${progressView.pct == null ? 'w-1/3 animate-pulse' : ''}`}
                   style={progressView.pct == null ? undefined : { width: `${progressView.pct}%` }}
                   role="progressbar"
                   aria-valuenow={progressView.pct ?? undefined}

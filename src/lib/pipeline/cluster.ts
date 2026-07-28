@@ -3,6 +3,7 @@ import { EVENT_CLUSTER_MAX_RETRIES } from '@/contracts/event-clustering';
 import { db } from '@/lib/db';
 import { clusterArticle, markClusterFailure } from '@/lib/event-clustering-service';
 import { repairStaleEventRepresentatives } from '@/lib/event-service';
+import { repairAttachedClusterFailures, repairDirtyEvents } from '@/lib/event/event-consistency-service';
 import { advanceJobProgress, startJobStage } from '@/lib/job-progress';
 import { assertNotAborted } from '@/lib/worker-stop';
 
@@ -33,6 +34,14 @@ export function buildClusterPendingWhere(now = new Date(), forceRetry = false): 
 }
 
 export async function clusterAllPending(signal?: AbortSignal, jobId?: string, forceRetry = false): Promise<{ total: number; processed: number; errors: number }> {
+  const repairedAttachedFailures = await repairAttachedClusterFailures();
+  if (repairedAttachedFailures > 0) {
+    console.warn(`[clusterAllPending] repaired ${repairedAttachedFailures} attached failed Article(s)`);
+  }
+  const repairedDirtyEvents = await repairDirtyEvents();
+  if (repairedDirtyEvents > 0) {
+    console.warn(`[clusterAllPending] repaired ${repairedDirtyEvents} dirty Event(s)`);
+  }
   const repairedRepresentatives = await repairStaleEventRepresentatives();
   if (repairedRepresentatives > 0) {
     console.warn(`[clusterAllPending] repaired ${repairedRepresentatives} stale Event representative pointer(s)`);

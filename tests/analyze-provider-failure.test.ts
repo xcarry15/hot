@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   articleFindMany: vi.fn(),
+  articleCount: vi.fn(),
   articleUpdateMany: vi.fn(),
   processWithAI: vi.fn(),
   getSetting: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('@/lib/db', () => ({
   db: {
     article: {
       findMany: mocks.articleFindMany,
+      count: mocks.articleCount,
       updateMany: mocks.articleUpdateMany,
     },
   },
@@ -44,6 +46,7 @@ describe('analyzeAllPending Provider 全局异常', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getSetting.mockResolvedValue('1');
+    mocks.articleCount.mockResolvedValue(0);
     mocks.articleUpdateMany.mockResolvedValueOnce({ count: 2 });
     mocks.startJobStage.mockResolvedValue(undefined);
     mocks.advanceJobProgress.mockResolvedValue(undefined);
@@ -55,9 +58,8 @@ describe('analyzeAllPending Provider 全局异常', () => {
       { id: 'article-2', title: '文章 2' },
       { id: 'article-3', title: '文章 3' },
     ];
-    mocks.articleFindMany
-      .mockResolvedValueOnce(articles.map(({ id }) => ({ id })))
-      .mockResolvedValueOnce(articles);
+    mocks.articleCount.mockResolvedValueOnce(3);
+    mocks.articleFindMany.mockResolvedValueOnce(articles);
     mocks.processWithAI.mockResolvedValueOnce({
       status: 'deferred',
       errorKind: 'rate_limit',
@@ -76,7 +78,10 @@ describe('analyzeAllPending Provider 全局异常', () => {
 
     expect(mocks.processWithAI).toHaveBeenCalledTimes(1);
     expect(mocks.articleUpdateMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({ id: { in: ['article-2', 'article-3'] } }),
+      where: expect.objectContaining({
+        aiStatus: { in: ['pending', 'failed'] },
+        fetchStatus: 'fetched',
+      }),
       data: expect.objectContaining({
         aiStatus: 'pending',
         aiError: null,
@@ -94,9 +99,8 @@ describe('analyzeAllPending Provider 全局异常', () => {
       { id: 'article-1', title: '文章 1' },
       { id: 'article-2', title: '文章 2' },
     ];
-    mocks.articleFindMany
-      .mockResolvedValueOnce(articles.map(({ id }) => ({ id })))
-      .mockResolvedValueOnce(articles);
+    mocks.articleCount.mockResolvedValueOnce(2);
+    mocks.articleFindMany.mockResolvedValueOnce(articles);
     mocks.articleUpdateMany.mockResolvedValueOnce({ count: 2 });
     mocks.processWithAI.mockRejectedValueOnce(new Error('AI分析超时 "文章 1"'));
 
@@ -111,9 +115,43 @@ describe('analyzeAllPending Provider 全局异常', () => {
 
     expect(mocks.articleUpdateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({
-        id: expect.objectContaining({ in: expect.arrayContaining(['article-1', 'article-2']) }),
+        aiStatus: { in: ['pending', 'failed'] },
+        fetchStatus: 'fetched',
       }),
       data: expect.objectContaining({ aiStatus: 'pending', aiError: null }),
     });
+  });
+
+  it('鉴权/配置错误暂停整批，不消耗任何文章的失败额度', async () => {
+    const articles = [
+      { id: 'article-1', title: '文章 1' },
+      { id: 'article-2', title: '文章 2' },
+      { id: 'article-3', title: '文章 3' },
+    ];
+    mocks.articleCount.mockResolvedValueOnce(3);
+    mocks.articleFindMany.mockResolvedValueOnce(articles);
+    mocks.processWithAI.mockResolvedValueOnce({
+      status: 'deferred',
+      errorKind: 'configuration',
+      globalError: true,
+      retryable: false,
+      globalMessage: 'opencode: API Key 无效或鉴权失败',
+    });
+
+    await expect(analyzeAllPending()).resolves.toMatchObject({
+      processed: 0,
+      errors: 0,
+      deferred: 3,
+      providerUnavailable: true,
+      providerPaused: true,
+    });
+
+    expect(mocks.articleUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        aiStatus: 'pending',
+        aiError: 'opencode: API Key 无效或鉴权失败',
+        nextAiRetryAt: expect.any(Date),
+      }),
+    }));
   });
 });

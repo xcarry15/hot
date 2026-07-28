@@ -1,6 +1,6 @@
 import { db } from './db';
 import { createCache } from './cache';
-import { KEYWORD_BLACKLIST_CATEGORY } from '@/features/keywords-catalog';
+import { KEYWORD_BLACKLIST_CATEGORY } from '@/contracts/keywords';
 
 /**
  * 关键词过滤 — 单一白名单

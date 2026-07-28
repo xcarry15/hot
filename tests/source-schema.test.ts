@@ -30,6 +30,12 @@ describe('source input schemas', () => {
     expect(sourceCreateSchema.safeParse({ name: 'x', url: 'https://example.com', extra: true }).success).toBe(false);
   });
 
+  it('拒绝本机、内网与带凭据的数据源地址', () => {
+    expect(sourceCreateSchema.safeParse({ name: 'x', url: 'http://127.0.0.1:3011' }).success).toBe(false);
+    expect(sourceCreateSchema.safeParse({ name: 'x', url: 'http://169.254.169.254/latest/meta-data' }).success).toBe(false);
+    expect(sourceCreateSchema.safeParse({ name: 'x', url: 'https://user:pass@example.com/feed' }).success).toBe(false);
+  });
+
   it('更新允许仅提交 enabled，但拒绝空更新', () => {
     expect(sourceUpdateSchema.parse({ enabled: false })).toEqual({ enabled: false });
     expect(sourceUpdateSchema.safeParse({}).success).toBe(false);

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ARTICLE_DETAIL_SELECT,
+  ARTICLE_LIST_SELECT,
   serializeArticleDetail,
   serializeArticleListItem,
   type ArticleDetailRecord,
@@ -89,6 +91,20 @@ describe('Article API DTO', () => {
     expect(list).not.toHaveProperty('articleBody');
     expect(list).not.toHaveProperty('contentHash');
     expect(list).not.toHaveProperty('dedupDetail');
+    expect(list).not.toHaveProperty('aiSnapshot');
+    expect(list).not.toHaveProperty('manualOverrides');
+    expect(list).not.toHaveProperty('fetchError');
+    expect(list).not.toHaveProperty('aiError');
+    expect(list).not.toHaveProperty('clusterError');
+    expect(list).not.toHaveProperty('eventSubjects');
+    expect(list).not.toHaveProperty('eventKey');
+    expect(list).not.toHaveProperty('keyPoints');
+    expect(ARTICLE_LIST_SELECT).not.toHaveProperty('cleanContent');
+    expect(ARTICLE_LIST_SELECT).not.toHaveProperty('aiSnapshot');
+    expect(ARTICLE_LIST_SELECT).not.toHaveProperty('manualOverrides');
+    expect(ARTICLE_LIST_SELECT).not.toHaveProperty('fetchError');
+    expect(ARTICLE_DETAIL_SELECT).toHaveProperty('cleanContent', true);
+    expect(ARTICLE_DETAIL_SELECT).toHaveProperty('aiSnapshot', true);
     expect(detail.pushLogs[0]?.createdAt).toBe('2026-07-11T02:00:00.000Z');
     expect(detail.pushLogs[0]?.webhookTarget).toBe('https://open.feishu.cn/…/***test');
     expect(detail.pushLogs[0]).not.toHaveProperty('webhookUrl');

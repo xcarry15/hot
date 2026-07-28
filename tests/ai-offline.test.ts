@@ -68,6 +68,7 @@ vi.mock('@/lib/dedup', () => ({
 }));
 
 import * as aiModule from '@/lib/ai';
+import { AIClientError } from '@/lib/ai-client';
 
 describe('AI 失败路径（offlineClassify 已删除）', () => {
   beforeEach(() => {
@@ -162,6 +163,37 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
       summary: null,
       publishedAt: null,
     })).resolves.not.toThrow();
+  });
+
+  it('Provider 鉴权错误保留 pending，不消耗文章重试次数', async () => {
+    const longContent = '这是一段足够长的内容用于测试 AI 流程。'.repeat(5);
+    mocks.createChatCompletion.mockRejectedValueOnce(
+      new AIClientError('opencode: API Key 无效或鉴权失败', 'configuration', true, false),
+    );
+
+    const result = await aiModule.processWithAI({
+      id: 'provider-config-1',
+      title: '瑞幸咖啡开店',
+      aiStatus: 'pending',
+      aiRetryCount: 3,
+      cleanContent: longContent,
+      summary: null,
+      publishedAt: null,
+    });
+
+    expect(result).toMatchObject({
+      status: 'deferred',
+      globalError: true,
+      retryable: false,
+      errorKind: 'configuration',
+    });
+    const updateCall = mocks.articleUpdate.mock.calls.find(c => c[0]?.where?.id === 'provider-config-1');
+    expect(updateCall?.[0].data).toMatchObject({
+      aiStatus: 'pending',
+      aiError: 'opencode: API Key 无效或鉴权失败',
+      nextAiRetryAt: expect.any(Date),
+    });
+    expect(updateCall?.[0].data).not.toHaveProperty('aiRetryCount');
   });
 
   it('无具体事件正常跳过，但保留模型与 Prompt 审计信息', async () => {
