@@ -9,6 +9,7 @@ import PublicHeader from '@/components/public-header'
 import PublicOriginalLink, { PublicShareButton } from '@/components/public-original-link'
 import PublicViewTracker from '@/components/public-view-tracker'
 import { ScoreBadge } from '@/components/ui/score-badge'
+import type { PublicArticleRecentDto } from '@/contracts/public-articles'
 import { getPublicArticleDetail } from '@/lib/public-article-service'
 import { getPublicSiteUrl } from '@/lib/public-site'
 import { splitBrands } from '@/lib/shared/article-codecs'
@@ -71,8 +72,11 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
   const brands = splitBrands(article.brand)
   const originalUrl = safeExternalUrl(article.url)
   const effectiveDate = article.publishedAt || article.createdAt
+  const displaySource = article.originalSource?.trim() || article.source.name
   const hasSummary = Boolean(article.summary)
   const hasKeyPoints = article.keyPoints.length > 0
+  const sameEventArticles = article.recentArticles.filter((item) => item.relation === 'same_event')
+  const sameBrandArticles = article.recentArticles.filter((item) => item.relation === 'same_brand')
 
   return (
     <div className="public-site flex min-h-[100dvh] flex-col bg-background text-foreground">
@@ -89,8 +93,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
             <div className="public-detail-intro flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--public-muted)]">
               <time dateTime={effectiveDate}>{formatPublicDateTime(effectiveDate)}</time>
               <span className="text-[var(--public-hairline-strong)]">|</span>
-              <span>{article.source.name}</span>
-              {article.originalSource && article.originalSource !== article.source.name && <><span className="text-[var(--public-hairline-strong)]">|</span><span>原始来源：{article.originalSource}</span></>}
+              <span>{displaySource}</span>
               {article.category && <><span className="text-[var(--public-hairline-strong)]">|</span><span>{article.category}</span></>}
               {article.sourceCount > 1 && <><span className="text-[var(--public-hairline-strong)]">|</span><span>{article.sourceCount} 个来源</span></>}
               {originalUrl && <div className="ml-auto"><PublicOriginalLink href={originalUrl} articleId={article.id} /></div>}
@@ -137,31 +140,14 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
 
             {article.recentArticles.length > 0 && (
               <section className="mt-7 border-t border-[var(--public-hairline)] pt-5" aria-labelledby="recent-articles-title">
-                <h2 id="recent-articles-title" className="text-sm font-semibold text-[var(--public-primary)]">近期文章</h2>
-                <ul className="mt-3 space-y-2 text-sm">
-                  {article.recentArticles.map((item) => {
-                    const itemDate = item.publishedAt || item.createdAt
-                    const content = (
-                      <>
-                        <span className="line-clamp-2 text-[var(--public-body)] transition-colors group-hover/recent:text-[var(--public-primary)] group-hover/recent:underline">{item.title}</span>
-                        <p className="mt-1 text-xs text-[var(--public-muted)]">{item.source.name}</p>
-                      </>
-                    )
-                    return (
-                      <li key={`${item.relation}-${item.id}`} className="flex items-start justify-between gap-4 border-b border-[var(--public-hairline)] pb-2">
-                        <time dateTime={itemDate} className="w-14 shrink-0 pt-0.5 text-right font-mono text-xs tabular-nums text-[var(--public-muted)]">{formatDaysAgo(itemDate)}</time>
-                        <div className="min-w-0 flex-1">
-                          {item.relation === 'same_brand' ? (
-                            <Link href={`/news/${item.eventId}`} className="group/recent block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">{content}</Link>
-                          ) : (
-                            <a href={item.url} target="_blank" rel="noreferrer" className="group/recent block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">{content}</a>
-                          )}
-                        </div>
-                        <ScoreBadge score={item.score} variant="compact-square" />
-                      </li>
-                    )
-                  })}
-                </ul>
+                <div className="flex items-baseline justify-between gap-3">
+                  <h2 id="recent-articles-title" className="text-sm font-semibold text-[var(--public-primary)]">近期文章</h2>
+                  <span className="text-xs text-[var(--public-muted)]">30 天内 · {article.recentArticles.length} 篇</span>
+                </div>
+                <div className="mt-3 space-y-4">
+                  {sameEventArticles.length > 0 && <RecentArticleGroup title="同事件其他报道" articles={sameEventArticles} />}
+                  {sameBrandArticles.length > 0 && <RecentArticleGroup title="同品牌其他文章" articles={sameBrandArticles} />}
+                </div>
               </section>
             )}
 
@@ -188,5 +174,37 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
 
       <PublicFooter />
     </div>
+  )
+}
+
+function RecentArticleGroup({ title, articles }: { title: string; articles: PublicArticleRecentDto[] }) {
+  return (
+    <section aria-label={title}>
+      <h3 className="flex items-baseline gap-2 text-xs font-semibold text-[var(--public-body)]">
+        <span>{title}</span>
+        <span className="font-normal text-[var(--public-muted)]">{articles.length} 篇</span>
+      </h3>
+      <ul className="mt-1.5 space-y-1.5 text-sm">
+        {articles.map((item) => {
+          const itemDate = item.publishedAt || item.createdAt
+          const content = (
+            <>
+              <span className="line-clamp-2 text-[var(--public-body)] transition-colors group-hover/recent:text-[var(--public-primary)] group-hover/recent:underline">{item.title}</span>
+              <p className="mt-0.5 text-xs text-[var(--public-muted)]">{item.source.name}</p>
+            </>
+          )
+          const itemLink = item.relation === 'same_brand' && item.eventId
+            ? <Link href={`/news/${item.eventId}`} className="group/recent block min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">{content}</Link>
+            : <a href={item.url} target="_blank" rel="noreferrer noopener" className="group/recent block min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">{content}</a>
+          return (
+            <li key={`${item.relation}-${item.id}`} className="flex items-start gap-3 border-b border-[var(--public-hairline)] pb-1.5 last:border-b-0">
+              <time dateTime={itemDate} className="w-14 shrink-0 pt-0.5 text-right font-mono text-xs tabular-nums text-[var(--public-muted)]">{formatDaysAgo(itemDate)}</time>
+              <div className="min-w-0 flex-1">{itemLink}</div>
+              <ScoreBadge score={item.score} variant="compact-square" />
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
