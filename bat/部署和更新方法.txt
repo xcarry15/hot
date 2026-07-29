@@ -208,6 +208,13 @@ Windows 双击：
 
   pm2 restart h2-hot2 --update-env
 
+如果网页能打开但完全没有样式，先检查 Next.js CSS 是否被 Nginx 拦截：
+
+  curl -I https://hot.kfxz.cn/_next/static/chunks/任意一个.css
+
+必须返回 `200`。Nginx 配置不要使用 `alias /www/wwwroot/hot.kfxz.cn/.next/static/`，
+统一按 `bat/本项目的nginx.txt` 将 `/_next/` 代理到 `127.0.0.1:3011`，否则宝塔或全局安全规则可能把 CSS/JS 返回 403。
+
 修改 Nginx 配置后才需要：
 
   nginx -t && nginx -s reload

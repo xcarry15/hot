@@ -114,6 +114,23 @@ describe('direct parser behavior', () => {
     ]);
   });
 
+  it('parseRss resolves relative links against the actual feed URL', async () => {
+    mocks.getZAI.mockResolvedValue({
+      functions: {
+        invoke: vi.fn().mockResolvedValue({
+          data: { html: '<rss><channel><item><title>相对链接文章</title><link>/news/relative</link></item></channel></rss>' },
+        }),
+      },
+    });
+
+    const result = await parseRss('https://example.com/list', JSON.stringify({ feedUrl: 'https://feed.example.com/rss.xml' }));
+
+    expect(result).toMatchObject({
+      success: true,
+      items: [{ title: '相对链接文章', url: 'https://feed.example.com/news/relative' }],
+    });
+  });
+
   it('parseCanyin88 extracts mobile post_item entries without detail fetches', async () => {
     const listHtml = `
       ${' '.repeat(600)}

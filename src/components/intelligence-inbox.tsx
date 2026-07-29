@@ -1,24 +1,9 @@
 "use client";
 
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ChevronDown,
-  Eye,
-  FileText,
-  Loader2,
-  Merge,
-  MousePointerClick,
-  Save,
-  Search,
-  Split,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
   SheetContent,
@@ -26,284 +11,37 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import type { ArticleWorkspacePanel } from "@/components/article-workspace";
-import type {
-  ArticleDetailDto,
-  ArticleListItemDto,
-  ArticlePushLogDto,
-} from "@/contracts/articles";
+import type { ArticleDetailDto } from "@/contracts/articles";
 import {
   fetchArticleDetail,
   invalidateArticleDetailCache,
   triggerArticleWorkflow,
   updateArticleEditorial,
 } from "@/features/articles-api.client";
-import {
-  parseManualOverrides,
-} from "@/lib/shared/article-calibration";
-import { isBusinessSkipReason } from "@/lib/article-pipeline-status";
 import { isRequestAborted, isRequestJsonError } from "@/lib/request-json.client";
 import {
   parseJsonArray,
   splitBrands,
-  stripHtml,
 } from "@/lib/shared/article-codecs";
 import { parseEventSubjects } from "@/contracts/event-identity";
-import { EventArticleList, type EventArticleRowModel } from "@/components/article-workspace/event-article-list";
-
-type DetailPanel = ArticleWorkspacePanel;
-type EventComparisonRow =
-  | { kind: "member"; memberIndex: number; article: EventDetail["articles"][number] }
-  | { kind: "recommended"; eventId: string; event: EventDetail["audits"][number]["candidateEvent"] };
-type EventDetail = {
-  id: string;
-  representativeArticleId: string | null;
-  representativeManual: boolean;
-  articleCount: number;
-  pushedAt: string | null;
-  publicStatus: string;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  audits: Array<{
-    id: string;
-    articleId: string;
-    actor: string;
-    action: string;
-    decisionSource: string;
-    confidence: number | null;
-    evidence: Record<string, unknown>;
-    createdAt: string;
-    candidateEventId: string | null;
-    candidateEvent: {
-      id: string;
-      status: string;
-      articleCount: number;
-      publicStatus: string;
-      pushedAt: string | null;
-      representativeArticle: {
-        title: string;
-        eventKey: string;
-        score: number;
-        brand: string;
-        publishedAt: string | null;
-        createdAt: string;
-        source: { name: string; type: string; publicEnabled: boolean; deleted: boolean };
-      } | null;
-    } | null;
-  }>;
-  articles: Array<{
-    id: string;
-    title: string;
-    url: string;
-    eventKey: string;
-    score: number;
-    relevance: number;
-    eventScore: number | null;
-    contentScore: number | null;
-    aiConfidence: number | null;
-    aiStatus: string;
-    publicStatus: string;
-    publicOverride: string;
-    pushStatus: string;
-    isAd: boolean;
-    brand: string;
-    category: string;
-    clusterStatus: string;
-    publishedAt: string | null;
-    createdAt: string;
-    source: { name: string; type: string; publicEnabled: boolean; deleted: boolean };
-  }>;
-  brandCandidates: Array<{
-    id: string;
-    eventId: string;
-    title: string;
-    url: string;
-    eventKey: string;
-    score: number;
-    relevance: number;
-    brand: string;
-    matchedBrands: string[];
-    publicStatus: string;
-    eventPushedAt: string | null;
-    isEventRepresentative: boolean;
-    publishedAt: string | null;
-    createdAt: string;
-    source: { name: string; type: string; publicEnabled: boolean; deleted: boolean };
-  }>;
-};
-
-const WORKSPACE_ACTION_CLASS = "min-h-7 h-auto max-w-full rounded-none px-2 text-left text-xs font-medium leading-4 whitespace-normal sm:whitespace-nowrap";
-
-const FULL_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-
-function timeLabel(value: string): string {
-  const date = new Date(value);
-  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
-function processingLabel(
-  item: Pick<
-    ArticleListItemDto,
-    "aiStatus" | "fetchStatus" | "skipReason" | "clusterStatus"
-  >,
-): string {
-  if (item.fetchStatus === "failed") return "抓取失败";
-  if (item.fetchStatus === "pending" && item.aiStatus !== "done")
-    return "待抓取";
-  if (item.aiStatus === "failed") return "AI失败";
-  if (item.aiStatus === "skipped" && item.skipReason?.includes("内容不足"))
-    return "正文不足";
-  if (item.aiStatus === "skipped" && isBusinessSkipReason(item.skipReason))
-    return item.skipReason === "无具体事件" ? "分析完成（无具体事件）" : "分析完成（多事件稿）";
-  if (item.aiStatus === "skipped") return "已跳过";
-  if (item.aiStatus === "pending") return "分析中";
-  if (item.clusterStatus === "failed") return "聚类失败";
-  if (item.clusterStatus === "needs_review") return "聚类复核";
-  return "正常";
-}
+import type {
+  ArticleEditorialDraft,
+  ComparisonTarget,
+  DetailPanel,
+  EventDetail,
+  EventOption,
+} from "./intelligence-inbox/types";
+import { useEventCalibrationActions } from "./intelligence-inbox/use-event-calibration-actions";
+import { createEventArticleModels } from "./intelligence-inbox/event-article-models";
+import { errorMessage } from "./intelligence-inbox/utils";
+import { ArticleComparisonDialog } from "./intelligence-inbox/workspace-primitives";
+import { ArticleWorkspaceHeader } from "./intelligence-inbox/article-workspace-header";
+import { ArticleReviewPanel } from "./intelligence-inbox/article-review-panel";
+import { ArticleWorkspaceSupportPanels } from "./intelligence-inbox/article-workspace-support-panels";
+import { EventCalibrationPanel } from "./intelligence-inbox/event-calibration-panel";
+import { createArticleWorkspaceViewModel } from "./intelligence-inbox/workspace-view-model";
 
 
-function clusterLabel(item: ArticleListItemDto): string {
-  if (item.clusterStatus === "pending") return "待聚类";
-  if (item.clusterStatus === "failed") return "聚类失败";
-  if (item.clusterStatus === "needs_review") return "待复核";
-  const count = item.event?.articleCount ?? 1;
-  const representative = item.event?.representativeArticleId === item.id;
-  return count <= 1
-    ? representative
-      ? "单来源·代表"
-      : "单来源"
-    : `${count}来源${representative ? "·代表" : ""}`;
-}
-
-
-function publicResultLabel(
-  item: Pick<ArticleListItemDto, "publicStatus">,
-): string {
-  return item.publicStatus === "published"
-    ? "已公开"
-    : item.publicStatus === "revoked"
-      ? "已撤回"
-      : "未公开";
-}
-
-function publicReasonLabel(reason: string): string {
-  return (
-    (
-      {
-        eligible: "符合公开规则",
-        "ai-not-done": "AI尚未完成",
-        "source-disabled": "来源未开放公开",
-        "manual-hidden": "人工隐藏",
-        "score-below-threshold": "评分低于公开阈值",
-        "ad-hidden": "软文规则隐藏",
-        "event-not-ready": "事件尚未完成聚类",
-        "not-event-representative": "当前文章不是 Event 代表",
-        "not-publicly-eligible": "不符合公开规则",
-      } as Record<string, string>
-    )[reason] ?? "等待公开规则评估"
-  );
-}
-
-function fullTimeLabel(value: string | null | undefined): string {
-  if (!value) return "—";
-  return FULL_DATE_TIME_FORMATTER.format(new Date(value));
-}
-
-function pushStatusLabel(status: string): string {
-  return status === "success"
-    ? "成功"
-    : status === "failed" || status === "failure"
-      ? "失败"
-      : status;
-}
-
-function articlePushStatusLabel(status: string): string {
-  return status === "success"
-    ? "已推送"
-    : status === "partial"
-      ? "部分推送"
-      : status === "failure"
-        ? "推送失败"
-        : "未推送";
-}
-
-function clusterAuditActionLabel(action: string): string {
-  return ({
-    create: "创建事件",
-    attach: "并入事件",
-    fallback_create: "创建待复核事件",
-    representative_change: "调整代表文章",
-    split: "拆分文章",
-    merge: "合并事件",
-    manual_create: "创建独立事件",
-    confirm_independent: "确认独立事件",
-  } as Record<string, string>)[action] ?? action;
-}
-
-function clusterAuditReason(audit: {
-  evidence: Record<string, unknown>;
-}): string {
-  const aiDecision = audit.evidence.aiDecision;
-  const aiReason = aiDecision && typeof aiDecision === "object"
-    ? (aiDecision as { reason?: unknown }).reason
-    : undefined;
-  const reason = aiReason ?? audit.evidence.reason ?? audit.evidence.aiReason;
-  return typeof reason === "string" && reason.trim() && reason !== "无补充理由"
-    ? reason
-    : "";
-}
-
-function stageStatusLabel(stage: "fetch" | "cluster" | "ai", status: string, skipReason?: string | null): string {
-  if (stage === "ai" && status === "skipped" && isBusinessSkipReason(skipReason)) {
-    return skipReason === "无具体事件" ? "已完成（无具体事件）" : "已完成（多事件稿）";
-  }
-  const labels: Record<"fetch" | "cluster" | "ai", Record<string, string>> = {
-    fetch: { pending: "待处理", success: "已完成", failed: "失败" },
-    cluster: { pending: "待聚类", clustered: "已聚类", needs_review: "待复核", failed: "失败" },
-    ai: { pending: "待分析", done: "已完成", skipped: "已跳过", failed: "失败" },
-  };
-  return labels[stage][status] ?? status;
-}
-
-function latestPushTargetLogs(logs: ArticlePushLogDto[]): ArticlePushLogDto[] {
-  const latest = new Map<string, ArticlePushLogDto>();
-  for (const log of logs) {
-    const target = log.webhookTarget || log.webhookRemark || log.id;
-    if (!latest.has(target)) latest.set(target, log);
-  }
-  return [...latest.values()];
-}
-
-function manualFieldLabel(field: string): string {
-  return (
-    {
-      summary: "AI 洞察",
-      brand: "品牌",
-      category: "分类",
-      eventSubjects: "事件主体",
-      eventAction: "事件行为",
-      eventObject: "具体事项",
-      keyPoints: "核心要点",
-      relevance: "相关度",
-      eventScore: "事件分",
-      contentScore: "内容分",
-      adProbability: "广告概率",
-      isAd: "内容判断",
-    } as Record<string, string>
-  )[field] ?? field;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 export interface IntelligenceInboxProps {
   articleId?: string | null;
@@ -337,23 +75,9 @@ export default function IntelligenceInbox({
   const [selectedSplitIds, setSelectedSplitIds] = useState<Set<string>>(() => new Set());
   const [mergeTargetId, setMergeTargetId] = useState("");
   const [eventSearch, setEventSearch] = useState("");
-  const [eventOptions, setEventOptions] = useState<
-    Array<{
-      id: string;
-      articleCount: number;
-      lastSeenAt: string;
-      publicStatus: string;
-      pushedAt: string | null;
-      representativeArticle: {
-        title: string;
-        score: number;
-        relevance: number;
-        publishedAt: string | null;
-        source: { name: string };
-      } | null;
-    }>
-  >([]);
-  const [draft, setDraft] = useState({
+  const [comparisonTarget, setComparisonTarget] = useState<ComparisonTarget | null>(null);
+  const [eventOptions, setEventOptions] = useState<EventOption[]>([]);
+  const [draft, setDraft] = useState<ArticleEditorialDraft>({
     summary: "",
     brand: "",
     category: "",
@@ -362,20 +86,11 @@ export default function IntelligenceInbox({
     eventObject: "",
     keyPoints: "",
   });
-  const clusterPanelRef = useRef<HTMLDivElement>(null);
-  const contentPanelRef = useRef<HTMLDivElement>(null);
   const rowWriteQueue = useRef<Promise<void>>(Promise.resolve());
   const rowSavingRef = useRef<string | null>(null);
   const eventDetailRequestRef = useRef(0);
   const eventSearchRequestRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
-  const initialPanelRef = useRef<DetailPanel | null>(initialPanel);
-  const eventSourceHeaderRef = useRef<HTMLTableCellElement>(null);
-  const [eventSourceColumnWidth, setEventSourceColumnWidth] = useState(88);
-
-  useEffect(() => {
-    initialPanelRef.current = initialPanel;
-  }, [initialPanel]);
 
   useEffect(() => {
     setSelectedId(articleId);
@@ -387,6 +102,7 @@ export default function IntelligenceInbox({
     setEventSearch("");
     setMergeTargetId("");
     setSelectedSplitIds(new Set());
+    setComparisonTarget(null);
   }, [articleId]);
 
   useEffect(() => {
@@ -448,7 +164,9 @@ export default function IntelligenceInbox({
 
   useEffect(() => {
     if (!detail || detail.id !== selectedId || !requestedPanel) return;
-    if (requestedPanel === "content") setShowFullContent(true);
+    if (requestedPanel === "content") {
+      setShowFullContent(true);
+    }
     // 面板入口只控制展开状态，不改变抽屉当前滚动位置；所有文章详情统一从顶部开始。
   }, [detail, requestedPanel, selectedId]);
 
@@ -513,277 +231,26 @@ export default function IntelligenceInbox({
     setEventSearch("");
     setMergeTargetId("");
     setSelectedSplitIds(new Set());
+    setComparisonTarget(null);
   }, [detail?.eventId]);
 
-  const setRepresentative = async (articleId: string) => {
-    if (!detail?.eventId || eventAction) return;
-    setEventAction("representative");
-    try {
-      const response = await fetch(
-        `/api/events/${encodeURIComponent(detail.eventId)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ representativeArticleId: articleId }),
-        },
-      );
-      if (!response.ok)
-        throw new Error(
-          ((await response.json().catch(() => ({}))) as { error?: string })
-            .error || "指定代表文章失败",
-        );
-      const updated = await refreshArticleDetail(detail.id);
-      await refreshSelectedEvent(updated);
-      refreshAfterMutation();
-      toast.success("代表文章已更新");
-    } catch (error) {
-      toast.error(errorMessage(error, "指定代表文章失败"));
-    } finally {
-      setEventAction(null);
-    }
-  };
-
-  const splitArticles = async (articleIds: string[]) => {
-    if (
-      !detail?.eventId ||
-      eventAction ||
-      articleIds.length === 0 ||
-      articleIds.length >= (eventDetail?.articleCount ?? 0)
-    )
-      return;
-    const titles = eventDetail?.articles
-      .filter((article) => articleIds.includes(article.id))
-      .map((article) => article.title) ?? [];
-    if (!window.confirm(`将 ${articleIds.length} 篇文章拆为一个新的独立 Event：\n${titles.slice(0, 3).join("\n")}${titles.length > 3 ? `\n等 ${titles.length} 篇` : ""}\n\n历史推送不会撤回，新 Event 默认不会补推。确认继续吗？`)) return;
-    setEventAction(`split:${articleIds.join(",")}`);
-    try {
-      const response = await fetch(
-        `/api/events/${encodeURIComponent(detail.eventId)}/split`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ articleIds }),
-        },
-      );
-      if (!response.ok)
-        throw new Error(
-          ((await response.json().catch(() => ({}))) as { error?: string })
-            .error || "拆分事件失败",
-        );
-      for (const articleId of articleIds) {
-        if (articleId !== detail.id) invalidateArticleDetailCache(articleId);
-      }
-      setSelectedSplitIds(new Set());
-      const updated = await refreshArticleDetail(detail.id);
-      await refreshSelectedEvent(updated);
-      refreshAfterMutation();
-      toast.success(`${articleIds.length} 篇文章已拆分为新事件，默认不会补推`);
-    } catch (error) {
-      toast.error(errorMessage(error, "拆分事件失败"));
-    } finally {
-      setEventAction(null);
-    }
-  };
-
-  const splitArticle = async (articleId: string) => splitArticles([articleId]);
-
-  const mergeCurrentEvent = async () => {
-    if (!detail?.eventId || !mergeTargetId.trim() || eventAction) return;
-    const target = eventOptions.find((event) => event.id === mergeTargetId.trim());
-    if (!window.confirm(`将当前整个 Event（${eventDetail?.articleCount ?? 0} 篇）合并到：\n${target?.representativeArticle?.title || mergeTargetId.trim()}\n\n当前 Event 会停止独立展示，历史推送不会撤回。确认继续吗？`)) return;
-    setEventAction("merge");
-    try {
-      const response = await fetch("/api/events/merge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceEventId: detail.eventId,
-          targetEventId: mergeTargetId.trim(),
-        }),
-      });
-      if (!response.ok)
-        throw new Error(
-          ((await response.json().catch(() => ({}))) as { error?: string })
-            .error || "合并事件失败",
-        );
-      setMergeTargetId("");
-      const updated = await refreshArticleDetail(detail.id);
-      await refreshSelectedEvent(updated);
-      refreshAfterMutation();
-      toast.success("事件已合并，不会补推或撤回历史消息");
-    } catch (error) {
-      toast.error(errorMessage(error, "合并事件失败"));
-    } finally {
-      setEventAction(null);
-    }
-  };
-
-  const searchEvents = async (query = eventSearch) => {
-    if (!detail?.eventId) return;
-    const requestId = ++eventSearchRequestRef.current;
-    try {
-      const response = await fetch(
-        `/api/events/search?q=${encodeURIComponent(query)}&excludeEventId=${encodeURIComponent(detail.eventId)}`,
-      );
-      if (!response.ok) throw new Error("事件搜索失败");
-      const result = await response.json();
-      if (requestId !== eventSearchRequestRef.current) return;
-      setEventOptions(result);
-    } catch (error) {
-      if (requestId !== eventSearchRequestRef.current) return;
-      toast.error(errorMessage(error, "事件搜索失败"));
-    }
-  };
-
-  const moveCurrentArticleToEvent = async (
-    targetEventId: string,
-    targetLabel: string,
-    actionKey = "move",
-  ) => {
-    if (!detail?.eventId || eventAction || !targetEventId) return;
-    if (!window.confirm(`将当前文章并入目标 Event：\n${detail.title}\n\n目标 Event 参考文章：${targetLabel}\n\n仅移动当前文章，目标 Event 的其他文章不变；两边的代表文章和公开状态会自动重新计算。确认继续吗？`)) return;
-    setEventAction(actionKey);
-    try {
-      const response = await fetch(
-        `/api/events/${encodeURIComponent(detail.eventId)}/move`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ articleId: detail.id, targetEventId }),
-        },
-      );
-      if (!response.ok)
-        throw new Error(
-          ((await response.json().catch(() => ({}))) as { error?: string })
-            .error || "移动文章失败",
-        );
-      setEventOptions([]);
-      setEventSearch("");
-      const updated = await refreshArticleDetail(detail.id);
-      await refreshSelectedEvent(updated);
-      refreshAfterMutation();
-      toast.success("当前文章已并入目标 Event");
-    } catch (error) {
-      toast.error(errorMessage(error, "移动文章失败"));
-    } finally {
-      setEventAction(null);
-    }
-  };
-
-  const moveCurrentArticle = async (targetEventId: string) => {
-    const target = eventOptions.find((event) => event.id === targetEventId);
-    await moveCurrentArticleToEvent(
-      targetEventId,
-      target?.representativeArticle?.title || targetEventId,
-    );
-  };
-
-  const moveBrandCandidate = async (candidate: EventDetail["brandCandidates"][number]) => {
-    if (!detail?.eventId || !eventDetail || eventAction) return;
-    if (!window.confirm(`将候选文章移入当前 Event：\n${candidate.title}\n\n仅移动这一篇候选文章，当前 Event 将新增 1 篇成员；两边的代表文章和公开状态会自动重新计算。确认继续吗？`)) return;
-    setEventAction(`move-candidate:${candidate.id}`);
-    try {
-      const response = await fetch(
-        `/api/events/${encodeURIComponent(candidate.eventId)}/move`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ articleId: candidate.id, targetEventId: eventDetail.id }),
-        },
-      );
-      if (!response.ok)
-        throw new Error(
-          ((await response.json().catch(() => ({}))) as { error?: string })
-            .error || "移动同品牌候选失败",
-        );
-      const updated = await refreshArticleDetail(detail.id);
-      await refreshSelectedEvent(updated);
-      refreshAfterMutation();
-      toast.success("同品牌候选已移入当前 Event");
-    } catch (error) {
-      toast.error(errorMessage(error, "移动同品牌候选失败"));
-    } finally {
-      setEventAction(null);
-    }
-  };
-
-  const moveCurrentArticleToBrandEvent = async (candidate: EventDetail["brandCandidates"][number]) => {
-    if (!detail?.eventId || !eventDetail || eventAction) return;
-    await moveCurrentArticleToEvent(
-      candidate.eventId,
-      candidate.title,
-      `move-current-brand:${candidate.id}`,
-    );
-  };
-
-  const confirmIndependent = async () => {
-    if (!detail?.eventId || eventAction) return;
-    setEventAction("confirm");
-    try {
-      const response = await fetch(
-        `/api/events/${encodeURIComponent(detail.eventId)}/confirm-independent`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ articleId: detail.id }),
-        },
-      );
-      if (!response.ok)
-        throw new Error(
-          ((await response.json().catch(() => ({}))) as { error?: string })
-            .error || "确认失败",
-        );
-      const updated = await refreshArticleDetail(detail.id);
-      await refreshSelectedEvent(updated);
-      refreshAfterMutation();
-      toast.success("已确认这是独立事件");
-    } catch (error) {
-      toast.error(errorMessage(error, "确认失败"));
-    } finally {
-      setEventAction(null);
-    }
-  };
-
-  const pushCurrentEvent = async (mode: "manual" | "repush") => {
-    if (!detail?.eventId || !eventDetail || eventAction) return;
-    const actionLabel = mode === "repush" ? "完整重新推送" : "强制推送";
-    if (
-      !window.confirm(
-        `${actionLabel}：${detail.title}\n事件共 ${eventDetail.articleCount} 个来源${eventDetail.pushedAt ? `，上次推送 ${timeLabel(eventDetail.pushedAt)}` : ""}。${mode === "manual" ? "本次会绕过评分、相关度和自动推送开关，但仍要求聚类及 AI 已完成。" : "本次会向全部启用目标再次发送。"}确认继续吗？`,
-      )
-    )
-      return;
-    setEventAction("push");
-    try {
-      const response = await fetch(
-        `/api/events/${encodeURIComponent(detail.eventId)}/push`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode }),
-        },
-      );
-      const result = (await response.json().catch(() => ({}))) as {
-        message?: string;
-      };
-      if (!response.ok) throw new Error(result.message || "事件推送失败");
-      toast.success(result.message || `${actionLabel}完成`);
-      if (selectedIdRef.current === detail.id) {
-        const updated = await refreshArticleDetail(detail.id);
-        await refreshSelectedEvent(updated);
-      }
-      refreshAfterMutation();
-    } catch (error) {
-      toast.error(errorMessage(error, "事件推送失败"));
-    } finally {
-      setEventAction(null);
-    }
-  };
+  const {
+    confirmIndependent, mergeCurrentEvent, moveBrandCandidate, moveCurrentArticle,
+    moveCurrentArticleToBrandEvent, moveCurrentArticleToEvent, pushCurrentEvent,
+    searchEvents, setRepresentative, splitArticle, splitArticles,
+  } = useEventCalibrationActions({
+    detail, eventDetail, eventAction, eventOptions, mergeTargetId, eventSearch,
+    eventSearchRequestRef, selectedIdRef, setEventAction, setEventOptions,
+    setMergeTargetId, setEventSearch, setSelectedSplitIds, refreshArticleDetail,
+    refreshSelectedEvent, refreshAfterMutation,
+  });
 
   const recommendedAudit = eventDetail?.audits.find(
     (audit) =>
       audit.articleId === detail?.id &&
       audit.actor === "system" &&
+      (audit.action === "create" || audit.action === "fallback_create") &&
+      audit.candidateEventId !== eventDetail?.id &&
       audit.candidateEvent?.status === "active",
   ) ?? null;
   const recommendedEventId = recommendedAudit?.candidateEventId ?? null;
@@ -797,7 +264,7 @@ export default function IntelligenceInbox({
         return next;
       }
       if (eventDetail && next.size + 1 >= eventDetail.articleCount) {
-        toast.info("至少保留一篇文章在当前 Event");
+        toast.info("当前事件至少需要保留一篇文章");
         return current;
       }
       next.add(articleId);
@@ -810,6 +277,10 @@ export default function IntelligenceInbox({
     if (panel !== undefined) setRequestedPanel(panel);
     onArticleChange?.(nextArticleId, panel);
   }, [onArticleChange]);
+
+  const updateDraft = useCallback((patch: Partial<ArticleEditorialDraft>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  }, []);
 
   const patchRow = useCallback((updated: ArticleDetailDto) => {
     setDetail((current) => (current?.id === updated.id ? updated : current));
@@ -844,6 +315,19 @@ export default function IntelligenceInbox({
     },
     [patchRow, refreshAfterMutation, refreshSelectedEvent],
   );
+
+  const changePublicOverride = (next: "auto" | "public" | "hidden") => {
+    if (!detail || rowSavingId === detail.id || next === detail.publicOverride) return;
+    if (
+      next === "hidden" &&
+      !window.confirm("确认隐藏文章？\n\n该操作会强制覆盖自动公开策略；如果当前文章是事件代表，事件公开状态会立即重新计算。")
+    ) return;
+    queueRowUpdate(
+      detail.id,
+      { publicOverride: next },
+      next === "hidden" ? "文章已隐藏" : next === "public" ? "已设为强制公开" : "已恢复自动公开策略",
+    );
+  };
 
   const saveEditorial = async () => {
     if (!selectedId || detail?.id !== selectedId) return;
@@ -886,15 +370,20 @@ export default function IntelligenceInbox({
     }
   };
 
-  const startWorkflow = async (startAt: "process" | "ai") => {
+  const startWorkflow = async (startAt: "process" | "ai" | "cluster") => {
     if (!detail || detailAction) return;
-    const label =
-      startAt === "process" ? "重新获取全文并重跑" : "重新生成 AI 结果";
+    const label = startAt === "process"
+      ? "重新获取全文并重跑"
+      : startAt === "ai"
+        ? "重新生成 AI 结果"
+        : "自动建立独立事件";
     if (
       !window.confirm(
         startAt === "process"
-          ? "当前 Event 归属和 AI 结果将被重置，并从全文获取开始连续重跑。确认继续吗？"
-          : "将重新生成 AI 结果，人工覆盖字段会保留。确认继续吗？",
+          ? "当前事件归属和 AI 结果将被重置，并从全文获取开始连续重跑。确认继续吗？"
+          : startAt === "ai"
+            ? "将重新生成 AI 结果，人工覆盖字段会保留。确认继续吗？"
+            : "将按当前 AI 结果重新计算事件归属；没有完整事件身份的文章会自动建立独立 Event，不再进入人工复核。确认继续吗？",
       )
     )
       return;
@@ -915,160 +404,17 @@ export default function IntelligenceInbox({
     }
   };
 
-  const manualOverridesValue = detail?.manualOverrides;
-  const keyPointsValue = detail?.keyPoints;
-  const brandValue = detail?.brand;
-  const pushLogsValue = detail?.pushLogs;
-  const cleanContentValue = detail?.cleanContent;
-  const eventAuditsValue = eventDetail?.audits;
-  const manualOverrides = useMemo(
-    () => manualOverridesValue ? parseManualOverrides(manualOverridesValue) : [],
-    [manualOverridesValue],
+  const workspace = useMemo(
+    () => detail ? createArticleWorkspaceViewModel(detail, eventDetail) : null,
+    [detail, eventDetail],
   );
-  const keyPoints = useMemo(
-    () => keyPointsValue ? parseJsonArray(keyPointsValue) : [],
-    [keyPointsValue],
-  );
-  const brands = useMemo(
-    () => brandValue ? splitBrands(brandValue) : [],
-    [brandValue],
-  );
-  const latestPushLogs = useMemo(
-    () => pushLogsValue ? latestPushTargetLogs(pushLogsValue) : [],
-    [pushLogsValue],
-  );
-  const cleanContentText = useMemo(
-    () => cleanContentValue ? stripHtml(cleanContentValue) : "",
-    [cleanContentValue],
-  );
-  const currentEventAudits = useMemo(
-    () => eventAuditsValue ?? [],
-    [eventAuditsValue],
-  );
-  const eventMembers = useMemo(() => {
-    const articles = eventDetail?.articles ?? [];
-    return [...articles].sort((left, right) => {
-      const leftTime = new Date(left.publishedAt || left.createdAt).getTime();
-      const rightTime = new Date(right.publishedAt || right.createdAt).getTime();
-      return rightTime - leftTime;
-    });
-  }, [eventDetail]);
-  const brandCandidates = eventDetail?.brandCandidates ?? [];
-  const eventComparisonRows = useMemo<EventComparisonRow[]>(() => {
-    const rows: EventComparisonRow[] = eventMembers.map((article, index) => ({
-      kind: "member",
-      memberIndex: index + 1,
-      article,
-    }));
-    if (recommendedEventId && recommendedEvent?.representativeArticle) {
-      rows.push({
-        kind: "recommended",
-        eventId: recommendedEventId,
-        event: recommendedEvent,
-      });
-    }
-    return rows;
-  }, [eventMembers, recommendedEvent, recommendedEventId]);
-  const eventComparisonModels: EventArticleRowModel[] = eventComparisonRows.map((row) => {
-    if (row.kind === "recommended") {
-      const article = row.event?.representativeArticle;
-      return {
-        id: `recommended:${row.eventId}`,
-        index: "推荐",
-        time: article ? timeLabel(article.publishedAt || article.createdAt) : "—",
-        score: article?.score ?? "—",
-        source: article?.source.name || "—",
-        title: article?.title || `Event ${row.eventId.slice(-8)}`,
-        representative: <span className="bg-foreground px-1 py-0.5 text-background">推荐代表</span>,
-        brand: article?.brand ? splitBrands(article.brand).join(" / ") : "—",
-        eventKey: article?.eventKey || "—",
-        sourceStatus: !article ? "—" : article.source.deleted ? "已删除" : article.source.publicEnabled ? "可公开" : "不公开",
-        publicStatus: row.event?.publicStatus === "published" ? "已公开" : "未公开",
-        pushStatus: row.event?.pushedAt ? "已推送" : "未推送",
-        actions: <Button size="sm" variant="outline" className="h-7 rounded-none border-sky-400 px-2 text-xs text-sky-800 hover:bg-sky-100" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(row.eventId)}>并入当前 Event</Button>,
-        tone: "recommended",
-      };
-    }
-    const article = row.article;
-    const representative = eventDetail?.representativeArticleId === article.id;
-    const selected = selectedSplitIds.has(article.id);
-    return {
-      id: article.id,
-      index: row.memberIndex,
-      time: timeLabel(article.publishedAt || article.createdAt),
-      score: article.score,
-      source: article.source.name,
-      title: article.title,
-      representative: representative ? <span className="bg-foreground px-1 py-0.5 text-background">当前代表</span> : "—",
-      brand: article.brand ? splitBrands(article.brand).join(" / ") : "—",
-      eventKey: article.eventKey || "—",
-      sourceStatus: article.source.deleted ? "已删除" : article.source.publicEnabled ? "可公开" : "不公开",
-      publicStatus: article.publicStatus === "published" ? "已公开" : "未公开",
-      pushStatus: articlePushStatusLabel(article.pushStatus),
-      selection: <input type="checkbox" aria-label={`选择拆分 ${article.title}`} checked={selected} disabled={(eventDetail?.articleCount ?? 0) <= 1 || eventAction !== null} onChange={() => toggleSplitSelection(article.id)} />,
-      actions: <>
-        {!representative && <Button size="sm" variant="ghost" className="h-7 rounded-none px-2 text-xs" disabled={eventAction !== null || article.clusterStatus !== "clustered" || article.aiStatus !== "done" || article.source.deleted} onClick={() => void setRepresentative(article.id)}>设为代表</Button>}
-        {!representative && (eventDetail?.articleCount ?? 0) > 1 && <Button size="sm" variant="ghost" className="h-7 rounded-none px-2 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticle(article.id)}>单独拆分</Button>}
-      </>,
-      tone: "member",
-      highlight: article.id === detail?.id ? "current" : selected ? "selected" : representative ? "representative" : undefined,
-      onTitleClick: () => selectArticle(article.id, "cluster"),
-    };
+  const brandCandidates = workspace?.brandCandidates ?? [];
+  const { brandCandidateModels, eventMemberModels, recommendedEventModels } = createEventArticleModels({
+    detail, eventDetail, eventMembers: workspace?.eventMembers ?? [], brandCandidates, selectedSplitIds, eventAction,
+    recommendedEventId, recommendedEvent, recommendedAudit,
+    setComparisonTarget, setRepresentative, splitArticle, toggleSplitSelection,
+    moveCurrentArticleToEvent, moveBrandCandidate, moveCurrentArticleToBrandEvent, selectArticle,
   });
-  const brandCandidateModels: EventArticleRowModel[] = brandCandidates.map((candidate, index) => {
-    const articleBrands = candidate.brand ? splitBrands(candidate.brand).join(" / ") : "—";
-    const matchedBrands = candidate.matchedBrands.join(" / ") || "—";
-    const brandLabel = matchedBrands === "—" || matchedBrands === articleBrands
-      ? articleBrands
-      : `${articleBrands} · 匹配 ${matchedBrands}`;
-    return {
-      id: `brand:${candidate.id}`,
-      index: index + 1,
-      time: timeLabel(candidate.publishedAt || candidate.createdAt),
-      score: candidate.score,
-      source: candidate.source.name,
-      title: candidate.title,
-      titleClassName: "text-amber-950",
-      representative: candidate.isEventRepresentative ? <span className="bg-foreground px-1 py-0.5 text-background">其他 Event 代表</span> : "—",
-      brand: brandLabel,
-      eventKey: candidate.eventKey || "—",
-      sourceStatus: candidate.source.deleted ? "已删除" : candidate.source.publicEnabled ? "可公开" : "不公开",
-      publicStatus: candidate.publicStatus === "published" ? "已公开" : "未公开",
-      pushStatus: candidate.eventPushedAt ? "已推送" : "未推送",
-      actions: <>
-        <Button size="sm" variant="outline" className="h-7 rounded-none border-amber-400 px-2 text-xs text-amber-800 hover:bg-amber-100" title="将这篇候选文章移入当前文章所属 Event" disabled={eventAction !== null} onClick={() => void moveBrandCandidate(candidate)}>候选移入当前</Button>
-        <Button size="sm" variant="ghost" className="h-7 rounded-none px-2 text-xs text-sky-800 hover:bg-sky-100" title="将当前文章移入这篇文章所属 Event" disabled={eventAction !== null} onClick={() => void moveCurrentArticleToBrandEvent(candidate)}>本篇移入该 Event</Button>
-      </>,
-      tone: "brand",
-      onTitleClick: () => selectArticle(candidate.id, "cluster"),
-    };
-  });
-  useEffect(() => {
-    const element = eventSourceHeaderRef.current;
-    if (!element) return;
-    const updateWidth = () => {
-      const width = Math.round(element.getBoundingClientRect().width);
-      setEventSourceColumnWidth((current) => current === width ? current : width);
-    };
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [eventDetail]);
-  const eventSourceCount = new Set(eventMembers.map((article) => article.source.name)).size;
-  const clickRate = detail && detail.viewCount > 0
-    ? Math.round((detail.originalClickCount / detail.viewCount) * 100)
-    : 0;
-  const isRepresentative = Boolean(
-    detail && detail.event?.representativeArticleId === detail.id,
-  );
-  const canForcePush = Boolean(
-    detail &&
-      eventDetail &&
-      isRepresentative &&
-      detail.clusterStatus === "clustered" &&
-      detail.aiStatus === "done",
-  );
   const detailWorkspace = detailLoading ? (
     <div className="space-y-2 p-3 lg:p-4">
       <Skeleton className="h-28 w-full rounded-none" />
@@ -1077,186 +423,115 @@ export default function IntelligenceInbox({
         <Skeleton className="h-[520px] w-full rounded-none" />
       </div>
     </div>
-  ) : detail ? (
-    <ScrollArea className="h-full w-full min-w-0 overscroll-contain">
-      <div className="mx-auto w-full min-w-0 max-w-[960px] space-y-1 p-1 sm:p-1.5">
-        <header className="min-w-0 overflow-hidden border bg-background">
-          <div>
-            <div className="min-w-0 p-2.5 pr-12 sm:pr-10">
-              <div className="mt-1 flex flex-col gap-1">
-                <div className="flex items-start justify-between gap-4">
-                  <h1 className="min-w-0 flex-1 break-words text-base font-semibold leading-5 text-balance sm:text-lg sm:leading-6">{detail.title}</h1>
-                </div>
-                {(brands.length > 0 || detail.category || detail.eventKey) && <div className="mt-2 grid min-w-0 grid-cols-2 gap-px border bg-border text-xs lg:grid-cols-4">
-                  <DetailMetaItem label="时间" value={fullTimeLabel(detail.publishedAt ?? detail.createdAt)} mono />
-                  <DetailMetaItem label="来源" value={`${detail.source.name}${detail.originalSource && detail.originalSource !== detail.source.name ? `（原始：${detail.originalSource}）` : ""}`} />
-                  <DetailMetaItem label="状态" value={`${processingLabel(detail)} · ${clusterLabel(detail)}${isRepresentative ? " · 代表文章" : ""}${manualOverrides.length > 0 ? ` · 人工修正${manualOverrides.length}项` : ""}`} />
-                  <DetailMetaItem label="品牌" value={brands.join("、") || "—"} />
-                  <DetailMetaItem label="分类" value={detail.category || "—"} />
-                  <DetailMetaItem label="事件键" value={`${detail.eventKey || "—"}${detail.eventKeyConfidence == null ? "" : `（${detail.eventKeyConfidence}%）`}`} mono />
-                  <DetailMetaItem label="总分" value={String(detail.score)} mono />
-                  <DetailMetaItem label="分析置信" value={detail.aiConfidence == null ? "—" : `${detail.aiConfidence}%`} mono />
-                  <DetailMetaItem label="相关度" value={String(detail.relevance)} mono />
-                  <DetailMetaItem label="事件分" value={detail.eventScore == null ? "—" : String(detail.eventScore)} mono />
-                  <DetailMetaItem label="内容分" value={detail.contentScore == null ? "—" : String(detail.contentScore)} mono />
-                  <DetailMetaItem label="广告概率" value={detail.adProbability == null ? "—" : `${detail.adProbability}%`} mono />
-                  <DetailMetaItem label="内容" value={detail.isAd ? "软文" : "正常"} />
-                </div>}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-1 border-t pt-2">
-                <Button size="sm" variant="outline" className={WORKSPACE_ACTION_CLASS} disabled={detailAction !== null} onClick={() => setEditing((value) => !value)}>{editing ? "取消编辑" : "人工编辑"}</Button>
-                <a className={`inline-flex items-center border bg-background hover:bg-muted ${WORKSPACE_ACTION_CLASS}`} href={detail.url} target="_blank" rel="noreferrer">查看原文</a>
-                <Button size="sm" variant="outline" className={WORKSPACE_ACTION_CLASS} disabled={detailAction !== null} onClick={() => void startWorkflow("ai")}>重新生成 AI</Button>
-                <Button size="sm" variant="outline" className={WORKSPACE_ACTION_CLASS} disabled={detailAction !== null} onClick={() => void startWorkflow("process")}>重新抓取并全量重跑</Button>
-                {isRepresentative && <Button size="sm" variant="outline" className={`${WORKSPACE_ACTION_CLASS} border-amber-500 text-amber-700 hover:bg-amber-50`} disabled={rowSavingId === detail.id} onClick={() => queueRowUpdate(detail.id, { publicOverride: detail.publicStatus === "published" ? "hidden" : "public" }, detail.publicStatus === "published" ? "已强制隐藏" : "已强制公开")}>{detail.publicStatus === "published" ? "强制隐藏" : "强制公开"}</Button>}
-                {canForcePush && <Button size="sm" variant="outline" className={`${WORKSPACE_ACTION_CLASS} border-amber-500 text-amber-700 hover:bg-amber-50`} disabled={eventAction !== null} onClick={() => void pushCurrentEvent(eventDetail?.pushedAt ? "repush" : "manual")}>{eventDetail?.pushedAt ? "再次推送" : "强制推送"}</Button>}
-              </div>
-            </div>
-          </div>
-        </header>
+  ) : detail && workspace ? (
+    <ScrollArea className="h-full w-full min-w-0 overscroll-contain [&>[data-radix-scroll-area-viewport]]:overflow-x-hidden">
+      <div className="mx-auto w-full min-w-0 max-w-[1080px] space-y-2 bg-muted/20 p-0 sm:p-2">
+        <ArticleWorkspaceHeader
+          detail={detail}
+          brands={workspace.brands}
+          manualOverrides={workspace.manualOverrides}
+          clickRate={workspace.clickRate}
+          isRepresentative={workspace.isRepresentative}
+          currentConclusion={workspace.currentConclusion}
+          detailActionPending={detailAction !== null}
+          editing={editing}
+          onToggleEditing={() => setEditing((value) => !value)}
+        />
 
-        <div className="min-w-0 space-y-1">
-          <main className="min-w-0 space-y-1">
-            <section ref={contentPanelRef} className="min-w-0 scroll-mt-3 border bg-background">
-              <div className="grid items-center gap-2 border-b px-2 py-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                <div className="flex min-w-0 items-center gap-2">
-                  {keyPoints.length > 0 && <h3 className="text-xs font-semibold">核心要点</h3>}
-                  <span className="ml-auto text-xs text-muted-foreground">{detail.aiStatus === "done" ? "分析完成" : processingLabel(detail)}</span>
-                </div>
-                <h2 className="text-xs font-semibold lg:border-l lg:pl-4">AI 洞察</h2>
-              </div>
-              <div className="min-w-0 grid gap-x-3 gap-y-1.5 p-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                <div className="min-w-0 max-w-full overflow-hidden">
-                  {keyPoints.length > 0 ? <ol className="space-y-1 text-xs leading-5">{keyPoints.map((point, index) => <li key={`${point}-${index}`} className="grid min-w-0 grid-cols-[20px_minmax(0,1fr)] gap-1.5"><span className="font-mono text-xs font-semibold tabular-nums text-muted-foreground">{String(index + 1).padStart(2, "0")}</span><span className="min-w-0 break-all">{point}</span></li>)}</ol> : <p className="break-words text-xs leading-5 text-pretty text-muted-foreground">暂无要点</p>}
-                </div>
-                <div className="min-w-0 max-w-full overflow-hidden lg:border-l lg:pl-4">
-                  <p className="max-w-full whitespace-normal break-words pr-1 text-xs leading-5 lg:max-h-[104px] lg:overflow-x-hidden lg:overflow-y-auto">{detail.summary || detail.excerpt || "暂无 AI 洞察"}</p>
-                </div>
-              </div>
-            </section>
-
-            {editing && <section className="grid gap-2 border bg-background p-3 sm:grid-cols-2"><label className="space-y-1 text-xs">品牌<Input className="h-8 rounded-none text-xs" value={draft.brand} onChange={(event) => setDraft((value) => ({ ...value, brand: event.target.value }))} /></label><label className="space-y-1 text-xs">分类<Input className="h-8 rounded-none text-xs" value={draft.category} onChange={(event) => setDraft((value) => ({ ...value, category: event.target.value }))} /></label><label className="space-y-1 text-xs">事件主体（多个主体用逗号分隔）<Input className="h-8 rounded-none text-xs" value={draft.eventSubjects} onChange={(event) => setDraft((value) => ({ ...value, eventSubjects: event.target.value }))} /></label><label className="space-y-1 text-xs">事件行为（保留计划/正式/完成等阶段）<Input className="h-8 rounded-none text-xs" value={draft.eventAction} onChange={(event) => setDraft((value) => ({ ...value, eventAction: event.target.value }))} /></label><label className="space-y-1 text-xs sm:col-span-2">具体事项<Input className="h-8 rounded-none text-xs" value={draft.eventObject} onChange={(event) => setDraft((value) => ({ ...value, eventObject: event.target.value }))} /></label><label className="space-y-1 text-xs sm:col-span-2">AI 洞察<Textarea value={draft.summary} onChange={(event) => setDraft((value) => ({ ...value, summary: event.target.value }))} className="min-h-24 rounded-none text-xs" /></label><label className="space-y-1 text-xs sm:col-span-2">核心要点（每行一条）<Textarea value={draft.keyPoints} onChange={(event) => setDraft((value) => ({ ...value, keyPoints: event.target.value }))} className="min-h-24 rounded-none text-xs" /></label><Button size="sm" className="h-8 rounded-none text-xs sm:col-span-2" disabled={detailAction !== null} onClick={() => void saveEditorial()}>{detailAction === "edit" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}保存人工修正</Button></section>}
-
+        <div className="min-w-0 space-y-2">
+          <main className="min-w-0 space-y-2">
+            <ArticleReviewPanel
+              detail={detail}
+              keyPoints={workspace.keyPoints}
+              releaseStatus={workspace.releaseStatus}
+              pushSummary={workspace.pushSummary}
+              releaseGateMessage={workspace.releaseGateMessage}
+              isRepresentative={workspace.isRepresentative}
+              canForcePush={workspace.canForcePush}
+              eventPushedAt={eventDetail?.pushedAt}
+              rowSaving={rowSavingId === detail.id}
+              eventActionPending={eventAction !== null}
+              detailAction={detailAction}
+              editing={editing}
+              draft={draft}
+              onChangePublicOverride={changePublicOverride}
+              onPushEvent={(mode) => void pushCurrentEvent(mode)}
+              onStartWorkflow={(startAt) => void startWorkflow(startAt)}
+              onDraftChange={updateDraft}
+              onSaveEditorial={() => void saveEditorial()}
+            />
           </main>
 
-          <aside className="min-w-0 space-y-1">
-            <section className="border bg-background">
-              <SectionHeader title="公开控制" />
-              <div className="space-y-1 p-2">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                  <span className="text-muted-foreground">公开策略</span>
-                  <select aria-label="人工公开策略" disabled={rowSavingId === detail.id} value={detail.publicOverride} onChange={(event) => queueRowUpdate(detail.id, { publicOverride: event.target.value as "auto" | "public" | "hidden" }, "公开策略已更新")} className="h-7 rounded-none border bg-background px-1.5 text-xs"><option value="auto">自动</option><option value="public">强制公开</option><option value="hidden">强制隐藏</option></select>
-                  <span className="text-muted-foreground">结果</span>
-                  <span className={`font-medium ${detail.publicStatus === "published" ? "text-emerald-700" : "text-amber-700"}`}>{publicResultLabel(detail)}</span>
-                  <span className="text-muted-foreground">· {detail.publicStatus === "published" ? "已通过当前公开规则" : publicReasonLabel(detail.publicPublicationReason)}</span>
-                </div>
-              </div>
-            </section>
-
-            {eventDetail && (
-              <section ref={clusterPanelRef} className="min-w-0 scroll-mt-3 bg-background">
-                <SectionHeader title="Event 校准" meta={`${eventDetail.articleCount} 篇 · ${eventSourceCount} 个来源`} />
-                <div className="space-y-1.5 p-2">
-
-                  {detail.clusterStatus === "needs_review" && <div className="grid gap-1.5 border border-amber-300 bg-amber-50 p-2"><p className="text-xs font-medium text-amber-950">当前聚类存在歧义。完成复核前，本篇不能成为代表、公开或推送。</p><div className="flex flex-wrap gap-1"><Button size="sm" className="h-7 rounded-none px-1.5 text-xs" disabled={eventAction !== null} onClick={() => void confirmIndependent()}>确认独立事件</Button></div></div>}
-
-                  <div className="pt-1">
-                    <div className="mb-1.5 flex items-center gap-2">
-                      <div><p className="text-xs font-semibold">事件成员对比</p><p className="text-xs text-muted-foreground">勾选当前成员可批量拆分，至少保留一篇；同品牌文章已移至下方单独查看。</p></div>
-                      {selectedSplitIds.size > 0 && <Button size="sm" variant="outline" className="ml-auto h-7 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void splitArticles([...selectedSplitIds])}><Split className="h-3 w-3" />拆分所选 {selectedSplitIds.size} 篇</Button>}
-                    </div>
-                    <EventArticleList rows={eventComparisonModels} sourceHeaderRef={eventSourceHeaderRef} sourceWidth={eventSourceColumnWidth} />
-
-                    {brandCandidates.length > 0 && (
-                      <section className="mt-2 border-t pt-2">
-                        <div className="mb-1.5 flex items-center gap-2">
-                          <div>
-                            <p className="text-xs font-semibold">同品牌文章</p>
-                            <p className="text-xs text-muted-foreground">近30天内与当前文章有品牌交集、且属于其他 Event 的文章。操作只移动单篇：可将候选文章移入当前 Event，也可将本篇文章并入候选所属 Event；整组事件合并请使用下方“调整事件归属”。</p>
-                          </div>
-                          <span className="ml-auto shrink-0 text-xs text-muted-foreground">{brandCandidates.length} 篇</span>
-                        </div>
-                        <EventArticleList rows={brandCandidateModels} sourceWidth={eventSourceColumnWidth} />
-                      </section>
-                    )}
-
-                  </div>
-
-                  <details open><summary className="flex cursor-pointer items-center justify-between border-t py-1.5 text-xs font-semibold"><span>聚类记录</span><span className="font-normal text-muted-foreground">{currentEventAudits.length} 条</span></summary><div className="max-h-[260px] overflow-y-auto"><div className="divide-y">{currentEventAudits.slice(0, 8).map((audit) => { const reason = clusterAuditReason(audit); return <div key={audit.id} className={`flex gap-2 border-l-2 px-2.5 py-2 text-xs leading-4 ${audit.actor === "admin" ? "border-sky-400" : "border-muted-foreground/30"}`}><div className="min-w-0 flex-1"><p className="flex flex-wrap items-center gap-x-2 gap-y-0.5"><span className="font-medium">{clusterAuditActionLabel(audit.action)}</span><span className="text-muted-foreground">{audit.actor === "admin" ? "人工" : "系统"}</span>{audit.confidence != null && <span className="text-muted-foreground">聚类置信度 {audit.confidence}%</span>}<time className="text-muted-foreground">{fullTimeLabel(audit.createdAt)}</time></p>{reason && <p className="mt-0.5 text-muted-foreground">{reason}</p>}{audit.candidateEvent?.representativeArticle?.title && <p className="mt-0.5 break-words text-muted-foreground" title={audit.candidateEvent.representativeArticle.title}>关联：{audit.candidateEvent.representativeArticle.title}</p>}</div></div>; })}{currentEventAudits.length === 0 && <p className="px-2.5 py-2 text-xs text-muted-foreground">暂无聚类记录</p>}</div></div></details>
-
-                  <details open><summary className="flex cursor-pointer items-center justify-between border-t py-1.5 text-xs font-semibold"><span>调整事件归属</span><span className="font-normal text-muted-foreground">移动当前文章或合并整组</span></summary><div className="space-y-2 p-2"><div className="flex gap-1"><Input value={eventSearch} onChange={(event) => setEventSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void searchEvents(); }} placeholder="搜索标题、品牌或事件键" className="h-7 rounded-none text-xs" /><Button size="sm" variant="outline" className="h-7 shrink-0 rounded-none px-1.5 text-xs" onClick={() => void searchEvents()}><Search className="h-3 w-3" />搜索</Button></div><button type="button" className="text-xs text-muted-foreground hover:text-foreground pb-0.5" onClick={() => { const query = detail.title.slice(0, 30); setEventSearch(query); void searchEvents(query); }}>用当前标题搜索相似事件</button>{eventOptions.length > 0 ? <div className="max-h-56 divide-y overflow-y-auto border">{eventOptions.map((event) => <div key={event.id} className={`p-2 text-xs ${mergeTargetId === event.id ? "bg-sky-50" : ""}`}><p className="line-clamp-2 font-medium">{event.representativeArticle?.title || `Event ${event.id.slice(-8)}`}</p><div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-muted-foreground"><span>{event.articleCount} 篇</span><span>{event.representativeArticle?.source.name || "未知来源"}</span><span>{event.publicStatus === "published" ? "已公开" : "未公开"}</span><span>{event.pushedAt ? "已推送" : "未推送"}</span><span>{fullTimeLabel(event.lastSeenAt)}</span></div><div className="mt-1 flex gap-1"><Button size="sm" variant="outline" className="h-7 rounded-none px-1 text-xs" disabled={eventAction !== null} onClick={() => void moveCurrentArticle(event.id)}>仅移动当前文章</Button><Button size="sm" variant="ghost" className="h-7 rounded-none px-1 text-xs" disabled={eventAction !== null} onClick={() => setMergeTargetId(event.id)}>选为整组目标</Button></div></div>)}</div> : <p className="border border-dashed px-2.5 py-2 text-xs text-muted-foreground">{eventSearch.trim() ? "未找到匹配的目标 Event。" : "输入关键词搜索目标 Event。"}</p>}{mergeTargetId && <div className="flex items-center gap-2 border bg-sky-50 px-2 py-1.5 text-xs"><span className="min-w-0 flex-1 truncate">整组目标：{eventOptions.find((event) => event.id === mergeTargetId)?.representativeArticle?.title || mergeTargetId}</span><Button size="sm" variant="ghost" className="h-6 shrink-0 rounded-none px-1.5 text-xs" disabled={eventAction !== null} onClick={() => setMergeTargetId("")}>取消</Button><Button size="sm" variant="outline" className="h-6 shrink-0 rounded-none px-1.5 text-xs text-amber-700" disabled={eventAction !== null} onClick={() => void mergeCurrentEvent()}><Merge className="h-3 w-3" />整组并入</Button></div>}</div></details>
-                </div>
-              </section>
-            )}
-
-            <section className="bg-background"><SectionHeader title="文章全貌" meta={`Article ${detail.id.slice(-8)}`} /><div className="grid grid-cols-2 divide-x divide-y border-b"><div className="p-2"><div className="flex items-center gap-1.5"><Eye className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" /><span className="text-xs text-muted-foreground">公开浏览</span></div><p className="mt-0.5 font-mono text-xs font-semibold tabular-nums">{detail.viewCount.toLocaleString("zh-CN")}</p></div><div className="p-2"><div className="flex items-center gap-1.5"><MousePointerClick className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" /><span className="text-xs text-muted-foreground">原文点击 · {clickRate}%</span></div><p className="mt-0.5 font-mono text-xs font-semibold tabular-nums">{detail.originalClickCount.toLocaleString("zh-CN")}</p></div></div><div className="grid grid-cols-2 gap-x-3 gap-y-1 p-2.5 text-xs lg:grid-cols-3"><MetaRow label="详情处理" value={stageStatusLabel("fetch", detail.fetchStatus)} />{detail.fetchError && <MetaRow label="处理失败原因" value={detail.fetchError} />}<MetaRow label="AI 分析" value={stageStatusLabel("ai", detail.aiStatus, detail.skipReason)} />{detail.aiError && <MetaRow label="AI 失败原因" value={detail.aiError} />}<MetaRow label="事件聚类" value={stageStatusLabel("cluster", detail.clusterStatus)} />{detail.clusterError && <MetaRow label="聚类失败原因" value={detail.clusterError} />}{detail.skipReason && <MetaRow label="跳过原因" value={detail.skipReason} />}<MetaRow label="原始评分" value={detail.rawScore == null ? "—" : String(detail.rawScore)} mono /><MetaRow label="创建时间" value={fullTimeLabel(detail.createdAt)} /><MetaRow label="更新时间" value={fullTimeLabel(detail.updatedAt)} /><MetaRow label="发布时间" value={fullTimeLabel(detail.publishedAt)} /><MetaRow label="聚类时间" value={fullTimeLabel(detail.clusteredAt)} /><MetaRow label="人工修正" value={detail.manualCorrectedAt ? fullTimeLabel(detail.manualCorrectedAt) : "无"} /><MetaRow label="来源类型" value={detail.source.type} /><div className="col-span-2 min-w-0 lg:col-span-3"><MetaRow label="文章 ID" value={detail.id} mono /></div><div className="col-span-2 min-w-0 lg:col-span-3"><div className="grid min-w-0 grid-cols-[58px_minmax(0,1fr)] gap-2"><span className="text-muted-foreground">来源主页</span><a className="min-w-0 break-all underline-offset-2 hover:underline" href={detail.source.url} target="_blank" rel="noreferrer" title={detail.source.url}>{detail.source.url}</a></div></div></div>{manualOverrides.length > 0 && <div className="border-t p-2.5"><p className="text-xs font-medium text-muted-foreground">人工覆盖字段</p><div className="mt-1.5 flex flex-wrap gap-1">{manualOverrides.map((field) => <Badge key={field} variant="secondary" className="h-5 rounded-none px-1 text-xs">{manualFieldLabel(field)}</Badge>)}</div></div>}</section>
+          <aside className="min-w-0 space-y-2">
+            <EventCalibrationPanel
+              detail={detail}
+              eventDetail={eventDetail}
+              eventSourceCount={workspace.eventSourceCount}
+              eventMemberModels={eventMemberModels}
+              recommendedEventModels={recommendedEventModels}
+              brandCandidateModels={brandCandidateModels}
+              currentArticleClassificationAudit={workspace.currentArticleClassificationAudit}
+              eventArticleTitles={workspace.eventArticleTitles}
+              selectedSplitIds={selectedSplitIds}
+              eventActionPending={eventAction !== null}
+              eventSearch={eventSearch}
+              eventOptions={eventOptions}
+              mergeTargetId={mergeTargetId}
+              onConfirmIndependent={() => void confirmIndependent()}
+              onAutoCluster={() => void startWorkflow("cluster")}
+              onSplitArticles={(articleIds) => void splitArticles(articleIds)}
+              onEventSearchChange={(value) => setEventSearch(value)}
+              onSearchEvents={(query) => void searchEvents(query)}
+              onMoveCurrentArticle={(eventId) => void moveCurrentArticle(eventId)}
+              onMergeTargetChange={(eventId) => setMergeTargetId(eventId)}
+              onMergeCurrentEvent={() => void mergeCurrentEvent()}
+            />
           </aside>
 
-          <section className="bg-background">
-            <button type="button" className="flex w-full items-center justify-between px-2 py-1.5 text-left text-xs font-medium focus-visible:outline-2 focus-visible:outline-offset-[-2px]" onClick={() => { setShowFullContent((value) => !value); setRequestedPanel("content"); updateDetailUrl(detail.id, "content"); }}><span className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" aria-hidden="true" />正文核验 <span className="font-normal text-muted-foreground">{cleanContentText.length.toLocaleString("zh-CN")} 字</span></span><ChevronDown className={`h-3.5 w-3.5 transition-transform ${showFullContent ? "rotate-180" : ""}`} aria-hidden="true" /></button>
-            {showFullContent && <div className="max-h-[220px] overflow-y-auto border-t px-2 py-1.5 text-xs leading-4 break-words whitespace-pre-line text-pretty">{cleanContentText.slice(0, 12000) || "正文尚未准备好"}</div>}
-          </section>
-
-          {detail.pushLogs.length > 0 && <section className="bg-background"><SectionHeader title="推送记录" meta={`${latestPushLogs.length} 个目标 · ${detail.pushLogs.length} 条记录`} /><div className="divide-y">{detail.pushLogs.map((log) => <div key={log.id} className="grid gap-0.5 px-3 py-2 text-xs sm:grid-cols-[100px_minmax(0,1fr)_68px_116px] sm:items-center sm:gap-2"><span className={`font-medium ${log.status === "success" ? "text-emerald-700" : log.status === "failed" || log.status === "failure" ? "text-red-700" : "text-amber-700"}`}>{pushStatusLabel(log.status)}{log.retryCount > 0 ? ` · 重试 ${log.retryCount}` : ""}</span><span className="min-w-0 truncate" title={log.webhookTarget}>{log.webhookRemark || log.webhookTarget || "未命名目标"}</span><span className="text-muted-foreground">{log.articleId === detail.id ? "本篇代表" : "历史代表"}</span><span className="font-mono text-xs tabular-nums text-muted-foreground sm:text-right">{fullTimeLabel(log.createdAt)}</span>{log.errorMessage && <p className="text-red-700 sm:col-span-4">{log.errorMessage}</p>}</div>)}</div></section>}
+          <ArticleWorkspaceSupportPanels
+            detail={detail}
+            cleanContentText={workspace.cleanContentText}
+            latestPushLogs={workspace.latestPushLogs}
+            showFullContent={showFullContent}
+            onToggleFullContent={() => {
+              setShowFullContent((value) => !value);
+              setRequestedPanel("content");
+              updateDetailUrl(detail.id, "content");
+            }}
+          />
         </div>
       </div>
     </ScrollArea>
   ) : <div className="flex h-full items-center justify-center text-xs text-muted-foreground">文章不存在或尚未选择</div>;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="h-[100dvh] w-screen max-w-[100vw] min-h-0 gap-0 overflow-hidden p-0 pb-[env(safe-area-inset-bottom)] [&>[data-slot=sheet-close]]:z-10 [&>[data-slot=sheet-close]]:rounded-none [&>[data-slot=sheet-close]]:bg-background sm:w-full sm:max-w-[min(987px,65dvw)]">
-        <SheetHeader className="sr-only">
-          <SheetTitle>文章工作台</SheetTitle>
-          <SheetDescription>内容校准、Event 修正、公开与推送</SheetDescription>
-        </SheetHeader>
-        <div className="min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/10">{detailWorkspace}</div>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-function SectionHeader({ title, meta }: { title: string; meta?: string }) {
-  return (
-    <div className="flex min-h-7 min-w-0 items-center gap-2 border-b px-2 py-1">
-      <h2 className="min-w-0 truncate text-xs font-semibold">{title}</h2>
-      {meta && <span className="ml-auto min-w-0 truncate text-right text-xs text-muted-foreground">{meta}</span>}
-    </div>
-  );
-}
-
-function DetailMetaItem({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <div className="min-w-0 bg-background px-1.5 py-1">
-      <div className="grid min-w-0 grid-cols-[50px_minmax(0,1fr)] items-start gap-1">
-        <span className="whitespace-nowrap text-muted-foreground">{label}</span>
-        <span className={`min-w-0 break-words ${mono ? "font-mono text-xs tabular-nums break-all" : ""}`}>{value}</span>
-      </div>
-    </div>
-  );
-}
-
-function MetaRow({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="grid min-w-0 grid-cols-[74px_minmax(0,1fr)] gap-2">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`min-w-0 break-words ${mono ? "font-mono text-xs tabular-nums" : ""}`} title={value}>{value}</span>
-    </div>
+    <>
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent side="right" className="h-[100dvh] w-screen max-w-[100vw] min-h-0 gap-0 overflow-hidden p-0 pb-[env(safe-area-inset-bottom)] [&>[data-slot=sheet-close]]:z-10 [&>[data-slot=sheet-close]]:rounded-none [&>[data-slot=sheet-close]]:bg-background sm:w-full sm:max-w-[min(1100px,78dvw)]">
+          <SheetHeader className="sr-only">
+            <SheetTitle>文章审核与事件校准工作台</SheetTitle>
+            <SheetDescription>内容校准、事件修正、公开与推送</SheetDescription>
+          </SheetHeader>
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/10">{detailWorkspace}</div>
+        </SheetContent>
+      </Sheet>
+      <ArticleComparisonDialog
+        detail={detail}
+        target={comparisonTarget}
+        onOpenChange={(nextOpen) => { if (!nextOpen) setComparisonTarget(null); }}
+        onMoveCurrent={() => {
+          if (!comparisonTarget) return;
+          const target = comparisonTarget;
+          setComparisonTarget(null);
+          void moveCurrentArticleToEvent(target.eventId, target.title, `compare-move:${target.eventId}`);
+        }}
+        onMergeCandidate={() => {
+          if (!comparisonTarget?.articleId) return;
+          const candidate = brandCandidates.find((item) => item.id === comparisonTarget.articleId);
+          setComparisonTarget(null);
+          if (candidate) void moveBrandCandidate(candidate);
+        }}
+      />
+    </>
   );
 }

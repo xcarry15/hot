@@ -24,10 +24,6 @@ import {
   PROMPT_BLOCK_ORDER,
   SCORE_WEIGHT_META,
 } from './prompts';
-import {
-  DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE,
-  DEFAULT_EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE,
-} from '@/contracts/event-clustering';
 
 export const SETTING_KEYS = {
   FEISHU_WEBHOOK_URL: 'feishu_webhook_url',
@@ -63,8 +59,6 @@ export const SETTING_KEYS = {
   AI_WEIGHT_CONTENT: 'ai_weight_content',
   AI_KEYWORD_MATCH_BONUS: 'ai_keyword_match_bonus',
   AI_CONCURRENCY: 'ai_concurrency',
-  EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE: 'event_cluster_ai_same_event_confidence',
-  EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE: 'event_cluster_ai_different_event_confidence',
 
 } as const;
 
@@ -131,7 +125,7 @@ const definitions: SettingDefinition[] = [
     seed: true,
   },
   { key: SETTING_KEYS.PUSH_MODE, defaultValue: 'realtime', schema: z.enum(PUSH_MODES), sensitive: false, exportable: true, frontend: true, seed: true },
-  { key: SETTING_KEYS.PUSH_MIN_SCORE, defaultValue: '80', schema: intRange(0, 100, '最低推送分数'), sensitive: false, exportable: true, frontend: true, seed: true },
+  { key: SETTING_KEYS.PUSH_MIN_SCORE, defaultValue: '75', schema: intRange(0, 100, '最低推送分数'), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUSH_MIN_RELEVANCE, defaultValue: '70', schema: intRange(0, 100, '最低相关度'), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUSH_TIME, defaultValue: '08:30', schema: pushTimeSchema, sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.PUBLIC_MIN_SCORE, defaultValue: '70', schema: intRange(0, 100, '公开最低评分'), sensitive: false, exportable: true, frontend: true, seed: true },
@@ -144,9 +138,9 @@ const definitions: SettingDefinition[] = [
 
   { key: SETTING_KEYS.AI_PROVIDER, defaultValue: 'opencode', schema: z.enum(AI_PROVIDER_IDS), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_TEMPERATURE, defaultValue: '0.3', schema: decimalRange(0, 2, '温度'), sensitive: false, exportable: true, frontend: true, seed: false },
-  { key: SETTING_KEYS.AI_MAX_TOKENS, defaultValue: '10240', schema: intRange(1, 65536, '最大tokens'), sensitive: false, exportable: true, frontend: true, seed: false },
+  { key: SETTING_KEYS.AI_MAX_TOKENS, defaultValue: '8192', schema: intRange(1, 65536, '最大tokens'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_SYSTEM_PROMPT, defaultValue: DEFAULT_SYSTEM_PROMPT, uiDefaultValue: '', schema: text, sensitive: false, exportable: true, frontend: true, seed: false },
-  { key: SETTING_KEYS.AI_STEP2_CONTENT_MAX_CHARS, defaultValue: '5000', schema: intRange(500, 10000, 'Step2正文最大字符数'), sensitive: false, exportable: true, frontend: true, seed: false },
+  { key: SETTING_KEYS.AI_STEP2_CONTENT_MAX_CHARS, defaultValue: '8000', schema: intRange(500, 10000, 'Step2正文最大字符数'), sensitive: false, exportable: true, frontend: true, seed: false },
 
   prompt(SETTING_KEYS.AI_BLOCK_AD, DEFAULT_BLOCK_AD),
   prompt(SETTING_KEYS.AI_BLOCK_EVENT_SCORE, DEFAULT_BLOCK_EVENT_SCORE),
@@ -162,8 +156,6 @@ const definitions: SettingDefinition[] = [
   { key: SETTING_KEYS.AI_WEIGHT_CONTENT, defaultValue: String(SCORE_WEIGHT_META.content.defaultWeight), schema: intRange(0, 100, '内容权重'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_KEYWORD_MATCH_BONUS, defaultValue: '5', schema: intRange(0, 20, '关键词命中加分'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_CONCURRENCY, defaultValue: '3', schema: intRange(1, 10, 'AI并发数'), sensitive: false, exportable: true, frontend: true, seed: false },
-  { key: SETTING_KEYS.EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE, defaultValue: String(DEFAULT_EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE), schema: intRange(70, 95, '自动归入同一事件置信度'), sensitive: false, exportable: true, frontend: true, seed: true },
-  { key: SETTING_KEYS.EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE, defaultValue: String(DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE), schema: intRange(70, 99, '自动新建独立事件置信度'), sensitive: false, exportable: true, frontend: true, seed: true },
 
   // Provider 专属配置由 AI_PROVIDERS 契约派生，避免 URL / 默认模型漂移。
   ...providerSettingDefinitions,

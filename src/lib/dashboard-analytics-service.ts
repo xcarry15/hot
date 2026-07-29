@@ -287,7 +287,7 @@ async function buildDashboardAnalytics(
     }
 
     const businessSkipAnalyzed = row.aiStatus === 'skipped'
-      && (row.skipReason === '无具体事件' || row.skipReason === '多事件聚合稿')
+      && row.skipReason === '无价值'
       && row.aiSnapshot !== '{}';
     const isAnalyzed = row.fetchStatus === 'fetched'
       && (row.aiStatus === 'done' || businessSkipAnalyzed);
@@ -304,7 +304,9 @@ async function buildDashboardAnalytics(
       trend.ads += row.isAd ? 1 : 0;
     }
 
-    if (isAnalyzed && row.event?.pushedAt) {
+    // Event 只会向外投递一次，必须只统计其代表文章；否则同一 Event 的
+    // 多篇转载会把推送量、推送率和软文推送量重复放大。
+    if (isAnalyzed && row.event?.pushedAt && row.event.representativeArticleId === row.id) {
       source.pushed += 1;
       trend.pushed += 1;
       if (row.isAd) {

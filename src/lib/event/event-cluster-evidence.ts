@@ -1,9 +1,15 @@
 import {
-  EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP,
-  EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD,
-  EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE,
+  EVENT_CLUSTER_AUTO_MERGE_ANCHOR_DAYS,
+  EVENT_CLUSTER_AUTO_MERGE_CONFIDENCE,
+  EVENT_CLUSTER_AUTO_MERGE_IDENTITY_SCORE,
+  EVENT_CLUSTER_AUTO_MERGE_OBJECT_SIMILARITY,
   EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP,
-  DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE,
+  EVENT_CLUSTER_FOLLOW_UP_DAYS,
+  EVENT_CLUSTER_LOOSE_ANCHOR_COUNT,
+  EVENT_CLUSTER_LOOSE_CONTENT_JACCARD,
+  EVENT_CLUSTER_LOOSE_CONTENT_OVERLAP,
+  EVENT_CLUSTER_LOOSE_OBJECT_SIMILARITY,
+  EVENT_CLUSTER_LOOSE_TITLE_OVERLAP,
   EVENT_CLUSTER_MIN_KEY_CONFIDENCE,
   EVENT_CLUSTER_STRONG_CONTENT_JACCARD,
   EVENT_CLUSTER_STRONG_CONTENT_OVERLAP,
@@ -88,57 +94,10 @@ export interface PairEvidence {
   decision: 'exact' | 'strong' | 'ambiguous' | 'reject';
 }
 
-export interface AiCandidateAudit {
+export interface RuleCandidateAudit {
   candidateEventId: string;
   matchedMemberArticleId: string;
   ruleEvidence: Record<string, unknown>;
-  aiDecision: { sameEvent: boolean; confidence: number; reason: string };
-}
-export function isAmbiguousEventCandidate(evidence: {
-  eventKeyMatch: boolean;
-  identityConfidence: number;
-  identityScore: number;
-  subjectSimilarity: number;
-  actionSimilarity: number;
-  objectSimilarity: number;
-  titleOverlap: number;
-  daysApart: number;
-  sharedAnchors: string[];
-  charContentOverlap: number;
-  charContentJaccard: number;
-  tokenContentOverlap: number;
-  tokenContentJaccard: number;
-  phaseConflict: boolean;
-  identityConflict: boolean;
-  multiTopic: boolean;
-}): boolean {
-  if (evidence.multiTopic || evidence.phaseConflict || evidence.identityConflict) return false;
-
-  const keySignal = evidence.eventKeyMatch
-    && evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE;
-  const identitySignal = evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
-    && evidence.identityScore >= EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE
-    && evidence.subjectSimilarity >= 0.5
-    && (evidence.actionSimilarity >= 0.4 || evidence.objectSimilarity >= 0.5);
-  const titleSignal = evidence.sharedAnchors.length > 0
-    && evidence.titleOverlap >= EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP
-    && evidence.daysApart <= EVENT_CLUSTER_WINDOW_DAYS
-    && evidence.identityScore >= 0.35;
-  // P0-3: 要求同一表示空间中的指标同时成立
-  const charContentSignal = evidence.charContentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
-    && evidence.charContentJaccard >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD;
-  const tokenContentSignal = evidence.tokenContentOverlap >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP
-    && evidence.tokenContentJaccard >= EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD;
-  // 正文相似只能证明“稿件内容接近”，不能证明“事件相同”。至少要求主体
-  // 与动作/具体事项共同一致，避免不同品牌使用同一站点模板时进入人工复核。
-  const contentIdentitySignal = evidence.actionSimilarity >= 0.4
-    || evidence.objectSimilarity >= 0.5;
-  const contentSignal = (charContentSignal || tokenContentSignal)
-    && contentIdentitySignal
-    && (evidence.subjectSimilarity >= 0.5 || evidence.identityScore >= 0.55)
-    && (evidence.sharedAnchors.length > 0 || evidence.identityScore >= 0.4);
-
-  return keySignal || identitySignal || titleSignal || contentSignal;
 }
 
 export function hasDuplicateReportEvidence(evidence: {
@@ -168,8 +127,37 @@ export function isStrongEventKeyDuplicate(evidence: {
   tokenContentJaccard: number;
 }): boolean {
   return evidence.eventKeyMatch
-    && evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
-    && hasDuplicateReportEvidence(evidence);
+    && evidence.identityConfidence >= EVENT_CLUSTER_AUTO_MERGE_CONFIDENCE
+    && evidence.daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS;
+}
+
+function isHighConfidenceIdentityMatch(evidence: {
+  identityConfidence: number;
+  identityScore: number;
+  subjectSimilarity: number;
+  actionSimilarity: number;
+  objectSimilarity: number;
+  daysApart: number;
+  sharedAnchors: string[];
+  tokenContentOverlap: number;
+}): boolean {
+  if (evidence.identityConfidence < EVENT_CLUSTER_AUTO_MERGE_CONFIDENCE
+    || evidence.daysApart > EVENT_CLUSTER_FOLLOW_UP_DAYS) return false;
+
+  const preciseIdentity = evidence.identityScore >= EVENT_CLUSTER_AUTO_MERGE_IDENTITY_SCORE
+    && evidence.subjectSimilarity >= 0.8
+    && evidence.actionSimilarity >= 0.8
+    && evidence.objectSimilarity >= EVENT_CLUSTER_AUTO_MERGE_OBJECT_SIMILARITY;
+  if (preciseIdentity) return true;
+
+  // 事项写法可能一边是品牌/项目名、一边是通用描述。仅在主体和动作完全一致、
+  // 同日附近且标题共享非泛化锚点时合并，避免把同品牌不同新品混成一个事件。
+  return evidence.subjectSimilarity >= 0.9
+    && evidence.actionSimilarity >= 0.9
+    && evidence.objectSimilarity >= 0.2
+    && evidence.daysApart <= EVENT_CLUSTER_AUTO_MERGE_ANCHOR_DAYS
+    && evidence.sharedAnchors.length > 0
+    && evidence.tokenContentOverlap >= 0.3;
 }
 
 export function isNearExactReprint(evidence: {
@@ -188,22 +176,54 @@ export function isNearExactReprint(evidence: {
     && !evidence.multiTopic;
 }
 
-export function shouldCreateClusterReview(
-  ambiguousCount: number,
-  aiCandidates: Pick<AiCandidateAudit, 'aiDecision'>[],
-  differentEventConfidence = DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE,
-): boolean {
-  if (ambiguousCount === 0) return false;
-  const hasAiFailure = aiCandidates.some((candidate) => candidate.aiDecision.confidence === 0);
-  const allAmbiguousConfidentlyDifferent = aiCandidates.length === ambiguousCount
-    && aiCandidates.every((candidate) => (
-      !candidate.aiDecision.sameEvent && candidate.aiDecision.confidence >= differentEventConfidence
-    ));
-  return hasAiFailure || !allAmbiguousConfidentlyDifferent;
+export function buildRuleCandidateAuditEvidence(candidates: RuleCandidateAudit[], selectedCandidateEventId: string | null) {
+  return { selectedCandidateEventId, candidates: [...candidates] };
 }
 
-export function buildAiClusterAuditEvidence(candidates: AiCandidateAudit[], selectedCandidateEventId: string | null) {
-  return { selectedCandidateEventId, candidates: [...candidates] };
+/**
+ * 仅决定是否把“相近但未合并”的候选写入审计，绝不影响自动归并或人工复核。
+ * 这样运营人员能看到系统曾比较过什么，同时证据不足的文章仍直接独立建 Event。
+ */
+function isAuditableNearbyCandidate(evidence: {
+  eventKeyMatch: boolean;
+  identityConfidence: number;
+  identityScore: number;
+  subjectSimilarity: number;
+  actionSimilarity: number;
+  objectSimilarity: number;
+  titleOverlap: number;
+  daysApart: number;
+  sharedAnchors: string[];
+  charContentOverlap: number;
+  charContentJaccard: number;
+  tokenContentOverlap: number;
+  tokenContentJaccard: number;
+  phaseConflict: boolean;
+  identityConflict: boolean;
+  multiTopic: boolean;
+}): boolean {
+  if (evidence.multiTopic || evidence.phaseConflict || evidence.identityConflict) return false;
+  if (evidence.daysApart > EVENT_CLUSTER_FOLLOW_UP_DAYS) return false;
+
+  const identitySignal = evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
+    && evidence.subjectSimilarity >= 0.5
+    && (evidence.actionSimilarity >= 0.4 || evidence.objectSimilarity >= 0.5);
+  const titleSignal = evidence.sharedAnchors.length > 0
+    && evidence.titleOverlap >= EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP
+    && evidence.daysApart <= EVENT_CLUSTER_WINDOW_DAYS
+    && evidence.identityScore >= 0.35;
+  const charContentSignal = evidence.charContentOverlap >= 0.45
+    && evidence.charContentJaccard >= 0.25;
+  const tokenContentSignal = evidence.tokenContentOverlap >= 0.45
+    && evidence.tokenContentJaccard >= 0.25;
+  const contentSignal = (charContentSignal || tokenContentSignal)
+    && evidence.subjectSimilarity >= 0.5
+    && (evidence.actionSimilarity >= 0.4 || evidence.objectSimilarity >= 0.5);
+
+  return (evidence.eventKeyMatch && evidence.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE)
+    || identitySignal
+    || titleSignal
+    || contentSignal;
 }
 
 export function articleDate(article: { publishedAt: Date | null; createdAt: Date }): Date {
@@ -242,11 +262,10 @@ function compareIdentity(left: IdentityArticle, right: IdentityArticle) {
   const subjectOverlap = subjectSimilarity(left.eventSubjects, right.eventSubjects);
   const actionOverlap = componentSimilarity(left.eventAction, right.eventAction);
   const objectOverlap = componentSimilarity(left.eventObject, right.eventObject);
-  const leftConf = left.eventKeyConfidence;
-  const rightConf = right.eventKeyConfidence;
-  const identityConfidence = leftConf != null && rightConf != null
-    ? Math.min(leftConf, rightConf)
-    : leftConf ?? rightConf ?? 0;
+  const identityConfidence = Math.min(
+    left.eventKeyConfidence ?? 0,
+    right.eventKeyConfidence ?? 0,
+  );
   const identityScore = subjectOverlap * 0.45 + actionOverlap * 0.25 + objectOverlap * 0.3;
   const qualifierConflict = hasEventIdentityQualifierConflict(left.eventObject, right.eventObject);
   return {
@@ -259,6 +278,45 @@ function compareIdentity(left: IdentityArticle, right: IdentityArticle) {
     identityConflict: identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
       && (subjectOverlap < 0.35 || qualifierConflict),
   };
+}
+
+function isLooseSameEventMatch(evidence: {
+  daysApart: number;
+  phaseConflict: boolean;
+  qualifierConflict: boolean;
+  qualifierConflictOnPair: boolean;
+  sharedAnchors: string[];
+  objectAnchors: string[];
+  subjectSimilarity: number;
+  objectSimilarity: number;
+  titleOverlap: number;
+  charContentOverlap: number;
+  charContentJaccard: number;
+  tokenContentOverlap: number;
+  tokenContentJaccard: number;
+}): boolean {
+  if (evidence.daysApart > EVENT_CLUSTER_FOLLOW_UP_DAYS
+    || evidence.phaseConflict
+    || evidence.qualifierConflict
+    || evidence.qualifierConflictOnPair) return false;
+
+  const titleAnchorsMatch = evidence.sharedAnchors.length >= EVENT_CLUSTER_LOOSE_ANCHOR_COUNT
+    && evidence.titleOverlap >= EVENT_CLUSTER_LOOSE_TITLE_OVERLAP
+    && (evidence.objectAnchors.length > 0 || evidence.objectSimilarity >= EVENT_CLUSTER_LOOSE_OBJECT_SIMILARITY);
+  const subjectTitleMatch = evidence.subjectSimilarity >= 0.65
+    && evidence.sharedAnchors.length > 0
+    && evidence.titleOverlap >= EVENT_CLUSTER_LOOSE_TITLE_OVERLAP
+    && (evidence.objectAnchors.length > 0 || evidence.objectSimilarity >= EVENT_CLUSTER_LOOSE_OBJECT_SIMILARITY);
+  const contentMatch = (evidence.sharedAnchors.length > 0 || evidence.titleOverlap >= 0.3)
+    && (evidence.objectAnchors.length > 0 || evidence.objectSimilarity >= EVENT_CLUSTER_LOOSE_OBJECT_SIMILARITY)
+    && (
+      evidence.charContentOverlap >= EVENT_CLUSTER_LOOSE_CONTENT_OVERLAP
+      && evidence.charContentJaccard >= EVENT_CLUSTER_LOOSE_CONTENT_JACCARD
+      || evidence.tokenContentOverlap >= EVENT_CLUSTER_LOOSE_CONTENT_OVERLAP
+      && evidence.tokenContentJaccard >= EVENT_CLUSTER_LOOSE_CONTENT_JACCARD
+    );
+
+  return titleAnchorsMatch || subjectTitleMatch || contentMatch;
 }
 
 /**
@@ -281,6 +339,8 @@ function computePairEvidence(
   const identity = compareIdentity(article, member);
 
   const titleOverlap = overlapCoefficient(article.title, member.title);
+  const sharedAnchors = sharedEventAnchors(article.title, member.title);
+  const objectAnchors = sharedEventAnchors(article.eventObject, member.eventObject);
 
   let contentSimilarity: ContentShingleResult = {
     charOverlap: 0, charJaccard: 0, tokenOverlap: 0, tokenJaccard: 0,
@@ -288,9 +348,9 @@ function computePairEvidence(
   if (includeContent) {
     const sameSubject = identity.subjectOverlap >= 0.5;
     const sameExactTitle = normalizedTitle.length > 0 && normalizedTitle === memberNormalizedTitle;
-    // 正文相似度只有在主体或标题已有交集时才值得计算。不同品牌在同一站点
-    // 常共享页脚、推荐栏和模板文案，直接比较会制造大量伪“强重复”。
-    if (fingerprintMatch || sameSubject || sameExactTitle) {
+    // AI 主体可能因改写而不稳定；只要标题有稳定锚点，也允许正文证据参与。
+    // 仍不对所有候选计算正文，避免同站点模板文案放大误合并。
+    if (fingerprintMatch || sameSubject || sameExactTitle || sharedAnchors.length > 0) {
       contentSimilarity = contentShingleSimilarity(article.cleanContent, member.cleanContent);
     }
   }
@@ -304,8 +364,6 @@ function computePairEvidence(
 
   const multiTopic = isMultiTopicTitle(article.title) || isMultiTopicTitle(member.title);
 
-  const sharedAnchors = sharedEventAnchors(article.title, member.title);
-
   const qualifierConflictOnPair = hasEventIdentityQualifierConflict(
     article.eventObject, member.eventObject,
   );
@@ -315,13 +373,14 @@ function computePairEvidence(
 
   const isExact = fingerprintMatch || (
     exactTitle
+    && daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS
     && !phaseConflict
     && !identity.identityConflict
     && (eventKeyMatch || identity.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE)
   );
   if (isExact) {
     decision = 'exact';
-  } else if (!phaseConflict && !identity.identityConflict && !multiTopic) {
+  } else if (!multiTopic) {
     // 不同媒体转载时常只删改署名、图片说明或个别句子。标题完全一致且正文
     // token 几乎重合时，这是比单次 AI 事件身份更稳定的“同一稿件”证据。
     const nearExactReprint = isNearExactReprint({
@@ -342,7 +401,17 @@ function computePairEvidence(
       tokenContentOverlap: contentSimilarity.tokenOverlap,
       tokenContentJaccard: contentSimilarity.tokenJaccard,
     });
-    const identityConfirmed = identity.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
+    const identityConfirmed = isHighConfidenceIdentityMatch({
+      identityConfidence: identity.identityConfidence,
+      identityScore: identity.identityScore,
+      subjectSimilarity: identity.subjectOverlap,
+      actionSimilarity: identity.actionOverlap,
+      objectSimilarity: identity.objectOverlap,
+      daysApart,
+      sharedAnchors,
+      tokenContentOverlap: contentSimilarity.tokenOverlap,
+    }) || (
+      identity.identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
       && identity.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE
       && identity.subjectOverlap >= 0.6
       && identity.actionOverlap >= 0.5
@@ -353,12 +422,8 @@ function computePairEvidence(
         charContentJaccard: contentSimilarity.charJaccard,
         tokenContentOverlap: contentSimilarity.tokenOverlap,
         tokenContentJaccard: contentSimilarity.tokenJaccard,
-      });
-    // P0-3: 要求同一表示空间的指标同时成立
-    const charContentConfirmed = contentSimilarity.charOverlap >= EVENT_CLUSTER_STRONG_CONTENT_OVERLAP
-      && contentSimilarity.charJaccard >= EVENT_CLUSTER_STRONG_CONTENT_JACCARD;
-    const tokenContentConfirmed = contentSimilarity.tokenOverlap >= EVENT_CLUSTER_STRONG_CONTENT_OVERLAP
-      && contentSimilarity.tokenJaccard >= EVENT_CLUSTER_STRONG_CONTENT_JACCARD;
+      })
+    );
     const titleConfirmed = sharedAnchors.length > 0
       && titleOverlap >= EVENT_CLUSTER_STRONG_TITLE_OVERLAP
       && daysApart <= EVENT_CLUSTER_STRONG_TITLE_DAYS
@@ -366,9 +431,28 @@ function computePairEvidence(
       && identity.actionOverlap >= 0.45
       && identity.objectOverlap >= 0.65;
 
-    if (nearExactReprint || keyConfirmed || identityConfirmed || charContentConfirmed || tokenContentConfirmed || titleConfirmed) {
+    // 正文高度相似本身不足以证明同一事件：同品牌页面常有相同模板、简介或背景。
+    // 它只能作为 nearExactReprint 或 identityConfirmed 的补强证据，不能单独自动归并。
+    const standardRuleMatch = !phaseConflict && !identity.identityConflict
+      && (nearExactReprint || keyConfirmed || identityConfirmed || titleConfirmed);
+    const looseRuleMatch = isLooseSameEventMatch({
+      daysApart,
+      phaseConflict,
+      qualifierConflict: identity.qualifierConflict,
+      qualifierConflictOnPair,
+      sharedAnchors,
+      objectAnchors,
+      subjectSimilarity: identity.subjectOverlap,
+      objectSimilarity: identity.objectOverlap,
+      titleOverlap,
+      charContentOverlap: contentSimilarity.charOverlap,
+      charContentJaccard: contentSimilarity.charJaccard,
+      tokenContentOverlap: contentSimilarity.tokenOverlap,
+      tokenContentJaccard: contentSimilarity.tokenJaccard,
+    });
+    if (standardRuleMatch || looseRuleMatch) {
       decision = 'strong';
-    } else if (isAmbiguousEventCandidate({
+    } else if (isAuditableNearbyCandidate({
       eventKeyMatch,
       identityConfidence: identity.identityConfidence,
       identityScore: identity.identityScore,
@@ -462,6 +546,7 @@ export function isStrongPushedDuplicate(pair: PairEvidence): boolean {
   if (pair.fingerprintMatch) return true;
   if (pair.phaseConflict || pair.identityConflict) return false;
   if (isStrongEventKeyDuplicate(pair)) return true;
+  if (isHighConfidenceIdentityMatch(pair)) return true;
   if (pair.identityScore >= 0.84
     && pair.subjectSimilarity >= 0.75
     && pair.actionSimilarity >= 0.6

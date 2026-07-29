@@ -28,7 +28,7 @@ export async function GET(request: Request) {
       maxConfidence: parseOptionalInt(searchParams.get('maxConfidence')),
       sourceId: searchParams.get('sourceId') ?? undefined,
       search: searchParams.get('search') ?? undefined,
-      fetchStatus: searchParams.get('fetchStatus') ?? undefined,
+      fetchStatus: parseFetchStatus(searchParams.get('fetchStatus')),
       anomaly: searchParams.get('anomaly') === 'needs_attention' || searchParams.get('anomaly') === 'technical'
         ? searchParams.get('anomaly') as 'needs_attention' | 'technical'
         : undefined,
@@ -50,6 +50,10 @@ function parseClusterView(raw: string | null): 'needs_review' | 'multi_source' |
 
 function parseSort(raw: string | null): ArticleListSort | undefined {
   return raw === 'newest' || raw === 'oldest' || raw === 'score_desc' || raw === 'score_asc' || raw === 'relevance_desc' || raw === 'relevance_asc' || raw === 'event_desc' || raw === 'event_asc' || raw === 'content_desc' || raw === 'content_asc' || raw === 'ad_desc' || raw === 'ad_asc' || raw === 'confidence_desc' || raw === 'confidence_asc' ? raw : undefined;
+}
+
+function parseFetchStatus(raw: string | null): 'pending' | 'fetched' | 'failed' | undefined {
+  return raw === 'pending' || raw === 'fetched' || raw === 'failed' ? raw : undefined;
 }
 
 // DELETE /api/articles - Batch delete articles

@@ -3,10 +3,21 @@ import type { CrawlResult } from '@/contracts/crawl';
 import { assertNotAborted } from './worker-stop';
 import { ensureResponseTextWithinLimit } from './http';
 import { assertSafeOutboundUrl } from './outbound-url';
+import { resolveUrl } from './url-utils';
 
 interface RssConfig {
   feedUrl?: string;
   maxItems?: number;
+}
+
+const DEFAULT_MAX_ITEMS = 20;
+const MAX_ITEMS = 50;
+
+function normalizeMaxItems(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number.NaN;
+  return Number.isFinite(parsed)
+    ? Math.max(1, Math.min(MAX_ITEMS, Math.floor(parsed)))
+    : DEFAULT_MAX_ITEMS;
 }
 
 /**
@@ -15,9 +26,14 @@ interface RssConfig {
  */
 export async function parseRss(url: string, parserConfigStr: string, signal?: AbortSignal): Promise<CrawlResult> {
   try {
-    const config: RssConfig = JSON.parse(parserConfigStr || '{}');
-    const feedUrl = config.feedUrl || url;
-    const maxItems = config.maxItems || 20;
+    const parsed: unknown = JSON.parse(parserConfigStr || '{}');
+    const config: RssConfig = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as RssConfig
+      : {};
+    const feedUrl = typeof config.feedUrl === 'string' && config.feedUrl.trim()
+      ? config.feedUrl.trim()
+      : url;
+    const maxItems = normalizeMaxItems(config.maxItems);
 
     await assertSafeOutboundUrl(feedUrl);
     const zai = await getZAI();
@@ -33,7 +49,7 @@ export async function parseRss(url: string, parserConfigStr: string, signal?: Ab
     const xml = ensureResponseTextWithinLimit(result.data.html);
 
     // Parse RSS items from XML
-    const items = parseRssXml(xml, maxItems);
+    const items = parseRssXml(xml, maxItems, feedUrl);
 
     return { success: true, items };
   } catch (error: unknown) {
@@ -43,7 +59,7 @@ export async function parseRss(url: string, parserConfigStr: string, signal?: Ab
   }
 }
 
-function parseRssXml(xml: string, maxItems: number) {
+function parseRssXml(xml: string, maxItems: number, baseUrl: string) {
   const items: Array<{
     title: string;
     url: string;
@@ -63,10 +79,11 @@ function parseRssXml(xml: string, maxItems: number) {
     const description = extractTag(itemXml, 'description');
     const pubDate = extractTag(itemXml, 'pubDate');
 
-    if (title && link) {
+    const url = link ? resolveUrl(link.trim(), baseUrl) : '';
+    if (title && /^https?:\/\//iu.test(url)) {
       items.push({
         title: decodeEntities(title),
-        url: link.trim(),
+        url,
         summary: decodeEntities(description?.substring(0, 300) || ''),
         publishedAt: pubDate || undefined,
       });
@@ -86,10 +103,11 @@ function parseRssXml(xml: string, maxItems: number) {
         extractTag(entryXml, 'summary') || extractTag(entryXml, 'content');
       const updated = extractTag(entryXml, 'updated') || extractTag(entryXml, 'published');
 
-      if (title && link) {
+      const url = link ? resolveUrl(link.trim(), baseUrl) : '';
+      if (title && /^https?:\/\//iu.test(url)) {
         items.push({
           title: decodeEntities(title),
-          url: link.trim(),
+          url,
           summary: decodeEntities(summary?.substring(0, 300) || ''),
           publishedAt: updated || undefined,
         });

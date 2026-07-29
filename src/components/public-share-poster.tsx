@@ -61,7 +61,8 @@ export default function PublicSharePoster(props: Props) {
       link.download = `行业新闻海报-${title.slice(0, 20)}.png`
       link.href = url
       link.click()
-      URL.revokeObjectURL(url)
+      // 立即 revoke 在部分浏览器会早于下载任务读取 Blob，导致保存空文件。
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
     } finally {
       setSaving(false)
     }

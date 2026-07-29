@@ -78,6 +78,14 @@ describe('proxy auth', () => {
     expect(proxy(makeRequest('POST', '/api/health')).status).toBe(405);
   });
 
+  it('公开分享海报无需后台 Token，但只允许 POST', async () => {
+    process.env.API_TOKEN = 'secret123';
+    (process.env as Record<string,string>).NODE_ENV = 'production';
+    const { proxy } = await import('@/proxy');
+    expect(proxy(makeRequest('POST', '/api/public/share-poster')).status).not.toBe(401);
+    expect(proxy(makeRequest('GET', '/api/public/share-poster')).status).toBe(405);
+  });
+
   it('POST /api/articles 无 token → 401', async () => {
     process.env.API_TOKEN = 'secret123';
     (process.env as Record<string,string>).NODE_ENV = 'production';

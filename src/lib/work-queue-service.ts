@@ -1,3 +1,4 @@
+import { AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD } from '@/contracts/ai-confidence';
 import { db } from '@/lib/db';
 import { getTechnicalWorkQueue } from '@/lib/technical-work-queue-service';
 
@@ -9,10 +10,10 @@ export async function getWorkQueueSummary() {
       SELECT COUNT(DISTINCT "id") AS "total"
       FROM "articles"
       WHERE "clusterStatus" = 'needs_review'
-         OR ("aiStatus" = 'done' AND "aiConfidence" < 70)
+         OR ("aiStatus" = 'done' AND "aiConfidence" < ${AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD})
     `,
     db.article.count({ where: { clusterStatus: 'needs_review' } }),
-    db.article.count({ where: { aiStatus: 'done', aiConfidence: { lt: 70 } } }),
+    db.article.count({ where: { aiStatus: 'done', aiConfidence: { lt: AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD } } }),
   ]);
   const humanTotal = Number(humanTotalRows[0]?.total ?? 0);
   const manualTechnicalItems = technicalItems.filter((item) => item.state === 'manual');

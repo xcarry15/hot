@@ -34,6 +34,7 @@ const ACTION_CANONICAL_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/(?:开业|开店|首店|门店落地)/u, '开店'],
   [/(?:计划|拟|预计|将).*?(?:关闭|关店|闭店|关停|撤店|撤场)/u, '计划关店'],
   [/(?:关闭|关店|闭店|关停|撤店|撤场)/u, '关闭门店'],
+  [/(?:注册成立|创立|成立|设立)(?:.*?(?:公司|企业|工作室|品牌))?/u, '成立主体'],
   [/(?:任命|换帅|接任|出任|履新).*?(?:董事长|CEO|总裁|高管|负责人)?/u, '任命高管'],
   [/(?:离职|卸任|辞任|离开).*?(?:董事长|CEO|总裁|高管|负责人)?/u, '高管离任'],
   [/(?:增持|加仓).*?(?:股份|股票|持股)?/u, '增持股份'],
@@ -82,6 +83,7 @@ export function normalizeEventAction(value: unknown): string {
 
 /** 宽泛身份不允许以高置信度参与强聚类，避免泛主题污染 Event。 */
 export function capEventIdentityConfidence(identity: EventIdentity, confidence: number): number {
+  if (!isCompleteEventIdentity(identity)) return 0;
   let cap = 100;
   if (VAGUE_ACTION_PATTERN.test(identity.action) || MULTI_ACTION_PATTERN.test(identity.action)) cap = 60;
   if (identity.object.length < 4 || VAGUE_OBJECT_PATTERN.test(identity.object)) cap = Math.min(cap, 60);

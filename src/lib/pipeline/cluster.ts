@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { EVENT_CLUSTER_MAX_RETRIES } from '@/contracts/event-clustering';
 import { db } from '@/lib/db';
 import { clusterArticle, markClusterFailure } from '@/lib/event-clustering-service';
-import { repairStaleEventRepresentatives } from '@/lib/event-service';
+import { autoConfirmSingleArticleReviewEvents, repairStaleEventRepresentatives } from '@/lib/event-service';
 import { repairAttachedClusterFailures, repairDirtyEvents } from '@/lib/event/event-consistency-service';
 import { advanceJobProgress, startJobStage } from '@/lib/job-progress';
 import { assertNotAborted } from '@/lib/worker-stop';
@@ -13,13 +13,13 @@ export function buildClusterPendingWhere(now = new Date(), forceRetry = false): 
   return {
     fetchStatus: 'fetched',
     aiStatus: 'done',
-    eventKey: { not: '' },
     technicalIgnoredAt: null,
     eventId: null,
     AND: [
       {
         OR: [
           { clusterStatus: 'pending' },
+          { clusterStatus: 'needs_review' },
           { clusterStatus: 'failed', clusterRetryCount: { lt: EVENT_CLUSTER_MAX_RETRIES } },
         ],
       },
@@ -34,6 +34,10 @@ export function buildClusterPendingWhere(now = new Date(), forceRetry = false): 
 }
 
 export async function clusterAllPending(signal?: AbortSignal, jobId?: string, forceRetry = false): Promise<{ total: number; processed: number; errors: number }> {
+  const autoConfirmedReviewEvents = await autoConfirmSingleArticleReviewEvents();
+  if (autoConfirmedReviewEvents > 0) {
+    console.warn(`[clusterAllPending] auto-confirmed ${autoConfirmedReviewEvents} standalone review Event(s)`);
+  }
   const repairedAttachedFailures = await repairAttachedClusterFailures();
   if (repairedAttachedFailures > 0) {
     console.warn(`[clusterAllPending] repaired ${repairedAttachedFailures} attached failed Article(s)`);
@@ -54,7 +58,9 @@ export async function clusterAllPending(signal?: AbortSignal, jobId?: string, fo
     const articles = await db.article.findMany({
       where: buildClusterPendingWhere(new Date(), forceRetry),
       select: { id: true, title: true },
-      orderBy: { createdAt: 'asc' },
+      // 事件候选以发布时间窗召回。历史补采按入库时间会打乱事件先后，
+      // 导致同一新闻无法稳定进入同一轮候选池。
+      orderBy: [{ publishedAt: 'asc' }, { createdAt: 'asc' }],
       take: MAX_CLUSTER_BATCH,
     });
     if (articles.length === 0) break;
@@ -73,7 +79,6 @@ export async function clusterAllPending(signal?: AbortSignal, jobId?: string, fo
       }
       if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, errorDelta: failed ? 1 : 0, currentItemLabel: article.title });
     }
-    if (articles.length < MAX_CLUSTER_BATCH) break;
   }
   return { total, processed, errors };
 }

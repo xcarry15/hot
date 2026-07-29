@@ -23,8 +23,7 @@ export type StepFilterKey =
   | 'normal-all'
   | 'normal-processing'
   | 'normal-ai'
-  | 'normal-no-event'
-  | 'normal-multi-event'
+  | 'normal-no-value'
   | 'normal-cluster'
   | 'normal-public'
   | 'normal-push'
@@ -39,7 +38,7 @@ export type StepFilterKey =
   | 'ignored'
 
 export const ALL_STEP_FILTER_KEYS: readonly StepFilterKey[] = [
-  'normal-all', 'normal-processing', 'normal-ai', 'normal-no-event', 'normal-multi-event', 'normal-cluster', 'normal-public', 'normal-push', 'normal-pushed',
+  'normal-all', 'normal-processing', 'normal-ai', 'normal-no-value', 'normal-cluster', 'normal-public', 'normal-push', 'normal-pushed',
   'anomaly-all', 'anomaly-manual', 'anomaly-review', 'anomaly-ad', 'anomaly-duplicate', 'anomaly-failure',
   'anomaly-low-confidence',
   'ignored',

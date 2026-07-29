@@ -86,7 +86,7 @@ describe('运营统计重复口径', () => {
       createdAt: now,
       fetchStatus: 'fetched',
       aiStatus: 'skipped',
-      skipReason: '无具体事件',
+      skipReason: '无价值',
       aiSnapshot: '{"eventScore":0}',
       score: 20,
       isAd: true,
@@ -99,5 +99,27 @@ describe('运营统计重复口径', () => {
 
     expect(result.summary.analyzed).toBe(1);
     expect(result.summary.ads).toBe(1);
+  });
+
+  it('同一已推送 Event 只按代表文章计一次推送', async () => {
+    const now = new Date();
+    const event = { pushedAt: now, articleCount: 2, representativeArticleId: 'representative' };
+    mocks.articleFindMany.mockResolvedValue([
+      {
+        id: 'representative', sourceId: 'source-1', createdAt: now,
+        fetchStatus: 'fetched', aiStatus: 'done', skipReason: null, aiSnapshot: '{}',
+        score: 85, isAd: false, event, viewCount: 0, originalClickCount: 0,
+      },
+      {
+        id: 'duplicate', sourceId: 'source-1', createdAt: now,
+        fetchStatus: 'fetched', aiStatus: 'done', skipReason: null, aiSnapshot: '{}',
+        score: 80, isAd: false, event, viewCount: 0, originalClickCount: 0,
+      },
+    ]);
+
+    const result = await getDashboardAnalytics('today');
+
+    expect(result.summary.pushed).toBe(1);
+    expect(result.sources[0]?.pushed).toBe(1);
   });
 });

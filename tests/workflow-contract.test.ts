@@ -16,7 +16,7 @@ describe('workflow state contract', () => {
   })
 
   it('正常业务跳过不进入技术失败', () => {
-    expect(isRecoverableFailure({ fetchStatus: 'fetched', aiStatus: 'skipped', clusterStatus: 'pending', skipReason: '无具体事件' })).toBe(false)
+    expect(isRecoverableFailure({ fetchStatus: 'fetched', aiStatus: 'skipped', clusterStatus: 'pending', skipReason: '无价值' })).toBe(false)
     expect(isRecoverableFailure({ fetchStatus: 'fetched', aiStatus: 'skipped', clusterStatus: 'pending', skipReason: 'AI 连续失败 5 次，已放弃' })).toBe(true)
     expect(isRecoverableFailure({ fetchStatus: 'fetched', aiStatus: 'done', clusterStatus: 'failed' })).toBe(true)
   })

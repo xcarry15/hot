@@ -4,9 +4,13 @@ import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import PublicArticleTimeline from '@/components/public-article-timeline'
 import type {
-  PublicArticleDateGroupDto,
   PublicArticleListResponseDto,
 } from '@/contracts/public-articles'
+import {
+  createPublicFeedState,
+  mergeLatestPublicFeedState,
+  mergePublicArticleGroups,
+} from '@/components/public-feed-state'
 
 type Props = {
   initialData: PublicArticleListResponseDto
@@ -24,57 +28,6 @@ function buildFeedUrl(params: {
   if (params.cursor) query.set('cursor', params.cursor)
   if (params.probe) query.set('probe', '1')
   return `/api/public/articles?${query.toString()}`
-}
-
-function countGroupItems(groups: PublicArticleDateGroupDto[]): number {
-  return groups.reduce((total, group) => total + group.items.length, 0)
-}
-
-function mergeGroups(
-  current: PublicArticleDateGroupDto[],
-  incoming: PublicArticleDateGroupDto[],
-  incomingFirst = false,
-): PublicArticleDateGroupDto[] {
-  const groups = new Map(current.map((group) => [group.date, group]))
-  for (const group of incoming) {
-    const existing = groups.get(group.date)
-    if (!existing) {
-      groups.set(group.date, group)
-      continue
-    }
-    const orderedItems = incomingFirst
-      ? [...group.items, ...existing.items]
-      : [...existing.items, ...group.items]
-    const items = new Map(orderedItems.map((item) => [item.id, item]))
-    groups.set(group.date, { ...group, count: items.size, items: [...items.values()] })
-  }
-  return [...groups.values()].sort((a, b) => b.date.localeCompare(a.date))
-}
-
-function createState(
-  data: PublicArticleListResponseDto,
-  groups = data.groups,
-): PublicArticleListResponseDto {
-  return {
-    ...data,
-    groups,
-    displayedArticleCount: countGroupItems(groups),
-    displayedDateCount: groups.length,
-  }
-}
-
-function mergeLatestState(
-  current: PublicArticleListResponseDto,
-  data: PublicArticleListResponseDto,
-): PublicArticleListResponseDto {
-  const groups = mergeGroups(current.groups, data.groups, true)
-  const hasLoadedOlderArticles = current.displayedArticleCount > data.displayedArticleCount
-
-  return createState({
-    ...data,
-    nextCursor: hasLoadedOlderArticles ? current.nextCursor : data.nextCursor,
-    hasMore: hasLoadedOlderArticles ? current.hasMore : data.hasMore,
-  }, groups)
 }
 
 async function requestFeed(url: string): Promise<PublicArticleListResponseDto> {
@@ -138,7 +91,10 @@ export default function PublicArticleFeed({
         search,
         cursor: state.nextCursor,
       }))
-      setState((current) => createState(data, mergeGroups(current.groups, data.groups)))
+      setState((current) => createPublicFeedState(
+        data,
+        mergePublicArticleGroups(current.groups, data.groups),
+      ))
     } catch {
       setLoadError(true)
     } finally {
@@ -153,7 +109,7 @@ export default function PublicArticleFeed({
       const data = await requestFeed(buildFeedUrl({
         search,
       }))
-      setState((current) => mergeLatestState(current, data))
+      setState((current) => mergeLatestPublicFeedState(current, data))
       setHasNewArticles(false)
     } catch {
       setLoadError(true)

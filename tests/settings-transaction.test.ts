@@ -228,6 +228,18 @@ describe('settings PUT 事务化', () => {
     expect(decryptWebhookConfigsForRuntime(webhookUpsert.update.value)).toBe(existingWebhook);
   });
 
+  it('服务端拒绝绕过设置页提交的非法 Webhook', async () => {
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feishu_webhook_url: JSON.stringify([{ url: 'file:///tmp/hook' }]) }),
+    });
+
+    const res = await settingsPUT(req);
+    expect(res.status).toBe(400);
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it('后台重算唤醒失败不影响已经提交的公开设置，标记留给调度器续跑', async () => {
     mocks.runJob.mockRejectedValueOnce(new Error('runner lease unavailable'));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);

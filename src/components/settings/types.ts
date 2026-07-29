@@ -39,8 +39,6 @@ export interface Settings extends Record<PromptBlockKey, string> {
   ai_keyword_match_bonus: string
   ai_step2_content_max_chars: string
   ai_concurrency: string
-  event_cluster_ai_same_event_confidence: string
-  event_cluster_ai_different_event_confidence: string
 }
 
 export interface AiTestResult {

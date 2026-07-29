@@ -135,9 +135,12 @@ export function useCrawlLogSnapshot(
         if (document.visibilityState === 'visible') {
           const current = snapshotRef.current
           if (current?.activeJob) {
+            // 轻量 Job 请求可能与手动/完整 snapshot 请求并发；若期间
+            // 已开始新的完整请求，不能让旧的轻量结果回写覆盖新快照。
+            const pollRequestId = requestIdRef.current
             try {
               const jobs = await fetchCrawlLogJobStatus()
-              if (!unmountedRef.current) {
+              if (!unmountedRef.current && pollRequestId === requestIdRef.current) {
                 const jobChanged = jobs.activeJob?.id !== current.activeJob.id
                 const stageChanged = jobs.activeJob?.currentStage !== current.activeJob.currentStage
                 const jobFinished = !jobs.activeJob

@@ -97,7 +97,7 @@ function numericSettingDefault(key: string, fallback: number): number {
 const DEFAULT_WEIGHT_EVENT = numericSettingDefault(SETTING_KEYS.AI_WEIGHT_EVENT, 70);
 const DEFAULT_WEIGHT_CONTENT = numericSettingDefault(SETTING_KEYS.AI_WEIGHT_CONTENT, 30);
 const DEFAULT_TEMPERATURE = numericSettingDefault(SETTING_KEYS.AI_TEMPERATURE, 0.3);
-const DEFAULT_MAX_TOKENS = numericSettingDefault(SETTING_KEYS.AI_MAX_TOKENS, 10240);
+const DEFAULT_MAX_TOKENS = numericSettingDefault(SETTING_KEYS.AI_MAX_TOKENS, 2048);
 const DEFAULT_STEP2_CONTENT_MAX_CHARS = numericSettingDefault(SETTING_KEYS.AI_STEP2_CONTENT_MAX_CHARS, 5000);
 
 const settingsCache = createCache<AISettings>(30_000); // 30 seconds

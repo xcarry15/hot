@@ -35,7 +35,7 @@ export function clearJobAbortController(jobId: string): void {
 /** Abort the currently running job (in-process). */
 export function abortCurrentJob(): string | null {
   if (!activeJob) return null;
-  activeJob.controller.abort();
+  activeJob.controller.abort(new Error('Stopped by user'));
   return activeJob.jobId;
 }
 

@@ -210,11 +210,6 @@ function readEventIdentity(raw: Record<string, unknown>): {
   };
 }
 
-export interface ParseAiAnalysisOptions {
-  /** 定向修复前允许保留评分和摘要，禁止直接把不完整身份落库。 */
-  allowIncompleteIdentity?: boolean;
-}
-
 /**
  * 结构化 AI 分析结果的唯一入口。
  *
@@ -222,7 +217,7 @@ export interface ParseAiAnalysisOptions {
  * 当成整篇分析失败。这里只对 JSON、核心字段和数值范围做保护，其余内容
  * 统一归一化后落库；真正没有可用 JSON/评分字段时才让上层进入失败重试。
  */
-export function parseAiAnalysisOutput(text: string, options: ParseAiAnalysisOptions = {}): AiAnalysisOutput {
+export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
   const raw = extractJsonObject(text);
   const hasCoreScore = [
     ['event_score', 'eventScore'],
@@ -257,41 +252,15 @@ export function parseAiAnalysisOutput(text: string, options: ParseAiAnalysisOpti
     summary,
     keyPoints,
   });
-  // “有没有具体事件”首先由事件影响分表达。模型偶尔会在给出 0-9 分后仍
-  // 为观点稿硬凑主体/动作/事项；此时直接清空身份，仍保留本次完整 AI 审计信息。
-  if (eventScore <= 9) {
-    return {
-      event_score: eventScore,
-      content_score: clampScore(raw.content_score ?? raw.contentScore),
-      relevance: clampScore(raw.relevance),
-      is_ad: normalizedAd.isAd,
-      ad_probability: normalizedAd.probability,
-      confidence,
-      category: (() => {
-        const category = readText(raw.category);
-        return CATEGORIES.has(category) ? category : '其他';
-      })(),
-      summary,
-      brand,
-      event_subjects: [],
-      event_action: '',
-      event_object: '',
-      event_key: '',
-      event_key_confidence: 0,
-      key_points: keyPoints,
-    };
-  }
-  if (!isCompleteEventIdentity(identity) && !options.allowIncompleteIdentity) {
-    throw new Error('LLM 响应缺少完整事件身份（主体/行为/具体事项）');
-  }
-  const eventKeyConfidence = capEventIdentityConfidence(
-    identity,
-    clampScore(raw.event_key_confidence
-      ?? raw.eventKeyConfidence
-      ?? identityConfidence
-      ?? confidence,
-      confidence),
-  );
+  // 事件影响力只描述事件大小，不能反推文章是否存在可聚类事实。
+  // 单次调用中若身份不完整，清空身份而不是抛错重试；评分、摘要仍是有效分析结果。
+  const hasCompleteEventIdentity = isCompleteEventIdentity(identity);
+  const eventIdentity = hasCompleteEventIdentity
+    ? identity
+    : { subjects: [], action: '', object: '' };
+  const eventKeyConfidence = hasCompleteEventIdentity
+    ? capEventIdentityConfidence(identity, identityConfidence ?? 0)
+    : 0;
 
   return {
     event_score: eventScore,
@@ -306,38 +275,11 @@ export function parseAiAnalysisOutput(text: string, options: ParseAiAnalysisOpti
     })(),
     summary,
     brand,
-    event_subjects: identity.subjects,
-    event_action: identity.action,
-    event_object: identity.object,
-    event_key: buildCanonicalEventKey(identity),
+    event_subjects: eventIdentity.subjects,
+    event_action: eventIdentity.action,
+    event_object: eventIdentity.object,
+    event_key: buildCanonicalEventKey(eventIdentity),
     event_key_confidence: eventKeyConfidence,
     key_points: keyPoints,
-  };
-}
-
-/** 解析定向身份修复的最小 JSON 响应。 */
-export function parseEventIdentityOutput(text: string): {
-  event_subjects: string[];
-  event_action: string;
-  event_object: string;
-  event_key_confidence: number;
-} {
-  const raw = extractJsonObject(text);
-  const identityFields = [
-    'event_subjects', 'eventSubjects', 'event_subject', 'eventSubject', 'subjects', 'subject',
-    'event_action', 'eventAction', 'event_verb', 'eventVerb', 'action', 'verb',
-    'event_object', 'eventObject', 'event_matter', 'eventMatter', 'object', 'matter',
-    '事件主体', '主体', '事件行为', '行为', '具体事项', '事项',
-    'event_identity', 'eventIdentity', 'identity', 'event', 'event_key', 'eventKey',
-  ];
-  if (!identityFields.some((field) => field in raw)) {
-    throw new Error('LLM 定向修复缺少事件身份字段');
-  }
-  const { identity, confidence } = readEventIdentity(raw);
-  return {
-    event_subjects: identity.subjects,
-    event_action: identity.action,
-    event_object: identity.object,
-    event_key_confidence: capEventIdentityConfidence(identity, confidence ?? 0),
   };
 }

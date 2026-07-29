@@ -196,7 +196,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
     expect(updateCall?.[0].data).not.toHaveProperty('aiRetryCount');
   });
 
-  it('无具体事件正常跳过，但保留模型与 Prompt 审计信息', async () => {
+  it('高价值文章缺少事件身份时保留为可自动建 Event 的结果，不追加第二次 AI 调用', async () => {
     const longContent = '这是一篇有足够正文的行业趋势文章。'.repeat(8);
     mocks.createChatCompletion.mockResolvedValue({
       content: JSON.stringify({
@@ -228,11 +228,12 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
       publishedAt: null,
     });
 
-    expect(result.status).toBe('skipped');
+    expect(result.status).toBe('done');
+    expect(mocks.createChatCompletion).toHaveBeenCalledTimes(1);
     const updateCall = mocks.articleUpdate.mock.calls.find(c => c[0]?.where?.id === 'trend-1');
     expect(updateCall?.[0].data).toMatchObject({
-      aiStatus: 'skipped',
-      skipReason: '无具体事件',
+      aiStatus: 'done',
+      skipReason: null,
       aiModel: 'audit-model',
       aiProvider: 'opencode',
       eventKey: '',
@@ -247,7 +248,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
     });
   });
 
-  it('多事件聚合稿也完成 AI 分析，不丢失软文与内容判断', async () => {
+  it('多事件标题保留模型选出的主事件，由聚类阶段自动建立独立 Event', async () => {
     const longContent = '聚合稿包含多条有效零售新闻，需要保留整体分析和广告判断。'.repeat(8);
     mocks.createChatCompletion.mockResolvedValue({
       content: JSON.stringify({
@@ -279,19 +280,19 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
       publishedAt: null,
     });
 
-    expect(result.status).toBe('skipped');
+    expect(result.status).toBe('done');
     expect(mocks.createChatCompletion).toHaveBeenCalledTimes(1);
     const updateCall = mocks.articleUpdate.mock.calls.find(c => c[0]?.where?.id === 'digest-1');
     expect(updateCall?.[0].data).toMatchObject({
-      aiStatus: 'skipped',
-      skipReason: '多事件聚合稿',
+      aiStatus: 'done',
+      skipReason: null,
       aiModel: 'audit-model',
       aiProvider: 'opencode',
-      eventSubjects: '[]',
-      eventAction: '',
-      eventObject: '',
-      eventKey: '',
-      eventKeyConfidence: 0,
+      eventSubjects: '["杉杉奥莱"]',
+      eventAction: '计划开店',
+      eventObject: '西安首店',
+      eventKey: '杉杉奥莱/计划开店/西安首店',
+      eventKeyConfidence: 55,
     });
     expect(updateCall?.[0].data.aiSnapshot).not.toBe('{}');
   });

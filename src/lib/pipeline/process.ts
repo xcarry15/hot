@@ -12,9 +12,10 @@
  *     · 关键字 DB 异常仅 console.error 不阻塞主流程
  *     · repair 只处理近 7 天 fetched 且有 rawContent 的文章
  */
+import type { Article } from '@prisma/client';
 import { db } from '@/lib/db';
 import { evaluateKeywordMatch, matchIndustryTitleSignal } from '@/lib/filter';
-import { fetchArticleDetail } from '@/lib/detail-fetcher';
+import { fetchArticleDetail, markArticleFetchFailure } from '@/lib/detail-fetcher';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
 import { assertNotAborted } from '@/lib/worker-stop';
 import { extractMetaPublishedAt } from '@/lib/date-utils';
@@ -31,6 +32,7 @@ const MAX_BATCH_SIZE = 500;
 const PROCESS_CONCURRENCY = 5;
 const PROCESS_DELAY_MS = 150;
 const REPAIR_WINDOW_DAYS = 7;
+const REPAIR_BATCH_SIZE = 20;
 const PROCESS_MAX_RETRIES = 5;
 
 /**
@@ -145,6 +147,9 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
           errors++;
           const errMsg = err instanceof Error ? err.message : String(err);
           console.error(`[processAllPending] fetch failed for article=${article.id} title="${article.title}":`, errMsg);
+          // 超时/运行时异常可能在 fetchArticleDetail 写入失败状态之前从外层返回。
+          // 不收口会让这篇文章永久保持 pending，并被 while 循环反复处理。
+          await markArticleFetchFailure(article.id, err, { onlyIfPending: true });
         }
       }));
       if (jobId) {
@@ -174,52 +179,61 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
  */
 export async function repairPublishedDates(signal?: AbortSignal): Promise<void> {
   try {
-    // 只拉近 7 天已 fetched 且有 rawContent 的文章（时间从已有 HTML 提取，不抓网）。
-    // detail-fetcher 已对新文章提取 publishedAt，老文章若仍日期-only 大概率源站无精确时间，
-    // 限制窗口避免随数据增长全表扫描越来越慢。
+    // 只扫描近 7 天已 fetched 且有 rawContent 的文章（时间从已有 HTML 提取，不抓网）。
+    // 按 createdAt/id 做稳定 keyset 分页；更新 publishedAt 不会影响游标，避免把整周
+    // raw HTML 一次装进内存。
     const sevenDaysAgo = new Date(Date.now() - REPAIR_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-    const toRepair = await db.article.findMany({
-      where: {
-        fetchStatus: 'fetched',
-        rawContent: { not: '' },
-        createdAt: { gte: sevenDaysAgo },
-      },
-      select: { id: true, title: true, url: true, rawContent: true, publishedAt: true, fetchStatus: true },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    // 只选出 publishedAt 为 null 或时间为 00:00:00（日期-only）的
-    const needsRepair = toRepair.filter(a =>
-      !a.publishedAt || (a.publishedAt.getUTCHours() + a.publishedAt.getUTCMinutes() + a.publishedAt.getUTCSeconds()) === 0
-    );
-
-    if (needsRepair.length === 0) return;
-
-    console.log(`[repairPublishedDates] found ${needsRepair.length} articles to repair`);
-
-    for (let i = 0; i < needsRepair.length; i += 5) {
+    let cursor: { createdAt: Date; id: string } | null = null;
+    while (true) {
       assertNotAborted(signal);
-      const batch = needsRepair.slice(i, i + 5);
-      await Promise.all(
-        batch.map(async (article) => {
-          try {
-            const html = article.rawContent || null;
-            if (!html) return;
-            const detailDate = extractMetaPublishedAt(html);
-            if (detailDate) {
-              await db.article.update({
-                where: { id: article.id },
-                data: { publishedAt: detailDate },
-              });
-              await refreshPublicPublication(article.id, db, { contentChanged: true });
-              console.log(`[repairPublishedDates] fixed article=${article.id} title="${article.title}" → ${detailDate.toISOString()}`);
-            }
-          } catch (err) {
-            if (signal?.aborted) throw err;
-            console.error(`[repairPublishedDates] failed for article=${article.id}:`, err);
-          }
-        })
+      const page: Array<Pick<Article, 'id' | 'title' | 'rawContent' | 'publishedAt' | 'createdAt'>> = await db.article.findMany({
+        where: {
+          fetchStatus: 'fetched',
+          rawContent: { not: '' },
+          createdAt: { gte: sevenDaysAgo },
+          ...(cursor ? {
+            AND: [{
+              OR: [
+                { createdAt: { lt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+              ],
+            }],
+          } : {}),
+        },
+        select: { id: true, title: true, rawContent: true, publishedAt: true, createdAt: true },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: REPAIR_BATCH_SIZE,
+      });
+      if (page.length === 0) break;
+
+      const needsRepair = page.filter(article =>
+        !article.publishedAt || (article.publishedAt.getUTCHours() + article.publishedAt.getUTCMinutes() + article.publishedAt.getUTCSeconds()) === 0,
       );
+      for (let i = 0; i < needsRepair.length; i += 5) {
+        const batch = needsRepair.slice(i, i + 5);
+        await Promise.all(
+          batch.map(async (article) => {
+            try {
+              const detailDate = extractMetaPublishedAt(article.rawContent);
+              if (detailDate) {
+                await db.article.update({
+                  where: { id: article.id },
+                  data: { publishedAt: detailDate },
+                });
+                await refreshPublicPublication(article.id, db, { contentChanged: true });
+                console.log(`[repairPublishedDates] fixed article=${article.id} title="${article.title}" → ${detailDate.toISOString()}`);
+              }
+            } catch (err) {
+              if (signal?.aborted) throw err;
+              console.error(`[repairPublishedDates] failed for article=${article.id}:`, err);
+            }
+          }),
+        );
+      }
+
+      const last = page[page.length - 1];
+      cursor = { createdAt: last.createdAt, id: last.id };
+      if (page.length < REPAIR_BATCH_SIZE) break;
     }
   } catch (err) {
     if (signal?.aborted) throw err;

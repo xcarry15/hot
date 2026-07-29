@@ -76,19 +76,11 @@ describe('matchStepChip 单谓词命中', () => {
     expect(matchStepChip(article({ anomalyLabels: ['duplicate'] }), 'anomaly-duplicate')).toBe(true)
   })
 
-  it('无具体事件是正常跳过，不是流程失败', () => {
-    const skipped = article({ ai: 'skipped', cluster: 'not_applicable', push: 'not_applicable', skipReason: '无具体事件' })
+  it('无价值是正常业务跳过，不是流程失败', () => {
+    const skipped = article({ ai: 'skipped', cluster: 'not_applicable', push: 'not_applicable', skipReason: '无价值' })
     expect(matchStepChip(skipped, 'anomaly-failure')).toBe(false)
     expect(matchStepChip(skipped, 'normal-all')).toBe(true)
-    expect(matchStepChip(skipped, 'normal-no-event')).toBe(true)
-    expect(matchStepChip(skipped, 'normal-processing')).toBe(false)
-  })
-
-  it('多事件聚合稿是正常跳过，不是聚类异常', () => {
-    const skipped = article({ ai: 'skipped', cluster: 'not_applicable', push: 'not_applicable', skipReason: '多事件聚合稿' })
-    expect(matchStepChip(skipped, 'anomaly-all')).toBe(false)
-    expect(matchStepChip(skipped, 'normal-all')).toBe(true)
-    expect(matchStepChip(skipped, 'normal-multi-event')).toBe(true)
+    expect(matchStepChip(skipped, 'normal-no-value')).toBe(true)
     expect(matchStepChip(skipped, 'normal-processing')).toBe(false)
   })
 

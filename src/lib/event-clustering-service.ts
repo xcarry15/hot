@@ -1,80 +1,41 @@
 import { Prisma } from '@prisma/client';
-import { z } from 'zod';
 import {
   EVENT_CLUSTER_MAX_CANDIDATES,
-  EVENT_CLUSTER_MAX_AI_CANDIDATES,
   EVENT_CLUSTER_MAX_MEMBER_ARTICLES,
   EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES,
   EVENT_CLUSTER_FOLLOW_UP_DAYS,
   EVENT_CLUSTER_MAX_RETRIES,
-  DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE,
-  DEFAULT_EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE,
   EVENT_CLUSTER_RULE_VERSION,
   EVENT_CLUSTER_WINDOW_DAYS,
   hasLiteralContentOverlap,
   isMultiTopicTitle,
 } from '@/contracts/event-clustering';
 import { parseEventSubjects } from '@/contracts/event-identity';
-import { createChatCompletion } from '@/lib/ai-client';
-import { parseStrictJsonObject } from '@/lib/ai-helpers';
 import { db } from '@/lib/db';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshEventPublicPublication } from '@/lib/public-publication-service';
 import { recalculateEvent } from '@/lib/event/event-recalculation-service';
 import { markEventDirty, repairAttachedClusterArticle } from '@/lib/event/event-consistency-service';
-import { getSetting, SETTING_KEYS } from '@/lib/settings';
+import { assertNotAborted } from '@/lib/worker-stop';
 import {
   articleDate,
   bestPairEvidenceForCandidate,
-  buildAiClusterAuditEvidence,
+  buildRuleCandidateAuditEvidence,
   candidateArticleSelect,
   isStrongPushedDuplicate,
-  shouldCreateClusterReview,
-  type AiCandidateAudit,
   type Candidate,
   type PairEvidence,
+  type RuleCandidateAudit,
 } from '@/lib/event/event-cluster-evidence';
 export {
-  buildAiClusterAuditEvidence,
+  buildRuleCandidateAuditEvidence,
   hasDuplicateReportEvidence,
-  isAmbiguousEventCandidate,
   isNearExactReprint,
   isStrongEventKeyDuplicate,
-  shouldCreateClusterReview,
-  type AiCandidateAudit,
+  type RuleCandidateAudit,
 } from '@/lib/event/event-cluster-evidence';
 
-const aiDecisionSchema = z.object({
-  same_event: z.boolean(),
-  confidence: z.number().int().min(0).max(100),
-  // reason 仅用于审计展示；模型偶尔超出提示词字数，不应因此把有效判决
-  // 降级成“AI 判断失败”。解析后统一截断即可。
-  reason: z.string().trim().min(1).transform((value) => value.slice(0, 100)),
-}).strict();
-
 type ClusterClient = Prisma.TransactionClient;
-
-
-type AiClusterThresholds = {
-  sameEvent: number;
-  differentEvent: number;
-};
-
-function parseThreshold(value: string, fallback: number, min: number, max: number): number {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
-}
-
-async function getAiClusterThresholds(): Promise<AiClusterThresholds> {
-  const [sameEvent, differentEvent] = await Promise.all([
-    getSetting(SETTING_KEYS.EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE),
-    getSetting(SETTING_KEYS.EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE),
-  ]);
-  return {
-    sameEvent: parseThreshold(sameEvent, DEFAULT_EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE, 70, 95),
-    differentEvent: parseThreshold(differentEvent, DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE, 70, 99),
-  };
-}
 
 
 export async function findRecentPushedEventDuplicate(articleId: string, eventId: string): Promise<{
@@ -195,7 +156,7 @@ async function commitClusterMutation(mutate: (tx: ClusterClient) => Promise<stri
 async function createEventForArticle(
   client: ClusterClient,
   article: { id: string; title: string; publishedAt: Date | null; createdAt: Date; eventKey: string },
-  input: { action: 'create' | 'fallback_create'; decisionSource: 'rule' | 'ai'; confidence?: number; evidence: object; needsReview?: boolean; candidateEventId?: string; matchedMemberArticleId?: string },
+  input: { action: 'create' | 'fallback_create'; decisionSource: 'rule' | 'ai'; confidence: number | null; evidence: object; needsReview?: boolean; candidateEventId?: string; matchedMemberArticleId?: string },
 ): Promise<string> {
   const seenAt = articleDate(article);
   const event = await client.event.create({
@@ -217,6 +178,7 @@ async function createEventForArticle(
       clusterError: null,
       clusterRetryCount: 0,
       nextClusterRetryAt: null,
+      skipReason: null,
     },
   });
   await client.eventClusterAudit.create({
@@ -243,8 +205,8 @@ async function attachArticle(
   article: { id: string; publishedAt: Date | null; createdAt: Date },
   candidate: Candidate,
   pair: PairEvidence,
-  decisionSource: 'exact' | 'rule' | 'ai',
-  confidence: number,
+  decisionSource: 'exact' | 'rule',
+  confidence: number | null,
 ): Promise<string> {
   const seenAt = articleDate(article);
   const currentEvent = await client.event.findUnique({
@@ -262,6 +224,7 @@ async function attachArticle(
       clusterError: null,
       clusterRetryCount: 0,
       nextClusterRetryAt: null,
+      skipReason: null,
     },
   });
   await client.event.update({
@@ -293,70 +256,8 @@ async function attachArticle(
   return candidate.id;
 }
 
-async function askAiSameEvent(
-  article: { title: string; cleanContent: string; eventKey: string; eventKeyConfidence: number | null },
-  pair: PairEvidence,
-  candidate: Candidate,
-  thresholds: AiClusterThresholds,
-  signal?: AbortSignal,
-) {
-  const member = candidate.articles.find((item) => item.id === pair.matchedMemberArticleId) ?? candidate.articles[0];
-  const prompt = `判断是否是同一个具体新闻事件。
-同一事件必须同时满足：核心主体相同、具体动作/结果相同、时间阶段一致。
-以下均不算同一事件：只有品牌/地点/奖项/话题相同；预告与事后结果；聚合快讯仅有一个子项重合。
-证据不足时返回 false 且 confidence 不超过 60；只有存在明确冲突时才返回 false 且 confidence 至少 ${thresholds.differentEvent}。
-只有同一事件证据充分时才返回 true，且 confidence 至少 ${thresholds.sameEvent}。
-
-新文章事件键：${article.eventKey}（置信度 ${article.eventKeyConfidence ?? 0}）
-新文章：${article.title}
-正文：${article.cleanContent.slice(0, 1_200)}
-
-匹配成员事件键：${member.eventKey}（置信度 ${member.eventKeyConfidence ?? 0}）
-匹配成员标题：${member.title}
-匹配成员正文：${member.cleanContent.slice(0, 600)}
-
-只返回 JSON：{"same_event":false,"confidence":0,"reason":"不超过100字"}`;
-  const result = await createChatCompletion([
-    { role: 'system', content: '你是保守的新闻事件聚类器，只根据给定文本判断，证据不足时分开。' },
-    { role: 'user', content: prompt },
-  ], { temperature: 0, maxTokens: 300, responseFormat: 'json_object', signal });
-  return aiDecisionSchema.parse(parseStrictJsonObject(result.content));
-}
-
-/**
- * AI 聚类判决后处理。提示词要求：
- * - same_event=true 时必须达到当前设置的自动归入阈值
- * - same_event=false 只有规则层已有明确冲突时，才可达到当前设置的独立事件阈值
- * 如果 AI 返回违反这些约束的组合，保守纠正。
- */
-function hasExplicitDifferentEvidence(pair: PairEvidence): boolean {
-  return pair.phaseConflict
-    || pair.identityConflict
-    || pair.qualifierConflict
-    || pair.qualifierConflictOnPair;
-}
-
-function validateAiClusterDecision(
-  raw: { same_event: boolean; confidence: number; reason: string },
-  pair: PairEvidence,
-  thresholds: AiClusterThresholds,
-): {
-  sameEvent: boolean; confidence: number; reason: string;
-} {
-  if (raw.same_event && raw.confidence < thresholds.sameEvent) {
-    return { sameEvent: false, confidence: 0, reason: `AI 判断矛盾（sameEvent=true 但 confidence=${raw.confidence}<${thresholds.sameEvent}），已保守分开` };
-  }
-  if (!raw.same_event && raw.confidence >= thresholds.differentEvent && !hasExplicitDifferentEvidence(pair)) {
-    return {
-      sameEvent: false,
-      confidence: 60,
-      reason: `${raw.reason}（缺少明确身份冲突，按低置信不同事件处理）`,
-    };
-  }
-  return { sameEvent: raw.same_event, confidence: raw.confidence, reason: raw.reason };
-}
-
 export async function clusterArticle(articleId: string, signal?: AbortSignal): Promise<{ eventId: string; action: string }> {
+  assertNotAborted(signal);
   const article = await db.article.findUnique({
     where: { id: articleId },
     select: {
@@ -376,27 +277,30 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     },
   });
   if (!article) throw new Error('文章不存在');
-  if (article.aiStatus !== 'done' || !article.eventKey) throw new Error('文章尚未完成事件身份分析');
+  if (article.aiStatus !== 'done') throw new Error('文章尚未完成 AI 分析');
   if (article.clusterStatus === 'clustered' || article.clusterStatus === 'needs_review') {
     const current = await db.article.findUnique({ where: { id: article.id }, select: { eventId: true } });
     if (current?.eventId) return { eventId: current.eventId, action: 'existing' };
   }
 
   const multiTopic = isMultiTopicTitle(article.title);
-  if (multiTopic) {
+  if (multiTopic || !article.eventKey) {
+    assertNotAborted(signal);
     const eventId = await commitClusterMutation((tx) => createEventForArticle(tx, article, {
-      action: 'fallback_create',
+      action: 'create',
       decisionSource: 'rule',
-      confidence: 50,
+      confidence: null,
       evidence: {
         eventKey: article.eventKey,
-        multiTopic: true,
-        reason: '标题包含多个独立主体与动作，不能自动归入单一 Event',
-        ...buildAiClusterAuditEvidence([], null),
+        multiTopic,
+        standalone: true,
+        reason: multiTopic
+          ? '标题包含多个独立主体与动作，不强行归入其中一个子事件，自动按单篇建立独立 Event'
+          : '未提取到完整事件身份，自动按单篇建立独立 Event',
+        ...buildRuleCandidateAuditEvidence([], null),
       },
-      needsReview: true,
     }));
-    return { eventId, action: 'fallback_create' };
+    return { eventId, action: 'create' };
   }
   const referenceAt = articleDate(article);
   const windowMs = EVENT_CLUSTER_FOLLOW_UP_DAYS * 24 * 60 * 60 * 1000;
@@ -450,6 +354,7 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     }),
   ]);
   const candidateRows = uniqueCandidateRows(exactCandidateRows, recentCandidateRows);
+  assertNotAborted(signal);
   const candidates: Candidate[] = candidateRows.map(({ representativeArticle, articles, ...candidate }) => ({
     ...candidate,
     articles: [
@@ -516,69 +421,32 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
   // P0-2: 每位候选使用其最佳成员证据的决策
   const exact = ranked.find(({ evidence }) => evidence.decision === 'exact');
   if (exact) {
-    const eventId = await commitClusterMutation((tx) => attachArticle(tx, article, exact.candidate, exact.evidence, 'exact', 100));
+    assertNotAborted(signal);
+    const eventId = await commitClusterMutation((tx) => attachArticle(tx, article, exact.candidate, exact.evidence, 'exact', null));
     return { eventId, action: 'attach' };
   }
 
   const strong = ranked.find(({ evidence }) => evidence.decision === 'strong');
   if (strong) {
-    const confidence = Math.min(99, Math.round(65
-      + Number(strong.evidence.eventKeyMatch) * 20
-      + strong.evidence.identityScore * 12
-      + strong.evidence.titleOverlap * 6
-      + Math.max(strong.evidence.charContentOverlap, strong.evidence.tokenContentOverlap) * 5));
-    const eventId = await commitClusterMutation((tx) => attachArticle(tx, article, strong.candidate, strong.evidence, 'rule', confidence));
+    assertNotAborted(signal);
+    const eventId = await commitClusterMutation((tx) => attachArticle(tx, article, strong.candidate, strong.evidence, 'rule', null));
     return { eventId, action: 'attach' };
   }
 
-  const ambiguous = ranked
+  // 事件候选只使用主分析已提取的身份和本地证据。证据不足时默认独立建 Event，
+  // 把人工复核保留给多主题稿和身份不完整稿，避免免费模型的二次判断扩大成本和噪声。
+  const nearbyCandidates: RuleCandidateAudit[] = ranked
     .filter(({ evidence }) => evidence.decision === 'ambiguous')
-    .slice(0, EVENT_CLUSTER_MAX_AI_CANDIDATES);
-
-  const aiCandidates: AiCandidateAudit[] = [];
-  const thresholds = ambiguous.length > 0 ? await getAiClusterThresholds() : null;
-  for (const item of ambiguous) {
-    let rawDecision;
-    try {
-      rawDecision = await askAiSameEvent(article, item.evidence, item.candidate, thresholds!, signal);
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      console.warn('[event-clustering] candidate decision failed:', error);
-      aiCandidates.push({
-        candidateEventId: item.candidate.id,
-        matchedMemberArticleId: item.evidence.matchedMemberArticleId,
-        ruleEvidence: item.evidence as unknown as Record<string, unknown>,
-        aiDecision: { sameEvent: false, confidence: 0, reason: 'AI 判断失败，已保守分开' },
-      });
-      continue;
-    }
-    const decision = validateAiClusterDecision(rawDecision, item.evidence, thresholds!);
-    const auditDecision: AiCandidateAudit = {
-      candidateEventId: item.candidate.id,
-      matchedMemberArticleId: item.evidence.matchedMemberArticleId,
-      ruleEvidence: item.evidence as unknown as Record<string, unknown>,
-      aiDecision: {
-        sameEvent: decision.sameEvent,
-        confidence: decision.confidence,
-        reason: decision.reason,
-      },
-    };
-    aiCandidates.push(auditDecision);
-    if (decision.sameEvent && decision.confidence >= thresholds!.sameEvent) {
-      const eventId = await commitClusterMutation((tx) => attachArticle(tx, article, item.candidate, item.evidence, 'ai', decision.confidence));
-      return { eventId, action: 'attach' };
-    }
-  }
-
-  const needsReview = shouldCreateClusterReview(
-    ambiguous.length,
-    aiCandidates,
-    thresholds?.differentEvent,
-  );
+    .map(({ candidate, evidence }) => ({
+      candidateEventId: candidate.id,
+      matchedMemberArticleId: evidence.matchedMemberArticleId,
+      ruleEvidence: evidence as unknown as Record<string, unknown>,
+    }));
+  assertNotAborted(signal);
   const eventId = await commitClusterMutation((tx) => createEventForArticle(tx, article, {
-    action: needsReview ? 'fallback_create' : 'create',
-    decisionSource: needsReview ? 'ai' : 'rule',
-    confidence: needsReview ? 50 : 90,
+    action: 'create',
+    decisionSource: 'rule',
+    confidence: null,
     evidence: {
       eventKey: article.eventKey,
       eventKeyConfidence: article.eventKeyConfidence,
@@ -587,12 +455,14 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
         action: article.eventAction,
         object: article.eventObject,
       },
-      ...buildAiClusterAuditEvidence(aiCandidates, null),
+      reason: nearbyCandidates.length > 0
+        ? '存在相近候选但未达到自动归并条件，按独立事件创建'
+        : '未发现可自动归并的候选事件',
+      ...buildRuleCandidateAuditEvidence(nearbyCandidates, null),
     },
-    needsReview,
-    candidateEventId: aiCandidates[0]?.candidateEventId,
+    candidateEventId: nearbyCandidates[0]?.candidateEventId,
   }));
-  return { eventId, action: needsReview ? 'fallback_create' : 'create' };
+  return { eventId, action: 'create' };
 }
 
 export async function markClusterFailure(articleId: string, error: unknown): Promise<void> {

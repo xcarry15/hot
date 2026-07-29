@@ -2,7 +2,39 @@ import { describe, expect, it } from 'vitest';
 import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors } from '@/contracts/event-clustering';
 import { buildCanonicalEventKey, normalizeEventAction, normalizeEventIdentity } from '@/contracts/event-identity';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
-import { buildAiClusterAuditEvidence, hasDuplicateReportEvidence, isAmbiguousEventCandidate, isNearExactReprint, isStrongEventKeyDuplicate, shouldCreateClusterReview, type AiCandidateAudit } from '@/lib/event-clustering-service';
+import { buildRuleCandidateAuditEvidence, hasDuplicateReportEvidence, isNearExactReprint, isStrongEventKeyDuplicate } from '@/lib/event-clustering-service';
+import { bestPairEvidenceForCandidate, type Candidate } from '@/lib/event/event-cluster-evidence';
+
+type ClusterArticle = Candidate['articles'][number];
+
+function makeClusterArticle(overrides: Partial<ClusterArticle> = {}): ClusterArticle {
+  return {
+    id: 'article',
+    title: '瑞幸咖啡在泰国商标案胜诉',
+    cleanContent: '泰国法院作出判决。',
+    contentHash: '',
+    eventSubjects: '["瑞幸咖啡"]',
+    eventAction: '争议维权',
+    eventObject: '泰国商标案',
+    eventKey: '瑞幸咖啡/争议维权/泰国商标案',
+    eventKeyConfidence: 90,
+    publishedAt: new Date('2026-07-10T08:00:00Z'),
+    createdAt: new Date('2026-07-10T08:00:00Z'),
+    ...overrides,
+  };
+}
+
+function pairEvidence(article: ClusterArticle, member: ClusterArticle) {
+  const candidate: Candidate = {
+    id: 'event',
+    representativeArticleId: member.id,
+    clusterReviewStatus: 'confirmed',
+    articles: [member],
+  };
+  const evidence = bestPairEvidenceForCandidate(article, candidate);
+  if (!evidence) throw new Error('expected pair evidence');
+  return evidence;
+}
 
 describe('轻量事件聚类规则', () => {
   it('统一标题中的空白、标点和大小写', () => {
@@ -75,7 +107,7 @@ describe('轻量事件聚类规则', () => {
     expect(sharedEventAnchors('都江堰邻你超市荣获年度好门店', '永辉超市福州店荣获年度好门店')).toEqual([]);
   });
 
-  it('事件身份还需标题或正文证据才能自动归并', () => {
+  it('改写稿可用标题或正文重复证据补强身份判断', () => {
     expect(hasDuplicateReportEvidence({
       titleOverlap: 0.29,
       charContentOverlap: 0.01,
@@ -92,11 +124,21 @@ describe('轻量事件聚类规则', () => {
     })).toBe(false);
   });
 
-  it('相同事件键超过普通窗口时也不能单独构成强重复', () => {
+  it('高置信相同事件键在跟进窗口内可直接归并', () => {
     expect(isStrongEventKeyDuplicate({
       eventKeyMatch: true,
       identityConfidence: 90,
       daysApart: 9,
+      titleOverlap: 0.2,
+      charContentOverlap: 0.05,
+      charContentJaccard: 0.01,
+      tokenContentOverlap: 0.1,
+      tokenContentJaccard: 0.02,
+    })).toBe(true);
+    expect(isStrongEventKeyDuplicate({
+      eventKeyMatch: true,
+      identityConfidence: 90,
+      daysApart: 15,
       titleOverlap: 0.2,
       charContentOverlap: 0.05,
       charContentJaccard: 0.01,
@@ -129,12 +171,12 @@ describe('轻量事件聚类规则', () => {
     expect(buildClusterPendingWhere(now)).toEqual({
       fetchStatus: 'fetched',
       aiStatus: 'done',
-      eventKey: { not: '' },
       eventId: null,
       technicalIgnoredAt: null,
       AND: [
         { OR: [
           { clusterStatus: 'pending' },
+          { clusterStatus: 'needs_review' },
           { clusterStatus: 'failed', clusterRetryCount: { lt: 5 } },
         ] },
         { OR: [
@@ -146,131 +188,197 @@ describe('轻量事件聚类规则', () => {
   });
 });
 
-describe('聚类 AI 候选审计', () => {
-  it('正文覆盖率高但交并比低时不进入人工复核灰区', () => {
-    expect(isAmbiguousEventCandidate({
-      eventKeyMatch: false,
-      identityConfidence: 0,
-      identityScore: 0,
-      subjectSimilarity: 0,
-      actionSimilarity: 0,
-      objectSimilarity: 0,
-      titleOverlap: 0,
-      charContentOverlap: 0.6,
-      charContentJaccard: 0.08,
-      tokenContentOverlap: 0,
-      tokenContentJaccard: 0,
-      daysApart: 1,
-      phaseConflict: false,
-      identityConflict: false,
-      multiTopic: false,
-      sharedAnchors: [],
-    })).toBe(false);
-    expect(isAmbiguousEventCandidate({
-      eventKeyMatch: false,
-      identityConfidence: 0,
-      identityScore: 0.55,
-      subjectSimilarity: 0.6,
-      actionSimilarity: 0.5,
-      objectSimilarity: 0,
-      titleOverlap: 0,
-      charContentOverlap: 0.6,
-      charContentJaccard: 0.22,
-      tokenContentOverlap: 0,
-      tokenContentJaccard: 0,
-      daysApart: 1,
-      phaseConflict: false,
-      identityConflict: false,
-      multiTopic: false,
-      sharedAnchors: ['品牌A'],
-    })).toBe(true);
+describe('规则归并对抗样例', () => {
+  it('动作和事项改写但标题锚点稳定时自动归并', () => {
+    const article = makeClusterArticle({
+      id: 'loose-new',
+      title: '耐克宣布与海瑟终止线上销售合作',
+      eventSubjects: '["耐克", "海瑟"]',
+      eventAction: '终止合作',
+      eventObject: '线上销售授权',
+      eventKey: '耐克+海瑟/终止合作/线上销售授权',
+    });
+    const member = makeClusterArticle({
+      id: 'loose-old',
+      title: '耐克与海瑟停止平台销售授权',
+      eventSubjects: '["耐克中国", "海瑟"]',
+      eventAction: '停止合作',
+      eventObject: '平台销售授权',
+      eventKey: '耐克中国+海瑟/停止合作/平台销售授权',
+    });
+
+    expect(pairEvidence(article, member).decision).toBe('strong');
   });
 
-  it('同品牌但动作和事项都不一致时不因正文相似进入复核', () => {
-    expect(isAmbiguousEventCandidate({
-      eventKeyMatch: false,
-      identityConfidence: 80,
-      identityScore: 0.52,
-      subjectSimilarity: 1,
-      actionSimilarity: 0,
-      objectSimilarity: 0.25,
-      titleOverlap: 0.25,
-      charContentOverlap: 0,
-      charContentJaccard: 0,
-      tokenContentOverlap: 0.43,
-      tokenContentJaccard: 0.22,
-      daysApart: 1,
-      phaseConflict: false,
-      identityConflict: false,
-      multiTopic: false,
-      sharedAnchors: ['品牌A'],
-    })).toBe(false);
+  it('AI 主体改写但标题锚点仍能驱动归并', () => {
+    const article = makeClusterArticle({
+      id: 'subject-new',
+      title: '海瑟终止与耐克线上销售合作',
+      eventSubjects: '["海瑟"]',
+      eventAction: '终止合作',
+      eventObject: '线上销售授权',
+      eventKey: '海瑟/终止合作/线上销售授权',
+    });
+    const member = makeClusterArticle({
+      id: 'subject-old',
+      title: '耐克中国与海瑟停止平台销售授权',
+      eventSubjects: '["耐克中国"]',
+      eventAction: '停止合作',
+      eventObject: '平台销售授权',
+      eventKey: '耐克中国/停止合作/平台销售授权',
+    });
+
+    expect(pairEvidence(article, member).decision).toBe('strong');
   });
 
-  it('不同主体不会仅因站点模板正文相似进入复核', () => {
-    expect(isAmbiguousEventCandidate({
-      eventKeyMatch: false,
-      identityConfidence: 85,
-      identityScore: 0.3,
-      subjectSimilarity: 0,
-      actionSimilarity: 1,
-      objectSimilarity: 0.15,
-      titleOverlap: 0,
-      charContentOverlap: 0.65,
-      charContentJaccard: 0.5,
-      tokenContentOverlap: 0.7,
-      tokenContentJaccard: 0.5,
-      daysApart: 1,
-      phaseConflict: false,
-      identityConflict: false,
-      multiTopic: false,
-      sharedAnchors: [],
-    })).toBe(false);
+  it('不同年份的同类事项仍不会被宽松规则合并', () => {
+    const article = makeClusterArticle({
+      id: 'year-new',
+      title: '瑞幸咖啡发布2026年第二季度业绩',
+      eventObject: '2026年第二季度业绩',
+      eventKey: '瑞幸咖啡/发布业绩/2026年第二季度业绩',
+    });
+    const member = makeClusterArticle({
+      id: 'year-old',
+      title: '瑞幸咖啡发布2026年第一季度业绩',
+      eventObject: '2026年第一季度业绩',
+      eventKey: '瑞幸咖啡/发布业绩/2026年第一季度业绩',
+    });
+
+    expect(pairEvidence(article, member).decision).not.toBe('strong');
   });
 
-  const identityEvidence = {
-    subjectOverlap: 1,
-    actionOverlap: 0.8,
-    objectOverlap: 0.75,
-    identityScore: 0.87,
-    identityConfidence: 85,
-    qualifierConflict: false,
-    identityConflict: false,
-  };
-  const candidates: AiCandidateAudit[] = [
-    { candidateEventId: 'A', matchedMemberArticleId: 'member1', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, ...identityEvidence, titleOverlap: 0.5, charContentOverlap: 0.3, charContentJaccard: 0.2, tokenContentOverlap: 0, tokenContentJaccard: 0, daysApart: 1, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌A'] }, aiDecision: { sameEvent: false, confidence: 58, reason: '周期不同' } },
-    { candidateEventId: 'B', matchedMemberArticleId: 'member2', ruleEvidence: { fingerprint: false, exactTitle: false, eventKeyMatch: true, ...identityEvidence, titleOverlap: 0.7, charContentOverlap: 0.8, charContentJaccard: 0.6, tokenContentOverlap: 0, tokenContentJaccard: 0, daysApart: 0, phaseConflict: false, multiTopic: false, sharedAnchors: ['品牌B'] }, aiDecision: { sameEvent: true, confidence: 82, reason: '事项一致' } },
-  ];
+  it('同一事件的改写报道以高置信身份直接归并', () => {
+    const article = makeClusterArticle({
+      id: 'new',
+      title: '泰国法院判瑞幸咖啡商标案胜诉',
+      cleanContent: '泰国法院作出判决，瑞幸咖啡胜诉。',
+    });
+    const member = makeClusterArticle({
+      id: 'old',
+      title: '瑞幸在泰国商标案胜诉',
+      cleanContent: '瑞幸咖啡在泰国商标案胜诉。',
+      publishedAt: new Date('2026-07-08T08:00:00Z'),
+    });
 
-  it('先拒绝 A、再接受 B 时保存全部候选并标记 B', () => {
-    expect(buildAiClusterAuditEvidence(candidates, 'B')).toEqual({ selectedCandidateEventId: 'B', candidates });
+    expect(pairEvidence(article, member).decision).toBe('strong');
   });
 
-  it('全部拒绝时 fallback evidence 保留全部候选且无采用项', () => {
-    expect(buildAiClusterAuditEvidence(candidates.slice(0, 1), null)).toEqual({ selectedCandidateEventId: null, candidates: candidates.slice(0, 1) });
+  it('同品牌不同门店只记录相近候选，不自动合并', () => {
+    const article = makeClusterArticle({
+      id: 'new-store',
+      title: '永辉超市福州仓山店正式开业',
+      eventSubjects: '["永辉超市"]',
+      eventAction: '正式开店',
+      eventObject: '福州仓山店',
+      eventKey: '永辉超市/正式开店/福州仓山店',
+    });
+    const member = makeClusterArticle({
+      id: 'old-store',
+      title: '永辉超市北京朝阳店正式开业',
+      eventSubjects: '["永辉超市"]',
+      eventAction: '正式开店',
+      eventObject: '北京朝阳店',
+      eventKey: '永辉超市/正式开店/北京朝阳店',
+    });
+
+    expect(pairEvidence(article, member).decision).toBe('ambiguous');
   });
 
-  it('AI 判断失败不能降级成普通可推送 Event', () => {
-    expect(shouldCreateClusterReview(1, [
-      { aiDecision: { sameEvent: false, confidence: 0, reason: 'AI 判断失败' } },
-    ])).toBe(true);
+  it('同品牌不同新品不自动合并', () => {
+    const article = makeClusterArticle({
+      id: 'socks',
+      title: '7-Eleven推出联名袜子',
+      eventSubjects: '["7-Eleven"]',
+      eventAction: '发布产品',
+      eventObject: '联名袜子',
+      eventKey: '7-Eleven/发布产品/联名袜子',
+    });
+    const member = makeClusterArticle({
+      id: 'snack',
+      title: '7-Eleven上新便利店零食',
+      eventSubjects: '["7-Eleven"]',
+      eventAction: '发布产品',
+      eventObject: '便利店零食',
+      eventKey: '7-Eleven/发布产品/便利店零食',
+    });
+
+    expect(pairEvidence(article, member).decision).not.toBe('strong');
   });
 
-  it('独立事件阈值可由调用方调整', () => {
-    const decisions = [
-      { aiDecision: { sameEvent: false, confidence: 80, reason: '主体不同' } },
-    ];
-    expect(shouldCreateClusterReview(1, decisions)).toBe(true);
-    expect(shouldCreateClusterReview(1, decisions, 80)).toBe(false);
+  it('预告与已发生的同一项目保留为不同事件', () => {
+    const article = makeClusterArticle({
+      id: 'plan',
+      title: '山姆杭州店计划8月开业',
+      eventSubjects: '["山姆"]',
+      eventAction: '计划开店',
+      eventObject: '杭州店',
+      eventKey: '山姆/计划开店/杭州店',
+    });
+    const member = makeClusterArticle({
+      id: 'opened',
+      title: '山姆杭州店正式开业',
+      eventSubjects: '["山姆"]',
+      eventAction: '正式开店',
+      eventObject: '杭州店',
+      eventKey: '山姆/正式开店/杭州店',
+    });
+
+    expect(pairEvidence(article, member).decision).toBe('reject');
   });
 
-  it('只有全部高置信判定为不同事件时才允许正常新建 Event', () => {
-    expect(shouldCreateClusterReview(2, [
-      { aiDecision: { sameEvent: false, confidence: 90, reason: '主体不同' } },
-      { aiDecision: { sameEvent: false, confidence: 86, reason: '事项不同' } },
-    ])).toBe(false);
-    expect(shouldCreateClusterReview(2, [
-      { aiDecision: { sameEvent: false, confidence: 90, reason: '主体不同' } },
-    ])).toBe(true);
+  it('同标题的旧报道不会跨跟进窗口自动合并', () => {
+    const article = makeClusterArticle({
+      id: 'new-quarter',
+      title: '瑞幸咖啡发布季度业绩',
+      cleanContent: '瑞幸咖啡称将在华南新增供应链投入，并公布经营数据。',
+      eventAction: '发布业绩',
+      eventObject: '季度经营数据',
+      eventKey: '瑞幸咖啡/发布业绩/季度经营数据',
+      publishedAt: new Date('2026-07-25T08:00:00Z'),
+    });
+    const member = makeClusterArticle({
+      id: 'old-quarter',
+      title: '瑞幸咖啡发布季度业绩',
+      cleanContent: '瑞幸咖啡披露上一季度同店增长，并调整门店策略。',
+      eventAction: '发布业绩',
+      eventObject: '季度经营数据',
+      eventKey: '瑞幸咖啡/发布业绩/季度经营数据',
+      publishedAt: new Date('2026-06-01T08:00:00Z'),
+    });
+
+    expect(pairEvidence(article, member).decision).toBe('reject');
+  });
+
+  it('创立与注册成立归一后可合并', () => {
+    const eventAction = normalizeEventAction('创立公司');
+    const memberAction = normalizeEventAction('注册成立公司');
+    const eventKey = buildCanonicalEventKey({ subjects: ['孙东旭'], action: eventAction, object: '东方甄选新公司' });
+    const memberEventKey = buildCanonicalEventKey({ subjects: ['孙东旭'], action: memberAction, object: '东方甄选新公司' });
+    const article = makeClusterArticle({
+      id: 'created',
+      title: '孙东旭创立东方甄选新公司',
+      eventSubjects: '["孙东旭"]',
+      eventAction,
+      eventObject: '东方甄选新公司',
+      eventKey,
+    });
+    const member = makeClusterArticle({
+      id: 'registered',
+      title: '孙东旭注册成立东方甄选新公司',
+      eventSubjects: '["孙东旭"]',
+      eventAction: memberAction,
+      eventObject: '东方甄选新公司',
+      eventKey: memberEventKey,
+    });
+
+    expect(eventAction).toBe('成立主体');
+    expect(memberAction).toBe('成立主体');
+    expect(pairEvidence(article, member).decision).toBe('strong');
+  });
+
+  it('规则候选审计不携带二次 AI 结论', () => {
+    const candidates = [{ candidateEventId: 'event-a', matchedMemberArticleId: 'article-a', ruleEvidence: { reason: '主体与动作相近' } }];
+    expect(buildRuleCandidateAuditEvidence(candidates, null)).toEqual({ selectedCandidateEventId: null, candidates });
   });
 });

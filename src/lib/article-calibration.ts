@@ -38,13 +38,6 @@ export function parseArticleAiSnapshot(value: string | null | undefined): Partia
   return parseSharedArticleAiSnapshot(value) as Partial<ArticleAiSnapshot>;
 }
 
-export function getSnapshotValue(
-  value: string | null | undefined,
-  field: ManualOverrideField,
-): string | number | boolean | undefined {
-  return parseArticleAiSnapshot(value)[field];
-}
-
 export function buildArticleAiSnapshot(input: ArticleAiSnapshot): string {
   return JSON.stringify(input);
 }

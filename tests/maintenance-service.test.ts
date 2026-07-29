@@ -98,7 +98,7 @@ describe('maintenance-service', () => {
     });
   });
 
-  it('低质量清理不会删除无具体事件或多事件聚合稿', async () => {
+  it('低质量清理不会删除无价值业务跳过稿', async () => {
     mocks.article.findMany.mockResolvedValue([{ id: 'technical-failure' }]);
     deleteArticlesByIds.mockResolvedValue({ deleted: 1 });
 

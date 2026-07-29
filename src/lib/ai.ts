@@ -6,9 +6,8 @@ import type { ChatMessage } from './ai-client';
 import { fetchArticleDetail } from './detail-fetcher';
 import { cleanContentMarkdown, extractArticleBody, meaningfulTextLength } from './cleaner';
 import { MIN_MEANINGFUL_CHARS } from './shared/content-policy';
-import { buildEventIdentityRepairPrompt, buildStep2Prompt } from './prompts';
+import { buildStep2Prompt } from './prompts';
 import { buildSystemContent } from './ai-helpers';
-import { isMultiTopicTitle } from '@/contracts/event-clustering';
 import {
   buildCanonicalEventKey,
   capEventIdentityConfidence,
@@ -29,10 +28,29 @@ import {
   type ArticleAiSnapshot,
   type ManualCalibrationValues,
 } from './article-calibration';
-import { parseAiAnalysisOutput, parseEventIdentityOutput } from './ai-output';
+import { parseAiAnalysisOutput } from './ai-output';
 
-// v20：事件身份缺失时增加定向修复，无法定位具体事件则正常跳过。
-const PROMPT_VERSION = 'v20';
+// v23：每篇文章只请求一次 AI；提示词压缩后保留事实、身份和可读洞察。
+const PROMPT_VERSION = 'v23';
+
+const MIN_VALUE_RELEVANCE = 60;
+const MIN_VALUE_CONTENT_SCORE = 40;
+
+function isNoValueAnalysis(input: {
+  hasCompleteEventIdentity: boolean;
+  isAd: boolean;
+  relevance: number;
+  contentScore: number;
+}): boolean {
+  // 有清晰事实的低影响事件仍保留，后续由评分/公开门禁决定是否展示。
+  if (input.hasCompleteEventIdentity) return input.isAd;
+  // 没有可归属事件时，缺少行业相关性或信息密度才归为无价值；
+  // 有价值但无法提取单一事件身份的文章由聚类阶段自动建立独立 Event，
+  // 不再把内容理解结果转成事件校准待办。
+  return input.isAd
+    || input.relevance < MIN_VALUE_RELEVANCE
+    || input.contentScore < MIN_VALUE_CONTENT_SCORE;
+}
 
 // AI 失败最大重试次数。超过后标 skipped 放弃，防止 provider 持续故障时无限重试烧 token。
 export const AI_MAX_RETRIES = 5;
@@ -106,62 +124,9 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
 
     const result = await createChatCompletion(messages, { responseFormat: 'json_object', signal });
     assertNotAborted(signal);
-    let parsed = parseAiAnalysisOutput(result.content, { allowIncompleteIdentity: true });
-    let promptHashInput = messages;
-
-    // 模型经常能完成评分和摘要，但漏掉三段式事件身份。此时只补问身份，
-    // 不重跑整篇分析；若补问确认没有可定位事件，则按正常跳过处理。
-    if (parsed.event_score > 9 && !isCompleteEventIdentity({
-      subjects: parsed.event_subjects,
-      action: parsed.event_action,
-      object: parsed.event_object,
-    })) {
-      const repairMessages: ChatMessage[] = [
-        { role: 'system', content: buildSystemContent(settings.systemPrompt) },
-        { role: 'user', content: buildEventIdentityRepairPrompt(article.title, truncated) },
-      ];
-      const repairResult = await createChatCompletion(repairMessages, {
-        responseFormat: 'json_object',
-        temperature: 0,
-        maxTokens: 512,
-        signal,
-      });
-      assertNotAborted(signal);
-      const repaired = parseEventIdentityOutput(repairResult.content);
-      const repairedIdentity = normalizeEventIdentity({
-        subjects: repaired.event_subjects,
-        action: repaired.event_action,
-        object: repaired.event_object,
-      });
-      const hasPartialIdentity = repairedIdentity.subjects.length > 0
-        || Boolean(repairedIdentity.action)
-        || Boolean(repairedIdentity.object);
-      promptHashInput = [...messages, ...repairMessages];
-      if (isCompleteEventIdentity(repairedIdentity)) {
-        parsed = {
-          ...parsed,
-          event_subjects: repairedIdentity.subjects,
-          event_action: repairedIdentity.action,
-          event_object: repairedIdentity.object,
-          event_key: buildCanonicalEventKey(repairedIdentity),
-          event_key_confidence: repaired.event_key_confidence,
-        };
-      } else if (!hasPartialIdentity) {
-        // 两次判断都无法定位唯一事件：把它作为内容判断结果正常跳过，
-        // 避免反复进入“自动恢复中”并占用技术失败队列。
-        parsed = {
-          ...parsed,
-          event_score: 0,
-          event_subjects: [],
-          event_action: '',
-          event_object: '',
-          event_key: '',
-          event_key_confidence: 0,
-        };
-      } else {
-        throw new Error('LLM 定向修复仍缺少完整事件身份（主体/行为/具体事项）');
-      }
-    }
+    // 每篇文章只进行一次 AI 请求。缺失或不完整的事件身份作为分析结果，
+    // 后续按独立文章进入 Event，不触发第二次模型调用。
+    const parsed = parseAiAnalysisOutput(result.content);
     return {
       eventScore: parsed.event_score,
       isAd: parsed.is_ad,
@@ -180,7 +145,7 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
       keyPoints: parsed.key_points,
       model: result.model,
       provider: result.provider,
-      promptHash: createHash('sha256').update(promptHashInput.map(x => `${x.role}:${x.content}`).join('\n')).digest('hex'),
+      promptHash: createHash('sha256').update(messages.map(x => `${x.role}:${x.content}`).join('\n')).digest('hex'),
     };
   } catch (err) {
     if (signal?.aborted) throw err;
@@ -309,8 +274,13 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
       keywordBonus: keywordMatchBonus,
     });
 
-    const multiTopic = isMultiTopicTitle(article.title);
-    const noConcreteEvent = step2.eventScore <= 9 || multiTopic;
+    const hasCompleteEventIdentity = isCompleteEventIdentity(effectiveIdentity);
+    const noValue = isNoValueAnalysis({
+      hasCompleteEventIdentity,
+      isAd: effective.isAd,
+      relevance: effective.relevance,
+      contentScore: effective.contentScore,
+    });
     assertNotAborted(signal);
     await db.article.update({
       where: { id: articleId },
@@ -319,11 +289,11 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         category: effective.category,
         summary: effective.summary,
         brand: effective.brand,
-        eventSubjects: noConcreteEvent ? '[]' : serializeEventSubjects(effectiveIdentity.subjects),
-        eventAction: noConcreteEvent ? '' : effectiveIdentity.action,
-        eventObject: noConcreteEvent ? '' : effectiveIdentity.object,
-        eventKey: noConcreteEvent ? '' : buildCanonicalEventKey(effectiveIdentity),
-        eventKeyConfidence: noConcreteEvent
+        eventSubjects: noValue ? '[]' : serializeEventSubjects(effectiveIdentity.subjects),
+        eventAction: noValue ? '' : effectiveIdentity.action,
+        eventObject: noValue ? '' : effectiveIdentity.object,
+        eventKey: noValue ? '' : buildCanonicalEventKey(effectiveIdentity),
+        eventKeyConfidence: noValue
           ? 0
           : identityManuallyOverridden
             ? capEventIdentityConfidence(effectiveIdentity, 100)
@@ -339,16 +309,16 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         promptHash: step2.promptHash,
         isAd: effective.isAd,
         promptVersion: PROMPT_VERSION,
-        aiStatus: noConcreteEvent ? 'skipped' : 'done',
+        aiStatus: noValue ? 'skipped' : 'done',
         aiError: null,
         aiSnapshot: buildArticleAiSnapshot(aiSnapshot),
         aiRetryCount: 0,
         nextAiRetryAt: null,
-        skipReason: multiTopic ? '多事件聚合稿' : noConcreteEvent ? '无具体事件' : null,
+        skipReason: noValue ? '无价值' : null,
       },
     });
 
-    return { status: noConcreteEvent ? 'skipped' : 'done' };
+    return { status: noValue ? 'skipped' : 'done' };
   } else {
     // 所有 Provider 级错误（包括鉴权/配置）都与文章无关。保留为 pending 并
     // 由批处理统一暂停，不能让同一配置问题逐篇耗尽重试次数、误标为已放弃。

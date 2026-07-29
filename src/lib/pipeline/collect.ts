@@ -25,6 +25,15 @@ import type { Article } from '@prisma/client';
 const CRAWL_SOURCE_TIMEOUT_MS = 60_000;
 const COLLECT_CONCURRENCY = 4;
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 单条 crawlItem 入口：
  *   - URL 精确去重（命中已处理 URL 仅更新列表元数据，不重置处理状态）
@@ -42,6 +51,12 @@ export async function collectItem(
 ): Promise<string | undefined> {
   // Normalize URL
   const normalizedUrl = normalizeUrl(item.url);
+  // 解析器面对的是第三方页面；结构化选择器可能意外抓到 javascript:、
+  // mailto: 等非文章链接。它们不能入库，更不能在公开页作为可点击链接输出。
+  if (!isHttpUrl(normalizedUrl)) {
+    console.warn(`[collectItem] skipped non-http URL from source=${sourceId}: ${item.url}`);
+    return;
+  }
 
   // ---- Step 1: URL exact dedup ----
   const existing = knownExisting === undefined
@@ -353,6 +368,14 @@ export async function collectAllSources(signal?: AbortSignal, jobId?: string) {
         } catch (err) {
           if (signal?.aborted) throw err;
           const msg = err instanceof Error ? err.message : String(err);
+          // crawlSource 在收到子超时信号时会原样抛出，以免把“任务取消”
+          // 误记为来源失败。这里确认父任务仍在运行，说明是本来源的超时，
+          // 必须补记健康状态和 FetchLog，才能触发后续熔断与人工告警。
+          try {
+            await recordFailure(source.id, msg);
+          } catch (recordError) {
+            console.error(`[collectAllSources] failed to record timeout source=${source.id}:`, recordError);
+          }
           return { sourceId: source.id, sourceName: source.name, success: false, items: [], error: msg } as CrawlResult & { sourceId: string; sourceName: string };
         }
       })

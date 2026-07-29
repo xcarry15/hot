@@ -77,7 +77,14 @@ export async function flushPublicArticleViews(): Promise<void> {
       `),
     ]);
   } catch {
-    // 文章可能已被删除；浏览统计不应阻塞公开页面或反复重试写入。
+    // UPDATE 找不到已删除文章时不会抛错；这里只需要把瞬时数据库错误
+    // 的计数放回队列，避免 SQLite 写锁冲突直接吞掉真实浏览量。
+    for (const [articleId, count] of viewBatch) {
+      state.pendingViews.set(articleId, (state.pendingViews.get(articleId) ?? 0) + count)
+    }
+    for (const [articleId, count] of clickBatch) {
+      state.pendingOriginalClicks.set(articleId, (state.pendingOriginalClicks.get(articleId) ?? 0) + count)
+    }
   }
 
   if (state.pendingViews.size > 0 || state.pendingOriginalClicks.size > 0) scheduleFlush()

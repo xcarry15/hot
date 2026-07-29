@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   WEBHOOK_MAX_COUNT,
   parseWebhookConfigs,
+  parseWebhookConfigsForServer,
   serializeWebhookConfigsForEditor,
   serializeWebhookConfigsForServer,
   type WebhookConfig,
@@ -109,6 +110,26 @@ describe('webhook contract', () => {
         { url: '', remark: 'empty', enabled: true },
         { url: 'https://disabled.example/', remark: 'B', enabled: false },
       ]);
+    });
+  });
+
+  describe('parseWebhookConfigsForServer', () => {
+    it('丢弃编辑态空草稿并规范化有效目标', () => {
+      expect(parseWebhookConfigsForServer(JSON.stringify([
+        { url: ' https://hook.example/a ', remark: ' 主群 ', enabled: true },
+        { url: '', remark: '草稿', enabled: true },
+      ]))).toEqual([
+        { url: 'https://hook.example/a', remark: '主群', enabled: true },
+      ]);
+    });
+
+    it('拒绝非 HTTP(S) URL、错误字段和超过数量上限的直接 API 输入', () => {
+      expect(() => parseWebhookConfigsForServer(JSON.stringify([{ url: 'file:///tmp/hook' }]))).toThrow('仅支持 HTTP(S)');
+      expect(() => parseWebhookConfigsForServer(JSON.stringify([{ url: 'https://hook.example', enabled: 'true' }]))).toThrow('启用状态必须是布尔值');
+      expect(() => parseWebhookConfigsForServer(JSON.stringify(Array.from(
+        { length: WEBHOOK_MAX_COUNT + 1 },
+        (_, index) => ({ url: `https://hook.example/${index}` }),
+      )))).toThrow(`最多支持 ${WEBHOOK_MAX_COUNT} 个 Webhook`);
     });
   });
 

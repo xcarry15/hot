@@ -114,6 +114,15 @@ function isWithinRecentWindow(date: Date, cutoff: Date): boolean {
   return date.getTime() >= cutoff.getTime();
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function getCandidateRelation(
   article: RelatedArticleBase & { eventId: string | null },
   candidate: RelatedCandidate,
@@ -213,6 +222,8 @@ export async function getRelatedArticles(
       return relation ? toRelatedArticle(candidate, relation) : null;
     })
     .filter((candidate): candidate is RelatedArticle => Boolean(candidate))
+    // 兼容旧库中可能遗留的异常链接，公开页和推送卡片都不输出非 HTTP(S) URL。
+    .filter((candidate) => isHttpUrl(candidate.url))
     .filter((candidate) => isWithinRecentWindow(candidate.publishedAt ?? candidate.createdAt, cutoff))
     .sort(compareByEffectiveTime);
 

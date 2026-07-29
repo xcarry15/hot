@@ -199,9 +199,9 @@ export function deriveSkipReason(article: {
   return undefined;
 }
 
-/** AI 已完成分析，但业务上没有可进入 Event 的具体事件。 */
+/** AI 已完成分析，但内容不具备保留价值。 */
 export function isBusinessSkipReason(reason: string | null | undefined): boolean {
-  return reason === '无具体事件' || reason === '多事件聚合稿';
+  return reason === '无价值';
 }
 
 export function isTechnicalSkipReason(reason: string | null | undefined): boolean {

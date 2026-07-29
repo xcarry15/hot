@@ -93,6 +93,20 @@ async function maybeEnqueueSettingsRebuild(): Promise<void> {
 // 决策函数提出来。生产代码仍通过 startScheduler 内部的 cron tick 调用。
 export { maybeEnqueueCrawl, maybeEnqueueTechnicalRetry, maybeEnqueueSettingsRebuild };
 
+/** 每分钟的持久化恢复与调度检查；独立导出便于回归测试。 */
+export async function runSchedulerTick(): Promise<void> {
+  // 先恢复持久化队列，再决定是否创建新的自动任务；避免失败 Job 被新任务长期挤压。
+  await resetOrphanedJobs();
+  await resumeQueuedJob();
+  // sending 租约到期后结果无法确定，必须及时转为人工确认，不能只等进程重启。
+  await cleanupExpiredSendingDeliveries();
+  const settings = await readAllSettings();
+  await maybeEnqueueSettingsRebuild();
+  await maybeEnqueueCrawl(settings);
+  await maybeEnqueueTechnicalRetry();
+  syncPushSchedule(settings);
+}
+
 function syncPushSchedule(settings: Record<string, string>): void {
   const pushMode = parsePushMode(settings[SETTING_KEYS.PUSH_MODE]);
   const configuredPushTime = settings[SETTING_KEYS.PUSH_TIME] || '08:30';
@@ -146,20 +160,15 @@ export function startScheduler(): void {
 
   // Reset orphaned 'running' jobs left by a previous process crash / HMR.
   void resetOrphanedJobs().then(() => resumeQueuedJob());
-  // P2: 每分钟清理过期的 sending Delivery，不阻塞。
-  void cleanupExpiredSendingDeliveries();
+  // 启动即先清理一次；之后由每分钟 tick 持续清理。
+  void cleanupExpiredSendingDeliveries().catch((error) => {
+    console.error('[scheduler] initial delivery cleanup failed:', error);
+  });
 
   // Crawl: 1-minute tick with interval check
   nodeCron.schedule('* * * * *', async () => {
     try {
-      // 先恢复持久化队列，再决定是否创建新的自动任务；避免失败 Job 被新任务长期挤压。
-      await resetOrphanedJobs();
-      await resumeQueuedJob();
-      const settings = await readAllSettings();
-      await maybeEnqueueSettingsRebuild();
-      await maybeEnqueueCrawl(settings);
-      await maybeEnqueueTechnicalRetry();
-      syncPushSchedule(settings);
+      await runSchedulerTick();
     } catch (err) {
       console.error('[scheduler] crawl tick failed:', err instanceof Error ? err.message : err);
     }

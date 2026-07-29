@@ -220,7 +220,7 @@ export async function clearFetchLogs(): Promise<{ deleted: number }> {
 
 export async function deleteLowQualityArticles() {
   const lowQuality = await db.article.findMany({
-    // “无具体事件”和“多事件聚合稿”是正常分类结果，不是低质量技术垃圾。
+    // “无价值”是正常业务分类结果，不是低质量技术垃圾。
     // AI 技术失败也应进入恢复队列，不应被“低质量清理”直接删除。
     where: {
       score: { lt: 40 },
@@ -253,6 +253,7 @@ export async function deleteAllArticles() {
       db.eventClusterAudit.deleteMany(),
       db.article.deleteMany(),
       db.event.deleteMany(),
+      db.eventDirty.deleteMany(),
       ...pauseAndResetOps(),
     ]);
     return { deleted: articleResult.count, pushLogsDeleted: pushResult.count };
@@ -282,13 +283,14 @@ export async function purgeAllData(): Promise<{ deleted: PurgeAllDeleted }> {
   const { prevWasEnabled } = await pauseAutoCrawlForWindow();
   invalidatePublicArticleCache();
   try {
-  const [pushResult, , eventAuditResult, articleResult, eventResult, discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
+  const [pushResult, , eventAuditResult, articleResult, eventResult, , discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
       await db.$transaction([
         db.pushLog.deleteMany(),
         db.pushDelivery.deleteMany(),
         db.eventClusterAudit.deleteMany(),
         db.article.deleteMany(),
         db.event.deleteMany(),
+        db.eventDirty.deleteMany(),
         db.discardedItem.deleteMany(),
         db.discardedRetryAudit.deleteMany(),
         db.fetchLog.deleteMany(),

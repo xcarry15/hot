@@ -13,8 +13,43 @@ import { assertNotAborted } from './worker-stop';
 
 const PAGE_READER_TIMEOUT_MS = 30000;
 const DIRECT_FETCH_TIMEOUT_MS = 20000;
-const FETCH_MAX_RETRIES = 5;
-const FETCH_RETRY_DELAY_MS = 2 * 60 * 60 * 1000;
+export const FETCH_MAX_RETRIES = 5;
+export const FETCH_RETRY_DELAY_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * 将未完成的正文抓取收口为可恢复失败。
+ *
+ * `withTimeout` 会中止请求，但底层操作可能在极端情况下晚于调用方返回；
+ * 因此批处理超时只能在文章仍为 pending 时写入，不能覆盖随后已成功的抓取。
+ */
+export async function markArticleFetchFailure(
+  articleId: string,
+  error: unknown,
+  options: { onlyIfPending?: boolean } = {},
+): Promise<boolean> {
+  const latest = await db.article.findUnique({
+    where: { id: articleId },
+    select: { fetchRetryCount: true, fetchStatus: true },
+  });
+  if (!latest || (options.onlyIfPending && latest.fetchStatus !== 'pending')) return false;
+
+  const retryCount = latest.fetchRetryCount + 1;
+  const result = await db.article.updateMany({
+    where: {
+      id: articleId,
+      ...(options.onlyIfPending ? { fetchStatus: 'pending' } : {}),
+    },
+    data: {
+      fetchStatus: 'failed',
+      fetchError: (error instanceof Error ? error.message : String(error)).slice(0, 1000),
+      fetchRetryCount: retryCount,
+      nextFetchRetryAt: retryCount >= FETCH_MAX_RETRIES
+        ? null
+        : new Date(Date.now() + FETCH_RETRY_DELAY_MS),
+    },
+  });
+  return result.count === 1;
+}
 
 function extractLinkshopOriginalSource(html: string): string | null {
   const $ = cheerio.load(html);
@@ -143,17 +178,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
 
   console.error(`[fetchArticleDetail] article=${articleId} all ${maxRetries + 1} attempts failed:`, lastError?.message);
   assertNotAborted(signal);
-  const latest = await db.article.findUnique({ where: { id: articleId }, select: { fetchRetryCount: true } });
-  const retryCount = (latest?.fetchRetryCount ?? 0) + 1;
-  await db.article.update({
-    where: { id: articleId },
-    data: {
-      fetchStatus: 'failed',
-      fetchError: (lastError?.message || '未获取到有效正文').slice(0, 1000),
-      fetchRetryCount: retryCount,
-      nextFetchRetryAt: retryCount >= FETCH_MAX_RETRIES ? null : new Date(Date.now() + FETCH_RETRY_DELAY_MS),
-    },
-  });
+  await markArticleFetchFailure(articleId, lastError ?? new Error('未获取到有效正文'));
 
   // 失败时不能把旧的短正文当作本次抓取成功的结果返回。
   // 否则单篇重跑会继续进入 AI / 聚类，批处理也可能把失败文章计为已处理。

@@ -228,6 +228,6 @@ describe('isTechnicalSkipReason', () => {
   it('只把内容不足和 AI 重试耗尽视为技术异常', () => {
     expect(isTechnicalSkipReason('内容不足（< 80 字符）')).toBe(true);
     expect(isTechnicalSkipReason('AI 连续失败 5 次，已放弃')).toBe(true);
-    expect(isTechnicalSkipReason('无具体事件')).toBe(false);
+    expect(isTechnicalSkipReason('无价值')).toBe(false);
   });
 });

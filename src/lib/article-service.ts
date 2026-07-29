@@ -12,7 +12,8 @@
  *   - Article 删除、Event 重算与公开状态撤回在同一个事务中完成；
  *   - 不建立通用 Repository；与 maintenance-service 各保留本地事务 helper。
  */
-import { Prisma } from '@prisma/client';
+import { Prisma, type FetchStatus } from '@prisma/client';
+import { AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD } from '@/contracts/ai-confidence';
 import { db } from '@/lib/db';
 import {
   ARTICLE_DETAIL_SELECT,
@@ -40,6 +41,7 @@ import {
 import { splitBrands } from '@/lib/shared/article-codecs';
 import {
   buildCanonicalEventKey,
+  capEventIdentityConfidence,
   isCompleteEventIdentity,
   normalizeEventIdentity,
   serializeEventSubjects,
@@ -61,7 +63,7 @@ export interface ArticleListFilter {
   maxConfidence?: number;
   sourceId?: string;
   search?: string;
-  fetchStatus?: string;
+  fetchStatus?: FetchStatus;
   anomaly?: 'needs_attention' | 'technical';
   clusterView?: 'needs_review' | 'multi_source' | 'representative';
   manualOnly?: boolean;
@@ -98,11 +100,11 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
   if (Number.isFinite(filter.minRelevance)) where.relevance = { gte: filter.minRelevance };
   if (Number.isFinite(filter.maxConfidence)) where.aiConfidence = { lt: filter.maxConfidence };
   if (filter.sourceId) where.sourceId = filter.sourceId;
-  if (filter.fetchStatus) where.fetchStatus = filter.fetchStatus as 'pending' | 'fetched' | 'failed';
+  if (filter.fetchStatus) where.fetchStatus = filter.fetchStatus;
   if (filter.anomaly === 'needs_attention') {
     where.OR = [
       { clusterStatus: 'needs_review' },
-      { aiStatus: 'done', aiConfidence: { lt: 70 } },
+      { aiStatus: 'done', aiConfidence: { lt: AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD } },
     ];
   }
   if (filter.anomaly === 'technical') {
@@ -283,7 +285,6 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
     data.eventAction = identity.action;
     data.eventObject = identity.object;
     data.eventKey = buildCanonicalEventKey(identity);
-    data.eventKeyConfidence = 100;
     touched.push('eventSubjects', 'eventAction', 'eventObject');
   }
   if (input.keyPoints !== undefined) { data.keyPoints = JSON.stringify(input.keyPoints.map((item) => item.trim().slice(0, 500)).filter(Boolean).slice(0, 20)); touched.push('keyPoints'); }
@@ -321,11 +322,12 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
     data.eventAction = identity.action;
     data.eventObject = identity.object;
     data.eventKey = buildCanonicalEventKey(identity);
-    data.eventKeyConfidence = touched.some((field) => identityFields.includes(field))
+    const sourceConfidence = touched.some((field) => identityFields.includes(field))
       ? 100
       : typeof snapshot.eventKeyConfidence === 'number'
         ? snapshot.eventKeyConfidence
-        : current.eventKeyConfidence;
+        : current.eventKeyConfidence ?? 0;
+    data.eventKeyConfidence = capEventIdentityConfidence(identity, sourceConfidence);
     data.event = { disconnect: true };
     data.clusterStatus = 'pending';
     data.clusteredAt = null;

@@ -29,13 +29,3 @@ export function parseArticleAiSnapshot(value: string | null | undefined): Record
     return {};
   }
 }
-
-export function getSnapshotValue(
-  value: string | null | undefined,
-  field: ManualOverrideField,
-): string | number | boolean | undefined {
-  const result = parseArticleAiSnapshot(value)[field];
-  return typeof result === 'string' || typeof result === 'number' || typeof result === 'boolean'
-    ? result
-    : undefined;
-}

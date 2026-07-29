@@ -89,8 +89,8 @@ describe('Event 人工纠错', () => {
   it('合并已推送来源 Event 时不再继承推送状态', async () => {
     const pushedAt = new Date('2026-07-18T00:00:00Z');
     mocks.eventFindUnique
-      .mockResolvedValueOnce({ id: 'source', status: 'active', pushedAt, articles: [{ id: 'a1' }] })
-      .mockResolvedValueOnce({ id: 'target', status: 'active', pushedAt: null })
+      .mockResolvedValueOnce({ id: 'source', status: 'active', pushedAt, articles: [{ id: 'a1', aiStatus: 'done' }] })
+      .mockResolvedValueOnce({ id: 'target', status: 'active', pushedAt: null, articles: [] })
       .mockResolvedValueOnce({ representativeArticleId: null, representativeManual: false })
       .mockResolvedValueOnce({ firstSeenAt: pushedAt, lastSeenAt: pushedAt })
       .mockResolvedValueOnce({ representativeArticleId: 'a1' })
@@ -134,7 +134,7 @@ describe('Event 人工纠错', () => {
       .mockResolvedValueOnce({ representativeArticleId: 'split' })
       .mockResolvedValueOnce({ representativeArticleId: 'split' });
     mocks.articleFindMany
-      .mockResolvedValueOnce([{ id: 'split', publishedAt: articleDate, createdAt: articleDate }])
+      .mockResolvedValueOnce([{ id: 'split', publishedAt: articleDate, createdAt: articleDate, aiStatus: 'done' }])
       .mockResolvedValueOnce([{ id: 'remaining', publishedAt: articleDate, createdAt: articleDate }])
       .mockResolvedValueOnce([{ id: 'remaining', clusterStatus: 'clustered', aiStatus: 'done', score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }])
       .mockResolvedValueOnce([{ id: 'split', publishedAt: articleDate, createdAt: articleDate }])

@@ -154,4 +154,13 @@ describe('analyzeAllPending Provider 全局异常', () => {
       }),
     }));
   });
+
+  it('未知运行时异常交给 Job 有限重试，不在 pending 队列内无限空转', async () => {
+    mocks.articleCount.mockResolvedValueOnce(1);
+    mocks.articleFindMany.mockResolvedValueOnce([{ id: 'article-1', title: '异常文章' }]);
+    mocks.processWithAI.mockRejectedValueOnce(new Error('database write failed'));
+
+    await expect(analyzeAllPending()).rejects.toThrow('database write failed');
+    expect(mocks.processWithAI).toHaveBeenCalledTimes(1);
+  });
 });

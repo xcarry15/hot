@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD } from '@/contracts/ai-confidence'
 import type { ArticleListItemDto, ArticleListResponseDto } from '@/contracts/articles'
 import { cancelArticleDetailPrefetch, fetchArticleList, prefetchArticleDetail } from '@/features/articles-api.client'
 import { preloadArticleWorkspace } from '@/components/article-workspace-drawer'
@@ -20,7 +21,7 @@ function timeLabel(value: string): string {
 
 function statusLabel(item: ArticleListItemDto): string | null {
   if (item.clusterStatus === 'needs_review') return '聚类待复核'
-  if (item.aiStatus === 'done' && item.aiConfidence != null && item.aiConfidence < 70) return '低分析置信度'
+  if (item.aiStatus === 'done' && item.aiConfidence != null && item.aiConfidence < AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD) return '低分析置信度'
   return null
 }
 
@@ -74,7 +75,7 @@ export default function ArticleLibrarySheet({
         search: search || undefined,
         anomaly: view === 'attention' ? 'needs_attention' : undefined,
         clusterView: view === 'cluster_review' ? 'needs_review' : undefined,
-        maxConfidence: view === 'low_confidence' ? 70 : undefined,
+        maxConfidence: view === 'low_confidence' ? AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD : undefined,
         sort: 'newest',
       })
       if (requestId === requestIdRef.current) setData(result)

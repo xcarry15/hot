@@ -19,6 +19,9 @@ export interface WebhookConfig {
 
 /** 设置页允许配置的最大 Webhook 数量。 */
 export const WEBHOOK_MAX_COUNT = 10;
+export const WEBHOOK_MAX_URL_LENGTH = 2048;
+export const WEBHOOK_MAX_REMARK_LENGTH = 100;
+export const WEBHOOK_MAX_CONFIG_LENGTH = 30_000;
 
 /**
  * 解析 webhook 配置 JSON / 历史纯 URL 字符串。
@@ -50,6 +53,77 @@ export function parseWebhookConfigs(value: string): WebhookConfig[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * 服务端持久化前的严格解析。
+ *
+ * 设置页的编辑态允许存在空 URL 草稿，因此宽松 parser 仍需保留；但 API 不能
+ * 只依赖前端约束。此入口会限制数量和长度，并只接收有效 HTTP(S) URL。
+ */
+export function parseWebhookConfigsForServer(value: string): WebhookConfig[] {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.length > WEBHOOK_MAX_CONFIG_LENGTH) {
+    throw new Error(`Webhook 配置不能超过 ${WEBHOOK_MAX_CONFIG_LENGTH} 个字符`);
+  }
+
+  let entries: unknown[];
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (!Array.isArray(parsed)) throw new Error('Webhook 配置必须是数组');
+      entries = parsed;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Webhook 配置必须是数组') throw error;
+      throw new Error('Webhook 配置 JSON 格式无效');
+    }
+  } else {
+    // 继续接受历史的单个 URL 格式，但保存后统一规范为 JSON 数组。
+    entries = [{ url: trimmed, remark: '', enabled: true }];
+  }
+
+  if (entries.length > WEBHOOK_MAX_COUNT) {
+    throw new Error(`最多支持 ${WEBHOOK_MAX_COUNT} 个 Webhook`);
+  }
+
+  const configs: WebhookConfig[] = [];
+  for (const [index, entry] of entries.entries()) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`第 ${index + 1} 个 Webhook 格式无效`);
+    }
+    const raw = entry as Record<string, unknown>;
+    if (typeof raw.url !== 'string') {
+      throw new Error(`第 ${index + 1} 个 Webhook URL 必须是字符串`);
+    }
+    const url = raw.url.trim();
+    // 设置页尚未填写的空草稿不持久化；服务端仍会保留其他有效目标。
+    if (!url) continue;
+    if (url.length > WEBHOOK_MAX_URL_LENGTH) {
+      throw new Error(`第 ${index + 1} 个 Webhook URL 不能超过 ${WEBHOOK_MAX_URL_LENGTH} 个字符`);
+    }
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      throw new Error(`第 ${index + 1} 个 Webhook URL 无效`);
+    }
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      throw new Error(`第 ${index + 1} 个 Webhook URL 仅支持 HTTP(S)`);
+    }
+    if (raw.remark !== undefined && typeof raw.remark !== 'string') {
+      throw new Error(`第 ${index + 1} 个 Webhook 备注必须是字符串`);
+    }
+    const remark = (raw.remark ?? '').trim();
+    if (remark.length > WEBHOOK_MAX_REMARK_LENGTH) {
+      throw new Error(`第 ${index + 1} 个 Webhook 备注不能超过 ${WEBHOOK_MAX_REMARK_LENGTH} 个字符`);
+    }
+    if (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') {
+      throw new Error(`第 ${index + 1} 个 Webhook 启用状态必须是布尔值`);
+    }
+    configs.push({ url, remark, enabled: raw.enabled !== false });
+  }
+  return configs;
 }
 
 /**

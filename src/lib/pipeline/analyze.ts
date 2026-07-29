@@ -134,6 +134,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
       )));
       assertNotAborted(signal);
       let batchErrors = 0;
+      let unexpectedError: unknown = null;
       for (const r of results) {
         if (r.status === 'rejected') {
           if (isTransientBatchError(r.reason)) {
@@ -141,6 +142,10 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
           } else {
             errors++;
             batchErrors++;
+            // processWithAI 已将可预期的文章级 AI 失败持久化为 failed。
+            // 剩下的 reject 通常是数据库/程序级异常；继续 while 会反复捞到
+            // 同一 pending 文章而空转，改由 Job 的有限重试统一处理。
+            unexpectedError ??= r.reason;
           }
           continue;
         }
@@ -168,6 +173,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
           currentItemLabel: batch[batch.length - 1]?.title,
         });
       }
+      if (unexpectedError && !providerPause) throw unexpectedError;
       if (providerPause) break;
       if (i + concurrency < pending.length) await abortableDelay(AI_DELAY_MS, signal);
     }
@@ -187,9 +193,9 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
         where: pendingWhere,
         data: {
           aiStatus: 'pending',
-          aiError: providerPause.retryable
-            ? null
-            : (providerPause.message?.slice(0, 1000) || 'AI 配置或服务状态需要处理'),
+          // 全局配置/余额问题只保留在实际触发请求的文章上；未开始文章
+          // 仅进入等待，避免把同一错误伪装成数百篇独立技术失败。
+          aiError: null,
           nextAiRetryAt: new Date(Date.now() + retryDelayMs),
         },
       });

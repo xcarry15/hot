@@ -37,8 +37,7 @@ describe('settings catalog', () => {
 
     expect(runtimeDefaults.push_mode).toBe('realtime');
     expect(runtimeDefaults.ai_keyword_match_bonus).toBe('5');
-    expect(runtimeDefaults.event_cluster_ai_same_event_confidence).toBe('70');
-    expect(runtimeDefaults.event_cluster_ai_different_event_confidence).toBe('85');
+    expect(runtimeDefaults.ai_max_tokens).toBe('8192');
     expect(runtimeDefaults.ai_block_ad).toContain('is_ad');
     expect(frontendDefaults.ai_block_ad).toBe('');
     expect(frontendDefaults.crawl_interval_min).toBe('120');
@@ -48,12 +47,7 @@ describe('settings catalog', () => {
     expect(SETTING_DEFINITIONS.some((item) => item.key.startsWith('dedup_'))).toBe(false);
   });
 
-  it('聚类 AI 阈值有明确的可调范围', () => {
-    const sameEvent = SETTING_DEFINITIONS.find((item) => item.key === 'event_cluster_ai_same_event_confidence');
-    const differentEvent = SETTING_DEFINITIONS.find((item) => item.key === 'event_cluster_ai_different_event_confidence');
-    expect(sameEvent?.schema.safeParse('69').success).toBe(false);
-    expect(sameEvent?.schema.safeParse('70').success).toBe(true);
-    expect(differentEvent?.schema.safeParse('99').success).toBe(true);
-    expect(differentEvent?.schema.safeParse('100').success).toBe(false);
+  it('聚类不再暴露二次 AI 阈值', () => {
+    expect(SETTING_DEFINITIONS.some((item) => item.key.startsWith('event_cluster_ai_'))).toBe(false);
   });
 });

@@ -140,8 +140,7 @@ export function StepIndicator({
 function shortSkipLabel(reason: string): string {
   if (reason.startsWith('[AI 处理失败]')) return 'AI 失败'
   if (reason === '内容不足') return '内容不足'
-  if (reason === '无具体事件') return '无具体事件'
-  if (reason === '多事件聚合稿') return '多事件稿'
+  if (reason === '无价值') return '无价值'
   // 未知形态：截断防溢出。
   return reason.length > 8 ? `${reason.slice(0, 8)}…` : reason
 }

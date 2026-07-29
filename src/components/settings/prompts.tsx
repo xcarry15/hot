@@ -203,10 +203,11 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
           <div className="space-y-1.5 border p-2.5">
             <p className="text-xs font-medium">当前生效的代码护栏</p>
             <div className="grid gap-x-4 gap-y-1 text-[11px] text-muted-foreground sm:grid-cols-2">
-              <p>• event_score ≤ 9：标记为无具体事件，不进入 Event 聚类。</p>
-              <p>• 标题包含多个独立事件：不自动合并，保留为正常跳过。</p>
+              <p>• event_score 只表示事件影响力；低分的具体事实仍可进入 Event 聚类。</p>
+              <p>• 无完整事件身份但相关度、内容分足够高：自动建立独立 Event，不会直接丢弃或进入人工校准。</p>
               <p>• 聚类时间信号：常规 7 天；跟进候选最多召回 14 天。</p>
               <p>• eventKey 由主体 / 原子动作 / 辨识事项确定性生成，brand 不覆盖事件主体。</p>
+              <p>• 每篇文章只调用一次 AI；归并只使用结构化身份和本地证据，不再二次请求 AI。</p>
               <p>• 广告概率 ≤ 20 不扣分；达到 50 后进入广告封顶，硬事实高分稿封顶 70，其余封顶 45。</p>
               <p>• 关键词加分在广告规则之后执行，最终分数封顶 100。</p>
               <p>• 劳动保障事实仅在模型已判广告时触发非广告兜底，避免单个关键词洗掉宣传稿。</p>

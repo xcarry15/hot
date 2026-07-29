@@ -31,4 +31,9 @@ async function seed() {
   console.log('Seed complete!');
 }
 
-seed().catch(console.error).finally(() => process.exit());
+seed()
+  .catch((error: unknown) => {
+    console.error('Seed failed!', error)
+    process.exitCode = 1
+  })
+  .finally(() => db.$disconnect())

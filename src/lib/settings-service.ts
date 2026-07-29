@@ -5,7 +5,7 @@ import {
   EXPORTABLE_SETTING_KEYS, WRITABLE_SETTING_KEYS, SETTING_DEFINITION_MAP, SENSITIVE_SETTING_KEYS, getSettingDefaults, getExportableSettingDefaults,
 } from '@/lib/settings';
 import { SETTING_KEYS } from '@/lib/settings-catalog';
-import { parseWebhookConfigs, serializeWebhookConfigsForServer } from '@/contracts/webhook';
+import { parseWebhookConfigsForServer, serializeWebhookConfigsForServer } from '@/contracts/webhook';
 import { decryptWebhookConfigsForRuntime, encryptWebhookConfigsForStorage } from '@/lib/settings-crypto';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { PUBLIC_PUBLICATION_REBUILD_KEYS } from '@/lib/public-publication-service';
@@ -72,6 +72,13 @@ export async function updateSettings(input: unknown): Promise<
     if (!definition) { validationErrors.push(`${key}: 不可写(未在配置目录中声明)`); continue; }
     const result = definition.schema.safeParse(value);
     if (!result.success) validationErrors.push(`${key}: ${result.error.issues[0].message}`);
+    if (key === SETTING_KEYS.FEISHU_WEBHOOK_URL) {
+      try {
+        parseWebhookConfigsForServer(value);
+      } catch (error) {
+        validationErrors.push(`${key}: ${error instanceof Error ? error.message : 'Webhook 配置无效'}`);
+      }
+    }
   }
   if (validationErrors.length > 0) return { ok: false, error: '设置值校验失败', details: validationErrors };
 
@@ -85,7 +92,7 @@ export async function updateSettings(input: unknown): Promise<
   );
   let updates = Object.entries(normalizedData) as [string, string][];
   updates = updates.map(([key, value]) => key === SETTING_KEYS.FEISHU_WEBHOOK_URL
-    ? [key, encryptWebhookConfigsForStorage(serializeWebhookConfigsForServer(parseWebhookConfigs(value)))]
+    ? [key, encryptWebhookConfigsForStorage(serializeWebhookConfigsForServer(parseWebhookConfigsForServer(value)))]
     : [key, value]);
   const keepKeys = updates.filter(([key]) => preserveRedactedSensitiveKeys.has(key)).map(([key]) => key);
   if (keepKeys.length > 0) {

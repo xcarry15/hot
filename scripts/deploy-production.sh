@@ -87,5 +87,9 @@ pm2 start npm --name "$APP_NAME" -- start
 pm2 save
 
 curl --fail --silent --show-error --retry 10 --retry-delay 3 "$SITE_URL/api/health" >/dev/null
+PUBLIC_HTML="$(curl --fail --silent --show-error --retry 10 --retry-delay 3 "${SITE_URL%/}/")"
+PUBLIC_CSS_PATH="$(printf '%s' "$PUBLIC_HTML" | sed -n 's/.*href="\([^\"]*\.css\)".*/\1/p' | head -n 1)"
+[[ -n "$PUBLIC_CSS_PATH" ]] || { echo "Deployment check failed: no Next.js CSS asset found in public HTML." >&2; exit 1; }
+curl --fail --silent --show-error --retry 10 --retry-delay 3 "${SITE_URL%/}${PUBLIC_CSS_PATH}" >/dev/null
 DEPLOY_SUCCEEDED=1
 echo "Deployment completed: $SITE_URL"

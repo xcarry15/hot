@@ -23,6 +23,15 @@ describe('parseAiAnalysisOutput', () => {
     expect(parseAiAnalysisOutput(JSON.stringify(validOutput))).toMatchObject(validOutput);
   });
 
+  it('事件身份置信度缺失时按 0 处理，不借用整篇分析置信度', () => {
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      confidence: 99,
+      event_key_confidence: undefined,
+    }));
+    expect(parsed.event_key_confidence).toBe(0);
+  });
+
   it('兼容 Markdown、未知字段和模型常见的宽松数组格式', () => {
     const parsed = parseAiAnalysisOutput(`\`\`\`json\n${JSON.stringify({
       ...validOutput,
@@ -114,11 +123,14 @@ describe('parseAiAnalysisOutput', () => {
     expect(() => parseAiAnalysisOutput(JSON.stringify({ summary: '没有评分' }))).toThrow();
   });
 
-  it('缺少完整事件身份时拒绝结果，避免用弱键进入聚类', () => {
-    expect(() => parseAiAnalysisOutput(JSON.stringify({
+  it('缺少完整事件身份时保留分析结果并清空身份，不触发重试', () => {
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
       ...validOutput,
       event_object: '',
-    }))).toThrow('完整事件身份');
+    }));
+    expect(parsed.event_score).toBe(validOutput.event_score);
+    expect(parsed.event_key).toBe('');
+    expect(parsed.event_key_confidence).toBe(0);
   });
 
   it('兼容模型返回的单数事件身份字段', () => {
@@ -136,16 +148,17 @@ describe('parseAiAnalysisOutput', () => {
     expect(parsed.event_object).toBe('郑州首店');
   });
 
-  it('定向修复前允许读取评分和摘要，但默认仍不允许不完整身份落库', () => {
+  it('单次分析直接接受不完整身份，保留评分和摘要', () => {
     const parsed = parseAiAnalysisOutput(JSON.stringify({
       ...validOutput,
       event_object: '',
-    }), { allowIncompleteIdentity: true });
+    }));
     expect(parsed.event_score).toBe(validOutput.event_score);
     expect(parsed.event_key).toBe('');
+    expect(parsed.event_key_confidence).toBe(0);
   });
 
-  it('纯观点文章缺少事件身份时识别为无具体事件', () => {
+  it('纯观点文章缺少事件身份时保留低事件分和分析结果', () => {
     const parsed = parseAiAnalysisOutput(JSON.stringify({
       ...validOutput,
       event_score: 5,
@@ -158,7 +171,7 @@ describe('parseAiAnalysisOutput', () => {
     expect(parsed.summary).toBe(validOutput.summary);
   });
 
-  it('低事件分即使模型编造完整身份也识别为无具体事件', () => {
+  it('低事件分但身份完整时保留可聚类事实', () => {
     const parsed = parseAiAnalysisOutput(JSON.stringify({
       ...validOutput,
       event_score: 5,
@@ -166,9 +179,9 @@ describe('parseAiAnalysisOutput', () => {
       event_action: '评估产品',
       event_object: '供应商渗透率',
     }));
-    expect(parsed.event_subjects).toEqual([]);
-    expect(parsed.event_action).toBe('');
-    expect(parsed.event_object).toBe('');
+    expect(parsed.event_subjects).toEqual(['山姆']);
+    expect(parsed.event_action).toBe('评估产品');
+    expect(parsed.event_object).toBe('供应商渗透率');
   });
 
   it('宽泛或多动作身份会自动降级置信度', () => {

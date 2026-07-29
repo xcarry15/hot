@@ -61,7 +61,7 @@ export const ArticleRow = memo(function ArticleRow({
   const aiLoading = onStepActionLoading?.(article.id, 'ai') ?? false
   const pushLoading = onStepActionLoading?.(article.id, 'push') ?? false
   const businessAiSkipped = article.ai === 'skipped' && isBusinessSkipReason(article.skipReason)
-  const businessAiSkipLabel = article.skipReason === '无具体事件' ? '无具体事件' : '多事件聚合稿'
+  const businessAiSkipLabel = '无价值'
   const nextActionLoading = nextAction?.step === 'process'
     ? processLoading
     : nextAction?.step === 'cluster'
@@ -184,7 +184,7 @@ export const ArticleRow = memo(function ArticleRow({
             onClick={actionFor('ai')}
             forceLabel={nextAction?.step === 'ai' ? (retryWaiting ? '等待' : '重试') : undefined}
             title={businessAiSkipped
-              ? `AI 分析已完成，但文章${article.skipReason === '无具体事件' ? '没有具体事件' : '属于多事件聚合稿'}`
+              ? 'AI 分析已完成，但内容不具备保留价值'
               : article.technicalErrorReasons.ai || (article.ai === 'failed' ? '点击重试 AI 分析' : article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined)}
           />
           <StepIndicator

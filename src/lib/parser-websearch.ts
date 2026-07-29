@@ -11,6 +11,53 @@ interface WebSearchConfig {
   snippetAsSummary?: boolean; // Use search snippet as summary (default true)
 }
 
+const MAX_QUERIES = 5;
+const MAX_RESULTS_PER_QUERY = 20;
+const MAX_RECENCY_DAYS = 365;
+
+function boundedInt(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === 'number' ? value : Number.NaN;
+  return Number.isFinite(parsed)
+    ? Math.max(min, Math.min(max, Math.floor(parsed)))
+    : fallback;
+}
+
+function normalizeQueries(value: unknown, fallback: string[]): string[] {
+  const raw = Array.isArray(value) ? value : fallback;
+  return [...new Set(raw
+    .filter((query): query is string => typeof query === 'string')
+    .map((query) => query.trim().slice(0, 120))
+    .filter(Boolean))]
+    .slice(0, MAX_QUERIES);
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function toSearchItems(results: unknown, snippetAsSummary: boolean): CrawlResult['items'] {
+  if (!Array.isArray(results)) return [];
+  return results.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const value = item as { url?: unknown; name?: unknown; snippet?: unknown; date?: unknown };
+    if (typeof value.url !== 'string' || typeof value.name !== 'string') return [];
+    const url = value.url.trim().slice(0, 2048);
+    const title = value.name.trim().slice(0, 500);
+    if (!url || !title || !isHttpUrl(url)) return [];
+    return [{
+      title,
+      url,
+      summary: snippetAsSummary && typeof value.snippet === 'string' ? value.snippet.trim().substring(0, 300) : '',
+      publishedAt: typeof value.date === 'string' && value.date ? value.date : undefined,
+    }];
+  }).slice(0, MAX_RESULTS_PER_QUERY);
+}
+
 /**
  * Web Search Parser — uses z-ai-web-dev-sdk web_search to find industry news
  *
@@ -34,10 +81,13 @@ export async function parseWebSearch(
   signal?: AbortSignal,
 ): Promise<CrawlResult> {
   try {
-    const config: WebSearchConfig = JSON.parse(parserConfigStr || '{}');
-    const queries = config.queries || extractQueriesFromUrl(sourceUrl);
-    const numPerQuery = config.numPerQuery || 10;
-    const recencyDays = config.recencyDays || 3;
+    const parsed: unknown = JSON.parse(parserConfigStr || '{}');
+    const config: WebSearchConfig = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as WebSearchConfig
+      : {};
+    const queries = normalizeQueries(config.queries, extractQueriesFromUrl(sourceUrl));
+    const numPerQuery = boundedInt(config.numPerQuery, 10, 1, MAX_RESULTS_PER_QUERY);
+    const recencyDays = boundedInt(config.recencyDays, 3, 0, MAX_RECENCY_DAYS);
     const snippetAsSummary = config.snippetAsSummary !== false;
 
     if (queries.length === 0) {
@@ -64,19 +114,7 @@ export async function parseWebSearch(
         const results = await zai.functions.invoke('web_search', searchArgs);
         assertNotAborted(signal);
 
-        if (Array.isArray(results)) {
-          const items = results
-            .filter((item: { url?: string; name?: string }) => item.url && item.name)
-            .map((item: { url: string; name: string; snippet?: string; date?: string; host_name?: string }) => ({
-              title: item.name.trim(),
-              url: item.url.trim(),
-              summary: snippetAsSummary && item.snippet ? item.snippet.trim().substring(0, 300) : '',
-              publishedAt: item.date || undefined,
-            }));
-          queryResults.push(items);
-        } else {
-          queryResults.push([]);
-        }
+        queryResults.push(toSearchItems(results, snippetAsSummary));
       } catch (err: unknown) {
         if (signal?.aborted) throw err;
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -91,19 +129,7 @@ export async function parseWebSearch(
               ...(recencyDays > 0 ? { recency_days: recencyDays } : {}),
             });
             assertNotAborted(signal);
-            if (Array.isArray(retryResults)) {
-              const items = retryResults
-                .filter((item: { url?: string; name?: string }) => item.url && item.name)
-                .map((item: { url: string; name: string; snippet?: string; date?: string }) => ({
-                  title: item.name.trim(),
-                  url: item.url.trim(),
-                  summary: snippetAsSummary && item.snippet ? item.snippet.trim().substring(0, 300) : '',
-                  publishedAt: item.date || undefined,
-                }));
-              queryResults.push(items);
-            } else {
-              queryResults.push([]);
-            }
+            queryResults.push(toSearchItems(retryResults, snippetAsSummary));
           } catch (retryError) {
             if (signal?.aborted) throw retryError;
             console.error(`[websearch] Retry failed for "${query}"`);

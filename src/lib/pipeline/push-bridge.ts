@@ -13,7 +13,7 @@ export async function pushAllPendingArticles(signal?: AbortSignal, jobId?: strin
   assertNotAborted(signal)
   const result = await pushAllUnpushed(signal, pushSettings, async (done, failed) => {
     if (!jobId) return
-    void advanceJobProgress(jobId, { doneDelta: done, errorDelta: failed, currentItemLabel: '推送处理中' })
+    await advanceJobProgress(jobId, { doneDelta: done, errorDelta: failed, currentItemLabel: '推送处理中' })
   })
   return { total: result.success + result.failed + result.skipped, processed: result.success, errors: result.failed }
 }

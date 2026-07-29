@@ -1,16 +1,16 @@
 export const EVENT_CLUSTER_WINDOW_DAYS = 7;
 export const EVENT_CLUSTER_FOLLOW_UP_DAYS = 14;
-// 候选召回优先保证覆盖率，最终只把少量高相关候选交给 AI。
-export const EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES = 48;
+// 候选只在短时间窗内做本地规则比较；提高召回上限，避免历史补采时被“最新 48 条”截断。
+export const EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES = 120;
 export const EVENT_CLUSTER_MAX_CANDIDATES = 15;
-export const EVENT_CLUSTER_MAX_AI_CANDIDATES = 5;
 export const EVENT_CLUSTER_MAX_MEMBER_ARTICLES = 12;
 export const EVENT_CLUSTER_MAX_RETRIES = 5;
-export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v7';
-/** AI 判为同一事件后允许自动归入的最低置信度。 */
-export const DEFAULT_EVENT_CLUSTER_AI_SAME_EVENT_CONFIDENCE = 70;
-/** AI 判为不同事件后允许自动新建 Event 的最低置信度。 */
-export const DEFAULT_EVENT_CLUSTER_AI_DIFFERENT_EVENT_CONFIDENCE = 85;
+export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v10';
+/** 高置信结构化身份可直接驱动自动归并，无需再请求 AI。 */
+export const EVENT_CLUSTER_AUTO_MERGE_CONFIDENCE = 85;
+export const EVENT_CLUSTER_AUTO_MERGE_IDENTITY_SCORE = 0.86;
+export const EVENT_CLUSTER_AUTO_MERGE_OBJECT_SIMILARITY = 0.65;
+export const EVENT_CLUSTER_AUTO_MERGE_ANCHOR_DAYS = 2;
 
 export interface ContentShingleResult {
   charOverlap: number;
@@ -70,12 +70,15 @@ export const EVENT_CLUSTER_STRONG_TITLE_DAYS = 2;
 export const EVENT_CLUSTER_STRONG_CONTENT_OVERLAP = 0.72;
 export const EVENT_CLUSTER_STRONG_CONTENT_JACCARD = 0.45;
 export const EVENT_CLUSTER_AMBIGUOUS_TITLE_OVERLAP = 0.55;
-export const EVENT_CLUSTER_AMBIGUOUS_CONTENT_OVERLAP = 0.35;
-export const EVENT_CLUSTER_AMBIGUOUS_CONTENT_JACCARD = 0.2;
 export const EVENT_CLUSTER_MIN_KEY_CONFIDENCE = 65;
 export const EVENT_CLUSTER_STRONG_IDENTITY_SCORE = 0.72;
-export const EVENT_CLUSTER_AMBIGUOUS_IDENTITY_SCORE = 0.55;
 export const EVENT_CLUSTER_ANCHOR_MIN_LENGTH = 2;
+/** 宽松归并：标题锚点和内容证据优先，AI 动作/事项只作辅助。 */
+export const EVENT_CLUSTER_LOOSE_ANCHOR_COUNT = 2;
+export const EVENT_CLUSTER_LOOSE_TITLE_OVERLAP = 0.45;
+export const EVENT_CLUSTER_LOOSE_CONTENT_OVERLAP = 0.65;
+export const EVENT_CLUSTER_LOOSE_CONTENT_JACCARD = 0.25;
+export const EVENT_CLUSTER_LOOSE_OBJECT_SIMILARITY = 0.35;
 
 export type ClusterStatus = 'pending' | 'clustered' | 'failed' | 'needs_review';
 

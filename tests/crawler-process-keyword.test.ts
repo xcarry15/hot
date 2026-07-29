@@ -32,11 +32,13 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
   // detail-fetcher
   fetchArticleDetail: vi.fn(),
+  markArticleFetchFailure: vi.fn(),
   // utils-shared
   withTimeout: vi.fn(),
   abortableDelay: vi.fn(),
   // worker-stop
   assertNotAborted: vi.fn(),
+  refreshPublicPublication: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -69,6 +71,7 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/detail-fetcher', () => ({
   fetchArticleDetail: mocks.fetchArticleDetail,
+  markArticleFetchFailure: mocks.markArticleFetchFailure,
 }));
 
 // withTimeout：直接返回 promise，避免 fetch 阶段被卡死
@@ -82,7 +85,11 @@ vi.mock('@/lib/worker-stop', () => ({
   assertNotAborted: mocks.assertNotAborted,
 }));
 
-import { processAllPending } from '../src/lib/pipeline/process';
+vi.mock('@/lib/public-publication-service', () => ({
+  refreshPublicPublication: mocks.refreshPublicPublication,
+}));
+
+import { processAllPending, repairPublishedDates } from '../src/lib/pipeline/process';
 import { invalidateKeywordCache } from '../src/lib/filter';
 
 beforeEach(() => {
@@ -93,6 +100,7 @@ beforeEach(() => {
   mocks.abortableDelay.mockResolvedValue(undefined);
   // 默认 fetchArticleDetail 返空（测试需要时再覆盖）
   mocks.fetchArticleDetail.mockResolvedValue('');
+  mocks.markArticleFetchFailure.mockResolvedValue(true);
   // 默认 article.findMany（pending + repairPublishedDates）返空
   mocks.articleFindMany.mockResolvedValue([]);
   // 默认 article.update / updateMany / delete 返 {}
@@ -219,6 +227,21 @@ describe('processAllPending 边界条件', () => {
     expect(mocks.keywordFindMany).not.toHaveBeenCalled();
   });
 
+  it('详情抓取抛错时收口为 failed，避免同一 pending 文章在本轮无限重试', async () => {
+    const article = mockPendingArticle();
+    mocks.articleFindMany.mockResolvedValueOnce([article]);
+    mocks.fetchArticleDetail.mockRejectedValueOnce(new Error('详情请求超时'));
+
+    const result = await processAllPending();
+
+    expect(result).toMatchObject({ processed: 0, errors: 1 });
+    expect(mocks.markArticleFetchFailure).toHaveBeenCalledWith(
+      'art-001',
+      expect.any(Error),
+      { onlyIfPending: true },
+    );
+  });
+
   it('关键字 DB 抛错 → 不删文章，宁可放过不可误杀（processed++）', async () => {
     const article = mockPendingArticle();
     mocks.articleFindMany.mockResolvedValueOnce([article]);
@@ -233,5 +256,50 @@ describe('processAllPending 边界条件', () => {
     expect(result.errors).toBe(0);
     expect(mocks.articleDelete).not.toHaveBeenCalled();
     expect(mocks.discardedItemUpsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('repairPublishedDates 分页边界', () => {
+  it('按固定窗口扫描近期开稿，不会一次读取整周 rawContent', async () => {
+    const createdAt = new Date('2026-07-29T12:00:00.000Z');
+    const firstPage = Array.from({ length: 20 }, (_, index) => ({
+      id: `normal-${index}`,
+      title: `正常时间文章 ${index}`,
+      rawContent: '<html></html>',
+      publishedAt: new Date('2026-07-29T09:30:00.000Z'),
+      createdAt,
+    }));
+    const repairable = {
+      id: 'needs-repair',
+      title: '待修复发布时间',
+      rawContent: '<meta property="article:published_time" content="2026-07-28T08:15:00.000Z">',
+      publishedAt: new Date('2026-07-28T00:00:00.000Z'),
+      createdAt: new Date('2026-07-28T12:00:00.000Z'),
+    };
+    mocks.articleFindMany
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce([repairable]);
+
+    await repairPublishedDates();
+
+    expect(mocks.articleFindMany).toHaveBeenCalledTimes(2);
+    expect(mocks.articleFindMany.mock.calls.every(([query]) => query.take === 20)).toBe(true);
+    expect(mocks.articleFindMany.mock.calls[1][0].where.AND).toEqual([
+      {
+        OR: [
+          { createdAt: { lt: createdAt } },
+          { createdAt, id: { lt: 'normal-19' } },
+        ],
+      },
+    ]);
+    expect(mocks.articleUpdate).toHaveBeenCalledWith({
+      where: { id: 'needs-repair' },
+      data: { publishedAt: new Date('2026-07-28T08:15:00.000Z') },
+    });
+    expect(mocks.refreshPublicPublication).toHaveBeenCalledWith(
+      'needs-repair',
+      expect.anything(),
+      { contentChanged: true },
+    );
   });
 });

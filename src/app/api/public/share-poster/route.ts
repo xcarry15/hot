@@ -1,6 +1,7 @@
 import QRCode from 'qrcode'
 import sharp from 'sharp'
 import { z } from 'zod'
+import { enforcePublicRateLimit } from '@/lib/public-rate-limit'
 
 const requestSchema = z.object({
   publishedAt: z.string().trim().max(50),
@@ -44,6 +45,9 @@ function textLines(lines: string[], x: number, y: number, lineHeight: number, at
 }
 
 export async function POST(request: Request) {
+  const limited = enforcePublicRateLimit(request)
+  if (limited) return limited
+
   const parsed = requestSchema.safeParse(await request.json().catch(() => null))
   if (!parsed.success) return Response.json({ error: '参数错误' }, { status: 400 })
 

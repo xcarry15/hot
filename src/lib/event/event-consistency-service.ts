@@ -66,14 +66,14 @@ export async function hasDirtyEvents(): Promise<boolean> {
 
 /**
  * 旧实现曾在归属事务提交后才重算 Event，极端中断时可能留下
- * `eventId != null && clusterStatus = failed`。该状态不能进入普通聚类队列，
- * 因此在批处理开始时主动收敛回 Event 的实际状态。
+ * `eventId != null && clusterStatus = failed`，或尚未完成 AI 就被挂入 Event。
+ * 这些状态都不能进入普通流水线，因此在批处理开始时主动收敛回基础事实。
  */
 export async function repairAttachedClusterArticle(articleId: string): Promise<boolean> {
   const result = await db.$transaction(async (tx) => {
     const article = await tx.article.findUnique({
       where: { id: articleId },
-      select: { id: true, eventId: true, clusterStatus: true },
+      select: { id: true, eventId: true, clusterStatus: true, aiStatus: true },
     });
     if (!article?.eventId) return false;
 
@@ -87,11 +87,31 @@ export async function repairAttachedClusterArticle(articleId: string): Promise<b
         data: {
           eventId: null,
           clusterStatus: 'pending',
+          clusteredAt: null,
           clusterError: null,
+          clusterRetryCount: 0,
           nextClusterRetryAt: null,
         },
       });
-      return false;
+      return true;
+    }
+
+    // Event 成员必须先完成 AI。若旧数据或异常人工操作绕过了该前置条件，
+    // 解除归属，让它重新进入 AI → 聚类正常流水线，不能伪装成 clustered。
+    if (article.aiStatus !== 'done') {
+      await tx.article.update({
+        where: { id: article.id },
+        data: {
+          eventId: null,
+          clusterStatus: 'pending',
+          clusteredAt: null,
+          clusterError: null,
+          clusterRetryCount: 0,
+          nextClusterRetryAt: null,
+        },
+      });
+      await recalculateEvent(tx, event.id);
+      return true;
     }
 
     if (article.clusterStatus === 'failed') {
@@ -113,7 +133,13 @@ export async function repairAttachedClusterArticle(articleId: string): Promise<b
 
 export async function repairAttachedClusterFailures(limit = EVENT_REPAIR_BATCH_SIZE): Promise<number> {
   const articles = await db.article.findMany({
-    where: { eventId: { not: null }, clusterStatus: 'failed' },
+    where: {
+      eventId: { not: null },
+      OR: [
+        { clusterStatus: 'failed' },
+        { aiStatus: { not: 'done' } },
+      ],
+    },
     orderBy: { updatedAt: 'asc' },
     take: Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)),
     select: { id: true },

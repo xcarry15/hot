@@ -16,8 +16,8 @@ import { ADMIN_SESSION_COOKIE, isValidAdminSession, isValidApiToken } from '@/li
  */
 
 export function proxy(request: NextRequest) {
-  // Public endpoints are deliberately allow-listed and read-only. Never make
-  // the existing admin article/settings APIs anonymous by broadening this rule.
+  // Public endpoints are deliberately allow-listed. Never make the existing
+  // admin article/settings APIs anonymous by broadening this rule.
   const pathname = request.nextUrl.pathname;
   const isAdminAuthApi = pathname === '/api/admin-auth';
   if (isAdminAuthApi) {
@@ -29,6 +29,16 @@ export function proxy(request: NextRequest) {
 
   if (pathname === '/api/health') {
     if (!['GET', 'HEAD'].includes(request.method)) {
+      return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
+    }
+    return NextResponse.next();
+  }
+
+  // The public article page generates its downloadable poster in the browser.
+  // This endpoint is stateless, validates its bounded input, and must remain
+  // reachable without an admin session in production.
+  if (pathname === '/api/public/share-poster') {
+    if (request.method !== 'POST') {
       return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });
     }
     return NextResponse.next();
