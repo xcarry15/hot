@@ -15,6 +15,12 @@ export interface CrawlResult {
   success: boolean;
   items: CrawlItem[];
   error?: string;
+  /** 本次真正写入 Article 的数量；items 仅代表列表页解析结果。 */
+  createdCount?: number;
+  /** 本次命中既有 URL、未新建 Article 的数量。 */
+  deduplicatedCount?: number;
+  /** 从同 URL 的已删除来源接管并恢复为待处理的文章数量。 */
+  reclaimedCount?: number;
 }
 
 export type ParserFn = (

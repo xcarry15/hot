@@ -5,7 +5,7 @@ export const EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES = 120;
 export const EVENT_CLUSTER_MAX_CANDIDATES = 15;
 export const EVENT_CLUSTER_MAX_MEMBER_ARTICLES = 12;
 export const EVENT_CLUSTER_MAX_RETRIES = 5;
-export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v10';
+export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v11';
 /** 高置信结构化身份可直接驱动自动归并，无需再请求 AI。 */
 export const EVENT_CLUSTER_AUTO_MERGE_CONFIDENCE = 85;
 export const EVENT_CLUSTER_AUTO_MERGE_IDENTITY_SCORE = 0.86;
@@ -150,6 +150,38 @@ const EVENT_GENERIC_TOKENS = new Set([
   '品牌', '战略', '合作', '首次', '中国', '探索', '模型', '首店', '落地', '正式', '亮相',
   '启幕', '开业', '发布', '增长', '荣获', '年度', '门店', '超市', '便利', '百货', '项目',
 ]);
+
+const EVENT_GENERIC_IDENTITY_VALUES = new Set([
+  '事件', '动态', '消息', '业务', '经营', '战略', '合作', '活动', '产品', '新品', '项目',
+  '门店', '新店', '市场', '品牌', '公司', '企业', '行业', '布局', '调整', '发布', '上线', '开业',
+]);
+
+/**
+ * 低置信度身份只在主体、动作、事项都足够具体时才可作为强证据，
+ * 防止“品牌/发布/新品”这类宽泛 AI 输出直接把不同事件合并。
+ */
+export function isSpecificEventIdentity(subjects: readonly string[], action: string, object: string): boolean {
+  const normalizedSubjects = subjects.map(normalizeEventText).filter((subject) => subject.length >= 2);
+  const normalizedAction = normalizeEventText(action);
+  const normalizedObject = normalizeEventText(object);
+  if (normalizedSubjects.length === 0 || normalizedAction.length < 2 || normalizedObject.length < 4) return false;
+  if (EVENT_GENERIC_IDENTITY_VALUES.has(normalizedAction) || EVENT_GENERIC_IDENTITY_VALUES.has(normalizedObject)) return false;
+  return buildEventAnchorTokens(object).size > 0 || /[a-z0-9]{2,}/u.test(normalizedObject);
+}
+
+/** 只提取带量纲的数值，年份、日期等时间数字不作为同一事件证据。 */
+export function sharedQuantifiedFacts(left: string, right: string): string[] {
+  const extract = (value: string) => {
+    const facts = new Set<string>();
+    const normalized = value.normalize('NFKC').toLowerCase();
+    const pattern = /\d+(?:[.,]\d+)?(?:万亿元|万平方米|亿元|万元|万家|万店|万|亿|家|店|人|款|个|%)/gu;
+    for (const match of normalized.matchAll(pattern)) facts.add(match[0].replace(',', '.'));
+    return facts;
+  };
+  const leftFacts = extract(left);
+  const rightFacts = extract(right);
+  return [...leftFacts].filter((fact) => rightFacts.has(fact));
+}
 
 export function buildEventAnchorTokens(value: string): Set<string> {
   const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' });

@@ -29,6 +29,9 @@ const mocks = vi.hoisted(() => ({
   keywordFindMany: vi.fn(),
   keywordCandidateFindMany: vi.fn(),
   keywordCandidateUpsert: vi.fn(),
+  keywordHitDeleteMany: vi.fn(),
+  keywordHitCreateMany: vi.fn(),
+  articleSearchUpsert: vi.fn(),
   transaction: vi.fn(),
   // detail-fetcher
   fetchArticleDetail: vi.fn(),
@@ -60,6 +63,13 @@ vi.mock('@/lib/db', () => ({
     },
     keyword: {
       findMany: mocks.keywordFindMany,
+    },
+    keywordHit: {
+      deleteMany: mocks.keywordHitDeleteMany,
+      createMany: mocks.keywordHitCreateMany,
+    },
+    articleSearch: {
+      upsert: mocks.articleSearchUpsert,
     },
     keywordCandidate: {
       findMany: mocks.keywordCandidateFindMany,
@@ -117,6 +127,9 @@ beforeEach(() => {
   mocks.keywordFindMany.mockResolvedValue([]);
   mocks.keywordCandidateFindMany.mockResolvedValue([]);
   mocks.keywordCandidateUpsert.mockResolvedValue({});
+  mocks.keywordHitDeleteMany.mockResolvedValue({ count: 0 });
+  mocks.keywordHitCreateMany.mockResolvedValue({ count: 0 });
+  mocks.articleSearchUpsert.mockResolvedValue({});
   mocks.transaction.mockImplementation(async (writes: Array<Promise<unknown>>) => Promise.all(writes));
 });
 
@@ -137,7 +150,16 @@ describe('processAllPending 全文关键字匹配', () => {
     // process stage 只处理 content.length > 50 的 article
     const longContent = '奈雪发布2026战略：计划新开300家门店聚焦一二线城市，进一步扩大品牌影响力'.repeat(2);
     mocks.fetchArticleDetail.mockResolvedValueOnce(longContent);
-    mocks.keywordFindMany.mockResolvedValueOnce([{ word: '奈雪' }]);
+    mocks.keywordFindMany
+      .mockResolvedValueOnce([{ word: '奈雪' }])
+      .mockResolvedValueOnce([{ id: 'kw-naixue' }]);
+    mocks.articleFindUnique.mockResolvedValueOnce({
+      title: article.title,
+      cleanContent: longContent,
+      summary: '',
+      brand: '["奈雪"]',
+      eventKey: '奈雪/发布/2026战略',
+    });
 
     const result = await processAllPending();
 
@@ -149,6 +171,17 @@ describe('processAllPending 全文关键字匹配', () => {
       where: { id: 'art-001' },
       data: { keywordMatched: true },
     });
+    expect(mocks.keywordHitDeleteMany).toHaveBeenCalledWith({ where: { articleId: 'art-001' } });
+    expect(mocks.keywordHitCreateMany).toHaveBeenCalledWith({
+      data: [{ articleId: 'art-001', keywordId: 'kw-naixue' }],
+    });
+    expect(mocks.articleSearchUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { articleId: 'art-001' },
+      create: expect.objectContaining({
+        articleId: 'art-001',
+        searchText: expect.stringContaining('奈雪'),
+      }),
+    }));
   });
 
   it('正文不命中关键字 → 文章删除 + DiscardedItem 写入 filter:keyword', async () => {
@@ -197,6 +230,13 @@ describe('processAllPending 全文关键字匹配', () => {
     mocks.articleFindMany.mockResolvedValueOnce([article]);
     mocks.fetchArticleDetail.mockResolvedValueOnce('行业报告显示，便利店门店总量增长，但单店收入和客流同比下降。'.repeat(3));
     mocks.keywordFindMany.mockResolvedValueOnce([{ word: '奈雪' }]);
+    mocks.articleFindUnique.mockResolvedValueOnce({
+      title: article.title,
+      cleanContent: '行业报告显示，便利店门店总量增长，但单店收入和客流同比下降。'.repeat(3),
+      summary: '',
+      brand: '',
+      eventKey: '',
+    });
 
     const result = await processAllPending();
 
@@ -207,6 +247,7 @@ describe('processAllPending 全文关键字匹配', () => {
       where: { id: 'art-001' },
       data: { keywordMatched: false },
     });
+    expect(mocks.articleSearchUpsert).toHaveBeenCalled();
   });
 });
 

@@ -15,6 +15,7 @@ vi.mock('@/lib/http', () => ({
   readResponseText: (response: { text: () => Promise<string> }) => response.text(),
   ensureResponseTextWithinLimit: (value: string) => value,
   hostFromUrl: (url: string) => new URL(url).origin,
+  isLikelyJavaScriptVerificationPage: () => false,
 }));
 
 vi.mock('@/lib/zai', () => ({

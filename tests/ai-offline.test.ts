@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   keywordFindMany: vi.fn(),
   articleFindUnique: vi.fn(),
   articleUpdate: vi.fn(),
+  articleSearchUpsert: vi.fn(),
   getAISettings: vi.fn(),
   buildStep2Prompt: vi.fn(),
   fetchArticleDetail: vi.fn(),
@@ -32,6 +33,9 @@ vi.mock('@/lib/db', () => ({
     article: {
       findUnique: mocks.articleFindUnique,
       update: mocks.articleUpdate,
+    },
+    articleSearch: {
+      upsert: mocks.articleSearchUpsert,
     },
   },
 }));
@@ -74,6 +78,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.articleUpdate.mockResolvedValue({});
+    mocks.articleSearchUpsert.mockResolvedValue({});
     // 触发失败路径：deepAnalyze → createChatCompletion 抛错
     mocks.createChatCompletion.mockRejectedValue(new Error('mock ai failure'));
     mocks.getAISettings.mockResolvedValue({
@@ -218,6 +223,13 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
       model: 'audit-model',
       provider: 'opencode',
     });
+    mocks.articleFindUnique.mockResolvedValueOnce({
+      title: '便利店增长逻辑正在失效',
+      cleanContent: longContent,
+      summary: '便利店行业增长正从单纯开店转向经营单客价值。',
+      brand: '[]',
+      eventKey: '',
+    });
 
     const result = await aiModule.processWithAI({
       id: 'trend-1',
@@ -246,6 +258,9 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
       model: 'audit-model',
       provider: 'opencode',
     });
+    expect(mocks.articleSearchUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { articleId: 'trend-1' },
+    }));
   });
 
   it('多事件标题保留模型选出的主事件，由聚类阶段自动建立独立 Event', async () => {
@@ -269,6 +284,13 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
       }),
       model: 'audit-model',
       provider: 'opencode',
+    });
+    mocks.articleFindUnique.mockResolvedValueOnce({
+      title: '联商头条：杉杉奥莱首进西安；金粒门浙江首店落地',
+      cleanContent: longContent,
+      summary: '文章汇总了多个彼此独立的零售事件。',
+      brand: '["杉杉奥莱","金粒门"]',
+      eventKey: '杉杉奥莱/计划开店/西安首店',
     });
 
     const result = await aiModule.processWithAI({

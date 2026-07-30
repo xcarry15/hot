@@ -1,6 +1,11 @@
 import * as cheerio from 'cheerio';
 import { getZAI } from './zai';
-import { ensureResponseTextWithinLimit, fetchHtml, BROWSER_HEADERS } from './http';
+import {
+  ensureResponseTextWithinLimit,
+  fetchHtml,
+  BROWSER_HEADERS,
+  isLikelyJavaScriptVerificationPage,
+} from './http';
 import { assertSafeOutboundUrl } from './outbound-url';
 import { resolveUrl } from './url-utils';
 import { extractMetaPublishedAt } from './date-utils';
@@ -35,7 +40,8 @@ export async function parseHtml(url: string, parserConfigStr: string, signal?: A
       headers: { ...BROWSER_HEADERS, ...customHeaders, Referer: new URL(url).origin },
       timeoutMs: DIRECT_FETCH_TIMEOUT_MS,
     });
-    if (html) fetchMethod = 'direct';
+    if (html && !isLikelyJavaScriptVerificationPage(html)) fetchMethod = 'direct';
+    else html = null;
 
     // Step 2: Fall back to ZAI page_reader if direct fetch returned nothing
     if (!html) {

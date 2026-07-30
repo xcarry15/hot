@@ -76,8 +76,23 @@ describe('matchKeyword 基本命中', () => {
     expect(await evaluateKeywordMatch('这是一篇赌博相关新闻')).toEqual({
       configured: true,
       matched: false,
+      matchedWords: [],
       blacklisted: true,
       blacklistWord: '赌博',
+    });
+  });
+
+  it('返回具体命中的白名单词，供处理阶段写入命中明细', async () => {
+    mocksHoisted.keywordFindMany.mockResolvedValue([
+      { word: '奈雪', category: 'default' },
+      { word: '瑞幸', category: 'default' },
+      { word: '喜茶', category: 'default' },
+    ]);
+
+    await expect(evaluateKeywordMatch('奈雪和瑞幸都在调整门店')).resolves.toEqual({
+      configured: true,
+      matched: true,
+      matchedWords: ['奈雪', '瑞幸'],
     });
   });
 });
@@ -152,7 +167,7 @@ describe('matchKeyword 缓存行为', () => {
   it('空词库会放行过滤，但不会伪造评分命中', async () => {
     mocksHoisted.keywordFindMany.mockResolvedValue([]);
     expect(await matchKeyword('任意文本')).toBe(true);
-    expect(await evaluateKeywordMatch('任意文本')).toEqual({ configured: false, matched: false });
+    expect(await evaluateKeywordMatch('任意文本')).toEqual({ configured: false, matched: false, matchedWords: [] });
   });
 });
 

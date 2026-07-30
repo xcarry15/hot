@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { addPresetSources, createSource, retrySource } from '@/lib/source-actions';
+import { getPresetSourceById } from '@/lib/preset-sources';
 
 const mocks = db as unknown as {
   source: {
@@ -17,6 +18,7 @@ vi.mock('@/lib/pipeline/collect', () => ({ testCrawlSource: vi.fn() }));
 describe('source-actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.source.findMany.mockResolvedValue([]);
   });
 
   it('创建来源复用统一 schema，并规范化持久化 parserConfig', async () => {
@@ -51,6 +53,38 @@ describe('source-actions', () => {
     expect(mocks.source.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ enabled: false }),
     }));
+  });
+
+  it('创建来源按规范化 URL 拒绝重复源', async () => {
+    mocks.source.findMany.mockResolvedValueOnce([
+      { name: '已有源', url: 'https://example.com/news/' },
+    ]);
+
+    await expect(createSource({
+      name: '重复源',
+      type: 'html',
+      url: 'https://EXAMPLE.com/news?utm_source=x#top',
+      parserConfig: {},
+      enabled: true,
+      publicEnabled: true,
+    })).resolves.toEqual({ error: '数据源已存在：已有源', status: 409 });
+
+    expect(mocks.source.create).not.toHaveBeenCalled();
+  });
+
+  it('包含已验证的亿邦动力品牌预设', () => {
+    expect(getPresetSourceById('ebrun-information')).toMatchObject({
+      name: '亿邦动力-品牌',
+      type: 'html',
+      url: 'https://www.ebrun.com/information/brand/',
+      parserConfig: JSON.stringify({
+        listItem: 'section.news-item',
+        link: 'p.title a',
+        title: 'p.title a',
+        summary: 'p.desc',
+        content: 'section.article-content-module',
+      }),
+    });
   });
 
   it('重试来源只排队 collect Job，且并发冲突不伪装成功', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors } from '@/contracts/event-clustering';
+import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors, sharedQuantifiedFacts } from '@/contracts/event-clustering';
 import { buildCanonicalEventKey, normalizeEventAction, normalizeEventIdentity } from '@/contracts/event-identity';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
 import { buildRuleCandidateAuditEvidence, hasDuplicateReportEvidence, isNearExactReprint, isStrongEventKeyDuplicate } from '@/lib/event-clustering-service';
@@ -105,6 +105,12 @@ describe('轻量事件聚类规则', () => {
   it('同事件改写保留共享主体锚点，不同门店奖项不共享主体锚点', () => {
     expect(sharedEventAnchors('十足便利与七鲜小厨合作', '十足便利店引进七鲜小厨专供菜')).toContain('十足');
     expect(sharedEventAnchors('都江堰邻你超市荣获年度好门店', '永辉超市福州店荣获年度好门店')).toEqual([]);
+  });
+
+  it('只把带量纲的相同数值作为可核查事实，不把年份当作数值证据', () => {
+    expect(sharedQuantifiedFacts('2026年营收207亿元、开出20家店', '2026年收入207亿元、新开20家店'))
+      .toEqual(['207亿元', '20家']);
+    expect(sharedQuantifiedFacts('2026年行业报告', '2026年品牌动态')).toEqual([]);
   });
 
   it('改写稿可用标题或正文重复证据补强身份判断', () => {
@@ -262,6 +268,113 @@ describe('规则归并对抗样例', () => {
     });
 
     expect(pairEvidence(article, member).decision).toBe('strong');
+  });
+
+  it('低置信但精确且不宽泛的身份仍可直接归并', () => {
+    const article = makeClusterArticle({
+      id: 'precise-low-confidence-new',
+      title: '茶百道调整西南履约网络',
+      cleanContent: '文章只披露茶百道近期调整。',
+      eventSubjects: '["茶百道"]',
+      eventAction: '建设供应链中心',
+      eventObject: '成都温江供应链中心',
+      eventKey: '茶百道/建设供应链中心/成都温江供应链中心',
+      eventKeyConfidence: 60,
+    });
+    const member = makeClusterArticle({
+      id: 'precise-low-confidence-old',
+      title: '茶百道披露成都项目进展',
+      cleanContent: '报道聚焦该项目的供应链安排。',
+      eventSubjects: '["茶百道"]',
+      eventAction: '建设供应链中心',
+      eventObject: '成都温江供应链中心',
+      eventKey: '茶百道/建设供应链中心/成都温江供应链中心',
+      eventKeyConfidence: 60,
+    });
+
+    const evidence = pairEvidence(article, member);
+    expect(evidence.preciseIdentity).toBe(true);
+    expect(evidence.decision).toBe('strong');
+  });
+
+  it('补充合作方的报道可凭主体包含、事项接近和正文重合归并', () => {
+    const sharedContent = '朴朴已接入淘宝闪购服务，首批覆盖福州城区并保持原有配送体系。'.repeat(8);
+    const article = makeClusterArticle({
+      id: 'pupu-taobao-new',
+      title: '朴朴开通淘宝闪购服务',
+      cleanContent: sharedContent,
+      eventSubjects: '["朴朴", "淘宝闪购"]',
+      eventAction: '接入平台',
+      eventObject: '淘宝闪购服务',
+      eventKey: '朴朴+淘宝闪购/接入平台/淘宝闪购服务',
+      eventKeyConfidence: 60,
+    });
+    const member = makeClusterArticle({
+      id: 'pupu-taobao-old',
+      title: '淘宝即时零售新增朴朴',
+      cleanContent: `${sharedContent}报道补充了平台合作背景。`,
+      eventSubjects: '["朴朴"]',
+      eventAction: '接入平台',
+      eventObject: '淘宝闪购渠道',
+      eventKey: '朴朴/接入平台/淘宝闪购渠道',
+      eventKeyConfidence: 60,
+    });
+
+    const evidence = pairEvidence(article, member);
+    expect(evidence.subjectContainment).toBe(true);
+    expect(evidence.decision).toBe('strong');
+  });
+
+  it('同主体、相近事项与相同量化事实可补强改写报道', () => {
+    const article = makeClusterArticle({
+      id: 'ccfa-new',
+      title: 'CCFA报告：上半年连锁百强销售额达2.1万亿元',
+      cleanContent: '中国连锁经营协会发布报告，连锁百强销售额为2.1万亿元。',
+      eventSubjects: '["中国连锁经营协会"]',
+      eventAction: '发布报告',
+      eventObject: '上半年连锁百强销售额2.1万亿元',
+      eventKey: '中国连锁经营协会/发布报告/上半年连锁百强销售额2.1万亿元',
+    });
+    const member = makeClusterArticle({
+      id: 'ccfa-old',
+      title: '中国连锁经营协会披露百强中期销售额2.1万亿元',
+      cleanContent: '协会公布中期榜单，核心统计口径为2.1万亿元。',
+      eventSubjects: '["中国连锁经营协会"]',
+      eventAction: '发布报告',
+      eventObject: '连锁百强中期销售额2.1万亿元',
+      eventKey: '中国连锁经营协会/发布报告/连锁百强中期销售额2.1万亿元',
+    });
+
+    const evidence = pairEvidence(article, member);
+    expect(evidence.sharedQuantifiedFacts).toContain('2.1万亿元');
+    expect(evidence.decision).toBe('strong');
+  });
+
+  it('宽泛的低置信身份不能单独触发归并', () => {
+    const article = makeClusterArticle({
+      id: 'generic-new',
+      title: '小象超市发布今日动态',
+      cleanContent: '正文没有说明具体事项。',
+      eventSubjects: '["小象超市"]',
+      eventAction: '发布',
+      eventObject: '新品',
+      eventKey: '小象超市/发布/新品',
+      eventKeyConfidence: 60,
+    });
+    const member = makeClusterArticle({
+      id: 'generic-old',
+      title: '小象超市调整业务安排',
+      cleanContent: '报道也没有可核查细节。',
+      eventSubjects: '["小象超市"]',
+      eventAction: '发布',
+      eventObject: '新品',
+      eventKey: '小象超市/发布/新品',
+      eventKeyConfidence: 60,
+    });
+
+    const evidence = pairEvidence(article, member);
+    expect(evidence.preciseIdentity).toBe(false);
+    expect(evidence.decision).not.toBe('strong');
   });
 
   it('同品牌不同门店只记录相近候选，不自动合并', () => {

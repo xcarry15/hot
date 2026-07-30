@@ -76,10 +76,10 @@ describe('buildStep2Prompt', () => {
     expect(prompt).toContain('提取标题、导语或正文中最明确的一个主事实；背景和分析不影响该事实');
   });
 
-  it('提高重要人事变动和规模化开关店的事件分', () => {
+  it('事件分锚定高优事件，但不受品牌热度或文风影响', () => {
     const prompt = buildStep2Prompt(blocks, '正文');
-    expect(prompt).toContain('头部企业重大人事、万店级变化、百亿级融资或重磅IPO');
-    expect(prompt).toContain('单店开闭、常规营销、新品上新');
+    expect(prompt).toContain('重点锚定【热门品牌】【人事变动】【门店规模】【融资/IPO】四类高优事件。');
+    expect(prompt).toContain('仅因品牌知名、文章篇幅长、罗列多个案例或使用“重磅”等形容词，不得抬高分数。');
   });
 
   it('洞察要求一针见血并保留默认人设', () => {

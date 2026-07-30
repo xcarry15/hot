@@ -121,7 +121,7 @@ export default function ArticleLibrarySheet({
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
               onKeyDown={(event) => { if (event.key === 'Enter') submitSearch() }}
-              placeholder="搜索标题、品牌或摘要"
+              placeholder="搜索标题、正文、品牌或摘要"
               className="h-8 text-xs"
             />
             <Button size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={submitSearch}>

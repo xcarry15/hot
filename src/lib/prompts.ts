@@ -47,12 +47,9 @@ export const DEFAULT_BLOCK_BRAND = `【brand 涉及品牌——JSON 字符串数
 - 无明确品牌则输出 []`;
 
 // 事件评分块：产出 event_score（0-100）
-export const DEFAULT_BLOCK_EVENT_SCORE = `【event_score 0-100】事件行业影响力: 评估事件对行业格局的扰动程度。重点锚定【热门品牌】【人事变动】【门店规模】【融资/IPO】四类高优事件。无视文章写作质量。
-- 85-100：头部企业重大人事、万店级变化、百亿级融资或重磅IPO
-- 70-84：关键高管、百店级变化、亿元级融资、重大经营转向
-- 40-69：区域或局部动作、常规人事、局部门店、新模式试水
-- 10-39：单店开闭、常规营销、新品上新
-- 0-9：无明确事件或影响很低；不等于文章无价值`;
+export const DEFAULT_BLOCK_EVENT_SCORE = `【event_score 0-100｜事件重要性】
+只评估“这件事本身是否值得行业决策者优先关注”，不看文章文笔、品牌知名度或关键词命中。重点锚定【热门品牌】【人事变动】【门店规模】【融资/IPO】四类高优事件。无视文章写作质量。
+- 仅因品牌知名、文章篇幅长、罗列多个案例或使用“重磅”等形容词，不得抬高分数。`;
 
 // 行业分类块:产出 category
 export const DEFAULT_BLOCK_CATEGORY = `【category】餐饮/零售/品牌/加盟/食品/供应链/政策/资本/消费者/科技/人事/其他`;
@@ -69,10 +66,9 @@ export const DEFAULT_BLOCK_RELEVANCE = `【relevance 0-100】按文章核心问�
 // ════════════════════════════════════════════════════════════════
 
 // 内容评分块:产出 content_score(0-100)
-export const DEFAULT_BLOCK_CONTENT_SCORE = `【content_score 0-100】内容信息信噪比: 评估文章降低读者搜寻成本的程度。只看【增量事实占比】×【可量化程度】，无视事件影响大小。
-- 60-84：主事实完整，有数据或明确细节
-- 30-59：通稿复述、事实少、套话多
-- 0-29：拼凑、情绪化或没有具体事实`;
+export const DEFAULT_BLOCK_CONTENT_SCORE = `【content_score 0-100｜证据可用性】
+评估读者能否仅凭这篇文章确认和复用事件事实；评估文章降低读者搜寻成本的程度。只看【增量事实占比】×【可量化程度】，无视事件影响大小、文风或立场。
+- “官方发布”“行业报告”“专家称”等措辞不是高分理由；要看文章是否给出具体可核查事实。`;
 
 // 要点提取块:产出 key_points(1-5条核心要点)
 // 设计目标:精炼、核心,每条 40 字以内的高密度信息。
@@ -225,6 +221,24 @@ export type PromptBlockKey =
   | 'ai_block_summary'
   | 'ai_block_event_identity'
   | 'ai_block_brand';
+
+/** 可独立保存、载入的提示词字段；评分权重等运行参数不随版本切换。 */
+export const PROMPT_VERSION_KEYS = [
+  'ai_system_prompt',
+  'ai_block_ad',
+  'ai_block_event_score',
+  'ai_block_category',
+  'ai_block_relevance',
+  'ai_block_content_score',
+  'ai_block_key_points',
+  'ai_block_summary',
+  'ai_block_event_identity',
+  'ai_block_brand',
+] as const;
+
+export const PROMPT_VERSION_LIMIT = 20;
+export type PromptVersionKey = (typeof PROMPT_VERSION_KEYS)[number];
+export type PromptVersionSnapshot = Record<PromptVersionKey, string>;
 
 // ════════════════════════════════════════════════════════════════
 // Prompt 拼接函数 —— 把公共框架 + 用户块拼成完整 prompt

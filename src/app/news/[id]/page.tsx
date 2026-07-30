@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { redirect } from 'next/navigation'
 import { cache } from 'react'
 import { Badge } from '@/components/ui/badge'
 import PublicErrorState from '@/components/public-error-state'
@@ -67,7 +67,8 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
   } catch {
     return <PublicErrorState detail />
   }
-  if (!article) notFound()
+  // 飞书等外部推送可能保留已删除或已撤回文章的旧链接；统一回到首页，避免落到无操作价值的 404 页面。
+  if (!article) redirect('/')
   const brands = splitBrands(article.brand)
   const originalUrl = safeExternalUrl(article.url)
   const effectiveDate = article.publishedAt || article.createdAt

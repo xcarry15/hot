@@ -60,6 +60,21 @@ export const PRESET_SOURCES: PresetSource[] = [
     description: '赢商网品牌动态与行业资讯',
   },
 
+  {
+    id: 'ebrun-information',
+    name: '亿邦动力-品牌',
+    type: 'html',
+    url: 'https://www.ebrun.com/information/brand/',
+    parserConfig: JSON.stringify({
+      listItem: 'section.news-item',
+      link: 'p.title a',
+      title: 'p.title a',
+      summary: 'p.desc',
+      content: 'section.article-content-module',
+    }),
+    description: '亿邦动力最新电商、零售与品牌资讯',
+  },
+
 ];
 
 /**

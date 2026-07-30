@@ -5,6 +5,7 @@ import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
 import { recalculateEventById } from '@/lib/event-service';
 import { evaluateKeywordMatch } from '@/lib/filter';
+import { refreshArticleSearchIndex, replaceArticleKeywordHits } from '@/lib/article-search-index';
 
 export async function refetchArticle(articleId: string) {
   const article = await db.article.findUnique({
@@ -50,6 +51,8 @@ export async function refetchArticle(articleId: string) {
     where: { id: articleId },
     data: resetData,
   });
+  await replaceArticleKeywordHits(articleId, []);
+  await refreshArticleSearchIndex(articleId);
   if (article.eventId) await recalculateEventById(article.eventId);
   await refreshPublicPublication(articleId);
   const content = await fetchArticleDetail(articleId);
@@ -60,10 +63,13 @@ export async function refetchArticle(articleId: string) {
   const keywordMatch = await evaluateKeywordMatch(`${article.title} ${content.slice(0, 1000)}`).catch(() => ({
     configured: false,
     matched: false,
+    matchedWords: [],
   }));
   await db.article.update({
     where: { id: articleId },
     data: { keywordMatched: keywordMatch.matched },
   });
+  await replaceArticleKeywordHits(articleId, keywordMatch.matchedWords);
+  await refreshArticleSearchIndex(articleId);
   return { success: true, contentLength: content.length };
 }

@@ -20,9 +20,11 @@ import {
   contentShingleSimilarity,
   hasEventIdentityQualifierConflict,
   hasEventPhaseConflict,
+  isSpecificEventIdentity,
   isMultiTopicTitle,
   normalizeEventText,
   overlapCoefficient,
+  sharedQuantifiedFacts,
   sharedEventAnchors,
   type ContentShingleResult,
 } from '@/contracts/event-clustering';
@@ -70,10 +72,12 @@ export interface PairEvidence {
   eventKeyMatch: boolean;
 
   subjectSimilarity: number;
+  subjectContainment: boolean;
   actionSimilarity: number;
   objectSimilarity: number;
   identityScore: number;
   identityConfidence: number;
+  preciseIdentity: boolean;
   identityConflict: boolean;
   qualifierConflict: boolean;
 
@@ -89,6 +93,7 @@ export interface PairEvidence {
   phaseConflict: boolean;
   qualifierConflictOnPair: boolean;
   sharedAnchors: string[];
+  sharedQuantifiedFacts: string[];
 
   /** P0-2: 该 pair 独立的判断：exact | strong | ambiguous | reject */
   decision: 'exact' | 'strong' | 'ambiguous' | 'reject';
@@ -158,6 +163,28 @@ function isHighConfidenceIdentityMatch(evidence: {
     && evidence.daysApart <= EVENT_CLUSTER_AUTO_MERGE_ANCHOR_DAYS
     && evidence.sharedAnchors.length > 0
     && evidence.tokenContentOverlap >= 0.3;
+}
+
+/**
+ * 事件身份由 AI 生成，置信度不是同一性本身。三段身份足够精确、且事项不宽泛时，
+ * 即使置信度偏低也可直接归并，避免同一事件因措辞波动制造人工校准。
+ */
+function isPreciseEventIdentityMatch(evidence: {
+  identityScore: number;
+  subjectSimilarity: number;
+  actionSimilarity: number;
+  objectSimilarity: number;
+  daysApart: number;
+  qualifierConflict: boolean;
+  specificIdentity: boolean;
+}): boolean {
+  return evidence.specificIdentity
+    && !evidence.qualifierConflict
+    && evidence.daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS
+    && evidence.identityScore >= 0.86
+    && evidence.subjectSimilarity >= 0.8
+    && evidence.actionSimilarity >= 0.75
+    && evidence.objectSimilarity >= 0.65;
 }
 
 export function isNearExactReprint(evidence: {
@@ -258,10 +285,24 @@ function subjectSimilarity(left: string, right: string): number {
   );
 }
 
+/** 一篇报道补充合作方时，短主体集合被完整包含仍属于同一主体关系。 */
+function hasSubjectContainment(left: string, right: string): boolean {
+  const leftSubjects = parseEventSubjects(left);
+  const rightSubjects = parseEventSubjects(right);
+  if (leftSubjects.length === 0 || rightSubjects.length === 0 || leftSubjects.length === rightSubjects.length) return false;
+  const [shorter, longer] = leftSubjects.length < rightSubjects.length
+    ? [leftSubjects, rightSubjects]
+    : [rightSubjects, leftSubjects];
+  return shorter.every((subject) => (
+    Math.max(...longer.map((candidate) => componentSimilarity(subject, candidate))) >= 0.8
+  ));
+}
+
 function compareIdentity(left: IdentityArticle, right: IdentityArticle) {
   const subjectOverlap = subjectSimilarity(left.eventSubjects, right.eventSubjects);
   const actionOverlap = componentSimilarity(left.eventAction, right.eventAction);
   const objectOverlap = componentSimilarity(left.eventObject, right.eventObject);
+  const subjectContainment = hasSubjectContainment(left.eventSubjects, right.eventSubjects);
   const identityConfidence = Math.min(
     left.eventKeyConfidence ?? 0,
     right.eventKeyConfidence ?? 0,
@@ -270,6 +311,7 @@ function compareIdentity(left: IdentityArticle, right: IdentityArticle) {
   const qualifierConflict = hasEventIdentityQualifierConflict(left.eventObject, right.eventObject);
   return {
     subjectOverlap,
+    subjectContainment,
     actionOverlap,
     objectOverlap,
     identityScore,
@@ -288,19 +330,22 @@ function isLooseSameEventMatch(evidence: {
   sharedAnchors: string[];
   objectAnchors: string[];
   subjectSimilarity: number;
+  actionSimilarity: number;
   objectSimilarity: number;
   titleOverlap: number;
   charContentOverlap: number;
   charContentJaccard: number;
   tokenContentOverlap: number;
   tokenContentJaccard: number;
+  sharedQuantifiedFacts: string[];
 }): boolean {
   if (evidence.daysApart > EVENT_CLUSTER_FOLLOW_UP_DAYS
     || evidence.phaseConflict
     || evidence.qualifierConflict
     || evidence.qualifierConflictOnPair) return false;
 
-  const titleAnchorsMatch = evidence.sharedAnchors.length >= EVENT_CLUSTER_LOOSE_ANCHOR_COUNT
+  const titleAnchorsMatch = evidence.daysApart <= EVENT_CLUSTER_WINDOW_DAYS
+    && evidence.sharedAnchors.length >= EVENT_CLUSTER_LOOSE_ANCHOR_COUNT
     && evidence.titleOverlap >= EVENT_CLUSTER_LOOSE_TITLE_OVERLAP
     && (evidence.objectAnchors.length > 0 || evidence.objectSimilarity >= EVENT_CLUSTER_LOOSE_OBJECT_SIMILARITY);
   const subjectTitleMatch = evidence.subjectSimilarity >= 0.65
@@ -315,8 +360,46 @@ function isLooseSameEventMatch(evidence: {
       || evidence.tokenContentOverlap >= EVENT_CLUSTER_LOOSE_CONTENT_OVERLAP
       && evidence.tokenContentJaccard >= EVENT_CLUSTER_LOOSE_CONTENT_JACCARD
     );
+  const reportOverlap = evidence.sharedAnchors.length > 0 && evidence.titleOverlap >= 0.35
+    || evidence.charContentOverlap >= 0.45 && evidence.charContentJaccard >= 0.2
+    || evidence.tokenContentOverlap >= 0.45 && evidence.tokenContentJaccard >= 0.2;
+  const quantifiedFactMatch = evidence.daysApart <= EVENT_CLUSTER_WINDOW_DAYS
+    && evidence.subjectSimilarity >= 0.8
+    && evidence.actionSimilarity >= 0.5
+    && evidence.objectSimilarity >= EVENT_CLUSTER_LOOSE_OBJECT_SIMILARITY
+    && evidence.sharedQuantifiedFacts.length > 0
+    && reportOverlap;
 
-  return titleAnchorsMatch || subjectTitleMatch || contentMatch;
+  return titleAnchorsMatch || subjectTitleMatch || contentMatch || quantifiedFactMatch;
+}
+
+function isSubjectExpansionSameEventMatch(evidence: {
+  daysApart: number;
+  phaseConflict: boolean;
+  qualifierConflict: boolean;
+  qualifierConflictOnPair: boolean;
+  subjectContainment: boolean;
+  actionSimilarity: number;
+  objectSimilarity: number;
+  titleOverlap: number;
+  sharedAnchors: string[];
+  charContentOverlap: number;
+  charContentJaccard: number;
+  tokenContentOverlap: number;
+  tokenContentJaccard: number;
+}): boolean {
+  if (!evidence.subjectContainment
+    || evidence.daysApart > EVENT_CLUSTER_FOLLOW_UP_DAYS
+    || evidence.phaseConflict
+    || evidence.qualifierConflict
+    || evidence.qualifierConflictOnPair) return false;
+
+  const titleOverlap = evidence.sharedAnchors.length > 0 && evidence.titleOverlap >= 0.35;
+  const contentOverlap = evidence.charContentOverlap >= 0.5 && evidence.charContentJaccard >= 0.2
+    || evidence.tokenContentOverlap >= 0.5 && evidence.tokenContentJaccard >= 0.2;
+  return evidence.actionSimilarity >= 0.5
+    && evidence.objectSimilarity >= EVENT_CLUSTER_LOOSE_OBJECT_SIMILARITY
+    && (titleOverlap || contentOverlap);
 }
 
 /**
@@ -337,10 +420,32 @@ function computePairEvidence(
   const exactTitle = normalizedTitle.length > 0 && normalizedTitle === memberNormalizedTitle;
 
   const identity = compareIdentity(article, member);
+  const daysApart = Math.abs(articleDate(article).getTime() - articleDate(member).getTime()) / 86_400_000;
+  const preciseIdentity = isPreciseEventIdentityMatch({
+    identityScore: identity.identityScore,
+    subjectSimilarity: identity.subjectOverlap,
+    actionSimilarity: identity.actionOverlap,
+    objectSimilarity: identity.objectOverlap,
+    daysApart,
+    qualifierConflict: identity.qualifierConflict,
+    specificIdentity: isSpecificEventIdentity(
+      parseEventSubjects(article.eventSubjects),
+      article.eventAction,
+      article.eventObject,
+    ) && isSpecificEventIdentity(
+      parseEventSubjects(member.eventSubjects),
+      member.eventAction,
+      member.eventObject,
+    ),
+  });
 
   const titleOverlap = overlapCoefficient(article.title, member.title);
   const sharedAnchors = sharedEventAnchors(article.title, member.title);
   const objectAnchors = sharedEventAnchors(article.eventObject, member.eventObject);
+  const sharedFacts = sharedQuantifiedFacts(
+    `${article.title}\n${article.cleanContent}`,
+    `${member.title}\n${member.cleanContent}`,
+  );
 
   let contentSimilarity: ContentShingleResult = {
     charOverlap: 0, charJaccard: 0, tokenOverlap: 0, tokenJaccard: 0,
@@ -354,8 +459,6 @@ function computePairEvidence(
       contentSimilarity = contentShingleSimilarity(article.cleanContent, member.cleanContent);
     }
   }
-
-  const daysApart = Math.abs(articleDate(article).getTime() - articleDate(member).getTime()) / 86_400_000;
 
   const phaseConflict = hasEventPhaseConflict(
     `${article.title} ${article.eventAction} ${article.eventObject}`,
@@ -401,7 +504,7 @@ function computePairEvidence(
       tokenContentOverlap: contentSimilarity.tokenOverlap,
       tokenContentJaccard: contentSimilarity.tokenJaccard,
     });
-    const identityConfirmed = isHighConfidenceIdentityMatch({
+    const identityConfirmed = preciseIdentity || isHighConfidenceIdentityMatch({
       identityConfidence: identity.identityConfidence,
       identityScore: identity.identityScore,
       subjectSimilarity: identity.subjectOverlap,
@@ -443,14 +546,31 @@ function computePairEvidence(
       sharedAnchors,
       objectAnchors,
       subjectSimilarity: identity.subjectOverlap,
+      actionSimilarity: identity.actionOverlap,
       objectSimilarity: identity.objectOverlap,
       titleOverlap,
       charContentOverlap: contentSimilarity.charOverlap,
       charContentJaccard: contentSimilarity.charJaccard,
       tokenContentOverlap: contentSimilarity.tokenOverlap,
       tokenContentJaccard: contentSimilarity.tokenJaccard,
+      sharedQuantifiedFacts: sharedFacts,
     });
-    if (standardRuleMatch || looseRuleMatch) {
+    const subjectExpansionMatch = isSubjectExpansionSameEventMatch({
+      daysApart,
+      phaseConflict,
+      qualifierConflict: identity.qualifierConflict,
+      qualifierConflictOnPair,
+      subjectContainment: identity.subjectContainment,
+      actionSimilarity: identity.actionOverlap,
+      objectSimilarity: identity.objectOverlap,
+      titleOverlap,
+      sharedAnchors,
+      charContentOverlap: contentSimilarity.charOverlap,
+      charContentJaccard: contentSimilarity.charJaccard,
+      tokenContentOverlap: contentSimilarity.tokenOverlap,
+      tokenContentJaccard: contentSimilarity.tokenJaccard,
+    });
+    if (standardRuleMatch || looseRuleMatch || subjectExpansionMatch) {
       decision = 'strong';
     } else if (isAuditableNearbyCandidate({
       eventKeyMatch,
@@ -480,10 +600,12 @@ function computePairEvidence(
     fingerprintMatch,
     eventKeyMatch,
     subjectSimilarity: identity.subjectOverlap,
+    subjectContainment: identity.subjectContainment,
     actionSimilarity: identity.actionOverlap,
     objectSimilarity: identity.objectOverlap,
     identityScore: identity.identityScore,
     identityConfidence: identity.identityConfidence,
+    preciseIdentity,
     identityConflict: identity.identityConflict,
     qualifierConflict: identity.qualifierConflict,
     titleOverlap,
@@ -496,6 +618,7 @@ function computePairEvidence(
     phaseConflict,
     qualifierConflictOnPair,
     sharedAnchors,
+    sharedQuantifiedFacts: sharedFacts,
     decision,
   };
 }
@@ -545,6 +668,7 @@ export function bestPairEvidenceForCandidate(
 export function isStrongPushedDuplicate(pair: PairEvidence): boolean {
   if (pair.fingerprintMatch) return true;
   if (pair.phaseConflict || pair.identityConflict) return false;
+  if (pair.preciseIdentity) return true;
   if (isStrongEventKeyDuplicate(pair)) return true;
   if (isHighConfidenceIdentityMatch(pair)) return true;
   if (pair.identityScore >= 0.84

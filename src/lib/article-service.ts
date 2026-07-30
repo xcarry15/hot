@@ -47,12 +47,13 @@ import {
   serializeEventSubjects,
 } from '@/contracts/event-identity';
 import { clusterArticle, markClusterFailure } from '@/lib/event-clustering-service';
+import { buildArticleSearchWhere, refreshArticleSearchIndex } from '@/lib/article-search-index';
 
 // ── 类型化筛选器 ────────────────────────────────────────────────
 
 /**
  * 列表筛选：可空字段要么完全省略，要么按规则构造 where 条件。
- * search 同时作用于 title / summary / brand（OR）。
+ * search 同时作用于 title / cleanContent / summary / brand / eventKey（OR）。
  */
 export interface ArticleListFilter {
   aiStatus?: string;
@@ -134,12 +135,7 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
     delete where.OR;
   }
   if (filter.search) {
-    const searchWhere: Prisma.ArticleWhereInput = { OR: [
-      { title: { contains: filter.search } },
-      { summary: { contains: filter.search } },
-      { brand: { contains: filter.search } },
-      { eventKey: { contains: filter.search } },
-    ] };
+    const searchWhere = buildArticleSearchWhere(filter.search);
     where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), searchWhere];
   }
   return where;
@@ -358,6 +354,7 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
     || validRestored.some((field) => ['summary', 'brand', 'category', 'keyPoints'].includes(field));
   await db.$transaction(async (tx) => {
     await tx.article.update({ where: { id }, data });
+    await refreshArticleSearchIndex(id, tx);
     await refreshPublicPublication(id, tx, { contentChanged });
   });
   invalidatePublicArticleCache();

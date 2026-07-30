@@ -29,6 +29,7 @@ import {
   type ManualCalibrationValues,
 } from './article-calibration';
 import { parseAiAnalysisOutput } from './ai-output';
+import { refreshArticleSearchIndex } from './article-search-index';
 
 // v23：每篇文章只请求一次 AI；提示词压缩后保留事实、身份和可读洞察。
 const PROMPT_VERSION = 'v23';
@@ -317,6 +318,7 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
         skipReason: noValue ? '无价值' : null,
       },
     });
+    await refreshArticleSearchIndex(articleId);
 
     return { status: noValue ? 'skipped' : 'done' };
   } else {

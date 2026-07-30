@@ -11,13 +11,14 @@ import { KEYWORD_BLACKLIST_CATEGORY } from '@/contracts/keywords';
  */
 
 interface KeywordCache {
-  words: string[];
-  blacklistWords: string[];
+  words: Array<{ raw: string; normalized: string }>;
+  blacklistWords: Array<{ raw: string; normalized: string }>;
 }
 
 export interface KeywordMatchResult {
   configured: boolean;
   matched: boolean;
+  matchedWords: string[];
   /** 命中黑名单时为 true；黑名单优先于白名单和行业信号。 */
   blacklisted?: boolean;
   blacklistWord?: string;
@@ -34,8 +35,12 @@ async function loadKeywordsFromDb(): Promise<KeywordCache> {
     select: { word: true, category: true },
   });
   return {
-    words: rows.filter(kw => kw.category !== KEYWORD_BLACKLIST_CATEGORY).map(kw => kw.word.toLowerCase()),
-    blacklistWords: rows.filter(kw => kw.category === KEYWORD_BLACKLIST_CATEGORY).map(kw => kw.word.toLowerCase()),
+    words: rows
+      .filter(kw => kw.category !== KEYWORD_BLACKLIST_CATEGORY)
+      .map(kw => ({ raw: kw.word, normalized: kw.word.toLowerCase() })),
+    blacklistWords: rows
+      .filter(kw => kw.category === KEYWORD_BLACKLIST_CATEGORY)
+      .map(kw => ({ raw: kw.word, normalized: kw.word.toLowerCase() })),
   };
 }
 
@@ -64,12 +69,13 @@ export async function matchKeyword(text: string): Promise<boolean> {
 export async function evaluateKeywordMatch(text: string): Promise<KeywordMatchResult> {
   const { words, blacklistWords } = await getCachedKeywords();
   const lowerText = text.toLowerCase();
-  const blacklistWord = blacklistWords.find(kw => lowerText.includes(kw));
+  const blacklistWord = blacklistWords.find(kw => lowerText.includes(kw.normalized));
   if (blacklistWord) {
-    return { configured: words.length > 0, matched: false, blacklisted: true, blacklistWord };
+    return { configured: words.length > 0, matched: false, matchedWords: [], blacklisted: true, blacklistWord: blacklistWord.raw };
   }
-  if (words.length === 0) return { configured: false, matched: false };
-  return { configured: true, matched: words.some(kw => lowerText.includes(kw)) };
+  if (words.length === 0) return { configured: false, matched: false, matchedWords: [] };
+  const matchedWords = words.filter(kw => lowerText.includes(kw.normalized)).map(kw => kw.raw);
+  return { configured: true, matched: matchedWords.length > 0, matchedWords };
 }
 
 /**

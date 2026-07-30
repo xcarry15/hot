@@ -14,24 +14,24 @@ enum FetchStatus {
 }
 
 model Source {
-  id                 String    @id @default(cuid())
-  name               String
-  type               String    @default("html") // html, rss, websearch, canyin88
-  url                String
-  parserConfig       String    @default("{}") // JSON: CSS selectors / feed URL / JSONPath + headers
-  enabled            Boolean   @default(true)
-  publicEnabled      Boolean   @default(true)
-  status             String    @default("never_fetched") // never_fetched, normal, warning, breaker, disabled
-  consecutiveFailures Int      @default(0)
+  id                  String    @id @default(cuid())
+  name                String
+  type                String    @default("html") // html, rss, websearch, canyin88
+  url                 String
+  parserConfig        String    @default("{}") // JSON: CSS selectors / feed URL / JSONPath + headers
+  enabled             Boolean   @default(true)
+  publicEnabled       Boolean   @default(true)
+  status              String    @default("never_fetched") // never_fetched, normal, warning, breaker, disabled
+  consecutiveFailures Int       @default(0)
   circuitBreakerUntil DateTime?
-  lastFetchedAt      DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  deletedAt          DateTime?
+  lastFetchedAt       DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
 
-  articles        Article[]
-  fetchLogs       FetchLog[]
-  discardedItems  DiscardedItem[]
+  articles       Article[]
+  fetchLogs      FetchLog[]
+  discardedItems DiscardedItem[]
 
   // Dashboard and maintenance frequently scope sources by lifecycle status.
   @@index([deletedAt, status])
@@ -39,77 +39,79 @@ model Source {
 }
 
 model Article {
-  id            String    @id @default(cuid())
-  sourceId      String
-  url           String
-  title         String
-  originalSource String?  // 文章原始来源（如联商网转载的时代周报）
-  rawContent    String    @default("")
-  cleanContent  String    @default("")
-  contentHash   String    @default("")
-  eventId       String?
-  clusterStatus String    @default("pending") // pending, clustered, failed, needs_review
-  clusteredAt   DateTime?
-  clusterError  String?
-  clusterRetryCount Int   @default(0)
-  nextClusterRetryAt DateTime?
-  eventSubjects String    @default("[]") // JSON string[]；规范事件身份中的主体
-  eventAction   String    @default("") // 规范事件身份中的行为，包含计划/正式/完成等阶段
-  eventObject   String    @default("") // 规范事件身份中的具体事项、对象或关键限定
-  eventKey      String    @default("") // 程序由主体/行为/具体事项确定性生成
-  eventKeyConfidence Int? // 0-100，事件身份提取置信度；缺失为 0，宽泛身份最高 60，人工修正沿用同一封顶规则
-  fetchStatus   FetchStatus @default(pending) // pending=待抓取, fetched=已抓取有内容, failed=已确认抓取失败
-  fetchError    String?   // 最近一次正文抓取失败原因；成功抓取时清空
-  fetchRetryCount Int       @default(0) // 正文处理连续失败次数；达到 5 次后停止自动重试
-  nextFetchRetryAt DateTime? // 正文处理失败后的下次自动重试时间
-  technicalIgnoredAt DateTime? // 管理员忽略技术异常后，不再计入任务中心待办
-  articleBody   String    @default("") // 已从 rawContent 提取的正文（缓存，避免每次 AI 重新 extractArticleBody）
+  id                           String      @id @default(cuid())
+  sourceId                     String
+  url                          String
+  title                        String
+  originalSource               String? // 文章原始来源（如联商网转载的时代周报）
+  rawContent                   String      @default("")
+  cleanContent                 String      @default("")
+  contentHash                  String      @default("")
+  eventId                      String?
+  clusterStatus                String      @default("pending") // pending, clustered, failed, needs_review
+  clusteredAt                  DateTime?
+  clusterError                 String?
+  clusterRetryCount            Int         @default(0)
+  nextClusterRetryAt           DateTime?
+  eventSubjects                String      @default("[]") // JSON string[]；规范事件身份中的主体
+  eventAction                  String      @default("") // 规范事件身份中的行为，包含计划/正式/完成等阶段
+  eventObject                  String      @default("") // 规范事件身份中的具体事项、对象或关键限定
+  eventKey                     String      @default("") // 程序由主体/行为/具体事项确定性生成
+  eventKeyConfidence           Int? // 0-100，事件身份提取置信度；缺失为 0，宽泛身份最高 60，人工修正沿用同一封顶规则
+  fetchStatus                  FetchStatus @default(pending) // pending=待抓取, fetched=已抓取有内容, failed=已确认抓取失败
+  fetchError                   String? // 最近一次正文抓取失败原因；成功抓取时清空
+  fetchRetryCount              Int         @default(0) // 正文处理连续失败次数；达到 5 次后停止自动重试
+  nextFetchRetryAt             DateTime? // 正文处理失败后的下次自动重试时间
+  technicalIgnoredAt           DateTime? // 管理员忽略技术异常后，不再计入任务中心待办
+  articleBody                  String      @default("") // 已从 rawContent 提取的正文（缓存，避免每次 AI 重新 extractArticleBody）
   // AI fields
-  relevance     Int       @default(0) // 0-100，与连锁消费行业的相关度
-  summary       String    @default("")
-  brand         String    @default("")
-  category      String    @default("") // 餐饮/零售/品牌/加盟/其他
-  keyPoints     String    @default("[]") // JSON array
-  score         Int       @default(0) // 0-100
-  keywordMatched Boolean  @default(false) // 处理阶段是否命中已配置关键词；用于确定性特殊加分
-  eventScore    Int?      // AI 原始事件影响力分；策略调整时用于零成本重算
-  contentScore  Int?      // AI 原始内容质量分；策略调整时用于零成本重算
-  rawScore      Int?      // 应用广告规则前的确定性加权分
-  adProbability Int?      // 0-100，AI 对广告/软文的概率判断
-  aiConfidence  Int?      // 0-100，AI 对整篇结构化分析的证据充分度
-  scorePolicyVersion String @default("") // 本次最终分使用的策略快照标识
-  aiModel       String    @default("") // 生成原始特征的模型
-  aiProvider    String    @default("") // 生成原始特征的 Provider
-  promptHash    String    @default("") // 完整 Prompt 的 SHA-256
-  scorePolicySnapshot String @default("") // JSON：本次权重及广告规则快照
-  promptVersion String    @default("v1")
-  aiStatus      String    @default("pending") // pending, done, skipped, failed
-  aiError       String?   // 最近一次 AI 分析失败原因；成功分析时清空
-  aiSnapshot    String    @default("{}") // 最近一次 AI 原始结构化结果；人工修改不覆盖此快照
-  manualOverrides String  @default("[]") // JSON string[]；记录当前由人工覆盖的字段
-  manualCorrectedAt DateTime?
-  skipReason    String?   // 跳过原因（dedup 命中 / 内容不足等）。与 summary 解耦：summary 保留 AI 洞察不被覆盖
-  aiRetryCount  Int       @default(0) // AI 失败累计重试次数；≥5 次标 skipped 放弃（防 provider 故障持续烧 token）
-  nextAiRetryAt DateTime? // AI 失败后的下次允许重试时间（指数退避：2^n 分钟，上限 6h）
-  isAd          Boolean   @default(false) // AI 判定为软文/广告时为 true（分数会被 clamp 到 0-34，标题加 [软文] 标记）
+  relevance                    Int         @default(0) // 0-100，与连锁消费行业的相关度
+  summary                      String      @default("")
+  brand                        String      @default("")
+  category                     String      @default("") // 餐饮/零售/品牌/加盟/其他
+  keyPoints                    String      @default("[]") // JSON array
+  score                        Int         @default(0) // 0-100
+  keywordMatched               Boolean     @default(false) // 处理阶段是否命中已配置关键词；用于确定性特殊加分
+  eventScore                   Int? // AI 原始事件影响力分；策略调整时用于零成本重算
+  contentScore                 Int? // AI 原始内容质量分；策略调整时用于零成本重算
+  rawScore                     Int? // 应用广告规则前的确定性加权分
+  adProbability                Int? // 0-100，AI 对广告/软文的概率判断
+  aiConfidence                 Int? // 0-100，AI 对整篇结构化分析的证据充分度
+  scorePolicyVersion           String      @default("") // 本次最终分使用的策略快照标识
+  aiModel                      String      @default("") // 生成原始特征的模型
+  aiProvider                   String      @default("") // 生成原始特征的 Provider
+  promptHash                   String      @default("") // 完整 Prompt 的 SHA-256
+  scorePolicySnapshot          String      @default("") // JSON：本次权重及广告规则快照
+  promptVersion                String      @default("v1")
+  aiStatus                     String      @default("pending") // pending, done, skipped, failed
+  aiError                      String? // 最近一次 AI 分析失败原因；成功分析时清空
+  aiSnapshot                   String      @default("{}") // 最近一次 AI 原始结构化结果；人工修改不覆盖此快照
+  manualOverrides              String      @default("[]") // JSON string[]；记录当前由人工覆盖的字段
+  manualCorrectedAt            DateTime?
+  skipReason                   String? // 跳过原因（dedup 命中 / 内容不足等）。与 summary 解耦：summary 保留 AI 洞察不被覆盖
+  aiRetryCount                 Int         @default(0) // AI 失败累计重试次数；≥5 次标 skipped 放弃（防 provider 故障持续烧 token）
+  nextAiRetryAt                DateTime? // AI 失败后的下次允许重试时间（指数退避：2^n 分钟，上限 6h）
+  isAd                         Boolean     @default(false) // AI 判定为软文/广告时为 true（分数会被 clamp 到 0-34，标题加 [软文] 标记）
   // 人工公开控制
-  publicOverride     String    @default("auto") // auto, public, hidden
-  publicStatus       String    @default("unpublished") // unpublished, published, revoked
-  publicPublishedAt  DateTime?
-  publicRevokedAt    DateTime?
-  publicPublicationReason String @default("")
+  publicOverride               String      @default("auto") // auto, public, hidden
+  publicStatus                 String      @default("unpublished") // unpublished, published, revoked
+  publicPublishedAt            DateTime?
+  publicRevokedAt              DateTime?
+  publicPublicationReason      String      @default("")
   publicPublicationEvaluatedAt DateTime?
-  publicContentUpdatedAt DateTime? // 发布时初始化；此后仅内容/发布状态变化时更新
-  viewCount          Int       @default(0)
-  originalClickCount Int       @default(0)
-  publishedAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  publicContentUpdatedAt       DateTime? // 发布时初始化；此后仅内容/发布状态变化时更新
+  viewCount                    Int         @default(0)
+  originalClickCount           Int         @default(0)
+  publishedAt                  DateTime?
+  createdAt                    DateTime    @default(now())
+  updatedAt                    DateTime    @updatedAt
 
-  source    Source     @relation(fields: [sourceId], references: [id])
-  event     Event?     @relation("EventArticles", fields: [eventId], references: [id])
-  representedEvent Event? @relation("EventRepresentative")
-  clusterAudits EventClusterAudit[]
+  source           Source              @relation(fields: [sourceId], references: [id])
+  event            Event?              @relation("EventArticles", fields: [eventId], references: [id])
+  representedEvent Event?              @relation("EventRepresentative")
+  clusterAudits    EventClusterAudit[]
+  searchIndex      ArticleSearch?
+  keywordHits      KeywordHit[]
 
   @@unique([url])
   @@index([contentHash])
@@ -128,6 +130,16 @@ model Article {
   @@index([publicStatus, publishedAt])
   @@index([publicStatus, publicContentUpdatedAt])
   @@map("articles")
+}
+
+model ArticleSearch {
+  articleId  String   @id
+  searchText String
+  updatedAt  DateTime @updatedAt
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@map("article_search")
 }
 
 model Event {
@@ -151,14 +163,14 @@ model Event {
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 
-  mergedInto              Event?    @relation("EventMerge", fields: [mergedIntoId], references: [id])
-  mergedEvents            Event[]   @relation("EventMerge")
-  representativeArticle   Article?  @relation("EventRepresentative", fields: [representativeArticleId], references: [id])
-  articles                Article[] @relation("EventArticles")
-  pushLogs                PushLog[]
-  deliveries              PushDelivery[]
-  assignedAudits          EventClusterAudit[] @relation("AssignedEventAudits")
-  candidateAudits         EventClusterAudit[] @relation("CandidateEventAudits")
+  mergedInto            Event?              @relation("EventMerge", fields: [mergedIntoId], references: [id])
+  mergedEvents          Event[]             @relation("EventMerge")
+  representativeArticle Article?            @relation("EventRepresentative", fields: [representativeArticleId], references: [id])
+  articles              Article[]           @relation("EventArticles")
+  pushLogs              PushLog[]
+  deliveries            PushDelivery[]
+  assignedAudits        EventClusterAudit[] @relation("AssignedEventAudits")
+  candidateAudits       EventClusterAudit[] @relation("CandidateEventAudits")
 
   @@index([status, clusterReviewStatus, lastSeenAt])
   @@index([publicStatus, firstSeenAt])
@@ -172,12 +184,12 @@ model EventClusterAudit {
   articleId        String
   assignedEventId  String
   candidateEventId String?
-  actor             String   // system, admin
-  action            String   // create, attach, fallback_create, move, merge, manual_create, confirm_independent, representative_change
-  decisionSource    String   // exact, rule, ai, admin
-  confidence        Int?     // 仅 decisionSource=ai 时记录 AI 归类判断置信度；其他决策方式必须为 null
-  evidence          String   @default("{}")
-  createdAt         DateTime @default(now())
+  actor            String // system, admin
+  action           String // create, attach, fallback_create, move, merge, manual_create, confirm_independent, representative_change
+  decisionSource   String // exact, rule, ai, admin
+  confidence       Int? // 仅 decisionSource=ai 时记录 AI 归类判断置信度；其他决策方式必须为 null
+  evidence         String   @default("{}")
+  createdAt        DateTime @default(now())
 
   article        Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
   assignedEvent  Event   @relation("AssignedEventAudits", fields: [assignedEventId], references: [id])
@@ -216,22 +228,36 @@ model TuningSuggestion {
 }
 
 model Keyword {
-  id        String   @id @default(cuid())
-  category  String   @default("正面") // 分组标签；「黑名单」命中后直接拦截，其余分组参与白名单命中
+  id        String       @id @default(cuid())
+  category  String       @default("正面") // 分组标签；「黑名单」命中后直接拦截，其余分组参与白名单命中
   word      String
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
+  hits      KeywordHit[]
 
   @@unique([category, word])
   @@map("keywords")
 }
 
+model KeywordHit {
+  articleId String
+  keywordId String
+  createdAt DateTime @default(now())
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  keyword Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, keywordId])
+  @@index([keywordId, createdAt])
+  @@map("keyword_hits")
+}
+
 model FetchLog {
-  id          String   @id @default(cuid())
-  sourceId    String
-  status      String   // success, failure, warning
-  errorMessage String  @default("")
-  itemsFound  Int      @default(0)
-  createdAt   DateTime @default(now())
+  id           String   @id @default(cuid())
+  sourceId     String
+  status       String // success, failure, warning
+  errorMessage String   @default("")
+  itemsFound   Int      @default(0)
+  createdAt    DateTime @default(now())
 
   source Source @relation(fields: [sourceId], references: [id])
 
@@ -241,18 +267,18 @@ model FetchLog {
 }
 
 model PushLog {
-  id            String   @id @default(cuid())
-  eventId       String
+  id                      String   @id @default(cuid())
+  eventId                 String
   representativeArticleId String?
-  targetId      String?
-  status        String   // success, failure
-  errorMessage  String   @default("")
-  retryCount    Int      @default(0)
-  webhookUrl    String   @default("") // @deprecated: 使用 targetId 替代，仅用于历史数据迁移兼容
-  webhookRemark String   @default("")
-  createdAt     DateTime @default(now())
+  targetId                String?
+  status                  String // success, failure
+  errorMessage            String   @default("")
+  retryCount              Int      @default(0)
+  webhookUrl              String   @default("") // @deprecated: 使用 targetId 替代，仅用于历史数据迁移兼容
+  webhookRemark           String   @default("")
+  createdAt               DateTime @default(now())
 
-  event  Event      @relation(fields: [eventId], references: [id])
+  event  Event       @relation(fields: [eventId], references: [id])
   target PushTarget? @relation(fields: [targetId], references: [id])
 
   @@index([eventId, targetId, status])
@@ -263,36 +289,36 @@ model PushLog {
 }
 
 model PushTarget {
-  id          String   @id @default(cuid())
-  name        String
-  urlHash     String   @unique
-  secretRef   String   @default("") // 加密引用或环境变量名
-  enabled     Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  urlHash   String   @unique
+  secretRef String   @default("") // 加密引用或环境变量名
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  deliveries  PushDelivery[]
-  pushLogs    PushLog[]
+  deliveries PushDelivery[]
+  pushLogs   PushLog[]
 
   @@map("push_targets")
 }
 
 model PushDelivery {
-  id                    String    @id @default(cuid())
-  eventId               String
-  targetId              String
+  id                      String    @id @default(cuid())
+  eventId                 String
+  targetId                String
   representativeArticleId String?
-  contentVersion        String    @default("")
-  mode                  String    @default("normal")
-  status                String    @default("pending") // pending, sending, succeeded, failed, unknown, cancelled
-  idempotencyKey        String    @default("")
-  attempt               Int       @default(0)
-  lastError             String    @default("")
-  leaseOwner            String    @default("")
-  leaseExpiresAt        DateTime?
-  createdAt             DateTime  @default(now())
-  sentAt                DateTime?
-  completedAt           DateTime?
+  contentVersion          String    @default("")
+  mode                    String    @default("normal")
+  status                  String    @default("pending") // pending, sending, succeeded, failed, unknown, cancelled
+  idempotencyKey          String    @default("")
+  attempt                 Int       @default(0)
+  lastError               String    @default("")
+  leaseOwner              String    @default("")
+  leaseExpiresAt          DateTime?
+  createdAt               DateTime  @default(now())
+  sentAt                  DateTime?
+  completedAt             DateTime?
 
   event  Event      @relation(fields: [eventId], references: [id])
   target PushTarget @relation(fields: [targetId], references: [id])
@@ -327,9 +353,9 @@ model DiscardedItem {
   sourceId        String
   title           String
   url             String
-  reason          String    // "dedup:url" | "dedup:content" | "dedup:near" | "dedup:entity" | "filter:keyword" | "filter:blacklist" | "filter:short"
+  reason          String // "dedup:url" | "dedup:content" | "dedup:near" | "dedup:entity" | "filter:keyword" | "filter:blacklist" | "filter:short"
   detail          String    @default("") // JSON: matched title/url, similarity, etc.
-  winnerArticleId String?   // 命中去重时指向「赢家」Article.id（filter:* 拒绝则为空）
+  winnerArticleId String? // 命中去重时指向「赢家」Article.id（filter:* 拒绝则为空）
   publishedAt     DateTime?
   createdAt       DateTime  @default(now())
 
@@ -357,7 +383,7 @@ model DiscardedRetryAudit {
   detail          String    @default("")
   winnerArticleId String?
   publishedAt     DateTime?
-  action          String    // existing | created
+  action          String // existing | created
   articleId       String?
   createdAt       DateTime  @default(now())
 
@@ -367,12 +393,12 @@ model DiscardedRetryAudit {
 }
 
 enum JobType {
-  full     // collect -> process -> ai -> cluster -> push
-  collect  // only collect all sources
-  process  // only fetch pending details
-  cluster  // only cluster AI-analyzed articles into events
-  ai       // only run AI on pending articles
-  push     // only push unpushed articles
+  full // collect -> process -> ai -> cluster -> push
+  collect // only collect all sources
+  process // only fetch pending details
+  cluster // only cluster AI-analyzed articles into events
+  ai // only run AI on pending articles
+  push // only push unpushed articles
 }
 
 enum JobStatus {
@@ -394,32 +420,32 @@ enum JobStage {
 }
 
 model Job {
-  id          String    @id @default(cuid())
-  type        JobType
-  status      JobStatus @default(queued)
-  payload     String    @default("{}") // JSON string
-  result      String    @default("{}") // JSON string
-  error       String    @default("")
+  id                String    @id @default(cuid())
+  type              JobType
+  status            JobStatus @default(queued)
+  payload           String    @default("{}") // JSON string
+  result            String    @default("{}") // JSON string
+  error             String    @default("")
   // 进度快照字段（重构 #4）：Job 是任务级状态的唯一事实源。
   // 旧 Job 这些字段为空/0，前端 snapshot API 在 stage 为 null 时仍能正常返回。
-  currentStage     JobStage?
-  progressTotal    Int       @default(0)
-  progressDone     Int       @default(0)
-  progressErrors   Int       @default(0)
-  currentItemLabel String    @default("")
-  heartbeatAt      DateTime?
+  currentStage      JobStage?
+  progressTotal     Int       @default(0)
+  progressDone      Int       @default(0)
+  progressErrors    Int       @default(0)
+  currentItemLabel  String    @default("")
+  heartbeatAt       DateTime?
   // P0-1: 持久化 Job Lease — Worker 原子领取任务 + 续租
-  leaseOwner       String    @default("")
-  leaseExpiresAt   DateTime?
-  attempt          Int       @default(0)
-  maxAttempts      Int       @default(3)
-  idempotencyKey   String    @default("")
-  availableAt      DateTime?
+  leaseOwner        String    @default("")
+  leaseExpiresAt    DateTime?
+  attempt           Int       @default(0)
+  maxAttempts       Int       @default(3)
+  idempotencyKey    String    @default("")
+  availableAt       DateTime?
   cancelRequestedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  startedAt   DateTime?
-  completedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  startedAt         DateTime?
+  completedAt       DateTime?
 
   @@index([status, createdAt])
   @@index([status, availableAt, leaseExpiresAt])

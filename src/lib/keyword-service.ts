@@ -8,7 +8,7 @@ import {
   type ImportedKeywordCandidate,
   type KeywordCandidateExportRow,
 } from '@/lib/keyword-candidate-service';
-import { KEYWORD_DEFAULT_CATEGORY } from '@/contracts/keywords';
+import { KEYWORD_BLACKLIST_CATEGORY, KEYWORD_DEFAULT_CATEGORY } from '@/contracts/keywords';
 
 const DEFAULT_CATEGORY = KEYWORD_DEFAULT_CATEGORY;
 const KEYWORD_HIT_COUNT_WINDOW_DAYS = 90;
@@ -18,21 +18,51 @@ async function loadKeywordHitCounts(rows: Array<{ id: string; word: string }>) {
   if (rows.length === 0) return new Map<string, number>();
   const cached = keywordHitCountCache.get();
   if (cached) return cached;
-  const cutoff = new Date(Date.now() - KEYWORD_HIT_COUNT_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const hitRows = await db.$queryRaw<Array<{ id: string; hitCount: number | bigint }>>`
-    SELECT k.id AS id, COUNT(a.id) AS hitCount
+  // SQLite 的 DateTime 列存储为毫秒时间戳；使用数值避免和 ISO 字符串比较时全部落空。
+  const cutoff = Date.now() - KEYWORD_HIT_COUNT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  // keywordMatched 只表示文章在当时命中过任一白名单词，并不记录具体命中的词。
+  // 新数据在 process 阶段写入 keyword_hits；设置页直接按命中明细计数。
+  // 黑名单文章不会进入 Article，仍从明确记录 matchedKeyword 的拦截审计统计。
+  const [articleHitRows, blacklistHitRows] = await Promise.all([
+    db.$queryRaw<Array<{ id: string; hitCount: number | bigint }>>`
+    SELECT k.id AS id, COUNT(h.articleId) AS hitCount
     FROM keywords AS k
+    LEFT JOIN keyword_hits AS h
+      ON h.keywordId = k.id
+      AND h.createdAt >= ${cutoff}
     LEFT JOIN articles AS a
-      ON a.keywordMatched = 1
-      AND COALESCE(a.publishedAt, a.createdAt) >= ${cutoff}
-      AND instr(
-        lower(a.title || ' ' || a.cleanContent),
-        lower(k.word)
-      ) > 0
+      ON a.id = h.articleId
+    LEFT JOIN sources AS s
+      ON s.id = a.sourceId
+      AND s.deletedAt IS NULL
     WHERE k.word <> ''
+      AND k.category <> ${KEYWORD_BLACKLIST_CATEGORY}
+      AND s.id IS NOT NULL
     GROUP BY k.id
-  `;
-  const result = new Map(hitRows.map(row => [row.id, Number(row.hitCount)]));
+  `,
+    db.$queryRaw<Array<{ id: string; hitCount: number | bigint }>>`
+    SELECT k.id AS id, COUNT(d.id) AS hitCount
+    FROM keywords AS k
+    LEFT JOIN discarded_items AS d
+      ON d.reason = 'filter:blacklist'
+      AND COALESCE(d.publishedAt, d.createdAt) >= ${cutoff}
+      AND CASE
+        WHEN json_valid(d.detail) THEN json_extract(d.detail, '$.matchedKeyword')
+        ELSE NULL
+      END = k.word
+    LEFT JOIN sources AS s
+      ON s.id = d.sourceId
+      AND s.deletedAt IS NULL
+    WHERE k.word <> ''
+      AND k.category = ${KEYWORD_BLACKLIST_CATEGORY}
+      AND s.id IS NOT NULL
+    GROUP BY k.id
+  `,
+  ]);
+  const result = new Map<string, number>();
+  for (const row of [...articleHitRows, ...blacklistHitRows]) {
+    result.set(row.id, (result.get(row.id) ?? 0) + Number(row.hitCount));
+  }
   keywordHitCountCache.set(result);
   return result;
 }

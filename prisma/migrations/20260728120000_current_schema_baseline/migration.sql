@@ -87,6 +87,14 @@ CREATE TABLE "articles" (
 );
 
 -- CreateTable
+CREATE TABLE "article_search" (
+    "articleId" TEXT NOT NULL PRIMARY KEY,
+    "searchText" TEXT NOT NULL,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "article_search_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "articles" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
 CREATE TABLE "events" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "status" TEXT NOT NULL DEFAULT 'active',
@@ -157,6 +165,16 @@ CREATE TABLE "keywords" (
     "category" TEXT NOT NULL DEFAULT '正面',
     "word" TEXT NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- CreateTable
+CREATE TABLE "keyword_hits" (
+    "articleId" TEXT NOT NULL,
+    "keywordId" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "keyword_hits_articleId_fkey" FOREIGN KEY ("articleId") REFERENCES "articles" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "keyword_hits_keywordId_fkey" FOREIGN KEY ("keywordId") REFERENCES "keywords" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    PRIMARY KEY ("articleId", "keywordId")
 );
 
 -- CreateTable
@@ -336,6 +354,9 @@ CREATE INDEX "articles_publicStatus_publishedAt_idx" ON "articles"("publicStatus
 
 -- CreateIndex
 CREATE INDEX "articles_publicStatus_publicContentUpdatedAt_idx" ON "articles"("publicStatus", "publicContentUpdatedAt");
+
+-- CreateIndex
+CREATE INDEX "keyword_hits_keywordId_createdAt_idx" ON "keyword_hits"("keywordId", "createdAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "articles_url_key" ON "articles"("url");

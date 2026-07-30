@@ -39,14 +39,90 @@ const MAX_RETRIES = 2; // total 3 attempts
 export const MAX_HTTP_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
 
+type RequestCookieJar = Map<string, Map<string, string>>;
+
+function getResponseCookies(headers: Headers): string[] {
+  const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+  const cookies = getSetCookie?.call(headers) || [];
+  if (cookies.length > 0) return cookies;
+
+  const combined = headers.get('set-cookie');
+  return combined ? [combined] : [];
+}
+
+function rememberRedirectCookies(target: URL, response: Response, cookieJar: RequestCookieJar): void {
+  const setCookies = getResponseCookies(response.headers);
+  if (setCookies.length === 0) return;
+
+  const hostname = target.hostname.toLowerCase();
+  const hostCookies = cookieJar.get(hostname) || new Map<string, string>();
+  for (const setCookie of setCookies) {
+    const pair = setCookie.split(';', 1)[0]?.trim();
+    const separator = pair?.indexOf('=') ?? -1;
+    if (separator <= 0) continue;
+    hostCookies.set(pair!.slice(0, separator).trim(), pair!.slice(separator + 1).trim());
+  }
+  if (hostCookies.size > 0) cookieJar.set(hostname, hostCookies);
+}
+
+function rememberClientCookie(target: URL, rawCookie: string, cookieJar: RequestCookieJar): boolean {
+  const pair = rawCookie.split(';', 1)[0]?.trim();
+  const separator = pair?.indexOf('=') ?? -1;
+  if (separator <= 0) return false;
+
+  const hostname = target.hostname.toLowerCase();
+  const hostCookies = cookieJar.get(hostname) || new Map<string, string>();
+  hostCookies.set(pair!.slice(0, separator).trim(), pair!.slice(separator + 1).trim());
+  cookieJar.set(hostname, hostCookies);
+  return true;
+}
+
+function requestHeadersWithCookies(target: URL, headers: HeadersInit | undefined, cookieJar: RequestCookieJar): Headers {
+  const requestHeaders = new Headers(headers);
+  if (requestHeaders.has('cookie')) return requestHeaders;
+
+  const hostCookies = cookieJar.get(target.hostname.toLowerCase());
+  if (hostCookies?.size) {
+    requestHeaders.set('cookie', [...hostCookies].map(([name, value]) => `${name}=${value}`).join('; '));
+  }
+  return requestHeaders;
+}
+
+/** HTTP 200 也可能是要求浏览器写 Cookie 后刷新的验证壳，不能视为有效页面。 */
+function isLikelyJavaScriptVerificationPage(html: string): boolean {
+  return html.length <= 4 * 1024
+    && /\.cookie\s*=|document\.cookie/i.test(html)
+    && /window\.open\s*\(/i.test(html);
+}
+
+function extractJavaScriptVerificationCookie(html: string): string | null {
+  const match = html.match(/\.cookie\s*=\s*["']([^;"']+=[^;"']+)/i);
+  return match?.[1]?.trim() || null;
+}
+
 export async function fetchSafe(
   rawUrl: string,
+  options: RequestInit & { signal?: AbortSignal } = {},
+): Promise<Response> {
+  return fetchSafeWithCookieJar(rawUrl, options, new Map());
+}
+
+async function fetchSafeWithCookieJar(
+  rawUrl: string,
   options: RequestInit & { signal?: AbortSignal },
+  cookieJar: RequestCookieJar,
 ): Promise<Response> {
   let target = await assertSafeOutboundUrl(rawUrl);
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
-    const response = await fetch(target, { ...options, redirect: 'manual' });
+    const response = await fetch(target, {
+      ...options,
+      headers: requestHeadersWithCookies(target, options.headers, cookieJar),
+      redirect: 'manual',
+    });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    // 部分站点会在同域 302 中下发一次性验证 Cookie。Node fetch 不自带
+    // Cookie jar，这里只在当前请求的同域重定向链里暂存，避免长期保存或跨域泄露。
+    rememberRedirectCookies(target, response, cookieJar);
     const location = response.headers.get('location');
     if (!location) throw new Error(`重定向缺少 Location: ${target}`);
     await response.body?.cancel();
@@ -103,6 +179,7 @@ async function fetchWithRetry(
   url: string,
   options: RequestInit & { timeoutMs?: number } = {},
   retries: number = MAX_RETRIES,
+  cookieJar?: RequestCookieJar,
 ): Promise<Response> {
   const { timeoutMs = 15_000, signal: parentSignal, ...rest } = options;
   let lastError: Error | null = null;
@@ -110,7 +187,9 @@ async function fetchWithRetry(
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await withTimeout(
-        signal => fetchSafe(url, { ...rest, signal }),
+        signal => cookieJar
+          ? fetchSafeWithCookieJar(url, { ...rest, signal }, cookieJar)
+          : fetchSafe(url, { ...rest, signal }),
         timeoutMs,
         `HTTP timeout: ${url}`,
         parentSignal ?? undefined,
@@ -176,6 +255,16 @@ function detectCharset(response: Response, bodyStart: string): string {
   return 'utf-8';
 }
 
+async function readHtmlResponse(response: Response): Promise<string> {
+  const buffer = await readResponseBuffer(response);
+  const bodyStart = buffer.slice(0, 4096).toString('ascii').toLowerCase();
+  const charset = detectCharset(response, bodyStart);
+  if (charset === 'gbk' || charset === 'gb2312' || charset === 'gb18030') {
+    return iconv.decode(buffer, charset);
+  }
+  return buffer.toString('utf-8');
+}
+
 /**
  * Fetch a URL and decode the response body with correct charset.
  * Handles GBK/GB2312 (via iconv-lite) and UTF-8.
@@ -187,26 +276,43 @@ async function fetchHtml(
   const { timeoutMs = 20_000, signal: parentSignal, ...rest } = options;
 
   try {
-    const response = await fetchWithRetry(url, {
+    const cookieJar: RequestCookieJar = new Map();
+    let response = await fetchWithRetry(url, {
       ...rest,
       signal: parentSignal ?? undefined,
       timeoutMs,
-    });
+    }, MAX_RETRIES, cookieJar);
 
     if (!response.ok) return null;
+    let html = await readHtmlResponse(response);
 
-    const buffer = await readResponseBuffer(response);
-    const bodyStart = buffer.slice(0, 4096).toString('ascii').toLowerCase();
-    const charset = detectCharset(response, bodyStart);
-
-    if (charset === 'gbk' || charset === 'gb2312' || charset === 'gb18030') {
-      return iconv.decode(buffer, charset);
+    // 只解析明确的 Cookie 赋值，不执行第三方脚本；Cookie 仍仅保留在本次请求的同域 jar。
+    const verificationCookie = isLikelyJavaScriptVerificationPage(html)
+      ? extractJavaScriptVerificationCookie(html)
+      : null;
+    if (verificationCookie && rememberClientCookie(new URL(url), verificationCookie, cookieJar)) {
+      response = await fetchWithRetry(url, {
+        ...rest,
+        signal: parentSignal ?? undefined,
+        timeoutMs,
+      }, MAX_RETRIES, cookieJar);
+      if (!response.ok) return null;
+      html = await readHtmlResponse(response);
     }
-    return buffer.toString('utf-8');
+
+    return html;
   } catch (error) {
     if (parentSignal?.aborted) throw error;
     return null;
   }
 }
 
-export { BROWSER_HEADERS, fetchWithRetry, fetchHtml, hostFromUrl, MAX_RETRIES, RETRYABLE_STATUS };
+export {
+  BROWSER_HEADERS,
+  fetchWithRetry,
+  fetchHtml,
+  hostFromUrl,
+  isLikelyJavaScriptVerificationPage,
+  MAX_RETRIES,
+  RETRYABLE_STATUS,
+};

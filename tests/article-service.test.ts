@@ -21,6 +21,18 @@ describe('article-service filters', () => {
     expect(where.AND).toHaveLength(2);
   });
 
+  it('全文搜索走派生搜索表，避免列表查询直接扫 Article 正文', () => {
+    expect(buildArticleListWhere({ search: '肯德基' })).toEqual({
+      AND: [{
+        searchIndex: {
+          is: {
+            searchText: { contains: '肯德基' },
+          },
+        },
+      }],
+    });
+  });
+
   it('删除筛选保持明确字段', () => {
     expect(buildArticleDeleteWhere({ aiStatus: 'failed', category: '餐饮', maxScore: 40 })).toEqual({
       aiStatus: 'failed',

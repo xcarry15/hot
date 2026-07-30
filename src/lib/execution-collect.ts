@@ -39,7 +39,7 @@ export async function executeCollectJob(
     }
     return summarizeCollectResult({
       results,
-      totalNewArticles: results.reduce((sum, item) => sum + item.items.length, 0),
+      totalNewArticles: results.reduce((sum, item) => sum + (item.createdCount ?? 0), 0),
       errors: results.filter(item => !item.success).length,
     });
   }
@@ -98,7 +98,7 @@ export async function collectSingleSource(
   }
   return {
     results,
-    totalNewArticles: result.items.length,
+    totalNewArticles: result.createdCount ?? 0,
     errors: result.success ? 0 : 1,
   };
 }
@@ -115,6 +115,9 @@ export function summarizeCollectResult(
       sourceName: r.sourceName,
       success: r.success,
       itemsFound: r.items.length,
+      newArticles: r.createdCount ?? 0,
+      deduplicated: r.deduplicatedCount ?? 0,
+      reclaimed: r.reclaimedCount ?? 0,
       error: r.error,
     })),
   };

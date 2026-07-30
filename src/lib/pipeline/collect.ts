@@ -19,11 +19,20 @@ import {
 } from '@/lib/job-progress';
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
 import { recordFailure, restoreBreakerIfElapsed } from '@/lib/pipeline/source-health';
+import { refreshArticleSearchIndex } from '@/lib/article-search-index';
 import type { CrawlItem, CrawlResult } from '@/contracts/crawl';
-import type { Article } from '@prisma/client';
+import type { Article, Source } from '@prisma/client';
 
 const CRAWL_SOURCE_TIMEOUT_MS = 60_000;
 const COLLECT_CONCURRENCY = 4;
+
+function sourceHostname(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return url;
+  }
+}
 
 function isHttpUrl(value: string): boolean {
   try {
@@ -42,20 +51,22 @@ function isHttpUrl(value: string): boolean {
  *   - 长度门控（title < 10 且无 summary/detail content → filter:short）
  *   - 写 Article（P2002 race → 记 dedup:url 后短路）
  */
+export type CollectItemResult = 'created' | 'existing' | 'discarded';
+
 export async function collectItem(
   sourceId: string,
   sourceName: string,
   item: CrawlItem,
   knownExisting?: Article | null,
   knownDiscarded?: boolean,
-): Promise<string | undefined> {
+): Promise<CollectItemResult> {
   // Normalize URL
   const normalizedUrl = normalizeUrl(item.url);
   // 解析器面对的是第三方页面；结构化选择器可能意外抓到 javascript:、
   // mailto: 等非文章链接。它们不能入库，更不能在公开页作为可点击链接输出。
   if (!isHttpUrl(normalizedUrl)) {
     console.warn(`[collectItem] skipped non-http URL from source=${sourceId}: ${item.url}`);
-    return;
+    return 'discarded';
   }
 
   // ---- Step 1: URL exact dedup ----
@@ -77,11 +88,12 @@ export async function collectItem(
           ...(publishedAtChanged ? { publishedAt: nextPublishedAt } : {}),
         },
       });
+      await refreshArticleSearchIndex(existing.id);
       console.log(`[dedup] URL exact match, metadata updated: "${item.title}"`);
     } else {
       console.log(`[dedup] URL exact match, skipped: "${item.title}"`);
     }
-    return existing.id;
+    return 'existing';
   }
 
   // ---- Step 2: DiscardedItem blocking ----
@@ -93,7 +105,7 @@ export async function collectItem(
       : null;
   if (discarded) {
     console.log(`[collectItem] skipping previously discarded: "${item.title}" (reason: ${discarded.reason})`);
-    return;
+    return 'discarded';
   }
 
   // 黑名单在入库前优先拦截；列表页已有标题/摘要/正文时无需创建 Article。
@@ -111,7 +123,7 @@ export async function collectItem(
         publishedAt: item.publishedAt,
       });
       console.log(`[collectItem] blacklist match, skipped before save: "${item.title}"`);
-      return;
+      return 'discarded';
     }
   } catch (error) {
     // 关键词 DB 异常时保持现有“放过不可误杀”策略。
@@ -129,7 +141,7 @@ export async function collectItem(
       detail: { titleLength: item.title.length, hasSummary: !!item.summary, hasDetailContent },
       publishedAt: item.publishedAt,
     });
-    return;
+    return 'discarded';
   }
 
   // 注意：关键字匹配已搬到 processAllPending，内容指纹由后续聚类使用。
@@ -159,8 +171,9 @@ export async function collectItem(
         publishedAt: item.publishedAt ? parseChineseDate(item.publishedAt) : undefined,
       },
     });
+    if (fetchStatus === 'fetched') await refreshArticleSearchIndex(created.id);
 
-    return created.id;
+    return 'created';
   } catch (err: unknown) {
     // P2002: 极少见 — 常规竞态已由 Step 1 URL 去重消除；极端并发下仍可能触发。
   // 不抛出中断整个 for 循环：按 URL 唯一约束命中跳过即可。
@@ -182,12 +195,62 @@ export async function collectItem(
         },
         publishedAt: item.publishedAt,
       });
-      return;
+      return 'discarded';
     }
     throw err;
   }
   // (函数内使用 sourceName 仅为兼容旧签名；目前被判定不会读取，但保留参数以避免调用方改动。)
   void sourceName;
+  return 'discarded';
+}
+
+/**
+ * 同一列表 URL 被删除后又重新添加时，Article 的 URL 全局唯一约束会让新来源
+ * 永远无法入库。仅在新来源已成功解析列表后，接管同 URL 的已删除来源文章，
+ * 并恢复此前未完成的正文抓取，避免产生第二份 Article 或长期不可见的孤儿记录。
+ */
+async function reclaimArticlesFromDeletedSource(source: Source): Promise<number> {
+  const deletedSources = await db.source.findMany({
+    where: {
+      id: { not: source.id },
+      url: source.url,
+      deletedAt: { not: null },
+    },
+    select: { id: true },
+  });
+  if (deletedSources.length === 0) return 0;
+
+  const result = await db.article.updateMany({
+    where: {
+      sourceId: { in: deletedSources.map((item) => item.id) },
+      fetchStatus: { in: ['pending', 'failed'] },
+    },
+    data: {
+      sourceId: source.id,
+      fetchStatus: 'pending',
+      fetchError: null,
+      fetchRetryCount: 0,
+      nextFetchRetryAt: null,
+      technicalIgnoredAt: null,
+      rawContent: '',
+      cleanContent: '',
+      articleBody: '',
+      contentHash: '',
+    },
+  });
+
+  // 已完成文章无需重跑，仍需归属到当前启用来源，才能在工作台正常显示。
+  await db.article.updateMany({
+    where: {
+      sourceId: { in: deletedSources.map((item) => item.id) },
+    },
+    data: { sourceId: source.id },
+  });
+
+  if (result.count > 0) {
+    console.log(`[collect] reclaimed ${result.count} pending article(s) from deleted source(s) for ${source.name}`);
+  }
+  return result.count;
 }
 
 /**
@@ -257,6 +320,9 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
     });
 
 
+    // 列表已成功解析后才允许接管同 URL 的已删除来源，避免错误配置的来源夺取文章。
+    const reclaimedCount = await reclaimArticlesFromDeletedSource(source);
+
     // 单批预取 URL 状态，把每条 2 次只读查询收敛为 2 次批量查询。
     const normalizedUrls = [...new Set(result.items.map((item) => normalizeUrl(item.url)))];
     const [existingArticles, discardedUrls] = await Promise.all([
@@ -267,6 +333,9 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
     const discardedUrlSet = new Set(discardedUrls.map((item) => item.url));
     const processedUrls = new Set<string>();
 
+    let createdCount = 0;
+    let deduplicatedCount = 0;
+
     // Collect each item (no detail fetch, no AI — those are separate stages).
     for (const item of result.items) {
       assertNotAborted(signal);
@@ -276,16 +345,18 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
         continue;
       }
       processedUrls.add(normalizedUrl);
-      await collectItem(
+      const outcome = await collectItem(
         sourceId,
         source.name,
         item,
         existingByUrl.get(normalizedUrl) ?? null,
         discardedUrlSet.has(normalizedUrl),
       );
+      if (outcome === 'created') createdCount++;
+      if (outcome === 'existing') deduplicatedCount++;
     }
 
-    return result;
+    return { ...result, createdCount, deduplicatedCount, reclaimedCount };
   } catch (error: unknown) {
     if (signal?.aborted) throw error;
     const msg = error instanceof Error ? error.message : 'Unknown crawl error';
@@ -342,10 +413,25 @@ export async function collectAllSources(signal?: AbortSignal, jobId?: string) {
   const results: Array<CrawlResult & { sourceId: string; sourceName: string }> = new Array(dueSources.length);
   let errors = 0;
   let totalNewArticles = 0;
+  let resultIndex = 0;
 
-  for (let i = 0; i < dueSources.length; i += COLLECT_CONCURRENCY) {
+  const remainingSources = [...dueSources];
+  while (remainingSources.length > 0) {
     assertNotAborted(signal);
-    const batch = dueSources.slice(i, i + COLLECT_CONCURRENCY);
+    const usedHosts = new Set<string>();
+    const batch: typeof dueSources = [];
+    for (let index = 0; index < remainingSources.length && batch.length < COLLECT_CONCURRENCY;) {
+      const candidate = remainingSources[index];
+      const host = sourceHostname(candidate.url);
+      if (usedHosts.has(host)) {
+        index++;
+        continue;
+      }
+      usedHosts.add(host);
+      batch.push(candidate);
+      remainingSources.splice(index, 1);
+    }
+    if (batch.length === 0) batch.push(remainingSources.shift()!);
 
     // 熔断恢复 + start 事件：在并发抓取前串行处理（快，不产生网络 I/O），
     // 保证 start 事件带正确的 index/total（前端进度条按 index 定位）。
@@ -381,11 +467,12 @@ export async function collectAllSources(signal?: AbortSignal, jobId?: string) {
       })
     );
 
-    // 按原 index 放回 results，保持顺序稳定（summarizeCollectResult 依赖 results 数组）
+    // 按执行完成的批次顺序写入结果；每批最多一个同域来源，避免同站并发抓取。
     for (let j = 0; j < batchResults.length; j++) {
-      results[i + j] = batchResults[j];
+      results[resultIndex] = batchResults[j];
+      resultIndex++;
       if (!batchResults[j].success) errors++;
-      totalNewArticles += batchResults[j].items.length;
+      totalNewArticles += batchResults[j].createdCount ?? 0;
     }
     if (jobId) {
       const batchErrors = batchResults.filter(r => !r.success).length;

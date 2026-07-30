@@ -9,6 +9,7 @@
  * 与 maintenance-api.client 协同：data.tsx 同时承担导入导出 + 清理操作。
  */
 import { requestJson } from '@/lib/request-json.client';
+import type { PromptVersionSnapshot } from '@/lib/prompts';
 
 /** Settings 行级 key→value 映射：与前端 Settings interface 一致。 */
 export type SettingsMap = Record<string, string>;
@@ -46,6 +47,27 @@ function publishSettingsChanged(patch: SettingsMap): void {
 
 export async function fetchSettings(signal?: AbortSignal): Promise<SettingsMap> {
   return requestJson<SettingsMap>('GET', '/api/settings', { signal });
+}
+
+export interface PromptVersion {
+  id: string;
+  name: string;
+  createdAt: string;
+  prompts: PromptVersionSnapshot;
+}
+
+export async function fetchPromptVersions(signal?: AbortSignal): Promise<PromptVersion[]> {
+  const result = await requestJson<{ versions: PromptVersion[] }>('GET', '/api/settings/prompt-versions', { signal });
+  return result.versions;
+}
+
+export async function createPromptVersion(input: { name: string; prompts: PromptVersionSnapshot }, signal?: AbortSignal): Promise<PromptVersion> {
+  const result = await requestJson<{ version: PromptVersion }>('POST', '/api/settings/prompt-versions', { body: input, signal });
+  return result.version;
+}
+
+export async function deletePromptVersion(id: string, signal?: AbortSignal): Promise<void> {
+  await requestJson('DELETE', '/api/settings/prompt-versions', { body: { id }, signal });
 }
 
 export interface OpenCodeModelsResult {

@@ -50,7 +50,7 @@ describe('collectItem URL 去重', () => {
       title: '新标题',
     };
 
-    await collectItem('source-1', '示例来源', item, existingArticle());
+    await expect(collectItem('source-1', '示例来源', item, existingArticle())).resolves.toBe('existing');
 
     expect(mocks.articleCreate).not.toHaveBeenCalled();
     expect(mocks.articleUpdate).toHaveBeenCalledWith({
@@ -69,7 +69,7 @@ describe('collectItem URL 去重', () => {
     const article = existingArticle();
     const item: CrawlItem = { url: article.url, title: article.title };
 
-    await collectItem('source-1', '示例来源', item, article);
+    await expect(collectItem('source-1', '示例来源', item, article)).resolves.toBe('existing');
 
     expect(mocks.articleUpdate).not.toHaveBeenCalled();
     expect(mocks.articleCreate).not.toHaveBeenCalled();

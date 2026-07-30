@@ -5,7 +5,12 @@ import { fetchCanyin88Detail } from './parser-canyin88';
 import { cleanContent, extractArticleBody, meaningfulTextLength } from './cleaner';
 import { abortableDelay, withTimeout } from './shared/async';
 import { MIN_MEANINGFUL_CHARS } from './shared/content-policy';
-import { ensureResponseTextWithinLimit, fetchHtml, BROWSER_HEADERS } from './http';
+import {
+  ensureResponseTextWithinLimit,
+  fetchHtml,
+  BROWSER_HEADERS,
+  isLikelyJavaScriptVerificationPage,
+} from './http';
 import { assertSafeOutboundUrl } from './outbound-url';
 import { extractMetaPublishedAt } from './date-utils';
 import { computeContentFingerprint } from './content-fingerprint';
@@ -60,6 +65,32 @@ function extractLinkshopOriginalSource(html: string): string | null {
   return source || null;
 }
 
+function extractArticleBodyForSource(html: string, parserConfig?: string): string {
+  if (parserConfig) {
+    try {
+      const parsed: unknown = JSON.parse(parserConfig);
+      const contentSelector = parsed
+        && typeof parsed === 'object'
+        && !Array.isArray(parsed)
+        && typeof (parsed as { content?: unknown }).content === 'string'
+        ? (parsed as { content: string }).content.trim()
+        : '';
+      if (contentSelector) {
+        const selected = cheerio.load(html)(contentSelector).first().html();
+        if (selected && selected.length > 100) return selected;
+      }
+    } catch {
+      // 来源配置错误时回退通用正文提取，不能中断正文流水线。
+    }
+  }
+  return extractArticleBody(html);
+}
+
+function hasUsableArticleContent(html: string, parserConfig?: string): boolean {
+  const articleBody = extractArticleBodyForSource(html, parserConfig);
+  return meaningfulTextLength(cleanContent(articleBody)) >= MIN_MEANINGFUL_CHARS;
+}
+
 export async function fetchArticleDetail(articleId: string, maxRetries = 2, signal?: AbortSignal): Promise<string> {
   assertNotAborted(signal);
   const article = await db.article.findUnique({
@@ -71,7 +102,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
       fetchStatus: true,
       cleanContent: true,
       originalSource: true,
-      source: { select: { type: true } },
+      source: { select: { type: true, parserConfig: true } },
     },
   });
   if (!article) return '';
@@ -102,14 +133,23 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
         fetchMethod = 'canyin88';
       } else {
         // Step 1: Try direct HTTP fetch with charset detection
-        html = await fetchHtml(article.url, {
+        const directHtml = await fetchHtml(article.url, {
           signal,
           headers: { ...BROWSER_HEADERS, Referer: new URL(article.url).origin },
           timeoutMs: DIRECT_FETCH_TIMEOUT_MS,
         });
-        if (html) fetchMethod = 'direct';
+        // 某些站点会返回 HTTP 200 的 JS 验证页或空壳页面。它们不是有效正文，
+        // 必须继续走 page_reader，不能因 html 非空而提前停止兜底。
+        if (
+          directHtml
+          && !isLikelyJavaScriptVerificationPage(directHtml)
+          && hasUsableArticleContent(directHtml, article.source?.parserConfig)
+        ) {
+          html = directHtml;
+          fetchMethod = 'direct';
+        }
 
-        // Step 2: Fall back to ZAI page_reader if direct returned nothing
+        // Step 2: Fall back to ZAI page_reader if direct returned no usable article body.
         if (!html) {
           try {
             await assertSafeOutboundUrl(article.url);
@@ -135,7 +175,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
 
       if (html) {
         assertNotAborted(signal);
-        const articleBody = extractArticleBody(html);
+        const articleBody = extractArticleBodyForSource(html, article.source?.parserConfig);
         const cleaned = cleanContent(articleBody);
         const meaningful = meaningfulTextLength(cleaned) >= MIN_MEANINGFUL_CHARS;
 

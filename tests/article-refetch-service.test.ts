@@ -10,6 +10,13 @@ const mocks = db as unknown as {
   keyword: {
     findMany: ReturnType<typeof vi.fn>;
   };
+  keywordHit: {
+    deleteMany: ReturnType<typeof vi.fn>;
+    createMany: ReturnType<typeof vi.fn>;
+  };
+  articleSearch: {
+    upsert: ReturnType<typeof vi.fn>;
+  };
 };
 
 vi.mock('@/lib/detail-fetcher', () => ({
@@ -25,6 +32,9 @@ describe('article-refetch-service', () => {
     vi.clearAllMocks();
     mocks.article.update.mockResolvedValue({});
     mocks.keyword.findMany.mockResolvedValue([]);
+    mocks.keywordHit.deleteMany.mockResolvedValue({ count: 0 });
+    mocks.keywordHit.createMany.mockResolvedValue({ count: 0 });
+    mocks.articleSearch.upsert.mockResolvedValue({});
   });
 
   it('文章不存在时返回 null，不执行写入', async () => {
@@ -34,7 +44,14 @@ describe('article-refetch-service', () => {
   });
 
   it('重新抓取前重置 AI 状态但保留人工校准契约', async () => {
-    mocks.article.findUnique.mockResolvedValue({ id: 'a1' });
+    mocks.article.findUnique.mockResolvedValue({
+      id: 'a1',
+      title: '旧标题',
+      cleanContent: '新的正文内容',
+      summary: '',
+      brand: '',
+      eventKey: '',
+    });
     await expect(refetchArticle('a1')).resolves.toEqual({ success: true, contentLength: 6 });
     expect(mocks.article.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'a1' },
@@ -50,11 +67,20 @@ describe('article-refetch-service', () => {
       where: { id: 'a1' },
       data: { keywordMatched: false },
     });
+    expect(mocks.keywordHit.deleteMany).toHaveBeenCalledWith({ where: { articleId: 'a1' } });
+    expect(mocks.articleSearch.upsert).toHaveBeenCalled();
   });
 
   it('重新抓取没有获得有效正文时返回失败，供工作流中断后续阶段', async () => {
     mocks.article.findUnique
       .mockResolvedValueOnce({ id: 'a2' })
+      .mockResolvedValueOnce({
+        title: '旧标题',
+        cleanContent: '',
+        summary: '',
+        brand: '',
+        eventKey: '',
+      })
       .mockResolvedValueOnce({ fetchError: '来源正文页超时' });
     const { fetchArticleDetail } = await import('@/lib/detail-fetcher');
     vi.mocked(fetchArticleDetail).mockResolvedValueOnce('');

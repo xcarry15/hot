@@ -122,7 +122,7 @@ describe('analyzeAllPending Provider 全局异常', () => {
     });
   });
 
-  it('鉴权/配置错误暂停整批，不消耗任何文章的失败额度', async () => {
+  it('鉴权/配置错误暂停整批，未开始文章只等待恢复、不复制同一错误', async () => {
     const articles = [
       { id: 'article-1', title: '文章 1' },
       { id: 'article-2', title: '文章 2' },
@@ -149,7 +149,7 @@ describe('analyzeAllPending Provider 全局异常', () => {
     expect(mocks.articleUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         aiStatus: 'pending',
-        aiError: 'opencode: API Key 无效或鉴权失败',
+        aiError: null,
         nextAiRetryAt: expect.any(Date),
       }),
     }));

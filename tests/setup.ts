@@ -70,6 +70,13 @@ vi.mock('@/lib/db', () => ({
       deleteMany: vi.fn(),
       upsert: vi.fn(),
     },
+    keywordHit: {
+      deleteMany: vi.fn(),
+      createMany: vi.fn(),
+    },
+    articleSearch: {
+      upsert: vi.fn(),
+    },
     pushLog: {
       count: vi.fn(),
       create: vi.fn(),

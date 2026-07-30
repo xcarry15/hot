@@ -10,6 +10,32 @@ import {
   sourceTestSchema,
 } from './source-schema';
 
+const SOURCE_TRACKING_PARAMS = new Set([
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+  'from', 'source', 'spm', 'track', 'share', 'timestamp', 'ref', 'referrer',
+]);
+
+function sourceIdentityUrl(value: string): string {
+  try {
+    const parsed = new URL(value.trim());
+    parsed.hash = '';
+    parsed.hostname = parsed.hostname.toLowerCase();
+    if ((parsed.protocol === 'http:' && parsed.port === '80') || (parsed.protocol === 'https:' && parsed.port === '443')) {
+      parsed.port = '';
+    }
+    const params = Array.from(parsed.searchParams.entries())
+      .filter(([key]) => !SOURCE_TRACKING_PARAMS.has(key.toLowerCase()))
+      .sort();
+    parsed.search = new URLSearchParams(params).toString();
+    if (parsed.pathname !== '/' && parsed.pathname.endsWith('/')) {
+      parsed.pathname = parsed.pathname.slice(0, -1);
+    }
+    return parsed.toString();
+  } catch {
+    return value.trim();
+  }
+}
+
 export async function listSources() {
   const sources = await db.source.findMany({
     where: { deletedAt: null },
@@ -76,6 +102,16 @@ export async function createSource(body: unknown) {
     throw error;
   }
 
+  const normalizedUrl = sourceIdentityUrl(url);
+  const existingSources = await db.source.findMany({
+    where: { deletedAt: null },
+    select: { name: true, url: true },
+  });
+  const duplicate = existingSources.find(source => sourceIdentityUrl(source.url) === normalizedUrl);
+  if (duplicate) {
+    return { error: `数据源已存在：${duplicate.name}`, status: 409 as const };
+  }
+
   const source = await db.source.create({
     data: {
       name,
@@ -95,11 +131,11 @@ export async function listPresetSources() {
     where: { deletedAt: null },
     select: { url: true, name: true },
   });
-  const existingUrls = new Set(existingSources.map(s => s.url));
+  const existingUrls = new Set(existingSources.map(s => sourceIdentityUrl(s.url)));
   const existingNames = new Set(existingSources.map(s => s.name));
   return PRESET_SOURCES.map(preset => ({
     ...preset,
-    isAdded: existingUrls.has(preset.url) || existingNames.has(preset.name),
+    isAdded: existingUrls.has(sourceIdentityUrl(preset.url)) || existingNames.has(preset.name),
   }));
 }
 
@@ -122,10 +158,10 @@ export async function addPresetSources(body: Record<string, unknown>) {
     where: { deletedAt: null },
     select: { url: true, name: true },
   });
-  const existingUrls = new Set(existingSources.map(s => s.url));
+  const existingUrls = new Set(existingSources.map(s => sourceIdentityUrl(s.url)));
   const existingNames = new Set(existingSources.map(s => s.name));
   const newPresets = presetsToAdd.filter(
-    p => !existingUrls.has(p.url) && !existingNames.has(p.name)
+    p => !existingUrls.has(sourceIdentityUrl(p.url)) && !existingNames.has(p.name)
   );
 
   if (newPresets.length === 0) {
