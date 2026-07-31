@@ -5,7 +5,7 @@ export type FilterChipKey = StepFilterKey | 'all'
 /**
  * 单选状态定义。优先呈现需要动作的队列，再展示流水线阶段和完成状态。
  *
- * 注意：标签尽量短（最多 4 字中文 + 括号数量），避免在窄屏挤成竖排。
+ * 注意：标签尽量短（最多 5 字中文 + 括号数量），避免在窄屏挤成竖排。
  */
 export interface StepFilterChip {
   key: FilterChipKey
@@ -25,8 +25,9 @@ export const NORMAL_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'normal-all', label: '全部正常', description: '全部正常流转文章' },
   { key: 'normal-processing', label: '处理中', description: '正在采集或提取正文' },
   { key: 'normal-ai', label: '待 AI', description: '正文处理完成，等待 AI 分析' },
-  { key: 'normal-no-value', label: '无价值', description: 'AI 已完成分析，但内容不具备保留价值' },
   { key: 'normal-cluster', label: '待聚类', description: 'AI 已生成事件身份，等待事件聚类' },
+  { key: 'normal-filtered', label: '未达门槛', description: '评分或相关性未达到推送要求' },
+  { key: 'normal-not-push', label: '推送关闭', description: '当前文章不参与推送，可能是推送开关关闭或非代表文章' },
   { key: 'normal-public', label: '已公开', description: '已在公开端展示的 Event 代表文章' },
   { key: 'normal-push', label: '待推送', description: '已满足推送条件，等待投递' },
   { key: 'normal-pushed', label: '已推送', description: '已成功完成投递' },
@@ -34,9 +35,11 @@ export const NORMAL_FILTER_CHIPS: readonly StepFilterChip[] = [
 
 export const ANOMALY_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'anomaly-all', label: '全部异常', description: '全部需要关注的文章' },
-  { key: 'anomaly-manual', label: '需处理', description: '自动重试耗尽，需要人工处理' },
+  { key: 'anomaly-manual', label: '需人工处理', description: '自动重试耗尽，需要人工处理' },
+  { key: 'anomaly-retrying', label: '自动恢复', description: '技术异常正在等待或执行自动重试' },
   { key: 'anomaly-review', label: '待复核', description: '聚类结果存在歧义，需要人工判断' },
-  { key: 'anomaly-failure', label: '流程失败', description: '流程失败、跳过或自动恢复中' },
+  { key: 'anomaly-failure', label: '流程失败', description: '流程失败或技术性跳过' },
+  { key: 'anomaly-no-value', label: '无价值', description: 'AI 已完成分析，但内容不具备保留价值' },
   { key: 'anomaly-ad', label: '软文', description: 'AI 判定为广告或软文的文章' },
   { key: 'anomaly-duplicate', label: '重复', description: '同一事件中的非代表报道' },
   { key: 'anomaly-low-confidence', label: '低分析置信', description: 'AI 对文章分析结论的证据把握不足，建议人工复核' },

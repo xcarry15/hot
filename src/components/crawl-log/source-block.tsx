@@ -164,7 +164,7 @@ export const SourceBlock = memo(function SourceBlock({
             <span className="text-xs text-sky-700">公开 {publicCount}</span>
             <span className="text-xs text-emerald-700">推送 {pushedCount}</span>
           <span className={`text-xs ${anomalyCount > 0 ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>异常 {anomalyCount}</span>
-          {manualCount > 0 && <span className="text-xs font-medium text-red-700">需处理 {manualCount}</span>}
+          {manualCount > 0 && <span className="text-xs font-medium text-red-700">需人工处理 {manualCount}</span>}
           {autoRetryCount > 0 && <span className="text-xs font-medium text-blue-700">自动恢复 {autoRetryCount}</span>}
         </div>
       </button>

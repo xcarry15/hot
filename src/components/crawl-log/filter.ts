@@ -13,11 +13,14 @@ import { isTechnicalSkipReason } from '@/lib/article-pipeline-status'
 export type ArticleFilterBucket =
   | 'normal-processing'
   | 'normal-ai'
-  | 'normal-no-value'
   | 'normal-cluster'
+  | 'normal-filtered'
+  | 'normal-not-push'
   | 'normal-push'
   | 'normal-pushed'
   | 'anomaly-manual'
+  | 'anomaly-no-value'
+  | 'anomaly-retrying'
   | 'anomaly-review'
   | 'anomaly-business'
   | 'anomaly-failure'
@@ -27,15 +30,17 @@ export function getArticleFilterBucket(article: ArticleProgress): ArticleFilterB
   if (article.technicalState === 'ignored') return 'ignored'
   if (article.technicalState === 'manual') return 'anomaly-manual'
   if (article.clusterStatus === 'needs_review') return 'anomaly-review'
+  if (article.technicalState === 'auto_retry' || article.technicalState === 'waiting') return 'anomaly-retrying'
   if (
-    article.technicalState === 'auto_retry'
-    || (article.technicalIssues?.length ?? 0) > 0
+    (article.technicalIssues?.length ?? 0) > 0
     || isArticleFailed(article)
     || Boolean(isTechnicalSkipReason(article.skipReason) && (article.crawl === 'skipped' || article.ai === 'skipped'))
   ) return 'anomaly-failure'
+  if (article.skipReason === '无价值') return 'anomaly-no-value'
   if ((article.anomalyLabels?.length ?? 0) > 0) return 'anomaly-business'
-  if (article.skipReason === '无价值') return 'normal-no-value'
   if (article.push === 'done') return 'normal-pushed'
+  if (article.push === 'filtered' && article.ai === 'done' && article.cluster === 'done') return 'normal-filtered'
+  if (article.push === 'not_applicable' && article.ai === 'done' && article.cluster === 'done') return 'normal-not-push'
   if (article.ai === 'done' && article.cluster === 'pending') return 'normal-cluster'
   if (article.cluster === 'done' && article.push === 'pending') return 'normal-push'
   if (article.process === 'done' && article.ai === 'pending') return 'normal-ai'
@@ -65,7 +70,7 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
       return article.anomalyLabels?.includes('duplicate') ?? false
     case 'anomaly-low-confidence':
       return article.anomalyLabels?.includes('low-confidence') ?? false
-    case 'normal-no-value':
+    case 'anomaly-no-value':
       return article.skipReason === '无价值'
     case 'normal-public':
       return article.isPublic

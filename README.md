@@ -96,7 +96,7 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 | cluster | `src/lib/pipeline/cluster.ts` | 把 Article 归入 Event，或按单篇自动建立独立 Event |
 | push | `src/lib/pipeline/push-bridge.ts` | 按 Event 和目标执行推送 |
 
-`src/lib/execution.ts` 是 Job 的统一调度入口；采集、AI 批处理、单篇工作流和阶段执行器分别位于同目录的 `execution-*.ts`，固定阶段通过 `src/lib/pipeline/stage-runner.ts` 共享执行前取消检查、阶段顺序和失败补偿语义。批量阶段会分块处理全部当前积压；分块大小不是任务完成边界。任务中心会在当前运行阶段显示该阶段的实时完成数和总数；文章步骤会显示 Event 代表文章的公开状态，正常筛选也支持按已公开查看；异常筛选只聚焦待复核、流程失败、软文、重复和低分析置信，文章行同步展示原因。正文抓取、AI 和聚类失败原因会持久化并显示在对应文章；单篇正文重跑失败会中断后续 AI/聚类并将 Job 标记失败；最近任务失败时会在任务区显示失败原因。数据源成功请求但解析为 0 篇会作为警告而非失败显示。调度器位于 `src/lib/scheduler.ts`，自动采集默认关闭，配置从数据库读取；每分钟还会独立检查到期的技术失败，只运行不重新采集数据源的恢复全流程。聚类批处理开始前会校正失效的 Event 代表文章指针，保证 `representativeArticleId` 的唯一所有权；候选 Event 和每个候选的成员比较都有显式上限，避免数据增长时单篇任务无限放大。
+`src/lib/execution.ts` 是 Job 的统一调度入口；采集、AI 批处理、单篇工作流和阶段执行器分别位于同目录的 `execution-*.ts`，固定阶段通过 `src/lib/pipeline/stage-runner.ts` 共享执行前取消检查、阶段顺序和失败补偿语义。批量阶段会分块处理全部当前积压；分块大小不是任务完成边界。任务中心会在当前运行阶段显示该阶段的实时完成数和总数；文章步骤会显示 Event 代表文章的公开状态，正常筛选也支持按已公开、未达推送门槛和不参与推送查看；异常筛选聚焦需人工处理、无价值、自动恢复、待复核、流程失败、软文、重复和低分析置信，文章行同步展示原因。正文抓取、AI 和聚类失败原因会持久化并显示在对应文章；单篇正文重跑失败会中断后续 AI/聚类并将 Job 标记失败；最近任务失败时会在任务区显示失败原因。数据源成功请求但解析为 0 篇会作为警告而非失败显示。调度器位于 `src/lib/scheduler.ts`，自动采集默认关闭，配置从数据库读取；每分钟还会独立检查到期的技术失败，只运行不重新采集数据源的恢复全流程。聚类批处理开始前会校正失效的 Event 代表文章指针，保证 `representativeArticleId` 的唯一所有权；候选 Event 和每个候选的成员比较都有显式上限，避免数据增长时单篇任务无限放大。
 
 Event 归属和代表文章重算在同一事务提交；事务后的公开快照异常以每个 Event 一条最新脏标记进入受控修复队列，不会无限累积重复恢复记录。
 
@@ -181,7 +181,7 @@ npm run db:optimize         # 启用/检查 WAL 并执行 PRAGMA optimize
 npm run db:cleanup-logs     # 清理过期运行日志
 ```
 
-日常生产部署禁止使用 `db:push` 或 `db:reset`。当前仓库只有 `prisma/migrations/20260728120000_current_schema_baseline` 一个 migration；首次切换到该基线必须备份后执行 `CONFIRM_RESET=YES bash scripts/init-production.sh`，之后日常更新才使用 `npm run db:migrate:deploy`。本项目不为历史业务数据维护兼容层；结构或规则变化按重新采集新数据处理。
+日常生产部署禁止使用 `db:push` 或 `db:reset`。当前仓库只有 `prisma/migrations/20260731120000_current_schema_baseline` 一个 migration；首次切换到该基线必须备份后执行 `CONFIRM_RESET=YES bash scripts/init-production.sh`，之后日常更新才使用 `npm run db:migrate:deploy`。本项目不为历史业务数据维护兼容层；结构或规则变化按重新采集新数据处理。
 
 ## 管理后台
 

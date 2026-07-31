@@ -76,12 +76,33 @@ describe('matchStepChip 单谓词命中', () => {
     expect(matchStepChip(article({ anomalyLabels: ['duplicate'] }), 'anomaly-duplicate')).toBe(true)
   })
 
-  it('无价值是正常业务跳过，不是流程失败', () => {
+  it('无价值归入异常业务分类，不是流程失败', () => {
     const skipped = article({ ai: 'skipped', cluster: 'not_applicable', push: 'not_applicable', skipReason: '无价值' })
     expect(matchStepChip(skipped, 'anomaly-failure')).toBe(false)
-    expect(matchStepChip(skipped, 'normal-all')).toBe(true)
-    expect(matchStepChip(skipped, 'normal-no-value')).toBe(true)
+    expect(matchStepChip(skipped, 'anomaly-all')).toBe(true)
+    expect(matchStepChip(skipped, 'anomaly-no-value')).toBe(true)
+    expect(matchStepChip(skipped, 'normal-all')).toBe(false)
     expect(matchStepChip(skipped, 'normal-processing')).toBe(false)
+  })
+
+  it('未达推送门槛和推送关闭不再误归入处理中', () => {
+    const filtered = article({ ai: 'done', cluster: 'done', push: 'filtered' })
+    expect(matchStepChip(filtered, 'normal-filtered')).toBe(true)
+    expect(matchStepChip(filtered, 'normal-processing')).toBe(false)
+
+    const notPushable = article({ ai: 'done', cluster: 'done', push: 'not_applicable' })
+    expect(matchStepChip(notPushable, 'normal-not-push')).toBe(true)
+    expect(matchStepChip(notPushable, 'normal-processing')).toBe(false)
+  })
+
+  it('自动恢复与最终流程失败分开筛选', () => {
+    const retrying = article({
+      ai: 'failed',
+      technicalState: 'auto_retry',
+      technicalIssues: ['ai_failed'],
+    })
+    expect(matchStepChip(retrying, 'anomaly-retrying')).toBe(true)
+    expect(matchStepChip(retrying, 'anomaly-failure')).toBe(false)
   })
 
   it('已公开只匹配公开端展示的 Event 代表文章', () => {

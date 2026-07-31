@@ -128,7 +128,7 @@ $RequiredReleaseFiles = @(
     "package-lock.json",
     "scripts\init-production.sh",
     "prisma\schema.prisma",
-    "prisma\migrations\20260728120000_current_schema_baseline\migration.sql"
+    "prisma\migrations\20260731120000_current_schema_baseline\migration.sql"
 )
 foreach ($requiredFile in $RequiredReleaseFiles) {
     $requiredPath = Join-Path $TempDir $requiredFile
