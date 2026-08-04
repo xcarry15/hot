@@ -8,7 +8,7 @@ import {
 } from './http';
 import { assertSafeOutboundUrl } from './outbound-url';
 import { resolveUrl } from './url-utils';
-import { extractMetaPublishedAt } from './date-utils';
+import { extractDateFromUrl, extractMetaPublishedAt } from './date-utils';
 import type { CrawlResult } from '@/contracts/crawl';
 import { assertNotAborted } from './worker-stop';
 
@@ -192,6 +192,14 @@ function extractStructuredItems(
       }
     }
 
+    // 相对日期（如“刚刚”）无法持久化为 Date；文章 URL 中的 YYYYMMDD
+    // 是稳定的来源事实，作为列表日期的兜底，确保未命中记录恢复后仍能
+    // 在工作台最近文章窗口中按正常文章显示。
+    const urlPublishedAt = extractDateFromUrl(item.url);
+    if ((!item.publishedAt || !/\d{4}/.test(item.publishedAt)) && urlPublishedAt) {
+      item.publishedAt = urlPublishedAt;
+    }
+
     if (item.title && item.url) {
       items.push(item);
     }
@@ -242,7 +250,12 @@ function extractAllLinks(
     if (seen.has(resolved)) return;
     seen.add(resolved);
 
-    items.push({ title: text, url: resolved });
+    const publishedAt = extractDateFromUrl(resolved);
+    items.push({
+      title: text,
+      url: resolved,
+      ...(publishedAt ? { publishedAt } : {}),
+    });
     if (items.length >= 20) return false;
   });
 

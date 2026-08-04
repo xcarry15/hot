@@ -70,6 +70,7 @@ export const PRESET_SOURCES: PresetSource[] = [
       link: 'p.title a',
       title: 'p.title a',
       summary: 'p.desc',
+      date: 'p.date',
       content: 'section.article-content-module',
     }),
     description: '亿邦动力最新电商、零售与品牌资讯',

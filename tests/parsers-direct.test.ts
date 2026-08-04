@@ -78,6 +78,35 @@ describe('direct parser behavior', () => {
     ]);
   });
 
+  it('parseHtml falls back to a compact date embedded in the article URL', async () => {
+    mocks.fetchHtml.mockResolvedValue(`
+      <main>
+        <section class="news-item">
+          <p class="title"><a href="/20260804/692331.shtml">亿邦动力文章</a></p>
+          <p class="desc">文章摘要</p>
+          <p class="date">刚刚</p>
+        </section>
+      </main>
+    `);
+
+    const result = await parseHtml('https://example.com/list', JSON.stringify({
+      listItem: 'section.news-item',
+      link: 'p.title a',
+      title: 'p.title a',
+      summary: 'p.desc',
+    }));
+
+    expect(result).toMatchObject({
+      success: true,
+      items: [{
+        title: '亿邦动力文章',
+        url: 'https://example.com/20260804/692331.shtml',
+        summary: '文章摘要',
+        publishedAt: '2026-08-04',
+      }],
+    });
+  });
+
   it('parseRss reads RSS items, decodes entities, and respects maxItems', async () => {
     mocks.getZAI.mockResolvedValue({
       functions: {

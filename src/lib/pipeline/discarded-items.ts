@@ -14,7 +14,7 @@
  *     · 失败仅 console.error，并返回 false 让调用方避免删除原文章
  */
 import { db } from '@/lib/db';
-import { parseChineseDate } from '@/lib/date-utils';
+import { extractDateFromUrl, parseChineseDate } from '@/lib/date-utils';
 
 export interface DiscardedItemInput {
   sourceId: string;
@@ -33,6 +33,8 @@ export interface DiscardedItemInput {
  */
 export async function recordDiscardedItem(input: DiscardedItemInput): Promise<boolean> {
   try {
+    const parsedPublishedAt = input.publishedAt ? parseChineseDate(input.publishedAt) : undefined;
+    const publishedAt = parsedPublishedAt ?? parseChineseDate(extractDateFromUrl(input.url) || '');
     await db.discardedItem.upsert({
       where: { url_reason: { url: input.url.slice(0, 1000), reason: input.reason } },
       create: {
@@ -42,14 +44,14 @@ export async function recordDiscardedItem(input: DiscardedItemInput): Promise<bo
         reason: input.reason,
         detail: input.detail ? JSON.stringify(input.detail) : '',
         winnerArticleId: input.winnerArticleId,
-        publishedAt: input.publishedAt ? parseChineseDate(input.publishedAt) : undefined,
+        publishedAt,
       },
       update: {
         sourceId: input.sourceId,
         title: input.title.slice(0, 500),
         detail: input.detail ? JSON.stringify(input.detail) : undefined,
         winnerArticleId: input.winnerArticleId,
-        publishedAt: input.publishedAt ? parseChineseDate(input.publishedAt) : undefined,
+        publishedAt,
       },
     });
     return true;

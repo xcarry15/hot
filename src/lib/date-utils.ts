@@ -21,6 +21,31 @@ export function parseChineseDate(value: string): Date | undefined {
 }
 
 /**
+ * 从常见的文章 URL 路径中提取紧凑日期，例如 `/20260804/692331.shtml`。
+ *
+ * 一些来源列表只展示“刚刚/昨天”等相对时间，但文章 URL 同时携带
+ * 精确到日期的路径。这个信息必须保留下来，否则未进入正文处理阶段的
+ * 文章会以空发布时间参与工作台窗口排序，可能暂时不可见。
+ */
+export function extractDateFromUrl(value: string): string | undefined {
+  const match = value.match(/(?:^|\/)((?:19|20)\d{2})(\d{2})(\d{2})(?=\/|[?#]|$)/);
+  if (!match) return undefined;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) {
+    return undefined;
+  }
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+/**
  * 从文章详情页 HTML 提取精确发布时间。
  * 优先级：meta property > meta itemprop > meta name > LD+JSON > 可见元素选择器。
  * 提取不到返回 undefined。

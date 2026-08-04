@@ -89,4 +89,24 @@ describe('手动恢复未命中关键词记录', () => {
     expect(mocks.keywordUpsert).not.toHaveBeenCalled();
     expect(mocks.invalidateKeywordCache).not.toHaveBeenCalled();
   });
+
+  it('恢复亿邦动力未命中记录时从 URL 回填发布时间', async () => {
+    mocks.discardedFindUnique.mockResolvedValue({
+      id: 'discarded-1',
+      sourceId: 'source-1',
+      title: '亿邦动力文章',
+      url: 'https://www.ebrun.com/20260804/692331.shtml',
+      reason: 'filter:keyword',
+      detail: '{}',
+      winnerArticleId: null,
+      publishedAt: null,
+      createdAt: new Date(),
+    });
+
+    await retryDiscardedItemWithKeyword('discarded-1');
+
+    expect(mocks.articleCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ publishedAt: new Date('2026-08-04T00:00:00.000Z') }),
+    }));
+  });
 });

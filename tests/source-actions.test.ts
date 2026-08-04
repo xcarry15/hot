@@ -82,6 +82,7 @@ describe('source-actions', () => {
         link: 'p.title a',
         title: 'p.title a',
         summary: 'p.desc',
+        date: 'p.date',
         content: 'section.article-content-module',
       }),
     });

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { DiscardedItem, Prisma } from '@prisma/client';
 import { invalidateKeywordCache } from '@/lib/filter';
 import { KEYWORD_DEFAULT_CATEGORY } from '@/contracts/keywords';
+import { extractDateFromUrl, parseChineseDate } from '@/lib/date-utils';
 
 const ALLOWED_REASONS = ['filter:keyword'];
 
@@ -37,23 +38,25 @@ async function retryDiscardedItemOnClient(
   const existing = await client.article.findUnique({ where: { url: discarded.url }, select: { id: true } });
   if (existing) {
     const auditId = randomUUID();
-    await client.$executeRaw`INSERT INTO discarded_retry_audits (id, discardedId, sourceId, title, url, reason, detail, winnerArticleId, publishedAt, action, articleId) VALUES (${auditId}, ${discarded.id}, ${discarded.sourceId}, ${discarded.title}, ${discarded.url}, ${discarded.reason}, ${discarded.detail}, ${discarded.winnerArticleId}, ${discarded.publishedAt}, ${'existing'}, ${existing.id})`;
+    const publishedAt = discarded.publishedAt ?? parseChineseDate(extractDateFromUrl(discarded.url) || '');
+    await client.$executeRaw`INSERT INTO discarded_retry_audits (id, discardedId, sourceId, title, url, reason, detail, winnerArticleId, publishedAt, action, articleId) VALUES (${auditId}, ${discarded.id}, ${discarded.sourceId}, ${discarded.title}, ${discarded.url}, ${discarded.reason}, ${discarded.detail}, ${discarded.winnerArticleId}, ${publishedAt}, ${'existing'}, ${existing.id})`;
     await client.discardedItem.delete({ where: { id } });
     return { kind: 'existing', articleId: existing.id, title: discarded.title, auditId };
   }
 
   const articleId = randomUUID();
   const auditId = randomUUID();
+  const publishedAt = discarded.publishedAt ?? parseChineseDate(extractDateFromUrl(discarded.url) || '');
   const article = await client.article.create({
     data: {
       id: articleId,
       sourceId: discarded.sourceId, url: discarded.url, title: discarded.title,
       rawContent: '', cleanContent: '', articleBody: '', contentHash: '',
       fetchStatus: 'pending', aiStatus: 'pending', score: 50,
-      publishedAt: discarded.publishedAt ?? undefined,
+      publishedAt,
     },
   });
-  await client.$executeRaw`INSERT INTO discarded_retry_audits (id, discardedId, sourceId, title, url, reason, detail, winnerArticleId, publishedAt, action, articleId) VALUES (${auditId}, ${discarded.id}, ${discarded.sourceId}, ${discarded.title}, ${discarded.url}, ${discarded.reason}, ${discarded.detail}, ${discarded.winnerArticleId}, ${discarded.publishedAt}, ${'created'}, ${articleId})`;
+  await client.$executeRaw`INSERT INTO discarded_retry_audits (id, discardedId, sourceId, title, url, reason, detail, winnerArticleId, publishedAt, action, articleId) VALUES (${auditId}, ${discarded.id}, ${discarded.sourceId}, ${discarded.title}, ${discarded.url}, ${discarded.reason}, ${discarded.detail}, ${discarded.winnerArticleId}, ${publishedAt}, ${'created'}, ${articleId})`;
   await client.discardedItem.delete({ where: { id } });
   return { kind: 'created', articleId: article.id, title: article.title, auditId };
 }
