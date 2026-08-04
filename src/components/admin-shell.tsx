@@ -42,6 +42,9 @@ const navItems: NavItem[] = [
   { key: 'settings', label: '设置', icon: Settings },
 ]
 
+const SIDEBAR_ACTION_CLASS = 'flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+const MOBILE_NAV_ITEM_CLASS = 'flex h-full flex-1 flex-col items-center justify-center gap-1 transition-colors'
+
 function readInitialTab(): TabKey {
   if (typeof window === 'undefined') return 'crawl-log'
   const params = new URLSearchParams(window.location.search)
@@ -118,15 +121,15 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
   }
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-background">
-      <div className="flex flex-1 overflow-hidden min-h-0">
-        <aside className="hidden sm:flex w-[180px] border-r border-border/70 bg-background flex-col shrink-0">
-          <div className="px-3 py-3.5 flex items-center gap-2 border-b border-border/70">
-            <div className="w-8 h-8 rounded-[6px] bg-primary flex items-center justify-center shrink-0 overflow-hidden shadow-[0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
-              <img src="/icon-192x192.png" alt="logo" className="w-full h-full object-cover" />
+    <div className="flex h-[100dvh] flex-col bg-background">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <aside className="hidden w-[180px] shrink-0 flex-col border-r border-border/70 bg-background sm:flex">
+          <div className="flex items-center gap-2 border-b border-border/70 px-3 py-3.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-[6px] bg-primary shadow-[0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+              <img src="/icon-192x192.png" alt="logo" className="h-full w-full object-cover" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-[13px] font-semibold leading-5 tracking-tight truncate">管理后台</h1>
+              <h1 className="truncate text-[13px] font-semibold leading-5 tracking-tight">管理后台</h1>
             </div>
           </div>
 
@@ -155,7 +158,7 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
           <div className="px-2 py-3 border-t border-border/70">
             <button
               onClick={() => router.push('/')}
-              className="mb-2 w-full flex h-9 items-center gap-2 rounded-md px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className={`${SIDEBAR_ACTION_CLASS} mb-2`}
             >
               <ExternalLink className="h-[15px] w-[15px] shrink-0" strokeWidth={1.8} />
               <span>返回前台</span>
@@ -163,19 +166,19 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
             {mounted ? (
               <button
                 onClick={toggleTheme}
-                className="w-full flex h-9 items-center gap-2 rounded-md px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/70 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                className={SIDEBAR_ACTION_CLASS}
                 aria-label="切换主题"
               >
                 {resolvedTheme === 'dark' ? <Sun className="h-[15px] w-[15px] shrink-0" strokeWidth={1.8} /> : <Moon className="h-[15px] w-[15px] shrink-0" strokeWidth={1.8} />}
                 <span>{resolvedTheme === 'dark' ? '亮色模式' : '暗色模式'}</span>
               </button>
-            ) : <div className="w-full h-9" />}
+            ) : <div className="h-9 w-full" />}
             <p className="mt-2 px-2.5 font-mono text-[10px] tracking-[0.08em] text-muted-foreground/70">v{APP_VERSION}</p>
           </div>
         </aside>
 
-        <main className="flex-1 flex flex-col overflow-hidden min-h-0 bg-background">
-          <div className="flex-1 overflow-hidden min-h-0 pb-16 sm:pb-0">
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+          <div className="min-h-0 flex-1 overflow-hidden pb-16 sm:pb-0">
             {visitedTabs.has('crawl-log') && (
               <section className={activeTab === 'crawl-log' ? 'h-full' : 'hidden'} aria-hidden={activeTab !== 'crawl-log'}>
                 <CrawlLogTab active={activeTab === 'crawl-log'} />
@@ -190,7 +193,7 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
         </main>
       </div>
 
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur border-t flex items-center justify-around h-16 pb-[env(safe-area-inset-bottom)]">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
         {navItems.map((item) => {
           const isActive = activeTab === item.key
           return (
@@ -199,13 +202,21 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
               onClick={() => handleTabChange(item.key)}
               onTouchStart={() => preloadTab(item.key)}
               aria-current={isActive ? 'page' : undefined}
-              className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-colors ${isActive ? 'text-primary' : 'text-muted-foreground'}`}
+              className={`${MOBILE_NAV_ITEM_CLASS} ${isActive ? 'text-primary' : 'text-muted-foreground'}`}
             >
               <item.icon className="h-5 w-5" />
               <span className="text-[11px] font-medium leading-none">{item.label}</span>
             </button>
           )
         })}
+        <button
+          onClick={() => router.push('/')}
+          className={`${MOBILE_NAV_ITEM_CLASS} text-muted-foreground`}
+          aria-label="返回前台"
+        >
+          <ExternalLink className="h-5 w-5" strokeWidth={1.8} />
+          <span className="text-[11px] font-medium leading-none">返回前台</span>
+        </button>
       </nav>
     </div>
   )

@@ -1,14 +1,20 @@
 import { memo, useCallback, useMemo } from 'react'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import { cancelArticleDetailPrefetch, prefetchArticleDetail } from '@/features/articles-api.client'
-import { formatPubDate } from './helpers'
+import { formatLastTime, formatPubDate, formatShortTime } from './helpers'
 import { StepIndicator, SkipBadge } from './step-indicator'
 import type { ArticleProgress } from './types'
 import type { ArticleWorkspacePanel } from '@/components/article-workspace'
 import { preloadArticleWorkspace } from '@/components/article-workspace-drawer'
 import { isBusinessSkipReason } from '@/lib/article-pipeline-status'
+import { CRAWL_LOG_ROW_HOVER_CLASS } from './styles'
 
 // ========== Article Row ==========
+
+const ARTICLE_ROW_CLASS = `group box-border flex w-full max-w-full min-w-0 flex-col gap-0 overflow-hidden px-2 py-0.5 text-[12px] leading-4 ${CRAWL_LOG_ROW_HOVER_CLASS} sm:px-1 sm:min-h-6 sm:flex-row sm:items-center sm:gap-1 sm:whitespace-nowrap`
+const ARTICLE_BADGE_CLASS = 'shrink-0 px-1 text-[11px] font-medium leading-5 text-white'
+const ARTICLE_ACTION_CLASS = 'inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted'
+const ARTICLE_STEP_LIST_CLASS = 'flex shrink-0 flex-nowrap items-center gap-0.5 overflow-hidden whitespace-nowrap pb-0.5 group-hover:ring-1 group-hover:ring-blue-300 group-hover:ring-offset-1 [&>*]:shrink-0 sm:flex-none sm:overflow-visible sm:pb-0'
 
 export const ArticleRow = memo(function ArticleRow({
   article,
@@ -30,6 +36,8 @@ export const ArticleRow = memo(function ArticleRow({
 }) {
   const isSkipped = article.crawl === 'skipped'
   const pubDate = formatPubDate(article.publishedAt)
+  const lastTimeLabel = formatLastTime(article.lastTime)
+  const shortLastTimeLabel = formatShortTime(article.lastTime)
 
 
   const nextAction = useMemo(() => article.process === 'failed'
@@ -62,15 +70,8 @@ export const ArticleRow = memo(function ArticleRow({
   const pushLoading = onStepActionLoading?.(article.id, 'push') ?? false
   const businessAiSkipped = article.ai === 'skipped' && isBusinessSkipReason(article.skipReason)
   const businessAiSkipLabel = '无价值'
-  const nextActionLoading = nextAction?.step === 'process'
-    ? processLoading
-    : nextAction?.step === 'cluster'
-      ? clusterLoading
-      : nextAction?.step === 'ai'
-        ? aiLoading
-        : nextAction?.step === 'push'
-          ? pushLoading
-          : false
+  const loadingByStep = { process: processLoading, cluster: clusterLoading, ai: aiLoading, push: pushLoading }
+  const nextActionLoading = nextAction ? loadingByStep[nextAction.step] : false
   const retryAt = nextAction?.step === 'process' ? article.processRetryAt
     : nextAction?.step === 'cluster' ? article.clusterRetryAt
       : nextAction?.step === 'ai' ? article.aiRetryAt
@@ -84,10 +85,10 @@ export const ArticleRow = memo(function ArticleRow({
   const isUnknownPushResult = article.technicalErrorReasons.push?.includes('投递结果未知') ?? false
 
   return (
-    <div className={`group flex min-w-0 flex-col gap-0 border-l-2 border-l-transparent px-1 py-0.5 text-[12px] leading-4 transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)] sm:min-h-6 sm:flex-row sm:items-center sm:gap-1 sm:overflow-hidden sm:whitespace-nowrap ${
+    <div className={`${ARTICLE_ROW_CLASS} ${
       isSkipped || article.technicalState === 'ignored' ? 'opacity-50' : ''
     }`}>
-      <div className="flex min-w-0 items-center gap-1 sm:contents">
+      <div className="order-1 flex w-full min-w-0 max-w-full items-center gap-1 sm:contents">
         {pubDate && (
           <span
             className="text-[11px] text-muted-foreground/70 shrink-0 tabular-nums font-mono"
@@ -101,44 +102,46 @@ export const ArticleRow = memo(function ArticleRow({
             <ScoreBadge score={article.score} variant="compact-square" />
           </span>
         )}
-        <div className="flex min-w-0 flex-1 items-center gap-1">
-          <button
-            type="button"
-            className="min-w-0 flex-1 line-clamp-2 text-left leading-4 text-muted-foreground group-hover:text-foreground sm:truncate sm:leading-4"
-            title={article.title}
-            onClick={handleOpen}
-            onMouseEnter={handlePrefetch}
-            onMouseLeave={() => cancelArticleDetailPrefetch(article.id)}
-            onFocus={handlePrefetch}
-          >
-            {article.title}
-          </button>
+        <button
+          type="button"
+          className="min-w-0 flex-1 truncate text-left leading-4 text-muted-foreground group-hover:text-foreground"
+          title={article.title}
+          onClick={handleOpen}
+          onMouseEnter={handlePrefetch}
+          onMouseLeave={() => cancelArticleDetailPrefetch(article.id)}
+          onFocus={handlePrefetch}
+        >
+          {article.title}
+        </button>
+      </div>
+      <div className="order-2 grid box-border w-full max-w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 overflow-hidden sm:contents">
+        <div className="order-2 flex min-w-0 items-center gap-0.5 overflow-hidden whitespace-nowrap sm:contents">
         {article.anomalyLabels?.includes('ad') && (
-          <span className="shrink-0 bg-slate-500 px-1 text-[11px] font-medium leading-5 text-white" title="业务识别：AI 判定为广告或软文">软文</span>
+          <span className={`${ARTICLE_BADGE_CLASS} bg-slate-500`} title="业务识别：AI 判定为广告或软文">软文</span>
         )}
         {article.anomalyLabels?.includes('duplicate') && (
-          <span className="shrink-0 bg-amber-500 px-1 text-[11px] font-medium leading-5 text-white" title="业务识别：已归入同一事件，非当前代表文章">重复</span>
+          <span className={`${ARTICLE_BADGE_CLASS} bg-amber-500`} title="业务识别：已归入同一事件，非当前代表文章">重复</span>
         )}
         {article.anomalyLabels?.includes('low-confidence') && (
-          <span className="shrink-0 bg-violet-600 px-1 text-[11px] font-medium leading-5 text-white" title="AI 对文章分析结论的证据把握不足">低分析置信</span>
+          <span className={`${ARTICLE_BADGE_CLASS} bg-violet-600`} title="AI 对文章分析结论的证据把握不足">低分析置信</span>
         )}
         {article.clusterStatus === 'needs_review' && (
           <>
-            <span className="shrink-0 bg-orange-500 px-1 text-[11px] font-medium leading-5 text-white">待复核</span>
-            <button type="button" onClick={() => onOpenArticlePanel?.(article.id, 'cluster')} className="inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted">去聚类复核</button>
+            <span className={`${ARTICLE_BADGE_CLASS} bg-orange-500`}>待复核</span>
+            <button type="button" onClick={() => onOpenArticlePanel?.(article.id, 'cluster')} className={ARTICLE_ACTION_CLASS}>去聚类复核</button>
           </>
         )}
         {article.technicalState === 'auto_retry' && (
           <>
-            <span className="shrink-0 bg-red-600 px-1 text-[11px] font-medium leading-5 text-white" title="流程失败，正在自动恢复">异常</span>
-            {retryAt && <span className="shrink-0 bg-blue-600 px-1 text-[11px] font-medium leading-5 text-white" title={`将在 ${new Date(retryAt).toLocaleString('zh-CN')} 自动重试`}>自动恢复中</span>}
-            <button type="button" onClick={() => onTechnicalStatus?.(article.id, 'ignore')} disabled={isJobRunning} className="inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted" title="立即停止后续自动重试并忽略">强制忽略</button>
+            <span className={`${ARTICLE_BADGE_CLASS} bg-red-600`} title="流程失败，正在自动恢复">异常</span>
+            {retryAt && <span className={`${ARTICLE_BADGE_CLASS} bg-blue-600`} title={`将在 ${new Date(retryAt).toLocaleString('zh-CN')} 自动重试`}>自动恢复中</span>}
+            <button type="button" onClick={() => onTechnicalStatus?.(article.id, 'ignore')} disabled={isJobRunning} className={ARTICLE_ACTION_CLASS} title="立即停止后续自动重试并忽略">强制忽略</button>
           </>
         )}
         {article.technicalState === 'manual' && (
           <>
-            <span className="shrink-0 bg-red-600 px-1 text-[11px] font-medium leading-5 text-white">需人工处理</span>
-            <button type="button" onClick={() => onTechnicalStatus?.(article.id, 'ignore')} disabled={isJobRunning} className="inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted" title="从技术待办中忽略">忽略</button>
+            <span className={`${ARTICLE_BADGE_CLASS} bg-red-600`}>需人工处理</span>
+            <button type="button" onClick={() => onTechnicalStatus?.(article.id, 'ignore')} disabled={isJobRunning} className={ARTICLE_ACTION_CLASS} title="从技术待办中忽略">忽略</button>
           </>
         )}
         {technicalReason && article.technicalState !== 'ignored' && (
@@ -156,50 +159,54 @@ export const ArticleRow = memo(function ArticleRow({
         )}
         {article.technicalState === 'ignored' && (
           <>
-            <span className="shrink-0 bg-zinc-500 px-1 text-[11px] font-medium leading-5 text-white">已忽略</span>
-            <button type="button" onClick={() => onTechnicalStatus?.(article.id, 'restore')} disabled={isJobRunning} className="inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted">恢复</button>
+            <span className={`${ARTICLE_BADGE_CLASS} bg-zinc-500`}>已忽略</span>
+            <button type="button" onClick={() => onTechnicalStatus?.(article.id, 'restore')} disabled={isJobRunning} className={ARTICLE_ACTION_CLASS}>恢复</button>
           </>
         )}
         {(isSkipped || article.ai === 'skipped') && article.skipReason && (
           <SkipBadge reason={article.skipReason} />
         )}
         {article.technicalState === 'waiting' && (
-          <span className="shrink-0 bg-slate-600 px-1 text-[11px] font-medium leading-5 text-white" title={article.aiRetryAt ? `将在 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 自动继续 AI 分析` : '等待 AI 服务恢复'}>AI 等待</span>
+          <span className={`${ARTICLE_BADGE_CLASS} bg-slate-600`} title={article.aiRetryAt ? `将在 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 自动继续 AI 分析` : '等待 AI 服务恢复'}>AI 等待</span>
         )}
         </div>
-      </div>
-      <div className="flex min-w-0 items-center gap-1 sm:contents">
-        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto pb-0.5 group-hover:ring-1 group-hover:ring-blue-300 group-hover:ring-offset-1 [&>*]:shrink-0 sm:flex-none sm:overflow-visible sm:pb-0">
-          <StepIndicator label="采集" status={article.crawl} />
-          <StepIndicator
-            label="处理"
-            status={processLoading ? 'running' : article.process}
-            onClick={actionFor('process')}
-            forceLabel={nextAction?.step === 'process' ? (retryWaiting ? '等待' : '重试') : undefined}
-            title={retryWaiting && article.processRetryAt ? `处理将在 ${new Date(article.processRetryAt).toLocaleString('zh-CN')} 自动重试` : article.technicalErrorReasons.process || (article.process === 'failed' ? '点击重试处理' : undefined)}
-          />
-          <StepIndicator
-            label="AI分析"
-            status={aiLoading ? 'running' : businessAiSkipped ? 'done' : article.ai}
-            onClick={actionFor('ai')}
-            forceLabel={nextAction?.step === 'ai' ? (retryWaiting ? '等待' : '重试') : undefined}
-            title={businessAiSkipped
-              ? 'AI 分析已完成，但内容不具备保留价值'
-              : article.technicalErrorReasons.ai || (article.ai === 'failed' ? '点击重试 AI 分析' : article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined)}
-          />
-          <StepIndicator
-            label="聚类"
-            status={clusterLoading ? 'running' : article.cluster}
-            onClick={actionFor('cluster')}
-            forceLabel={nextAction?.step === 'cluster' ? (retryWaiting ? '等待' : '重试') : undefined}
-            title={article.clusterStatus === 'needs_review'
-              ? '聚类结果存在歧义，点击打开文章工作台复核'
-              : article.technicalErrorReasons.cluster || (article.cluster === 'failed'
-                ? '点击重试聚类'
-                : article.clusterRetryAt
-                  ? `聚类将于 ${new Date(article.clusterRetryAt).toLocaleString('zh-CN')} 后自动重试`
-                  : undefined)}
-          />
+        <span className="order-3 flex h-5 w-[42px] min-w-0 shrink-0 items-center justify-end truncate border-l border-border/40 pl-1 text-right font-mono text-[10px] tabular-nums text-muted-foreground sm:hidden" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
+          {shortLastTimeLabel}
+        </span>
+        <div className="order-1 flex min-w-0 items-center gap-1 sm:contents">
+          <div className={ARTICLE_STEP_LIST_CLASS}>
+          <span className="hidden sm:contents">
+            <StepIndicator label="采集" status={article.crawl} />
+            <StepIndicator
+              label="处理"
+              status={processLoading ? 'running' : article.process}
+              onClick={actionFor('process')}
+              forceLabel={nextAction?.step === 'process' ? (retryWaiting ? '等待' : '重试') : undefined}
+              title={retryWaiting && article.processRetryAt ? `处理将在 ${new Date(article.processRetryAt).toLocaleString('zh-CN')} 自动重试` : article.technicalErrorReasons.process || (article.process === 'failed' ? '点击重试处理' : undefined)}
+            />
+            <StepIndicator
+              label="AI"
+              status={aiLoading ? 'running' : businessAiSkipped ? 'done' : article.ai}
+              onClick={actionFor('ai')}
+              forceLabel={nextAction?.step === 'ai' ? (retryWaiting ? '等待' : '重试') : undefined}
+              title={businessAiSkipped
+                ? 'AI 分析已完成，但内容不具备保留价值'
+                : article.technicalErrorReasons.ai || (article.ai === 'failed' ? '点击重试 AI 分析' : article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined)}
+            />
+            <StepIndicator
+              label="聚类"
+              status={clusterLoading ? 'running' : article.cluster}
+              onClick={actionFor('cluster')}
+              forceLabel={nextAction?.step === 'cluster' ? (retryWaiting ? '等待' : '重试') : undefined}
+              title={article.clusterStatus === 'needs_review'
+                ? '聚类结果存在歧义，点击打开文章工作台复核'
+                : article.technicalErrorReasons.cluster || (article.cluster === 'failed'
+                  ? '点击重试聚类'
+                  : article.clusterRetryAt
+                    ? `聚类将于 ${new Date(article.clusterRetryAt).toLocaleString('zh-CN')} 后自动重试`
+                    : undefined)}
+            />
+          </span>
           <StepIndicator
             label="公开"
             status={article.isPublic ? 'done' : 'not_applicable'}
@@ -212,16 +219,11 @@ export const ArticleRow = memo(function ArticleRow({
             forceLabel={nextAction?.step === 'push' && !pushResultUnknown ? (retryWaiting ? '等待' : '重试') : undefined}
             title={retryWaiting && article.pushRetryAt ? `推送将在 ${new Date(article.pushRetryAt).toLocaleString('zh-CN')} 自动重试` : article.technicalErrorReasons.push || (article.push === 'failed' ? '点击重试投递' : undefined)}
           />
+          </div>
+          <span className="hidden w-14 shrink-0 truncate text-right font-mono text-[11px] tabular-nums text-muted-foreground/50 sm:inline" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
+            {lastTimeLabel}
+          </span>
         </div>
-        <span className="ml-auto w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground/50" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
-        {article.lastTime ? (() => {
-          const d = new Date(article.lastTime)
-          const now = new Date()
-          const isToday = d.toDateString() === now.toDateString()
-          const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
-          return isToday ? time : `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${time}`
-        })() : ''}
-        </span>
       </div>
     </div>
   )

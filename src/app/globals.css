@@ -167,7 +167,7 @@
   font-family: var(--public-font-serif);
   font-weight: 700;
   letter-spacing: -0.02em;
-  text-wrap: balance;
+  text-wrap: wrap;
 }
 
 .public-section-enter,
@@ -395,6 +395,16 @@
 }
 
 @layer base {
+  /* 标题按自然顺序填满当前行，避免 balance 将首行提前截短。 */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    text-wrap: wrap;
+  }
+
   html {
     scrollbar-gutter: stable;
   }

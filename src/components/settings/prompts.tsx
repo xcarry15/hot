@@ -69,6 +69,11 @@ interface PromptBackupPayload {
   type: 'hot2-prompt-backup'
   version: 1
   exportedAt: string
+  sourceVersion?: {
+    id: string
+    name: string
+    createdAt: string
+  }
   prompts: Partial<Record<PromptBackupKey, string>>
 }
 
@@ -96,6 +101,10 @@ function promptVersionLabel(key: PromptVersionKey): string {
   if (key === 'ai_system_prompt') return '系统角色'
   const blockId = PROMPT_BLOCK_ORDER.find((id) => PROMPT_BLOCK_META[id].key === key)
   return blockId ? PROMPT_BLOCK_META[blockId].label : key
+}
+
+function safeFileNamePart(value: string): string {
+  return value.trim().replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || '未命名版本'
 }
 
 export default function PromptsTab({ settings, setSettings, onImportPrompts, saving }: Props) {
@@ -183,29 +192,39 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
     }
   }
 
-  const exportPrompts = () => {
-    const prompts: Partial<Record<PromptBackupKey, string>> = {
-      ai_system_prompt: settings.ai_system_prompt || DEFAULT_SYSTEM_PROMPT,
-    }
-    for (const blockId of PROMPT_BLOCK_ORDER) {
-      const meta = PROMPT_BLOCK_META[blockId]
-      prompts[meta.key] = settings[meta.key] || meta.defaultBlock
-    }
-
+  const downloadPromptBackup = (prompts: PromptVersionSnapshot, fileName: string, sourceVersion?: PromptVersion) => {
     const payload: PromptBackupPayload = {
       type: 'hot2-prompt-backup',
       version: 1,
       exportedAt: new Date().toISOString(),
       prompts,
     }
+    if (sourceVersion) {
+      payload.sourceVersion = {
+        id: sourceVersion.id,
+        name: sourceVersion.name,
+        createdAt: sourceVersion.createdAt,
+      }
+    }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `hot2-prompts-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}.json`
+    link.download = fileName
     link.click()
     URL.revokeObjectURL(url)
-    toast.success('提示词已导出')
+  }
+
+  const exportPrompts = () => {
+    const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
+    downloadPromptBackup(buildPromptVersionSnapshot(settings), `hot2-prompts-current-${date}.json`)
+    toast.success('当前提示词已导出')
+  }
+
+  const exportPromptVersion = (version: PromptVersion) => {
+    const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
+    downloadPromptBackup(version.prompts, `hot2-prompts-${safeFileNamePart(version.name)}-${date}.json`, version)
+    toast.success(`已导出提示词版本「${version.name}」`)
   }
 
   const importPrompts = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -477,6 +496,10 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
                 </div>
                 <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs text-violet-700 hover:text-violet-800" onClick={() => openPromptComparison(version)}>对比</Button>
                 <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setVersionToLoad(version)}>载入</Button>
+                <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => exportPromptVersion(version)} title={`导出「${version.name}」`}>
+                  <Download className="h-3 w-3" />
+                  导出
+                </Button>
                 <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive hover:text-destructive" onClick={() => void removePromptVersion(version.id)}>
                   <Trash2 className="h-3 w-3" />
                   删除

@@ -1,6 +1,6 @@
 import { useState, useMemo, memo, useCallback } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { CheckCircle2, XCircle, Loader2, Clock3 } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, Clock3, type LucideIcon } from 'lucide-react'
 import { ArticleRow } from './article-row'
 import { DiscardedRow } from './discarded-row'
 import { DISCARD_REASON_LABELS } from './helpers'
@@ -16,6 +16,14 @@ function humanizeSourceError(value?: string): string {
   if (/timeout/i.test(value)) return '请求超时，可稍后重试'
   if (/fetch failed|network|econn|socket/i.test(value)) return '网络请求失败，可稍后重试'
   return value.length > 180 ? `${value.slice(0, 180)}…` : value
+}
+
+const SOURCE_STATUS_CONFIG: Record<SourceProgress['status'], { icon: LucideIcon; iconClass: string; panelClass: string }> = {
+  running: { icon: Loader2, iconClass: 'animate-spin text-blue-600', panelClass: 'bg-blue-50/80 border-blue-200/50' },
+  success: { icon: CheckCircle2, iconClass: 'text-emerald-600', panelClass: 'bg-emerald-50/80 border-emerald-200/50' },
+  'not-run': { icon: Clock3, iconClass: 'text-muted-foreground', panelClass: 'bg-muted/50 border-border' },
+  warning: { icon: Clock3, iconClass: 'text-amber-600', panelClass: 'bg-amber-50/80 border-amber-200/50' },
+  error: { icon: XCircle, iconClass: 'text-destructive', panelClass: 'bg-red-50/80 border-red-200/50' },
 }
 
 // ========== Source Block ==========
@@ -53,17 +61,8 @@ export const SourceBlock = memo(function SourceBlock({
   /** 批量 Job 运行时禁用单篇动作。 */
   isJobRunning?: boolean
 }) {
-  const statusIcon = source.status === 'running' ? <Loader2 className="h-4 w-4 animate-spin text-blue-600" /> :
-                     source.status === 'success' ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> :
-                     source.status === 'not-run' ? <Clock3 className="h-4 w-4 text-muted-foreground" /> :
-                     source.status === 'warning' ? <Clock3 className="h-4 w-4 text-amber-600" /> :
-                     <XCircle className="h-4 w-4 text-destructive" />
-
-  const statusBg = source.status === 'running' ? 'bg-blue-50/80 border-blue-200/50' :
-                   source.status === 'success' ? 'bg-emerald-50/80 border-emerald-200/50' :
-                   source.status === 'not-run' ? 'bg-muted/50 border-border' :
-                   source.status === 'warning' ? 'bg-amber-50/80 border-amber-200/50' :
-                   'bg-red-50/80 border-red-200/50'
+  const statusConfig = SOURCE_STATUS_CONFIG[source.status]
+  const StatusIcon = statusConfig.icon
 
   const lastRunLabel = source.lastRunStatus === 'success'
     ? `本次发现 ${source.lastRunItemsFound ?? 0}`
@@ -73,21 +72,34 @@ export const SourceBlock = memo(function SourceBlock({
         ? '本次有警告'
         : '未运行'
 
-  // 稳定引用：source.articles 缺失时 `|| []` 会返回新数组，破坏下游 useMemo 的依赖判断
+  // 保持缺失文章列表的空数组引用稳定，避免破坏下游 useMemo 的依赖判断。
   const articles = useMemo(() => source.articles ?? [], [source.articles])
   const summaryArticles = summarySource?.articles ?? articles
   const totalCount = summaryArticles.length
-  const manualCount = summaryArticles.filter(a => a.technicalState === 'manual').length
-  const autoRetryCount = summaryArticles.filter(a => a.technicalState === 'auto_retry').length
-  const publicCount = summaryArticles.filter(a => a.isPublic).length
-  const pushedCount = summaryArticles.filter(a => a.push === 'done').length
-  const anomalyCount = summaryArticles.filter(hasArticleAnomaly).length
+  const articleMetrics = useMemo(() => {
+    let manualCount = 0
+    let autoRetryCount = 0
+    let publicCount = 0
+    let pushedCount = 0
+    let anomalyCount = 0
+
+    for (const article of summaryArticles) {
+      if (article.technicalState === 'manual') manualCount += 1
+      if (article.technicalState === 'auto_retry') autoRetryCount += 1
+      if (article.isPublic) publicCount += 1
+      if (article.push === 'done') pushedCount += 1
+      if (hasArticleAnomaly(article)) anomalyCount += 1
+    }
+
+    return { manualCount, autoRetryCount, publicCount, pushedCount, anomalyCount }
+  }, [summaryArticles])
+  const { manualCount, autoRetryCount, publicCount, pushedCount, anomalyCount } = articleMetrics
   const visibleDiscardedCount = source.discarded?.length ?? 0
 
   const [collapsedArticleGroups, setCollapsedArticleGroups] = useState<Set<string>>(() => new Set())
   // 按 reason 分组，组内按 publishedAt desc 排序
   const discardedGroups = useMemo(() => {
-    const discarded = source.discarded || []
+    const discarded = source.discarded ?? []
     const groups = new Map<string, DiscardedRowType[]>()
     for (const item of discarded) {
       const list = groups.get(item.reason) || []
@@ -142,27 +154,55 @@ export const SourceBlock = memo(function SourceBlock({
     )
   }
 
+  const renderDiscardedGroup = (reason: string, items: DiscardedRowType[], isBlacklist = false) => {
+    const group = isBlacklist ? 'blacklist' : `discarded:${reason}`
+    const groupLabel = DISCARD_REASON_LABELS[reason] || reason
+
+    return (
+      <div
+        key={group}
+        className={`border-t border-dashed ${isBlacklist ? 'bg-red-50/30 dark:bg-red-950/10' : 'bg-muted/20'}`}
+      >
+        {renderGroupHeader(group, groupLabel, items.length)}
+        {!collapsedArticleGroups.has(group) && (
+          <div className="divide-y divide-border/30 px-1 py-0.5">
+            {items.map(item => (
+              <DiscardedRow
+                key={item.id}
+                item={item}
+                onOpen={onOpenDiscarded}
+                onRetried={onDiscardedRetried}
+                keywordCategories={keywordCategories}
+                onKeywordAdded={onKeywordAdded}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
-    <div className="rounded-none border border-border overflow-hidden bg-card">
+    <div className="w-full min-w-0 max-w-full overflow-hidden rounded-none border border-border bg-card">
       <button
         onClick={onToggle}
-        className={`w-full flex flex-wrap items-center gap-x-1 gap-y-0.5 px-2 py-1.5 text-left text-sm border-b ${statusBg} hover:opacity-80 transition-opacity`}
+        className={`w-full flex flex-wrap items-center gap-x-1 gap-y-0.5 border-b px-2 py-1.5 text-left text-sm ${statusConfig.panelClass} transition-opacity hover:opacity-80`}
       >
         <div className="flex min-w-0 items-center gap-1.5">
-          {statusIcon}
+          <StatusIcon className={`h-4 w-4 ${statusConfig.iconClass}`} />
           <span className="min-w-0 truncate font-semibold">{source.name}</span>
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
           <Badge
             variant="secondary"
-            className={`text-[10px] px-1.5 py-0 rounded-none ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
+            className={`rounded-none px-1.5 py-0 text-[10px] ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
             title={humanizeSourceError(source.lastRunError) || '源级最近一次采集结果'}
           >
             {lastRunLabel}
           </Badge>
-            <span className="text-muted-foreground text-xs">文章 {totalCount}</span>
-            <span className="text-xs text-sky-700">公开 {publicCount}</span>
-            <span className="text-xs text-emerald-700">推送 {pushedCount}</span>
+          <span className="text-xs text-muted-foreground">文章 {totalCount}</span>
+          <span className="text-xs text-sky-700">公开 {publicCount}</span>
+          <span className="text-xs text-emerald-700">推送 {pushedCount}</span>
           <span className={`text-xs ${anomalyCount > 0 ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>异常 {anomalyCount}</span>
           {manualCount > 0 && <span className="text-xs font-medium text-red-700">需人工处理 {manualCount}</span>}
           {autoRetryCount > 0 && <span className="text-xs font-medium text-blue-700">自动恢复 {autoRetryCount}</span>}
@@ -175,7 +215,7 @@ export const SourceBlock = memo(function SourceBlock({
             <div className="border-t border-border/40">
               {renderGroupHeader('articles', '正常文章', articles.length)}
               {!collapsedArticleGroups.has('articles') && (
-                <div className="max-h-none divide-y divide-border/20 sm:overflow-y-auto sm:max-h-none">
+                <div className="w-full min-w-0 max-w-full divide-y divide-border/20">
                   {articles.map(article => (
                     <ArticleRow
                       key={article.id}
@@ -193,49 +233,9 @@ export const SourceBlock = memo(function SourceBlock({
             </div>
           )}
 
-          {normalDiscardGroups.map(([reason, items]) => {
-            const group = `discarded:${reason}`
-            const groupLabel = DISCARD_REASON_LABELS[reason] || reason
-            return (
-              <div key={reason} className="border-t border-dashed bg-muted/20">
-                {renderGroupHeader(group, groupLabel, items.length)}
-                {!collapsedArticleGroups.has(group) && (
-                  <div className="divide-y divide-border/30 px-1 py-0.5">
-                    {items.map(item => (
-                      <DiscardedRow
-                        key={item.id}
-                        item={item}
-                        onOpen={onOpenDiscarded}
-                        onRetried={onDiscardedRetried}
-                        keywordCategories={keywordCategories}
-                        onKeywordAdded={onKeywordAdded}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+          {normalDiscardGroups.map(([reason, items]) => renderDiscardedGroup(reason, items))}
 
-          {blacklistItems.length > 0 && (
-            <div className="border-t border-dashed bg-red-50/30 dark:bg-red-950/10">
-              {renderGroupHeader('blacklist', '黑名单', blacklistItems.length)}
-              {!collapsedArticleGroups.has('blacklist') && (
-                <div className="divide-y divide-border/30 px-1 py-0.5">
-                  {blacklistItems.map(item => (
-                    <DiscardedRow
-                      key={item.id}
-                      item={item}
-                      onOpen={onOpenDiscarded}
-                      onRetried={onDiscardedRetried}
-                      keywordCategories={keywordCategories}
-                      onKeywordAdded={onKeywordAdded}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {blacklistItems.length > 0 && renderDiscardedGroup('filter:blacklist', blacklistItems, true)}
         </div>
       )}
 

@@ -1,9 +1,12 @@
 import { Check, XCircle, Loader2, Circle, Play } from 'lucide-react'
+import type { ReactNode } from 'react'
 import type { StepStatus } from './types'
 
 // ========== Step Indicator ==========
 
-const STEP_STYLES: Record<StepStatus, { bg: string; text: string; icon: React.ReactNode }> = {
+const UNAVAILABLE_ICON = <Circle className="h-3 w-3 opacity-50" />
+
+const STEP_STYLES: Record<StepStatus, { bg: string; text: string; icon: ReactNode }> = {
   done: {
     bg: 'bg-emerald-100',
     text: 'text-emerald-700',
@@ -27,7 +30,7 @@ const STEP_STYLES: Record<StepStatus, { bg: string; text: string; icon: React.Re
   skipped: {
     bg: 'bg-slate-100',
     text: 'text-slate-500',
-    icon: <Circle className="h-3 w-3 opacity-50" />,
+    icon: UNAVAILABLE_ICON,
   },
   blocked: {
     bg: 'bg-amber-50',
@@ -37,14 +40,19 @@ const STEP_STYLES: Record<StepStatus, { bg: string; text: string; icon: React.Re
   filtered: {
     bg: 'bg-slate-100',
     text: 'text-slate-500',
-    icon: <Circle className="h-3 w-3 opacity-50" />,
+    icon: UNAVAILABLE_ICON,
   },
   not_applicable: {
     bg: 'bg-slate-100',
     text: 'text-slate-500',
-    icon: <Circle className="h-3 w-3 opacity-50" />,
+    icon: UNAVAILABLE_ICON,
   },
 }
+
+const INDICATOR_CLASS = 'inline-flex h-5 shrink-0 items-center gap-0 whitespace-nowrap rounded-none px-0.5 text-[10px] font-medium leading-5 sm:gap-0.5 sm:px-1.5'
+const ACTIONABLE_STATUSES: readonly StepStatus[] = ['pending', 'failed', 'skipped', 'filtered', 'done']
+const STEP_ICON_CLASS = 'hidden shrink-0 items-center sm:inline-flex'
+
 export function StepIndicator({
   label,
   status,
@@ -62,70 +70,48 @@ export function StepIndicator({
 }) {
   const s = STEP_STYLES[status]
   // filtered 仍允许用户手动执行；调用方会使用 force=true，绕过批量推送阈值。
-  const actionable = status === 'pending'
-    || status === 'failed'
-    || status === 'skipped'
-    || status === 'filtered'
-    || status === 'done'
-  const isClickable = actionable && !!onClick
+  const isClickable = ACTIONABLE_STATUSES.includes(status) && !!onClick
   // 失败后的操作仍占用原阶段位置；即使因其他任务被禁用，也不应退回成普通状态文案。
   const displayLabel = forceLabel && status !== 'running' ? forceLabel : label
   const isPushAction = label === '推送'
   const isPublicStatus = label === '公开'
-  const columnWidth = isPushAction || isPublicStatus ? 'w-[62px]' : label === 'AI分析' ? 'w-[58px]' : 'w-[48px]'
+  const columnWidth = isPushAction || isPublicStatus ? 'w-[40px] sm:w-[62px]' : 'w-[34px] sm:w-[48px]'
   const isForcePush = isPushAction && !!forceLabel && isClickable
-  const isUnfinishedUnavailable = !isClickable && (
-    status === 'pending'
-    || status === 'blocked'
-    || status === 'skipped'
-    || status === 'filtered'
-    || status === 'not_applicable'
-  )
+  const isUnfinishedUnavailable = !isClickable && !['done', 'failed', 'running'].includes(status)
   // 颜色优先表达状态：完成=绿、运行=蓝、失败=红、阻塞/强制=琥珀、待处理=灰。
   // 仅普通“待推送”使用绿色无背景，表达这是可执行的正向动作。
-  const pushActionStyle = !isPushAction
-    ? status === 'pending'
-      ? `${columnWidth} justify-center bg-amber-100 text-amber-800 hover:bg-amber-200`
-      : `${columnWidth} justify-center ${s.bg} ${s.text}`
-    : isForcePush
-      ? 'w-[62px] justify-center bg-amber-100 text-amber-800 hover:bg-amber-200'
-      : status === 'pending'
-        ? 'w-[62px] justify-center bg-amber-100 text-amber-800 hover:bg-amber-200'
-    : `${columnWidth} justify-center ${s.bg} ${s.text}`
-  const pushDisplayStyle = isPushAction
-    ? isUnfinishedUnavailable
-      ? 'w-[62px] justify-center bg-slate-100 text-foreground'
-      : `w-[62px] justify-center ${s.bg} ${s.text}`
-    : isUnfinishedUnavailable
-      ? `${columnWidth} justify-center bg-slate-100 text-foreground`
-      : `${columnWidth} justify-center ${s.bg} ${s.text}`
+  const actionStateClass = status === 'pending' || isForcePush
+    ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+    : `${s.bg} ${s.text}`
+  const displayStateClass = isUnfinishedUnavailable
+    ? 'bg-slate-100 text-foreground'
+    : `${s.bg} ${s.text}`
 
   return isClickable ? (
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex h-5 shrink-0 items-center gap-0.5 rounded-none px-1.5 text-[10px] font-medium leading-5
-        ${pushActionStyle}
+      className={`${INDICATOR_CLASS} ${columnWidth} justify-center ${actionStateClass}
         cursor-pointer hover:ring-1 hover:ring-primary/20 hover:brightness-95 active:scale-95 transition-[box-shadow,filter,transform] duration-150
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
       `}
       title={title || `点击执行「${displayLabel}」`}
     >
-      {status === 'pending' ? (
-        <Play className="h-3 w-3" strokeWidth={3} />
-      ) : (
-        s.icon
-      )}
+      <span className={STEP_ICON_CLASS} aria-hidden="true">
+        {status === 'pending' ? (
+          <Play className="h-3 w-3" strokeWidth={3} />
+        ) : (
+          s.icon
+        )}
+      </span>
       {displayLabel}
     </button>
   ) : (
     <span
-      className={`inline-flex h-5 shrink-0 items-center gap-0.5 rounded-none px-1.5 text-[10px] font-medium leading-5
-        ${pushDisplayStyle}
-      `}
+      className={`${INDICATOR_CLASS} ${columnWidth} justify-center ${displayStateClass}`}
       title={title}
     >
-      {!isUnfinishedUnavailable && s.icon}
+      {!isUnfinishedUnavailable && <span className={STEP_ICON_CLASS} aria-hidden="true">{s.icon}</span>}
       {displayLabel}
     </span>
   )

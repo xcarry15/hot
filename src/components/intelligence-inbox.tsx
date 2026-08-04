@@ -40,8 +40,11 @@ import { ArticleReviewPanel } from "./intelligence-inbox/article-review-panel";
 import { ArticleWorkspaceSupportPanels } from "./intelligence-inbox/article-workspace-support-panels";
 import { EventCalibrationPanel } from "./intelligence-inbox/event-calibration-panel";
 import { createArticleWorkspaceViewModel } from "./intelligence-inbox/workspace-view-model";
-
-
+import {
+  WORKSPACE_CANVAS_CLASS,
+  WORKSPACE_SCROLL_CLASS,
+  WORKSPACE_SHEET_CLASS,
+} from "./intelligence-inbox/styles";
 
 export interface IntelligenceInboxProps {
   articleId?: string | null;
@@ -424,8 +427,8 @@ export default function IntelligenceInbox({
       </div>
     </div>
   ) : detail && workspace ? (
-    <ScrollArea className="h-full w-full min-w-0 overscroll-contain [&>[data-radix-scroll-area-viewport]]:overflow-x-hidden">
-      <div className="mx-auto w-full min-w-0 max-w-[1080px] space-y-2 bg-muted/20 p-0 sm:p-2">
+    <ScrollArea className={WORKSPACE_SCROLL_CLASS}>
+      <div className={WORKSPACE_CANVAS_CLASS}>
         <ArticleWorkspaceHeader
           detail={detail}
           brands={workspace.brands}
@@ -507,7 +510,7 @@ export default function IntelligenceInbox({
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="h-[100dvh] w-screen max-w-[100vw] min-h-0 gap-0 overflow-hidden p-0 pb-[env(safe-area-inset-bottom)] [&>[data-slot=sheet-close]]:z-10 [&>[data-slot=sheet-close]]:rounded-none [&>[data-slot=sheet-close]]:bg-background sm:w-full sm:max-w-[min(1100px,78dvw)]">
+        <SheetContent side="right" className={WORKSPACE_SHEET_CLASS}>
           <SheetHeader className="sr-only">
             <SheetTitle>文章审核与事件校准工作台</SheetTitle>
             <SheetDescription>内容校准、事件修正、公开与推送</SheetDescription>

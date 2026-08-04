@@ -13,7 +13,7 @@
  *   - 不建立通用 Repository；与 maintenance-service 各保留本地事务 helper。
  */
 import { Prisma, type FetchStatus } from '@prisma/client';
-import { AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD } from '@/contracts/ai-confidence';
+import { LOW_ANALYSIS_CONFIDENCE_FILTER } from '@/contracts/ai-confidence';
 import { db } from '@/lib/db';
 import {
   ARTICLE_DETAIL_SELECT,
@@ -99,13 +99,16 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
   if (filter.category) where.category = filter.category;
   if (Number.isFinite(filter.minScore)) where.score = { gte: filter.minScore };
   if (Number.isFinite(filter.minRelevance)) where.relevance = { gte: filter.minRelevance };
-  if (Number.isFinite(filter.maxConfidence)) where.aiConfidence = { lt: filter.maxConfidence };
+  if (Number.isFinite(filter.maxConfidence)) {
+    where.aiStatus = 'done';
+    where.aiConfidence = { lt: filter.maxConfidence };
+  }
   if (filter.sourceId) where.sourceId = filter.sourceId;
   if (filter.fetchStatus) where.fetchStatus = filter.fetchStatus;
   if (filter.anomaly === 'needs_attention') {
     where.OR = [
       { clusterStatus: 'needs_review' },
-      { aiStatus: 'done', aiConfidence: { lt: AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD } },
+      LOW_ANALYSIS_CONFIDENCE_FILTER,
     ];
   }
   if (filter.anomaly === 'technical') {

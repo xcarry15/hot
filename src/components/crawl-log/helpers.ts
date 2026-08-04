@@ -15,6 +15,28 @@ export function formatPubDate(input?: string | null): string {
   return `${mm}-${dd} ${hh}:${mi}`
 }
 
+export function formatLastTime(input?: string | number | null): string {
+  if (!input) return ''
+  const date = new Date(input)
+  if (isNaN(date.getTime())) return ''
+
+  const time = [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map(value => String(value).padStart(2, '0'))
+    .join(':')
+  if (date.toDateString() === new Date().toDateString()) return time
+
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${month}-${day} ${time}`
+}
+
+export function formatShortTime(input?: string | number | null): string {
+  if (!input) return ''
+  const date = new Date(input)
+  if (isNaN(date.getTime())) return ''
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
 export const DISCARD_REASON_LABELS: Record<string, string> = {
   'dedup:url': '链接已存在',
   'filter:keyword': '未命中关键词',

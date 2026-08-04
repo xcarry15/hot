@@ -26,8 +26,12 @@ import {
   KEYWORD_BLACKLIST_CATEGORY,
   KEYWORD_DEFAULT_CATEGORY,
 } from '@/contracts/keywords'
+import { CRAWL_LOG_ROW_HOVER_CLASS } from './styles'
 
 // ========== Discarded Row ==========
+
+const DISCARDED_ROW_CLASS = `group min-w-0 overflow-hidden px-1 py-0.5 text-[11px] leading-4 text-muted-foreground ${CRAWL_LOG_ROW_HOVER_CLASS}`
+const RETRY_BUTTON_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-none text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700'
 
 export function DiscardedRow({
   item,
@@ -49,7 +53,6 @@ export function DiscardedRow({
   const [keywordCategory, setKeywordCategory] = useState<string>(KEYWORD_DEFAULT_CATEGORY)
   const [retrying, setRetrying] = useState(false)
   const isKeywordFiltered = item.reason === 'filter:keyword'
-  const canRetry = isKeywordFiltered
   const categoryOptions = Array.from(new Set([
     KEYWORD_DEFAULT_CATEGORY,
     KEYWORD_BLACKLIST_CATEGORY,
@@ -95,7 +98,7 @@ export function DiscardedRow({
   }
 
   return (
-    <div className="group min-w-0 overflow-hidden border-l-2 border-l-transparent px-1 py-0.5 text-[11px] leading-4 text-muted-foreground transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)]">
+    <div className={DISCARDED_ROW_CLASS}>
       <div className="flex min-w-0 flex-nowrap items-center gap-x-1">
         {pubDate && (
           <span className="shrink-0 font-mono text-[10px] leading-4 tabular-nums text-muted-foreground/70">
@@ -112,12 +115,12 @@ export function DiscardedRow({
         <span className="shrink-0 rounded-none bg-amber-100 px-1 py-0 text-[10px] leading-4 text-amber-700">
           {label}
         </span>
-        {canRetry && (
+        {isKeywordFiltered && (
           <button
             onClick={openRetryDialog}
             disabled={retrying}
             title="手动采集此文章，可先添加关键词"
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-none text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700"
+            className={RETRY_BUTTON_CLASS}
           >
             {retrying ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

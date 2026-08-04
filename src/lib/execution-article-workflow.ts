@@ -1,6 +1,7 @@
 import { reprocessWithAI } from './ai';
 import { refetchArticle } from './article-refetch-service';
 import { db } from './db';
+import { LOW_ANALYSIS_CONFIDENCE_FILTER } from '@/contracts/ai-confidence';
 import { clusterArticle, markClusterFailure } from './event-clustering-service';
 import { recalculateEventById } from './event-service';
 import { assertJobNotCancelled } from './execution-cancellation';
@@ -42,6 +43,31 @@ export async function validateSingleArticleWorkflow(
     }
   }
   return { ok: true };
+}
+
+/**
+ * 校验低分析置信队列的批量 AI 重跑。
+ *
+ * 只允许队列当下仍是“AI 已完成且置信度低”的文章，避免管理员打开列表后
+ * 文章状态已变化，却误把其它文章重新清空事件并送入 AI。
+ */
+export async function validateBatchArticleRegeneration(
+  articleIds: string[],
+): Promise<{ ok: true; articleIds: string[] } | { ok: false; status: 400 | 409; reason: string }> {
+  const ids = [...new Set(articleIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return { ok: false, status: 400, reason: '至少选择一篇文章' };
+  if (ids.length > 100) return { ok: false, status: 400, reason: '单次最多重跑 100 篇文章' };
+
+  const eligibleCount = await db.article.count({
+    where: {
+      id: { in: ids },
+      ...LOW_ANALYSIS_CONFIDENCE_FILTER,
+    },
+  });
+  if (eligibleCount !== ids.length) {
+    return { ok: false, status: 409, reason: '部分文章已不属于低分析置信队列，请刷新后重试' };
+  }
+  return { ok: true, articleIds: ids };
 }
 
 export function isSingleWorkflow(payload: Record<string, unknown>): boolean {

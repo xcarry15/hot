@@ -1,0 +1,1 @@
+export const CRAWL_LOG_ROW_HOVER_CLASS = 'border-l-2 border-l-transparent transition-colors hover:border-l-blue-500 hover:bg-blue-100/80 hover:shadow-[inset_0_1px_0_rgba(59,130,246,0.12),inset_0_-1px_0_rgba(59,130,246,0.12)]'

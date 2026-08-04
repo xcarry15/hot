@@ -27,7 +27,6 @@ import {
 import {
   Plus,
   Trash2,
-  X,
   Loader2,
   Tag,
   Upload,
@@ -278,17 +277,16 @@ export default function KeywordsTab() {
 
     return (
       <div key={item.id} className="flex min-h-5 w-fit max-w-full items-center gap-0.5 py-0" title={`${countLabel} ${count} 次`}>
-        <span className="truncate text-[11px]">{word}</span>
-        <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">({count})</span>
         <button
           type="button"
           onClick={handleItemDelete}
-          className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground hover:text-destructive"
+          className="min-w-0 max-w-full truncate text-left text-[11px] hover:text-destructive hover:underline"
           aria-label={`删除${groupLabel}关键词 ${word}`}
-          title={`删除「${word}」`}
+          title={`点击删除「${word}」`}
         >
-          <X className="h-3 w-3" aria-hidden="true" />
+          {word}
         </button>
+        <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">({count})</span>
       </div>
     )
   }
@@ -477,9 +475,9 @@ export default function KeywordsTab() {
                   <div className="flex w-max min-w-full flex-nowrap items-start gap-1">
                     {sortedKeywordGroups.map(group => (
                       <section key={group.key} className={`w-fit shrink-0 overflow-hidden border ${getGroupClassName(group)}`}>
-                        <div className="flex h-5 items-center gap-0.5 border-b border-inherit bg-transparent px-1.5">
-                          <span className="truncate text-[11px] font-medium text-muted-foreground">{group.label}</span>
-                          <span className="text-[10px] text-muted-foreground">({group.items.length})</span>
+                        <div className="flex h-7 items-center gap-1 border-b-2 border-border/70 bg-muted/70 px-1.5">
+                    <span className="truncate text-xs font-semibold text-foreground">{group.label}</span>
+                          <span className="rounded-sm bg-background/80 px-1 text-[10px] font-medium tabular-nums text-muted-foreground">{group.items.length}</span>
                         </div>
                         <div className="space-y-0 px-1.5 py-0.5">
                           {group.items.map(item => renderKeywordGroupItem(item, group.label))}

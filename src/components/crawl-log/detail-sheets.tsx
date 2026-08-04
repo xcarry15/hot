@@ -1,16 +1,16 @@
-"use client"
+'use client'
 
-import type { ArticleWorkspacePanel } from "@/components/article-workspace"
-import DiscardedDetailSheet from "../article-detail-sheet"
-import ArticleLibrarySheet from "../article-library-sheet"
-import ArticleWorkspaceDrawer from "../article-workspace-drawer"
+import type { ArticleWorkspacePanel } from '@/components/article-workspace'
+import DiscardedDetailSheet from '../article-detail-sheet'
+import ArticleLibrarySheet from '../article-library-sheet'
+import ArticleWorkspaceDrawer from '../article-workspace-drawer'
 
 interface CrawlLogDetailSheetsProps {
   discardedDetailId: string | null
   detailOpen: boolean
   onDetailOpenChange: (open: boolean) => void
   libraryOpen: boolean
-  libraryView: "all" | "attention" | "cluster_review" | "low_confidence"
+  libraryView: 'all' | 'attention' | 'cluster_review' | 'low_confidence'
   humanQueue: { total: number; clusterReview: number; lowConfidence: number }
   onLibraryOpenChange: (open: boolean) => void
   onOpenArticle: (articleId: string) => void
@@ -23,9 +23,20 @@ interface CrawlLogDetailSheetsProps {
 }
 
 export function CrawlLogDetailSheets({
-  discardedDetailId, detailOpen, onDetailOpenChange, libraryOpen, libraryView, humanQueue,
-  onLibraryOpenChange, onOpenArticle, articleDetailId, articleDetailPanel, articleDetailOpen,
-  onArticleDetailOpenChange, onArticleChange, onChanged,
+  discardedDetailId,
+  detailOpen,
+  onDetailOpenChange,
+  libraryOpen,
+  libraryView,
+  humanQueue,
+  onLibraryOpenChange,
+  onOpenArticle,
+  articleDetailId,
+  articleDetailPanel,
+  articleDetailOpen,
+  onArticleDetailOpenChange,
+  onArticleChange,
+  onChanged,
 }: CrawlLogDetailSheetsProps) {
   return (
     <>

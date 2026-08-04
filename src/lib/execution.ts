@@ -54,7 +54,10 @@ import {
 import type { JobExecutor, JobType } from './execution-types';
 
 export type { JobType } from './execution-types';
-export { validateSingleArticleWorkflow } from './execution-article-workflow';
+export {
+  validateBatchArticleRegeneration,
+  validateSingleArticleWorkflow,
+} from './execution-article-workflow';
 
 const LEASE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds

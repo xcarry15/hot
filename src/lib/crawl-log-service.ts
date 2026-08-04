@@ -30,7 +30,7 @@ import type {
   JobSnapshot,
   SourceProgress,
 } from '@/contracts/crawl-log';
-import { AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD } from '@/contracts/ai-confidence';
+import { isLowAnalysisConfidence } from '@/contracts/ai-confidence';
 import { getTechnicalWorkQueue } from '@/lib/technical-work-queue-service';
 import { getPushTargetStatesForEvents } from '@/lib/push/delivery';
 import { ACTIVE_JOB_STATUSES, TERMINAL_JOB_STATUSES } from '@/lib/job-status';
@@ -354,10 +354,7 @@ export async function getCrawlLogSnapshot(
       anomalyLabels: [
         ...(a.isAd ? ['ad' as const] : []),
         ...(a.event && a.event.articleCount > 1 && !isRepresentative ? ['duplicate' as const] : []),
-        ...((a.aiStatus === 'done'
-          || (a.aiStatus === 'skipped' && a.skipReason === '无价值'))
-          && a.aiConfidence != null
-          && a.aiConfidence < AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD
+        ...(isLowAnalysisConfidence({ aiStatus: a.aiStatus, aiConfidence: a.aiConfidence })
           ? ['low-confidence' as const]
           : []),
       ],

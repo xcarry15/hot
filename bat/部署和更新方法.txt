@@ -1,49 +1,79 @@
-Hot2 部署和更新方法（精简版）
-============================
+Hot2 生产部署与更新
+====================
 
-生产目录：/www/wwwroot/hot.kfxz.cn
-生产端口：3011
-PM2 应用：h2-hot2（只能运行一个实例）
-环境要求：Node.js >= 20.9.0、npm >= 10、PM2、sqlite3、rsync、unzip、tar、curl
+固定配置：
 
+- 项目目录：`/www/wwwroot/hot.kfxz.cn`
+- Node 服务：`127.0.0.1:3011`
+- PM2 应用：`h2-hot2`，只运行一个实例
+- 数据库：`../db/custom.db`
+- 备份目录：`/www/backup/h2-hot2`
 
-一、服务端首次初始化或完全重建
---------------------------------
+生产环境要求：Node.js >= 20.9.0、npm >= 10、PM2、sqlite3、rsync、tar、curl。首次手工同步还需要 `unzip`。
 
-此流程会先停止原有 PM2 进程，再清理旧项目代码，最后删除旧 SQLite、node_modules 和 .next，重新创建全新数据。
-现有 .env 会保留；如果存在旧数据库，初始化脚本会先备份。
+## 一、日常更新（推荐）
 
-不要手工执行 rm -rf /www/wwwroot/hot.kfxz.cn/*：它可能误删配置，并且容易遗漏隐藏文件。项目资料统一由 rsync --delete 收敛清理，同时明确保留 .env、db/ 和 node_modules/；其中旧数据库和 node_modules 会在后续初始化脚本中备份或删除。
+日常不需要登录服务器，也不需要上传 Windows ZIP：
 
-1. 本地双击 bat/run.bat，生成最新 zip。
+```text
+推送/合并 master
+  → GitHub Actions CI
+  → CI 成功后自动部署 production
+```
 
-2. 把 zip 上传到项目目录外：
+`.github/workflows/deploy.yml` 会打包生产文件并调用 `scripts/deploy-production.sh`。部署脚本会依次：
 
-  /www/wwwroot/h2-hot2-release.zip
+1. 验证 `.env`、SQLite 和当前 migration 基线。
+2. 停止 PM2 并备份 SQLite。
+3. 用 `rsync --delete` 同步代码，保留 `.env`、`db/` 和 `node_modules/`。
+4. 执行 `npm ci`、`db:migrate:deploy`、`db:generate`、`db:optimize` 和生产构建。
+5. 以单实例启动 PM2，检查 `/api/health` 和 Next.js CSS 资源。
 
-不要直接把 zip 解压到 /www/wwwroot/hot.kfxz.cn，否则新版本已删除的旧文件可能残留。
+当前仓库只有 `20260731120000_current_schema_baseline` 一个 migration。线上历史不匹配时，部署会在停止服务前拒绝执行；请先备份，再按第二节全新初始化。部署失败不会自动回滚代码或 migration。
 
-3. 确认生产配置存在：
+手动运行 GitHub Actions 的 `Deploy production` 不会重新执行 CI，只能用于已经确认通过 CI 的提交。
 
-  ls -lh /www/wwwroot/hot.kfxz.cn/.env
+## 二、首次部署或完全重建
 
-如果是第一次部署，没有 .env，执行：
+⚠️ 该流程会删除现有 SQLite、`node_modules` 和 `.next`，数据库会重新创建。旧数据库会先备份，但业务数据不会自动恢复。
 
-  mkdir -p /www/wwwroot/hot.kfxz.cn
-  cd /www/wwwroot/hot.kfxz.cn
-  echo 'DATABASE_URL=file:../db/custom.db' > .env
-  echo "API_TOKEN=$(openssl rand -hex 32)" >> .env
-   echo "SETTINGS_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> .env
-   echo 'NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn' >> .env
+### 1. 生成部署包
 
-   SETTINGS_ENCRYPTION_KEY 用于解密已保存的 Webhook；初始化后必须长期保持不变，不能随 API_TOKEN 一起轮换。
+在 Windows 项目根目录双击：
 
-4. 在宝塔终端完整复制下面这段命令。
+```text
+bat/run.bat
+```
 
-括号中的内容运行在子 Shell；即使出错，也不会因为 set -e 断开当前宝塔终端。
-Windows 生成的 zip 可能让 unzip 返回“使用反斜杠路径”的警告码 1，下方命令已正确兼容。
+它会调用 `bat/pack-deploy.ps1`，在 `bat/` 生成 `h2-hot2-deploy-*.zip`。部署包不包含 `.env`、`db/`、测试、文档和本地依赖。
 
-  (
+### 2. 准备生产配置
+
+将 ZIP 上传到项目目录之外，例如：
+
+```text
+/www/wwwroot/h2-hot2-release.zip
+```
+
+不要直接把 ZIP 解压到项目目录，否则已删除的旧文件可能残留。
+
+确认 `/www/wwwroot/hot.kfxz.cn/.env` 存在，并至少包含：
+
+```env
+DATABASE_URL=file:../db/custom.db
+API_TOKEN=<随机强令牌>
+SETTINGS_ENCRYPTION_KEY=<长期不变的随机密钥>
+NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
+```
+
+可用 `openssl rand -hex 32` 分别生成两个随机值。`SETTINGS_ENCRYPTION_KEY` 用于解密已保存的 Webhook，后续部署不能随意更换。
+
+### 3. 验证并同步部署包
+
+在服务器终端执行下面的完整命令。Windows ZIP 的 `unzip` 可能返回反斜杠路径警告码 1，脚本已兼容；不要用 `rm -rf 项目目录/*` 替代。
+
+```bash
+(
   set -Eeuo pipefail
 
   APP=/www/wwwroot/hot.kfxz.cn
@@ -59,7 +89,6 @@ Windows 生成的 zip 可能让 unzip 返回“使用反斜杠路径”的警告
   unzip -q "$ZIP" -d "$TMP"
   UNZIP_CODE=$?
   set -e
-
   if [ "$UNZIP_CODE" -gt 1 ]; then
     echo "错误：ZIP 解压失败，状态码 $UNZIP_CODE"
     exit 1
@@ -74,10 +103,9 @@ Windows 生成的 zip 可能让 unzip 返回“使用反斜杠路径”的警告
   RELEASE_ROOT="$(dirname "$LOCK_FILE")"
   test -f "$RELEASE_ROOT/package.json"
   test -f "$RELEASE_ROOT/scripts/init-production.sh"
-
   echo "识别到项目目录：$RELEASE_ROOT"
 
-  # 发布包验证成功后再停止旧进程，避免无效 zip 导致站点提前离线
+  # 发布包验证成功后再停止旧进程，避免无效 ZIP 导致站点提前离线
   pm2 stop h2-hot2 >/dev/null 2>&1 || true
   pm2 delete h2-hot2 >/dev/null 2>&1 || true
 
@@ -90,162 +118,108 @@ Windows 生成的 zip 可能让 unzip 返回“使用反斜杠路径”的警告
 
   cd "$APP"
   ls -lh package.json package-lock.json scripts/init-production.sh
-
   rm -rf "$TMP"
   echo "项目文件同步完成"
-  )
+)
 
-  echo "子 Shell 退出码：$?"
+echo "子 Shell 退出码：$?"
+```
 
-成功结果应显示：
+### 4. 全新初始化并启动
 
-  项目文件同步完成
-  子 Shell 退出码：0
+```bash
+cd /www/wwwroot/hot.kfxz.cn
+CONFIRM_RESET=YES bash scripts/init-production.sh
+```
 
-5. 执行一键初始化：
+交互执行时也可以直接运行 `bash scripts/init-production.sh`，输入 `RESET` 确认。脚本会备份旧数据库、重新安装依赖、应用 baseline migration、生成 Prisma Client、写入种子数据、优化数据库、构建并启动 PM2，最后检查本机和正式域名健康接口。
 
-   cd /www/wwwroot/hot.kfxz.cn
-   bash scripts/init-production.sh
+首次配置 PM2 开机启动时执行一次：
 
-输入 RESET 确认；非交互环境使用 `CONFIRM_RESET=YES bash scripts/init-production.sh`。脚本会自动完成：
+```bash
+pm2 startup
+# 执行上一步输出的命令后：
+pm2 save
+```
 
-- 再次确认旧 PM2 应用已停止（可重复执行）
-- 备份并删除旧 SQLite
-- 全新安装依赖
-- 应用 migration、生成 Prisma Client、写入种子数据
-- 优化数据库、生产构建、启动 PM2
-- 检查本机和正式域名 /api/health
-
-完整顺序是：验证 zip -> 停止 PM2 -> rsync 清理旧代码并同步新代码 -> 备份旧数据库 -> 全新初始化 -> 启动 PM2。
-
-首次配置 PM2 开机启动时，再执行：
-
-  pm2 startup
-
-复制执行它输出的命令，然后执行：
-
-  pm2 save
-  rm -f /www/wwwroot/h2-hot2-release.zip
-
-
-二、日常更新（已经自动化）
---------------------------
-
-正常情况下不需要登录宝塔，也不需要手工上传 zip。
-
-   推送或合并到 master
-     -> GitHub Actions 自动测试
-     -> 测试成功
-     -> 自动备份数据库并部署生产环境
-
-本轮 migration 已压缩为当前 schema 的单一基线，不提供旧 migration 或历史业务数据兼容层。基线发布后的第一次线上更新，必须先执行上面的“首次初始化或完全重建”并重新采集；日常自动部署只接受已经记录 `20260731120000_current_schema_baseline` 的数据库，否则会在停机前拒绝执行。
-
-查看运行状态：
-
-  https://github.com/xcarry15/hot/actions
-
-手动运行 Deploy production 不会重新执行 CI，也不会验证目标提交是否已通过 CI；只有确认目标提交已由 CI 成功验证后才可使用。
-
-自动部署会保留服务器上的：
-
-- .env
-- db/custom.db
-- node_modules（同步阶段保留，随后 npm ci 更新）
-
-自动部署失败不会自动恢复旧代码或回滚 migration。需要恢复时，应使用部署前生成的数据库备份，并重新部署一个明确可用的提交。
-
-
-三、本地一键初始化
-------------------
+## 三、本地初始化
 
 Windows 双击：
 
-  bat/本地一键初始化.bat
+```text
+bat/本地一键初始化.bat
+```
 
-该 bat 只负责启动纯英文 PowerShell 脚本 bat/local-init.ps1，避免 Windows CMD 因中文编码或复杂命令解析而闪退。初始化失败时窗口会保留并显示错误信息。
+它会停止当前项目 Node 进程，清理本地 SQLite 和 `.next`，按需安装依赖、应用 migration、生成 Prisma Client、写入 seed，并启动 `http://localhost:3011`。默认复用已有 `node_modules`；依赖异常或 `package-lock.json` 变化时使用：
 
-确认后会自动：
+```text
+bat/本地一键初始化.bat -RefreshDependencies
+```
 
-- 停止当前项目的本地 Node 进程
-- 删除本地 SQLite 和 .next；默认复用已有 node_modules
-- 保留现有 .env；没有时从 .env.example 创建
-- 依赖缺失时执行带缓存优化的 npm ci、migration、Prisma generate、seed、数据库优化
-- 启动开发服务并打开 http://localhost:3011
+该流程不会运行测试或生产构建。
 
-该流程不保留本地历史数据，也不会自动运行测试或生产构建。
+## 四、常用检查
 
-如果依赖安装异常或 package-lock.json 已发生变化，可在项目根目录执行：
+```bash
+pm2 status
+pm2 logs h2-hot2 --lines 100
+curl --fail --silent --show-error http://127.0.0.1:3011/api/health
+curl --fail --silent --show-error https://hot.kfxz.cn/api/health
 
-  bat/本地一键初始化.bat -RefreshDependencies
+cd /www/wwwroot/hot.kfxz.cn
+npm run db:migrate:status
+pm2 restart h2-hot2 --update-env
+```
 
+### PM2 停止与删除
 
-四、只清理业务历史，保留配置
-----------------------------
+手工维护时：
 
-如果项目已经正常运行，只想重新采集文章，不需要重建整个服务器。
+```bash
+# 停止并删除 PM2 进程定义（不会删除项目文件或数据库）
+pm2 stop h2-hot2
+pm2 delete h2-hot2
 
-进入后台：
+# 需要恢复时
+cd /www/wwwroot/hot.kfxz.cn
+pm2 start npm --name h2-hot2 -- start
+pm2 save
+```
 
-  设置 -> 数据 -> 一键清空所有数据
+### 按需清理 Nginx 全局缓存
 
-它会删除文章、事件、任务、采集和推送历史，但保留数据源、关键词、系统设置和推送目标。
+普通更新不需要清理；仅在旧 HTML 或 CSS/JS 缓存导致页面异常时执行。先确认实际目录：
 
+```bash
+nginx -T 2>/dev/null | grep -E '^[[:space:]]*proxy_cache_path'
+```
 
-五、常用故障检查
-----------------
+将上一步目录填入 `NGINX_CACHE_DIR`，确认它位于 `/www/server/nginx/` 后执行：
 
-  pm2 status
-  pm2 logs h2-hot2 --lines 100
-  curl --fail --silent --show-error http://127.0.0.1:3011/api/health
-  curl --fail --silent --show-error https://hot.kfxz.cn/api/health
+```bash
+NGINX_CACHE_DIR=/www/server/nginx/proxy_cache_dir
+test -d "$NGINX_CACHE_DIR"
+test "$NGINX_CACHE_DIR" != /www/server/nginx
+test "$NGINX_CACHE_DIR" != /www/server/nginx/conf
+case "$NGINX_CACHE_DIR" in /www/server/nginx/*) ;; *) exit 1 ;; esac
+find "$NGINX_CACHE_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+nginx -t && nginx -s reload
+```
 
-检查数据库 migration：
+不要把 `/www/server/nginx`、`/www/server/nginx/conf` 或项目目录作为清理目标。仍无样式时，检查 `bat/本项目的nginx.txt`。
 
-  cd /www/wwwroot/hot.kfxz.cn
-  npm run db:migrate:status
+只有修改 Nginx 配置后才需要单独执行：
 
-重启应用：
+```bash
+nginx -t && nginx -s reload
+```
 
-  pm2 restart h2-hot2 --update-env
+普通项目更新不需要清理服务器全局 Nginx 缓存，也不需要 reload Nginx。
 
-如果网页能打开但完全没有样式，先检查 Next.js CSS 是否被 Nginx 拦截：
+## 五、安全与数据规则
 
-  curl -I https://hot.kfxz.cn/_next/static/chunks/任意一个.css
-
-必须返回 `200`。Nginx 配置不要使用 `alias /www/wwwroot/hot.kfxz.cn/.next/static/`，
-统一按 `bat/本项目的nginx.txt` 将 `/_next/` 代理到 `127.0.0.1:3011`，否则宝塔或全局安全规则可能把 CSS/JS 返回 403。
-
-修改 Nginx 配置后才需要：
-
-  nginx -t && nginx -s reload
-
-普通项目更新不要清理服务器全局 Nginx 缓存，也不需要 reload Nginx。
-
-
-六、备份和磁盘清理
-------------------
-
-数据库备份目录：
-
-  /www/backup/h2-hot2
-
-查看占用：
-
-  du -sh /www/backup/h2-hot2 ~/.pm2/logs
-
-查看超过 30 天的备份：
-
-  find /www/backup/h2-hot2 -mindepth 1 -maxdepth 1 -type d -mtime +30 -print
-
-确认不再需要后删除：
-
-  find /www/backup/h2-hot2 -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf -- {} +
-
-
-七、安全提醒
-------------
-
-- 不要把 .env、API_TOKEN、SSH 私钥、Webhook、数据库或部署 zip 提交到 GitHub。
-- 不要在聊天、文档或命令日志中回显密码、API_TOKEN 或 SSH 私钥。
-- 生产环境不要执行 prisma db push、db:danger:reset 或 db:seed，除非明确进行本文件第一节的全新初始化。
-- PM2 禁止使用 -i max 或 cluster 模式，本项目只能运行一个实例。
+- 不要提交或外传 `.env`、API Token、Webhook、SSH 私钥、SQLite 数据和部署包。
+- 生产环境禁止使用 `prisma db push`、`db:danger:reset`；`db:seed` 仅用于初始化或明确的全新重建。
+- migration 或完全重建前先确认数据库备份有效。
+- PM2 禁止 `-i max` 和 cluster 模式。
+- 普通业务数据清理使用后台「设置 → 数据」中的维护功能，不要通过删除 SQLite 文件代替。

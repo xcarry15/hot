@@ -3,11 +3,10 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
 import {
-  Loader2, Activity, Play, RefreshCcw, XCircle, Search,
+  Loader2, Activity,
 } from 'lucide-react'
 
 import type {
@@ -46,10 +45,36 @@ import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
 import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
 import { retrySource, retrySources } from '@/features/sources-api.client'
 
+const AUTO_CRAWL_COMMIT_DELAY_MS = 5_000
+type WorkflowStage = 'collect' | 'process' | 'ai' | 'cluster' | 'push'
+type WorkflowAction = WorkflowStage | 'all'
+
+const WORKFLOW_STAGES: readonly WorkflowStage[] = ['collect', 'process', 'ai', 'cluster', 'push']
+const WORKFLOW_STAGE_LABELS: Record<WorkflowStage, string> = {
+  collect: '采集',
+  process: '处理',
+  ai: 'AI',
+  cluster: '聚类',
+  push: '推送',
+}
+const WORKFLOW_SINGLE_STAGES: Record<WorkflowStage, WorkflowStage[]> = {
+  collect: ['collect'],
+  process: ['process', 'ai', 'cluster'],
+  cluster: ['cluster'],
+  ai: ['ai', 'cluster'],
+  push: ['push'],
+}
+
+const WORKBENCH_STEP_BUTTON_CLASS = 'h-6 w-full px-0 text-[11px] sm:h-7 sm:w-[52px] sm:px-2 sm:text-xs'
+const WORKBENCH_TOGGLE_CLASS = 'flex h-6 items-center justify-center gap-0.5 border border-border/70 bg-background/60 px-0.5 text-[10px] text-muted-foreground select-none cursor-pointer sm:h-auto sm:gap-1 sm:border-0 sm:bg-transparent sm:px-0 sm:text-xs'
+const WORKBENCH_SWITCH_CLASS = 'scale-75'
+const WORKBENCH_ACTION_CLASS = 'h-6 w-full gap-0.5 px-1 text-[11px] sm:h-7 sm:w-auto sm:gap-1 sm:px-2 sm:text-xs'
+const WORKBENCH_PRIMARY_ACTION_CLASS = `${WORKBENCH_ACTION_CLASS} whitespace-nowrap sm:px-2.5`
+
 // ========== Main Component ==========
 
 export default function CrawlLogTab({ active = true }: { active?: boolean }) {
-  const { snapshot, loading, error, refreshSnapshot } = useCrawlLogSnapshot({
+  const { snapshot, error, refreshSnapshot } = useCrawlLogSnapshot({
     // 项目日处理量低于 200；保留一定余量即可，避免每轮传输 1000 条明细。
     limit: 250,
     enabled: active,
@@ -81,9 +106,17 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const [autoCrawl, setAutoCrawl] = useState<boolean | null>(null)
   const [autoCrawlSaving, setAutoCrawlSaving] = useState(false)
   const autoCrawlSavingRef = useRef(false)
+  const autoCrawlCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoCrawlPersistedRef = useRef<boolean | null>(null)
+
+  useEffect(() => () => {
+    if (autoCrawlCommitTimerRef.current !== null) {
+      clearTimeout(autoCrawlCommitTimerRef.current)
+      autoCrawlCommitTimerRef.current = null
+    }
+  }, [])
   // 惰性读取 URL，避免挂载时覆盖深链状态。
   const [filterState, setFilterState] = useState<FilterState>(() => readFilterFromCurrentUrl())
-  const scrollRef = useRef<HTMLDivElement>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [stopLoading, setStopLoading] = useState(false)
   const [discardedDetailId, setDiscardedDetailId] = useState<string | null>(null)
@@ -189,7 +222,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   }, [discardedDetailId])
 
   // 局部请求级 loading：仅用于按钮点击瞬间——成功入队 / 失败都不持久化。
-  const [stageRequestLoading, setStageRequestLoading] = useState<Record<string, boolean>>({})
+  const [stageRequestLoading, setStageRequestLoading] = useState<Partial<Record<WorkflowAction, boolean>>>({})
   const [sourceRetryLoading, setSourceRetryLoading] = useState(false)
   const [stepActionLoading, setStepActionLoading] = useState<Record<string, boolean>>({})
   const operationRequestLockRef = useRef(false)
@@ -263,7 +296,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     fetchSettings()
       .then((data: Record<string, string>) => {
         if (cancelled) return
-        setAutoCrawl(data.auto_crawl_enabled === 'true')
+        const enabled = data.auto_crawl_enabled === 'true'
+        autoCrawlPersistedRef.current = enabled
+        setAutoCrawl(enabled)
       })
       .catch(() => { /* keep null = unknown */ })
     return () => { cancelled = true }
@@ -271,7 +306,11 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   useEffect(() => subscribeToSettingsChanged((changes) => {
     if (typeof changes.auto_crawl_enabled === 'string') {
-      setAutoCrawl(changes.auto_crawl_enabled === 'true')
+      const enabled = changes.auto_crawl_enabled === 'true'
+      autoCrawlPersistedRef.current = enabled
+      if (autoCrawlCommitTimerRef.current === null && !autoCrawlSavingRef.current) {
+        setAutoCrawl(enabled)
+      }
     }
   }), [])
 
@@ -287,7 +326,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   // 当前阶段按钮的 loading 状态：activeJob.currentStage 已知 → 标记对应按钮。
   // stageRequestLoading 仅记录"用户刚点了还没返回"瞬间，不持久化。
   const stageLoading = useMemo(() => {
-    const empty = { collect: false, process: false, ai: false, cluster: false, push: false, all: false }
+    const empty: Record<WorkflowAction, boolean> = { collect: false, process: false, ai: false, cluster: false, push: false, all: false }
     if (!activeJob) return empty
     const stage = activeJob.currentStage
     if (stage === 'collect') return { ...empty, collect: true, all: activeJob.type === 'full' }
@@ -298,27 +337,20 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     return empty
   }, [activeJob])
 
-  // 进度条数值与文案——纯派生自 activeJob；无 activeJob 时退回 latestJob 的 result。
+  // 进度条数值与文案仅派生自 activeJob，避免从历史 Job 伪造运行进度。
   const progressView = useMemo(() => {
     if (activeJob) {
       const total = activeJob.progressTotal
       const done = activeJob.progressDone
       const pct = total > 0 ? Math.round((done / total) * 100) : null
-      const stageLabel =
-        activeJob.currentStage === 'collect' ? '采集'
-        : activeJob.currentStage === 'process' ? '处理'
-        : activeJob.currentStage === 'ai' ? 'AI分析'
-        : activeJob.currentStage === 'cluster' ? '事件聚类'
-        : activeJob.currentStage === 'push' ? '推送'
+      const stageLabel = activeJob.currentStage && activeJob.currentStage in WORKFLOW_STAGE_LABELS
+        ? WORKFLOW_STAGE_LABELS[activeJob.currentStage as WorkflowStage]
         : ''
       return {
         isRunning: true,
         pct,
-        total,
-        done,
         errors: activeJob.progressErrors,
         stageLabel,
-        itemLabel: activeJob.currentItemLabel,
       }
     }
     return null
@@ -326,26 +358,11 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   const activeTaskView = useMemo(() => {
     if (!activeJob) return null
-    type Stage = 'collect' | 'process' | 'ai' | 'cluster' | 'push'
-    const labels: Record<Stage, string> = {
-      collect: '采集',
-      process: '处理',
-      ai: 'AI 分析',
-      cluster: '聚类',
-      push: '推送',
-    }
-    const singleStages: Record<Stage, Stage[]> = {
-      collect: ['collect'],
-      process: ['process', 'ai', 'cluster'],
-      cluster: ['cluster'],
-      ai: ['ai', 'cluster'],
-      push: ['push'],
-    }
     const startStage = activeJob.workflowStartAt ?? activeJob.currentStage
-    const stages: Stage[] = activeJob.activeArticleId && startStage
-      ? singleStages[startStage]
+    const stages: WorkflowStage[] = activeJob.activeArticleId && startStage
+      ? WORKFLOW_SINGLE_STAGES[startStage]
       : activeJob.type === 'full'
-        ? ['collect', 'process', 'ai', 'cluster', 'push']
+        ? [...WORKFLOW_STAGES]
         : [activeJob.type]
     const currentStage = activeJob.currentStage ?? startStage
     const currentIndex = currentStage ? stages.indexOf(currentStage) : -1
@@ -355,14 +372,14 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     const taskLabel = activeJob.activeArticleId
       ? '单篇恢复'
       : activeJob.type === 'full'
-        ? '全流程'
-        : `${currentStage ? labels[currentStage] : '批量'}任务`
+        ? '全量抓取'
+        : `${currentStage ? WORKFLOW_STAGE_LABELS[currentStage as WorkflowStage] : '批量'}任务`
     return {
       taskLabel,
       targetLabel: targetArticle?.title || activeJob.currentItemLabel || null,
       stages: stages.map((stage, index) => ({
         key: stage,
-        label: labels[stage],
+        label: WORKFLOW_STAGE_LABELS[stage],
         state: index < currentIndex ? 'done' as const : index === currentIndex ? 'running' as const : 'pending' as const,
         progress: index === currentIndex
           ? { done: activeJob.progressDone, total: activeJob.progressTotal }
@@ -400,22 +417,35 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   // ── Button Handlers ──
 
-  const handleToggleAutoCrawl = async (next: boolean) => {
+  const handleToggleAutoCrawl = (next: boolean) => {
     if (autoCrawlSavingRef.current) return
-    const prev = autoCrawl
-    autoCrawlSavingRef.current = true
-    setAutoCrawl(next)
-    setAutoCrawlSaving(true)
-    try {
-      await saveSettings({ auto_crawl_enabled: next ? 'true' : 'false' })
-      toast.success(next ? '已启用自动抓取' : '已停用自动抓取', { duration: 2000 })
-    } catch {
-      setAutoCrawl(prev ?? true)
-      toast.error('设置保存失败')
-    } finally {
-      autoCrawlSavingRef.current = false
-      setAutoCrawlSaving(false)
+
+    if (autoCrawlCommitTimerRef.current !== null) {
+      clearTimeout(autoCrawlCommitTimerRef.current)
+      autoCrawlCommitTimerRef.current = null
     }
+
+    setAutoCrawl(next)
+
+    if (autoCrawlPersistedRef.current === next) return
+
+    autoCrawlCommitTimerRef.current = setTimeout(() => {
+      autoCrawlCommitTimerRef.current = null
+      autoCrawlSavingRef.current = true
+      setAutoCrawlSaving(true)
+      void saveSettings({ auto_crawl_enabled: next ? 'true' : 'false' })
+        .then(() => {
+          autoCrawlPersistedRef.current = next
+        })
+        .catch(() => {
+          setAutoCrawl(autoCrawlPersistedRef.current ?? !next)
+          toast.error('设置保存失败')
+        })
+        .finally(() => {
+          autoCrawlSavingRef.current = false
+          setAutoCrawlSaving(false)
+        })
+    }, AUTO_CRAWL_COMMIT_DELAY_MS)
   }
 
   const handleRetrySource = async (sourceId: string) => {
@@ -455,9 +485,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     }
   }
 
-  const runStage = async (stage: 'all' | 'collect' | 'process' | 'ai' | 'cluster' | 'push') => {
+  const runStage = async (stage: WorkflowAction) => {
     if (isOperationBusy || operationRequestLockRef.current) return
-    if (stage === 'all' && typeof window !== 'undefined' && !window.confirm('运行全流程将依次执行采集、处理、AI 分析、事件聚类，并可能推送文章。确认继续吗？')) {
+    if (stage === 'all' && typeof window !== 'undefined' && !window.confirm('运行全量抓取将依次执行采集、处理、AI 分析、事件聚类，并可能推送文章。确认继续吗？')) {
       return
     }
     operationRequestLockRef.current = true
@@ -603,187 +633,154 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   // ── Render Helpers ──
 
-  const stageButtonLoading = (stage: 'all' | 'collect' | 'process' | 'ai' | 'cluster' | 'push') =>
+  const stageButtonLoading = (stage: WorkflowAction) =>
     stageRequestLoading[stage] || stageLoading[stage]
 
   return (
-    <div className="flex flex-col h-full [&_[data-slot=button]]:rounded-none [&_[data-slot=badge]]:rounded-none">
+    <div className="flex h-full min-w-0 max-w-full flex-col overflow-x-hidden [&_[data-slot=button]]:rounded-none [&_[data-slot=badge]]:rounded-none">
       {/* ===== Header ===== */}
-      <div className="border-b bg-muted px-2 py-1.5 sm:px-4 sm:py-2 space-y-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-2 shrink-0">
-            <Activity className="h-4 w-4 text-primary" />
+      <div className="border-b bg-muted px-2 py-1 sm:px-4 sm:py-2 space-y-1.5 sm:space-y-2">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-1 sm:flex sm:items-center sm:gap-2">
+          <div className="order-1 flex min-w-0 items-center gap-2 shrink-0">
             <span className="text-sm font-semibold">任务中心</span>
-          </div>
 
-          {headerBadge.spinning ? (
-            <Badge variant={headerBadge.variant} className="text-xs px-2 py-0 gap-1 border-blue-300 text-blue-700 bg-blue-50">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              {headerBadge.label}
-            </Badge>
-          ) : (
-            <Badge variant={headerBadge.variant} className={`text-xs px-2 py-0 ${headerBadge.label === '已完成' ? 'bg-emerald-100 text-emerald-700' : ''}`}>
-              {headerBadge.label}
-            </Badge>
-          )}
-
-          <div className="flex items-center gap-1 flex-wrap">
-          <StageButton
-            label="采集"
-            loading={stageButtonLoading('collect')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('collect')}
-          />
-          <StageButton
-            label="处理"
-            loading={stageButtonLoading('process')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('process')}
-          />
-          <StageButton
-            label="AI分析"
-            loading={stageButtonLoading('ai')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('ai')}
-          />
-          <StageButton
-            label="事件聚类"
-            loading={stageButtonLoading('cluster')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('cluster')}
-          />
-          <StageButton
-            label="推送"
-            loading={stageButtonLoading('push')}
-            disabled={isOperationBusy}
-            onClick={() => runStage('push')}
-          />
-          </div>
-
-          <div className="flex-1" />
-
-          <label className="flex items-center gap-1 text-xs text-muted-foreground select-none cursor-pointer shrink-0">
-            <Switch
-              checked={filterState.includeDiscarded}
-              onCheckedChange={(v) => setFilterState(prev => ({ ...prev, includeDiscarded: v }))}
-              aria-label="包含未入库项"
-              className="scale-75"
-            />
-            <span>含未入库</span>
-          </label>
-
-          <label className="flex items-center gap-1 text-xs text-muted-foreground select-none cursor-pointer shrink-0">
-            <Switch
-              checked={filterState.publishedToday}
-              onCheckedChange={(v) => setFilterState(prev => ({ ...prev, publishedToday: v }))}
-              aria-label="只看今天发布的文章"
-              className="scale-75"
-            />
-            <span>今日发布</span>
-          </label>
-
-          <label className="flex items-center gap-1 text-xs text-muted-foreground select-none cursor-pointer shrink-0">
-            {autoCrawl === null ? (
-              <span className="text-xs text-muted-foreground/50 italic">读取中...</span>
+            {headerBadge.spinning ? (
+              <Badge variant={headerBadge.variant} className="text-xs px-2 py-0 gap-1 border-blue-300 text-blue-700 bg-blue-50">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {headerBadge.label}
+              </Badge>
             ) : (
-              <Switch
-                checked={autoCrawl}
-                onCheckedChange={handleToggleAutoCrawl}
-                disabled={autoCrawlSaving}
-                className="scale-75"
+              <Badge variant={headerBadge.variant} className={`text-xs px-2 py-0 ${headerBadge.label === '已完成' ? 'bg-emerald-100 text-emerald-700' : ''}`}>
+                {headerBadge.label}
+              </Badge>
+            )}
+          </div>
+
+          <div className="order-3 col-span-2 grid w-full grid-cols-5 gap-1 sm:order-2 sm:flex sm:w-auto">
+            {WORKFLOW_STAGES.map(stage => (
+              <StageButton
+                key={stage}
+                label={WORKFLOW_STAGE_LABELS[stage]}
+                loading={stageButtonLoading(stage)}
+                disabled={isOperationBusy}
+                onClick={() => runStage(stage)}
+                className={WORKBENCH_STEP_BUTTON_CLASS}
               />
-            )}
-            <span>自动抓取</span>
-          </label>
+            ))}
+          </div>
 
-          <Button
-            size="sm"
-            onClick={() => runStage('all')}
-            disabled={isOperationBusy}
-            className="h-7 gap-1 px-2.5 text-xs whitespace-nowrap"
-          >
-            {stageButtonLoading('all') ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Play className="h-3.5 w-3.5" />
-            )}
-            {stageButtonLoading('all') ? '运行中...' : '运行全流程'}
-          </Button>
+          <div className="hidden flex-1 sm:order-3 sm:block" />
 
-          {isAnyRunning && (
+          <div className="order-2 grid w-full grid-cols-3 gap-1 sm:order-4 sm:flex sm:w-auto sm:items-center sm:gap-2">
+            <label className={WORKBENCH_TOGGLE_CLASS}>
+              <Switch
+                checked={filterState.includeDiscarded}
+                onCheckedChange={(v) => setFilterState(prev => ({ ...prev, includeDiscarded: v }))}
+                aria-label="包含未入库项"
+                className={WORKBENCH_SWITCH_CLASS}
+              />
+              <span>未入</span>
+            </label>
+
+            <label className={WORKBENCH_TOGGLE_CLASS}>
+              <Switch
+                checked={filterState.publishedToday}
+                onCheckedChange={(v) => setFilterState(prev => ({ ...prev, publishedToday: v }))}
+                aria-label="只看今天发布的文章"
+                className={WORKBENCH_SWITCH_CLASS}
+              />
+              <span>今日</span>
+            </label>
+
+            <label className={WORKBENCH_TOGGLE_CLASS}>
+              {autoCrawl === null ? (
+                <span className="text-[10px] text-muted-foreground/50 italic">读取中...</span>
+              ) : (
+                <Switch
+                  checked={autoCrawl}
+                  onCheckedChange={handleToggleAutoCrawl}
+                  disabled={autoCrawlSaving}
+                  className={WORKBENCH_SWITCH_CLASS}
+                />
+              )}
+              <span>自动</span>
+            </label>
+          </div>
+
+          <div className={`order-4 col-span-2 grid w-full gap-1 sm:order-5 sm:flex sm:w-auto sm:items-center sm:gap-1 ${isAnyRunning ? 'grid-cols-4' : 'grid-cols-3'}`}>
             <Button
               size="sm"
-              variant="destructive"
-              onClick={handleStopWorker}
-              disabled={stopLoading}
-            className="h-7 gap-1 px-2.5 text-xs whitespace-nowrap"
-              aria-label="停止后台抓取"
+              onClick={() => runStage('all')}
+              disabled={isOperationBusy}
+              className={WORKBENCH_PRIMARY_ACTION_CLASS}
             >
-              {stopLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <XCircle className="h-3.5 w-3.5" />
-              )}
-              {stopLoading ? '停止中...' : '停止任务'}
+              <span>{stageButtonLoading('all') ? '运行中' : '全量抓取'}</span>
             </Button>
-          )}
 
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="h-7 gap-1 px-2 text-xs shrink-0"
-            title="从数据库拉取真实状态,清除卡住的转圈"
-          >
-            {refreshing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-3.5 w-3.5" />
+            {isAnyRunning && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleStopWorker}
+                disabled={stopLoading}
+                className={WORKBENCH_PRIMARY_ACTION_CLASS}
+                aria-label="停止后台抓取"
+              >
+                <span>{stopLoading ? '停止中' : '停止'}</span>
+              </Button>
             )}
-            {refreshing ? '刷新中...' : '刷新'}
-          </Button>
 
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => openLibrary('all')}
-            className="h-7 gap-1 px-2 text-xs shrink-0"
-            title="搜索全部历史文章"
-          >
-            <Search className="h-3.5 w-3.5" />
-            全部文章
-          </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className={WORKBENCH_ACTION_CLASS}
+              title="从数据库拉取真实状态,清除卡住的转圈"
+            >
+              <span>{refreshing ? '刷新中' : '刷新'}</span>
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => openLibrary('all')}
+              className={WORKBENCH_ACTION_CLASS}
+              title="搜索全部历史文章"
+            >
+              <span>搜索</span>
+            </Button>
+          </div>
         </div>
 
         {/* 顶部流水线状态筛选；选择正常/异常后显示具体状态。 */}
-          <CrawlLogFilters
-            filterState={filterState}
-            setFilterState={setFilterState}
-            activePrimaryFilter={activePrimaryFilter}
-            secondaryFilterChips={secondaryFilterChips}
-            filterCounts={filterCounts}
-          />
+        <CrawlLogFilters
+          filterState={filterState}
+          setFilterState={setFilterState}
+          activePrimaryFilter={activePrimaryFilter}
+          secondaryFilterChips={secondaryFilterChips}
+          filterCounts={filterCounts}
+        />
 
         <TaskStatusPanels
           activeTaskView={activeTaskView}
           progressView={progressView}
-          sourceCount={sources.length}
-          loading={loading}
           latestJobFailure={latestJobFailure}
           failedSourcesCount={failedSources.length}
           failedArticles={failedArticles}
           autoRetryArticles={autoRetryArticles}
           isOperationBusy={isOperationBusy}
           onRetryFailedSources={() => void handleRetryFailedSources()}
-          humanQueue={humanQueue}
-          onOpenAttention={() => openLibrary("attention")}
         />
       </div>
 
       {/* ===== Source List ===== */}
-      <ScrollArea className="flex-1 min-h-0 min-w-0 h-full" ref={scrollRef}>
-        <div className="min-w-0 p-2 sm:p-3 space-y-1.5">
+      {/*
+       * 此处不用 Radix ScrollArea：其内部 table 包装层会按内容的固有宽度扩张，
+       * 移动端的长标题会把文章行推到可视区外。原生纵向滚动可把列表宽度稳定约束在父容器内。
+       */}
+      <div className="flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-contain">
+        <div className="w-full min-w-0 max-w-full space-y-1.5 p-2 sm:p-3">
           {filteredSources.map(source => (
             <SourceBlock
               key={source.id}
@@ -807,7 +804,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           {filteredSources.length === 0 && (
             error ? (
               <EmptyState
-              title="任务中心加载失败"
+                title="任务中心加载失败"
                 description={error}
                 action={
                   <Button size="sm" variant="outline" onClick={handleRefresh} disabled={refreshing}>
@@ -834,7 +831,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
             )
           )}
         </div>
-      </ScrollArea>
+      </div>
 
       {/* 未入库记录保留轻量诊断；已入库文章进入当前工作台的详情抽屉。 */}
       <CrawlLogDetailSheets

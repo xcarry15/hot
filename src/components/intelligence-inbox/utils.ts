@@ -13,9 +13,6 @@ const EVENT_CLASSIFICATION_ACTIONS = new Set([
   "confirm_independent",
 ]);
 
-const WORKSPACE_ACTION_CLASS = "min-h-7 h-auto max-w-full rounded-none px-2 text-left text-xs font-medium leading-4 whitespace-normal sm:whitespace-nowrap";
-const EDITOR_FIELD_CLASS = "rounded-none border-amber-300 bg-amber-50 text-xs focus-visible:border-amber-400 focus-visible:ring-amber-400/30";
-
 const FULL_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
   month: "2-digit",
@@ -286,9 +283,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export {
-  EDITOR_FIELD_CLASS,
   EVENT_CLASSIFICATION_ACTIONS,
-  WORKSPACE_ACTION_CLASS,
   articlePushStatusLabel,
   asAuditRecord,
   clusterAuditActionLabel,

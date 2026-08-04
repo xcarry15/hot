@@ -18,7 +18,7 @@ export const PRIMARY_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'all', label: '全部', description: '显示当前文章，数量包含已忽略' },
   { key: 'normal-all', label: '正常', description: '按预期流转，无需人工介入' },
   { key: 'anomaly-all', label: '异常', description: '需要关注、复核或恢复的文章' },
-  { key: 'ignored', label: '技术已忽略', description: '已从技术待办中忽略的文章；可恢复，不代表人工内容审核结论' },
+  { key: 'ignored', label: '已忽略', description: '已从技术待办中忽略的文章；可恢复，不代表人工内容审核结论' },
 ] as const
 
 export const NORMAL_FILTER_CHIPS: readonly StepFilterChip[] = [
@@ -42,7 +42,7 @@ export const ANOMALY_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'anomaly-no-value', label: '无价值', description: 'AI 已完成分析，但内容不具备保留价值' },
   { key: 'anomaly-ad', label: '软文', description: 'AI 判定为广告或软文的文章' },
   { key: 'anomaly-duplicate', label: '重复', description: '同一事件中的非代表报道' },
-  { key: 'anomaly-low-confidence', label: '低分析置信', description: 'AI 对文章分析结论的证据把握不足，建议人工复核' },
+  { key: 'anomaly-low-confidence', label: '低分析置信', description: 'AI 已完成分析但证据把握不足，建议人工复核；无价值单独归类' },
 ] as const
 
 export const STEP_FILTER_CHIPS: readonly StepFilterChip[] = [

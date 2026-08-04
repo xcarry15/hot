@@ -15,6 +15,13 @@ describe('article-service filters', () => {
     });
   });
 
+  it('低分析置信列表只返回 AI 已完成的文章', () => {
+    expect(buildArticleListWhere({ maxConfidence: 70 })).toEqual({
+      aiStatus: 'done',
+      aiConfidence: { lt: 70 },
+    });
+  });
+
   it('搜索与异常条件同时生效', () => {
     const where = buildArticleListWhere({ anomaly: 'needs_attention', search: '咖啡' });
     expect(Array.isArray(where.AND)).toBe(true);

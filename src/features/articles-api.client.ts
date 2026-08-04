@@ -162,6 +162,16 @@ export async function triggerArticleWorkflow(
   return result;
 }
 
+export async function triggerBatchArticleRegeneration(
+  articleIds: string[],
+): Promise<{ queued: boolean; jobId?: string; count?: number; reason?: string }> {
+  const result = await requestJson<{ queued: boolean; jobId?: string; count?: number; reason?: string }>('POST', '/api/articles/batch-workflow', {
+    body: { articleIds },
+  });
+  if (result.queued) invalidateArticleDetailCache();
+  return result;
+}
+
 export async function updateArticleTechnicalStatus(
   articleId: string,
   action: 'ignore' | 'restore',

@@ -1,14 +1,23 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD } from '@/contracts/ai-confidence'
+import {
+  AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD,
+  isLowAnalysisConfidence,
+} from '@/contracts/ai-confidence'
 import type { ArticleListItemDto, ArticleListResponseDto } from '@/contracts/articles'
-import { cancelArticleDetailPrefetch, fetchArticleList, prefetchArticleDetail } from '@/features/articles-api.client'
+import {
+  cancelArticleDetailPrefetch,
+  fetchArticleList,
+  prefetchArticleDetail,
+  triggerBatchArticleRegeneration,
+} from '@/features/articles-api.client'
 import { preloadArticleWorkspace } from '@/components/article-workspace-drawer'
 
 type QueueView = 'all' | 'attention' | 'cluster_review' | 'low_confidence'
@@ -21,7 +30,7 @@ function timeLabel(value: string): string {
 
 function statusLabel(item: ArticleListItemDto): string | null {
   if (item.clusterStatus === 'needs_review') return '聚类待复核'
-  if (item.aiStatus === 'done' && item.aiConfidence != null && item.aiConfidence < AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD) return '低分析置信度'
+  if (isLowAnalysisConfidence(item)) return '低分析置信度'
   return null
 }
 
@@ -44,6 +53,7 @@ export default function ArticleLibrarySheet({
   const [page, setPage] = useState(1)
   const [data, setData] = useState<ArticleListResponseDto | null>(null)
   const [loading, setLoading] = useState(false)
+  const [bulkLoading, setBulkLoading] = useState(false)
   const [error, setError] = useState('')
   const requestIdRef = useRef(0)
   const previousOpenRef = useRef(open)
@@ -108,12 +118,50 @@ export default function ArticleLibrarySheet({
     setSearch(searchInput.trim())
   }
 
+  const regenerateCurrentPage = async () => {
+    const items = data?.items ?? []
+    if (view !== 'low_confidence' || items.length === 0 || bulkLoading) return
+    if (typeof window !== 'undefined' && !window.confirm(
+      `确认重跑当前页 ${items.length} 篇低分析置信文章？\n\n将重新调用 AI 并重新聚类，不会自动推送。`,
+    )) return
+
+    setBulkLoading(true)
+    try {
+      const result = await triggerBatchArticleRegeneration(items.map((item) => item.id))
+      if (!result.queued) throw new Error(result.reason || '批量重跑未能启动')
+      toast.success(`已提交 ${items.length} 篇文章重跑 AI，可在任务中心查看进度`)
+      await load()
+    } catch (loadError) {
+      toast.error(loadError instanceof Error ? loadError.message : '批量重跑失败')
+    } finally {
+      setBulkLoading(false)
+    }
+  }
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full gap-0 p-0 [&>[data-slot=sheet-close]]:z-10 [&>[data-slot=sheet-close]]:rounded-none [&>[data-slot=sheet-close]]:bg-background sm:max-w-2xl">
         <SheetHeader className="border-b px-4 py-3 pr-12">
-          <SheetTitle className="text-base">全部文章</SheetTitle>
-          <SheetDescription>搜索历史文章或进入异常处理队列</SheetDescription>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <SheetTitle className="text-base">全部文章</SheetTitle>
+              <SheetDescription>搜索历史文章或进入异常处理队列</SheetDescription>
+            </div>
+            {view === 'low_confidence' && data?.items.length ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 shrink-0 px-2 text-xs"
+                disabled={bulkLoading || loading}
+                onClick={() => void regenerateCurrentPage()}
+                title="重新调用 AI 并重新聚类，不会自动推送"
+              >
+                {bulkLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                {bulkLoading ? '提交中…' : `一键重跑 AI（${data.items.length}）`}
+              </Button>
+            ) : null}
+          </div>
         </SheetHeader>
         <div className="space-y-1.5 border-b p-2.5">
           <div className="flex gap-2">
@@ -122,9 +170,9 @@ export default function ArticleLibrarySheet({
               onChange={(event) => setSearchInput(event.target.value)}
               onKeyDown={(event) => { if (event.key === 'Enter') submitSearch() }}
               placeholder="搜索标题、正文、品牌或摘要"
-              className="h-8 text-xs"
+              className="h-8 rounded-none text-xs"
             />
-            <Button size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={submitSearch}>
+            <Button size="sm" variant="outline" className="h-8 rounded-none px-2 text-xs" onClick={submitSearch}>
               <Search className="h-3.5 w-3.5" />搜索
             </Button>
           </div>

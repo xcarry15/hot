@@ -1,5 +1,8 @@
 import type { ArticleDetailDto } from "@/contracts/articles";
-import { AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD } from "@/contracts/ai-confidence";
+import {
+  AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD,
+  isLowAnalysisConfidence,
+} from "@/contracts/ai-confidence";
 import { isBusinessSkipReason } from "@/lib/article-pipeline-status";
 import { parseManualOverrides, type ManualOverrideField } from "@/lib/shared/article-calibration";
 import { parseJsonArray, splitBrands, stripHtml } from "@/lib/shared/article-codecs";
@@ -87,8 +90,7 @@ export function createArticleWorkspaceViewModel(
   const processingError = detail.fetchStatus === "failed"
     || detail.aiStatus === "failed"
     || detail.clusterStatus === "failed";
-  const lowAnalysisConfidence = typeof detail.aiConfidence === "number"
-    && detail.aiConfidence < AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD;
+  const lowAnalysisConfidence = isLowAnalysisConfidence(detail);
   const businessSkipConclusion = detail.aiStatus === "skipped" && isBusinessSkipReason(detail.skipReason)
     ? "分析完成 · 无价值"
     : null;
