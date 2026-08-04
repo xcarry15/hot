@@ -25,7 +25,29 @@ export const stopWorker = (signal?: AbortSignal) =>
   requestJson('POST', '/api/worker/stop', { signal });
 
 
+export interface RetryDiscardedOptions {
+  keyword?: string;
+  category?: string;
+}
+
+export interface RetryDiscardedResponse {
+  success: boolean;
+  articleId: string;
+  title: string;
+  auditId: string;
+  existed?: boolean;
+  keyword?: {
+    word: string;
+    category: string;
+    added: boolean;
+  };
+}
+
 export const retryDiscarded = (
   discardedId: string,
+  options: RetryDiscardedOptions = {},
   signal?: AbortSignal,
-) => requestJson('POST', '/api/discarded/retry', { body: { id: discardedId }, signal });
+) => requestJson<RetryDiscardedResponse>('POST', '/api/discarded/retry', {
+  body: { id: discardedId, ...options },
+  signal,
+});

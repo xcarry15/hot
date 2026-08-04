@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
-import { retryDiscardedItem } from '@/lib/discarded-retry-service';
+import { retryDiscardedItemWithKeyword } from '@/lib/discarded-retry-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 
 /**
@@ -9,17 +9,20 @@ import { runExclusiveMutation } from '@/lib/mutation-guard';
  * 将一条被关键词过滤的 DiscardedItem 强制采集为 Article。
  * 创建后文章状态为 pending，后续 process/ai/push 流水线自然接管。
  *
- * Body: { id: string }  — DiscardedItem 的主键
+ * Body: { id: string, keyword?: string, category?: string } — 可在恢复当前记录的同一事务中保存关键词
  * Response: { success: true, articleId, title, auditId }
  */
 export async function POST(request: Request) {
   try {
-    const { id } = (await request.json()) as { id?: string };
+    const body = (await request.json()) as { id?: unknown; keyword?: unknown; category?: unknown };
+    const id = typeof body.id === 'string' ? body.id.trim() : '';
     if (!id) {
       return NextResponse.json({ error: '缺少 id 参数' }, { status: 400 });
     }
 
-    const result = await runExclusiveMutation('重试未入库条目', () => retryDiscardedItem(id));
+    const keyword = typeof body.keyword === 'string' ? body.keyword.trim() : '';
+    const category = typeof body.category === 'string' ? body.category.trim() : undefined;
+    const result = await runExclusiveMutation('重试未入库条目', () => retryDiscardedItemWithKeyword(id, { keyword, category }));
     if (result.kind === 'not_found') {
       return NextResponse.json({ error: '记录不存在' }, { status: 404 });
     }
@@ -35,6 +38,7 @@ export async function POST(request: Request) {
       title: result.title,
       auditId: result.auditId,
       ...(result.kind === 'existing' ? { existed: true } : {}),
+      ...(result.keyword ? { keyword: result.keyword } : {}),
     });
   } catch (error: unknown) {
     return apiError(error, '采集失败');

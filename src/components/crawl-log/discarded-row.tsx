@@ -21,7 +21,6 @@ import {
 import { formatPubDate, DISCARD_REASON_LABELS } from './helpers'
 import type { DiscardedRow as DiscardedRowType } from './types'
 import { retryDiscarded } from '@/features/jobs-api.client'
-import { bulkAddKeywords } from '@/features/keywords-api.client'
 import {
   KEYWORD_BLACKLIST_CATEGORY,
   KEYWORD_DEFAULT_CATEGORY,
@@ -71,17 +70,18 @@ export function DiscardedRow({
     setRetrying(true)
     try {
       const nextKeyword = keyword.trim()
-      let keywordHint = ''
-      if (nextKeyword) {
-        const keywordResult = await bulkAddKeywords(nextKeyword, keywordCategory)
-        if (keywordResult.error) throw new Error(keywordResult.error)
-        onKeywordAdded?.(keywordCategory)
-        keywordHint = keywordResult.imported && keywordResult.imported > 0
-          ? `已添加关键词「${nextKeyword}」到「${keywordCategory}」；`
-          : `关键词「${nextKeyword}」已在「${keywordCategory}」；`
+      const data = await retryDiscarded(item.id, {
+        keyword: nextKeyword || undefined,
+        category: nextKeyword ? keywordCategory : undefined,
+      })
+      if (data.keyword) {
+        onKeywordAdded?.(data.keyword.category)
       }
-      const data = (await retryDiscarded(item.id)) as { title?: string; error?: string; existed?: boolean }
-      if (data.error) throw new Error(data.error)
+      const keywordHint = data.keyword
+        ? data.keyword.added
+          ? `已添加关键词「${data.keyword.word}」到「${data.keyword.category}」；`
+          : `关键词「${data.keyword.word}」已在「${data.keyword.category}」；`
+        : ''
       // P1-5: 区分 existing 和 created 两种结果
       if (data.existed) {
         toast.success(`${keywordHint}URL 已存在，已清理未入库记录「${data.title}」`, { duration: 3000 })
