@@ -22,7 +22,7 @@ export async function POST(request: Request) {
 
     const keyword = typeof body.keyword === 'string' ? body.keyword.trim() : '';
     const category = typeof body.category === 'string' ? body.category.trim() : undefined;
-    const result = await runExclusiveMutation('重试未入库条目', () => retryDiscardedItemWithKeyword(id, { keyword, category }));
+    const result = await runExclusiveMutation('重试未入库条目', () => retryDiscardedItemWithKeyword(id, { word: keyword, category }));
     if (result.kind === 'not_found') {
       return NextResponse.json({ error: '记录不存在' }, { status: 404 });
     }
