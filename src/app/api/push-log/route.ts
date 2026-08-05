@@ -4,9 +4,9 @@ import { listPushLogs } from '@/lib/push-log-service';
 import { parsePositiveInt } from '@/lib/pagination';
 
 // GET /api/push-log?startAt=...&endAt=... - List push history
-export async function GET(request: Request) {
+export async function GET(request?: Request) {
   try {
-    const { searchParams } = new URL(request.url);
+    const searchParams = request ? new URL(request.url).searchParams : new URLSearchParams();
     const page = parsePositiveInt(searchParams.get('page'), 1);
     const pageSize = parsePositiveInt(searchParams.get('pageSize'), 20, 100);
     const status = searchParams.get('status'); // success/failure

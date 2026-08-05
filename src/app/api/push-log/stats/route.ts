@@ -3,9 +3,9 @@ import { apiError } from '@/lib/api-helpers';
 import { getPushLogStats } from '@/lib/push-log-service';
 
 // GET /api/push-log/stats?startAt=...&endAt=... - Count grouped by source, webhookRemark, and status
-export async function GET(request: Request) {
+export async function GET(request?: Request) {
   try {
-    const { searchParams } = new URL(request.url);
+    const searchParams = request ? new URL(request.url).searchParams : new URLSearchParams();
     const startAt = parseDate(searchParams.get('startAt'));
     const endAt = parseDate(searchParams.get('endAt'));
     return NextResponse.json(await getPushLogStats(startAt, endAt));
