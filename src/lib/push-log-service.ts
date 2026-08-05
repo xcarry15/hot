@@ -1,10 +1,22 @@
 import { db } from '@/lib/db';
 import { maskWebhookTarget } from '@/lib/webhook-display';
+import { Prisma } from '@prisma/client';
 
-export async function listPushLogs(page: number, pageSize: number, status: string | null, source: string | null, webhookRemark: string | null) {
+export async function listPushLogs(
+  page: number,
+  pageSize: number,
+  status: string | null,
+  source: string | null,
+  webhookRemark: string | null,
+  startAt?: Date,
+  endAt?: Date,
+) {
   const where: Record<string, unknown> = {};
   if (status) where.status = status;
   if (webhookRemark) where.webhookRemark = webhookRemark;
+  if (startAt || endAt) {
+    where.createdAt = { ...(startAt ? { gte: startAt } : {}), ...(endAt ? { lte: endAt } : {}) };
+  }
   if (source) {
     const articleIds = await db.article.findMany({
       where: { source: { name: source } },
@@ -38,11 +50,18 @@ export async function listPushLogs(page: number, pageSize: number, status: strin
   };
 }
 
-export async function getPushLogStats() {
+export async function getPushLogStats(startAt?: Date, endAt?: Date) {
+  const createdAt = startAt || endAt
+    ? { ...(startAt ? { gte: startAt } : {}), ...(endAt ? { lte: endAt } : {}) }
+    : undefined;
+  const dateFilter = Prisma.sql`
+    ${startAt ? Prisma.sql`AND pl.createdAt >= ${startAt}` : Prisma.empty}
+    ${endAt ? Prisma.sql`AND pl.createdAt <= ${endAt}` : Prisma.empty}
+  `;
   const [statusGroups, webhookGroups, sourceGroups] = await Promise.all([
-    db.pushLog.groupBy({ by: ['status'], _count: { _all: true } }),
-    db.pushLog.groupBy({ by: ['webhookRemark'], _count: { _all: true } }),
-    db.$queryRaw<Array<{ sourceName: string; count: number | bigint }>>`SELECT s.name AS sourceName, COUNT(*) AS count FROM push_logs pl INNER JOIN articles a ON a.id = pl.representativeArticleId INNER JOIN sources s ON s.id = a.sourceId GROUP BY s.id, s.name ORDER BY count DESC`,
+    db.pushLog.groupBy({ where: createdAt ? { createdAt } : undefined, by: ['status'], _count: { _all: true } }),
+    db.pushLog.groupBy({ where: createdAt ? { createdAt } : undefined, by: ['webhookRemark'], _count: { _all: true } }),
+    db.$queryRaw<Array<{ sourceName: string; count: number | bigint }>>`SELECT s.name AS sourceName, COUNT(*) AS count FROM push_logs pl INNER JOIN articles a ON a.id = pl.representativeArticleId INNER JOIN sources s ON s.id = a.sourceId WHERE 1 = 1 ${dateFilter} GROUP BY s.id, s.name ORDER BY count DESC`,
   ]);
   const successCount = statusGroups.find((group) => group.status === 'success')?._count._all ?? 0;
   const total = statusGroups.reduce((sum, group) => sum + group._count._all, 0);
