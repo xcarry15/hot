@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CrawlTimeCard, DailyNewArticlesCard, TopViewedArticlesCard } from './dashboard/dashboard-cards'
+import { isRequestAborted } from '@/lib/request-json.client'
 
 type SourceSort = 'found' | 'totalArticles' | 'avgScore' | 'ingested' | 'processed' | 'analyzed' | 'pushed' | 'unmatched' | 'duplicates' | 'ads'
 
@@ -99,24 +100,43 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
   const [tooltipInfo, setTooltipInfo] = useState<{ field: string; x: number; y: number } | null>(null)
   const [suggestions, setSuggestions] = useState<FeedbackSuggestion[]>([])
   const intervalRef = useRef<number | null>(null)
+  const analyticsRequestRef = useRef<AbortController | null>(null)
+  const analyticsRequestVersionRef = useRef(0)
 
   const fetchData = useCallback(async () => {
+    analyticsRequestRef.current?.abort()
+    const controller = new AbortController()
+    analyticsRequestRef.current = controller
+    const requestVersion = ++analyticsRequestVersionRef.current
     try {
-      const analyticsJson = await fetchDashboardAnalytics(range, undefined, undefined, {
-        page: crawlPage,
-        trigger: crawlTrigger === 'all' ? undefined : crawlTrigger,
-        status: crawlStatus === 'all' ? undefined : crawlStatus,
-        type: crawlType === 'all' ? undefined : crawlType,
-        sourceId: crawlSourceId === 'all' ? undefined : crawlSourceId,
-      })
+      const [analyticsJson, nextSuggestions] = await Promise.all([
+        fetchDashboardAnalytics(range, undefined, controller.signal, {
+          page: crawlPage,
+          trigger: crawlTrigger === 'all' ? undefined : crawlTrigger,
+          status: crawlStatus === 'all' ? undefined : crawlStatus,
+          type: crawlType === 'all' ? undefined : crawlType,
+          sourceId: crawlSourceId === 'all' ? undefined : crawlSourceId,
+        }),
+        fetchFeedbackSuggestions(controller.signal).catch(() => []),
+      ])
+      if (controller.signal.aborted || requestVersion !== analyticsRequestVersionRef.current) return
       setAnalytics(analyticsJson)
-      fetchFeedbackSuggestions().then(setSuggestions).catch(() => undefined)
-    } catch {
+      setSuggestions(nextSuggestions)
+    } catch (error) {
+      if (controller.signal.aborted || isRequestAborted(error)) return
+      if (requestVersion !== analyticsRequestVersionRef.current) return
       toast.error('获取概览数据失败')
     } finally {
-      setLoading(false)
+      if (analyticsRequestRef.current === controller) {
+        analyticsRequestRef.current = null
+        if (requestVersion === analyticsRequestVersionRef.current) setLoading(false)
+      }
     }
   }, [crawlPage, crawlSourceId, crawlStatus, crawlTrigger, crawlType, range])
+
+  useEffect(() => () => {
+    analyticsRequestRef.current?.abort()
+  }, [])
 
   const handleSuggestion = async (id: string, action: 'apply' | 'dismiss') => {
     try {

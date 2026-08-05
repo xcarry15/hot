@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
-import { InvalidParserConfigError, getSourceDetail, softDeleteSource, updateSource } from '@/lib/source-service';
+import { DuplicateSourceIdentityError, InvalidParserConfigError, SourceNotFoundError, getSourceDetail, softDeleteSource, updateSource } from '@/lib/source-service';
 import { formatSourceSchemaError, sourceUpdateSchema } from '@/lib/source-schema';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 
@@ -42,6 +42,12 @@ export async function PUT(
     if (error instanceof InvalidParserConfigError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
+    if (error instanceof DuplicateSourceIdentityError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof SourceNotFoundError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return apiError(error, 'Failed to update source');
   }
 }
@@ -57,6 +63,9 @@ export async function DELETE(
 
     return NextResponse.json(source);
   } catch (error: unknown) {
+    if (error instanceof SourceNotFoundError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return apiError(error, 'Failed to delete source');
   }
 }

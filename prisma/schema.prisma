@@ -158,6 +158,9 @@ model Event {
   publicDateKey           String    @default("")
   publicSortAt            DateTime?
   pushedAt                DateTime?
+  // 公开入口以 Event.id 为主键，互动累计值必须随 Event 保存，不能绑在可能变更的代表 Article 上。
+  viewCount               Int       @default(0)
+  originalClickCount      Int       @default(0)
   nextPushRetryAt         DateTime?
   pushRetryCount          Int       @default(0) // 连续批次投递失败次数；达到 5 次后停止自动重试
   createdAt               DateTime  @default(now())
@@ -169,6 +172,7 @@ model Event {
   articles              Article[]           @relation("EventArticles")
   pushLogs              PushLog[]
   deliveries            PushDelivery[]
+  interactions          EventInteractionDaily[]
   assignedAudits        EventClusterAudit[] @relation("AssignedEventAudits")
   candidateAudits       EventClusterAudit[] @relation("CandidateEventAudits")
 
@@ -177,6 +181,25 @@ model Event {
   @@index([status, publicStatus, publicDateKey, publicSortAt])
   @@index([pushedAt, nextPushRetryAt])
   @@map("events")
+}
+
+/// 公开互动的不可回推日明细。dateKey 固定为 Asia/Shanghai 业务日，sourceId 记录互动发生时的代表来源，
+/// 避免之后切换代表文章或撤回公开状态时篡改历史统计归属。
+model EventInteractionDaily {
+  eventId            String
+  sourceId           String
+  dateKey            String
+  viewCount          Int      @default(0)
+  originalClickCount Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, sourceId, dateKey])
+  @@index([dateKey, sourceId])
+  @@index([eventId, dateKey])
+  @@map("event_interaction_daily")
 }
 
 model EventClusterAudit {

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   sourceFindMany: vi.fn(),
   transaction: vi.fn(),
   readPushSettings: vi.fn(),
+  readAllSettings: vi.fn(),
   consoleError: vi.fn(),
   technicalQueue: vi.fn(),
   pushTargetStates: vi.fn(),
@@ -24,12 +25,16 @@ vi.mock('@/lib/db', () => ({
     article: { findMany: mocks.articleFindMany },
     discardedItem: { findMany: mocks.discardedItemFindMany },
     source: { findMany: mocks.sourceFindMany },
+    setting: {},
     $transaction: mocks.transaction,
   },
 }));
 
 vi.mock('@/lib/push/policy', () => ({
   readPushSettings: mocks.readPushSettings,
+}));
+vi.mock('@/lib/settings', () => ({
+  readAllSettings: mocks.readAllSettings,
 }));
 vi.mock('@/lib/technical-work-queue-service', () => ({
   getTechnicalWorkQueue: mocks.technicalQueue,
@@ -49,18 +54,21 @@ describe('crawl-log-service', () => {
     vi.clearAllMocks();
     // 基线：默认返回空。特定用例在内部覆盖。
     mocks.transaction.mockImplementation(async () => [[], [], [], []]);
+    mocks.jobFindMany.mockResolvedValue([]);
     mocks.sourceFindMany.mockResolvedValue([]);
     mocks.readPushSettings.mockResolvedValue({
       pushMode: 'realtime',
       minScore: 50,
       minRelevance: 5,
     });
+    mocks.readAllSettings.mockResolvedValue({});
     mocks.technicalQueue.mockResolvedValue([]);
     mocks.pushTargetStates.mockResolvedValue(new Map());
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   describe('clampCrawlLogLimit', () => {
@@ -80,6 +88,43 @@ describe('crawl-log-service', () => {
       expect(clampCrawlLogLimit(0)).toBe(1);
       expect(clampCrawlLogLimit(-1)).toBe(1);
     });
+  });
+
+  it('运行栏从独立采集查询读取最后一次抓取，并按调度 marker 计算下次时间', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T00:30:00.000Z')); // 上海 08:30
+    const collect = {
+      id: 'collect-old', type: 'full', status: 'succeeded', payload: JSON.stringify({ trigger: 'auto' }),
+      result: JSON.stringify({ stages: { collect: { totalNewArticles: 4 } } }), error: '',
+      currentStage: null, progressTotal: 0, progressDone: 0, progressErrors: 0, currentItemLabel: '', heartbeatAt: null,
+      startedAt: new Date('2026-08-05T00:01:00.000Z'), completedAt: new Date('2026-08-05T00:05:00.000Z'),
+      createdAt: new Date('2026-08-05T00:01:00.000Z'), updatedAt: new Date('2026-08-05T00:05:00.000Z'),
+    };
+    const recovery = (index: number) => ({
+      ...collect,
+      id: `recovery-${index}`,
+      payload: JSON.stringify({ skipCollect: true }),
+      completedAt: new Date(`2026-08-05T00:${String(10 + index).padStart(2, '0')}:00.000Z`),
+    });
+    mocks.jobFindMany.mockImplementation((args: { take?: number }) => (
+      args.take === 500 ? Promise.resolve([...Array.from({ length: 6 }, (_, index) => recovery(index)), collect]) : Promise.resolve([])
+    ));
+    mocks.readAllSettings.mockResolvedValue({
+      auto_crawl_enabled: 'true',
+      crawl_interval_min: '60',
+      scheduler_last_crawl_at: String(new Date('2026-08-05T00:00:00.000Z').getTime()),
+      crawl_quiet_start: '22:00',
+      crawl_quiet_end: '08:00',
+    });
+
+    const snapshot = await getCrawlLogSnapshot();
+
+    expect(snapshot.runtime).toEqual({
+      lastCrawlAt: '2026-08-05T00:05:00.000Z',
+      lastCrawlCount: 4,
+      nextCrawlAt: '2026-08-05T01:00:00.000Z',
+    });
+    expect(mocks.jobFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
   });
 
   it('技术摘要只统计当前快照实际可见的待办', async () => {

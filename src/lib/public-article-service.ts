@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import type { Prisma } from '@prisma/client';
 import { parseJsonArray, stripHtml } from '@/lib/shared/article-codecs';
 import { getPublicDateKey } from '@/lib/shared/public-date';
-import { enqueuePublicArticleOriginalClick, enqueuePublicArticleView } from '@/lib/public-view-service';
+import { recordPublicEventOriginalClick, recordPublicEventView } from '@/lib/public-view-service';
 import { getRelatedArticles } from '@/lib/article-related-service';
 import {
   publicArticleCountCache,
@@ -323,9 +323,16 @@ export async function getPublicArticleDetail(id: string): Promise<PublicArticleD
 export async function recordPublicArticleView(id: string): Promise<void> {
   const event = await db.event.findFirst({
     where: { id, status: 'active', publicStatus: 'published' },
-    select: { representativeArticleId: true },
+    select: { id: true, representativeArticle: { select: { sourceId: true } } },
   });
-  if (event?.representativeArticleId) enqueuePublicArticleView(event.representativeArticleId);
+  if (!event?.representativeArticle) return;
+  try {
+    await recordPublicEventView(event.id, event.representativeArticle.sourceId);
+  } catch (error) {
+    // 浏览统计不能让公开文章本身变成 5xx；写入函数已经处理短暂 SQLite 锁，
+    // 这里只记录最终基础设施故障以便运维发现。
+    console.error('[public-interaction] failed to record view:', error);
+  }
 }
 
 export async function listPublicArticleIds(): Promise<Array<{ id: string; updatedAt: Date }>> {
@@ -343,9 +350,13 @@ export async function listPublicArticleIds(): Promise<Array<{ id: string; update
 export async function recordOriginalClick(id: string): Promise<boolean> {
   const event = await db.event.findFirst({
     where: { id, status: 'active', publicStatus: 'published' },
-    select: { representativeArticleId: true },
+    select: { id: true, representativeArticle: { select: { sourceId: true } } },
   });
-  if (!event?.representativeArticleId) return false;
-  enqueuePublicArticleOriginalClick(event.representativeArticleId);
+  if (!event?.representativeArticle) return false;
+  try {
+    await recordPublicEventOriginalClick(event.id, event.representativeArticle.sourceId);
+  } catch (error) {
+    console.error('[public-interaction] failed to record original click:', error);
+  }
   return true;
 }

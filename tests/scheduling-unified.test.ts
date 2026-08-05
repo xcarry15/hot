@@ -163,6 +163,16 @@ describe('Scheduler — production maybeEnqueueCrawl', () => {
     expect(mockRunJob).not.toHaveBeenCalled();
   });
 
+  it('损坏的间隔配置回退为 120 分钟，不会每分钟重复入队', async () => {
+    mockSettingStore['auto_crawl_enabled'] = 'true';
+    mockSettingStore['crawl_interval_min'] = 'not-a-number';
+    mockSettingStore['scheduler_last_crawl_at'] = String(Date.now() - 60 * 1000);
+
+    await maybeEnqueueCrawl({ ...mockSettingStore });
+
+    expect(mockRunJob).not.toHaveBeenCalled();
+  });
+
   it('lastCrawlAt unset (0): invokes runJob("full")', async () => {
     mockSettingStore['auto_crawl_enabled'] = 'true';
     mockSettingStore['crawl_interval_min'] = '120';

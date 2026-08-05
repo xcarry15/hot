@@ -53,7 +53,9 @@ export async function requestJson<T = unknown>(
   init: RequestJsonInit = {},
 ): Promise<T> {
   const { body, signal, keepalive, headers } = init;
-  const hasBody = body !== undefined && body !== null && method !== 'GET' && method !== 'DELETE';
+  // DELETE 同样允许 JSON body；提示词版本等资源删除需要携带明确 id。
+  // 只有 GET 不发送 body，避免浏览器/代理对 GET body 的兼容性差异。
+  const hasBody = body !== undefined && body !== null && method !== 'GET';
   const finalHeaders = new Headers(headers);
   if (hasBody && !finalHeaders.has('Content-Type')) {
     finalHeaders.set('Content-Type', 'application/json');

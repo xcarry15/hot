@@ -8,12 +8,14 @@ export async function listPushLogs(
   status: string | null,
   source: string | null,
   webhookRemark: string | null,
+  emptyWebhookRemark = false,
   startAt?: Date,
   endAt?: Date,
 ) {
   const where: Record<string, unknown> = {};
   if (status) where.status = status;
-  if (webhookRemark) where.webhookRemark = webhookRemark;
+  if (emptyWebhookRemark) where.webhookRemark = '';
+  else if (webhookRemark) where.webhookRemark = webhookRemark;
   if (startAt || endAt) {
     where.createdAt = { ...(startAt ? { gte: startAt } : {}), ...(endAt ? { lte: endAt } : {}) };
   }
@@ -68,6 +70,10 @@ export async function getPushLogStats(startAt?: Date, endAt?: Date) {
   return {
     status: { all: total, success: successCount, failure: total - successCount },
     sources: sourceGroups.map((group) => ({ name: group.sourceName, count: Number(group.count) })).sort((a, b) => b.count - a.count),
-    webhooks: webhookGroups.map((group) => ({ remark: group.webhookRemark || '(无备注)', count: group._count._all })).sort((a, b) => b.count - a.count),
+    webhooks: webhookGroups.map((group) => ({
+      remark: group.webhookRemark || '(无备注)',
+      isEmpty: group.webhookRemark === '',
+      count: group._count._all,
+    })).sort((a, b) => b.count - a.count),
   };
 }

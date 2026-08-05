@@ -249,7 +249,13 @@ async function maybeEnqueueCrawl(settings: Record<string, string>): Promise<void
   if (settings[SETTING_KEYS.AUTO_CRAWL_ENABLED] !== 'true') return;
   if (isQuietHoursNow(settings, new Date())) return;
 
-  const intervalMs = Math.max(5, parseInt(settings[SETTING_KEYS.CRAWL_INTERVAL_MIN] || '120', 10)) * 60 * 1000;
+  // 设置写入有校验，但数据库可能因手工维护或旧数据出现异常值。不能让 NaN
+  // 绕过间隔判断、每分钟重复创建抓取任务；与工作台运行态使用同一默认值。
+  const configuredInterval = Number.parseInt(settings[SETTING_KEYS.CRAWL_INTERVAL_MIN] || '120', 10);
+  const intervalMinutes = Number.isFinite(configuredInterval)
+    ? Math.max(5, configuredInterval)
+    : 120;
+  const intervalMs = intervalMinutes * 60 * 1000;
   const lastCrawlAtStr = await getSetting(LAST_CRAWL_AT_KEY);
   const lastCrawlAt = lastCrawlAtStr ? parseInt(lastCrawlAtStr, 10) : 0;
 

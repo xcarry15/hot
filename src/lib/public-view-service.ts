@@ -1,91 +1,62 @@
-import { db } from '@/lib/db'
+import { db } from '@/lib/db';
+import { getPublicDateKey } from '@/lib/shared/public-date';
 
-const VIEW_FLUSH_DELAY_MS = 1_000
-type PublicViewState = {
-  pendingViews: Map<string, number>
-  pendingOriginalClicks: Map<string, number>
-  flushTimer: NodeJS.Timeout | null
-  beforeExitHookRegistered: boolean
+type PublicInteractionKind = 'view' | 'originalClick';
+
+const MAX_INTERACTION_WRITE_ATTEMPTS = 3;
+
+function isRetryableInteractionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /database is locked|database is busy|SQLITE_BUSY|P1008|P2024/i.test(message);
 }
 
-const globalForPublicViews = globalThis as typeof globalThis & {
-  __hot2PublicViewState?: PublicViewState
+function waitForRetry(attempt: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, attempt * 25));
 }
 
-const state = globalForPublicViews.__hot2PublicViewState ?? {
-  pendingViews: new Map<string, number>(),
-  pendingOriginalClicks: new Map<string, number>(),
-  flushTimer: null,
-  beforeExitHookRegistered: false,
-}
+/**
+ * 公开页面的 URL、权限和去重门禁都以 Event 为单位，因此互动也必须写到 Event。
+ * 每次请求在响应前写入同一个 SQLite 事务：这样进程重启不会像内存缓冲那样丢失
+ * 最后几秒的浏览/点击；短暂写锁仅做有限重试。
+ */
+export async function recordPublicEventInteraction(
+  eventId: string,
+  sourceId: string,
+  kind: PublicInteractionKind,
+  now = new Date(),
+): Promise<void> {
+  const dateKey = getPublicDateKey(now);
+  const eventIncrement = kind === 'view' ? { viewCount: { increment: 1 } } : { originalClickCount: { increment: 1 } };
+  const dailyCreate = kind === 'view'
+    ? { eventId, sourceId, dateKey, viewCount: 1, originalClickCount: 0 }
+    : { eventId, sourceId, dateKey, viewCount: 0, originalClickCount: 1 };
+  const dailyUpdate = kind === 'view'
+    ? { viewCount: { increment: 1 } }
+    : { originalClickCount: { increment: 1 } };
 
-// 开发热更新可能复用旧 global 状态，补齐新增字段而不是要求重启进程。
-state.pendingOriginalClicks ??= new Map<string, number>()
-
-globalForPublicViews.__hot2PublicViewState = state
-
-function registerBeforeExitFlush() {
-  if (state.beforeExitHookRegistered || typeof process === 'undefined') return
-  state.beforeExitHookRegistered = true
-  process.once('beforeExit', () => {
-    void flushPublicArticleViews()
-  })
-}
-
-function scheduleFlush() {
-  if (state.flushTimer) return
-  state.flushTimer = setTimeout(() => {
-    state.flushTimer = null
-    void flushPublicArticleViews()
-  }, VIEW_FLUSH_DELAY_MS)
-}
-
-export function enqueuePublicArticleView(articleId: string): void {
-  registerBeforeExitFlush()
-  state.pendingViews.set(articleId, (state.pendingViews.get(articleId) ?? 0) + 1)
-  scheduleFlush()
-}
-
-export function enqueuePublicArticleOriginalClick(articleId: string): void {
-  registerBeforeExitFlush()
-  state.pendingOriginalClicks.set(articleId, (state.pendingOriginalClicks.get(articleId) ?? 0) + 1)
-  scheduleFlush()
-}
-
-export async function flushPublicArticleViews(): Promise<void> {
-  if (state.pendingViews.size === 0 && state.pendingOriginalClicks.size === 0) return
-  const viewBatch = new Map(state.pendingViews)
-  const clickBatch = new Map(state.pendingOriginalClicks)
-  state.pendingViews.clear()
-  state.pendingOriginalClicks.clear()
-
-  try {
-    await db.$transaction([
-      ...[...viewBatch].map(([articleId, count]) => (
-        // 互动计数不属于内容变更，绕过 Prisma @updatedAt，避免 sitemap 的
-        // lastModified 被每次浏览刷新并向搜索引擎发送错误信号。
-        db.$executeRaw`
-          UPDATE "articles"
-          SET "viewCount" = "viewCount" + ${count}
-          WHERE "id" = ${articleId}
-        `
-      )),
-      ...[...clickBatch].map(([articleId, count]) => db.$executeRaw`
-        UPDATE "articles"
-        SET "originalClickCount" = "originalClickCount" + ${count}
-        WHERE "id" = ${articleId}
-      `),
-    ]);
-  } catch {
-    // UPDATE 找不到已删除文章时不会抛错；这里只需要把瞬时数据库错误
-    // 的计数放回队列，避免 SQLite 写锁冲突直接吞掉真实浏览量。
-    for (const [articleId, count] of viewBatch) {
-      state.pendingViews.set(articleId, (state.pendingViews.get(articleId) ?? 0) + count)
-    }
-    for (const [articleId, count] of clickBatch) {
-      state.pendingOriginalClicks.set(articleId, (state.pendingOriginalClicks.get(articleId) ?? 0) + count)
+  for (let attempt = 1; attempt <= MAX_INTERACTION_WRITE_ATTEMPTS; attempt += 1) {
+    try {
+      await db.$transaction([
+        // Event 的累计值仅用于工作台详情；按日统计读取下方的不可回推事实表。
+        db.event.update({ where: { id: eventId }, data: eventIncrement }),
+        db.eventInteractionDaily.upsert({
+          where: { eventId_sourceId_dateKey: { eventId, sourceId, dateKey } },
+          create: dailyCreate,
+          update: dailyUpdate,
+        }),
+      ]);
+      return;
+    } catch (error) {
+      if (!isRetryableInteractionError(error) || attempt === MAX_INTERACTION_WRITE_ATTEMPTS) throw error;
+      await waitForRetry(attempt);
     }
   }
+}
 
-  if (state.pendingViews.size > 0 || state.pendingOriginalClicks.size > 0) scheduleFlush()
+export async function recordPublicEventView(eventId: string, sourceId: string): Promise<void> {
+  await recordPublicEventInteraction(eventId, sourceId, 'view');
+}
+
+export async function recordPublicEventOriginalClick(eventId: string, sourceId: string): Promise<void> {
+  await recordPublicEventInteraction(eventId, sourceId, 'originalClick');
 }

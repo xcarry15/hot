@@ -59,6 +59,8 @@ export const ARTICLE_LIST_SELECT = {
       articleCount: true,
       representativeArticleId: true,
       pushedAt: true,
+      viewCount: true,
+      originalClickCount: true,
     },
   },
 } as const;
@@ -97,6 +99,8 @@ export interface ArticleListFieldsDto {
     articleCount: number;
     representativeArticleId: string | null;
     pushedAt: string | null;
+    viewCount: number;
+    originalClickCount: number;
   } | null;
   sourceId: string;
   url: string;
@@ -211,6 +215,8 @@ export type ArticleListRecord = Omit<
     articleCount: number;
     representativeArticleId: string | null;
     pushedAt: NullableDateValue;
+    viewCount?: number;
+    originalClickCount?: number;
   } | null;
 };
 
@@ -225,6 +231,8 @@ export type ArticleDetailRecord = Omit<
     articleCount: number;
     representativeArticleId: string | null;
     pushedAt: NullableDateValue;
+    viewCount?: number;
+    originalClickCount?: number;
   } | null;
 };
 
@@ -263,8 +271,12 @@ function serializeArticleListFields(
     clusterStatus: article.clusterStatus,
     clusteredAt: toIso(article.clusteredAt),
     event: article.event ? {
-      ...article.event,
+      id: article.event.id,
+      articleCount: article.event.articleCount,
+      representativeArticleId: article.event.representativeArticleId,
       pushedAt: toIso(article.event.pushedAt),
+      viewCount: article.event.viewCount ?? 0,
+      originalClickCount: article.event.originalClickCount ?? 0,
     } : null,
     sourceId: article.sourceId,
     url: article.url,
@@ -317,8 +329,9 @@ export function serializeArticleDetail(article: ArticleDetailRecord): ArticleDet
     aiSnapshot: article.aiSnapshot,
     manualOverrides: article.manualOverrides,
     manualCorrectedAt: toIso(article.manualCorrectedAt),
-    viewCount: article.viewCount,
-    originalClickCount: article.originalClickCount,
+    // 公开 URL 是 Event，不是 Article。代表文章切换后仍展示同一个 Event 的互动总数。
+    viewCount: article.event?.viewCount ?? 0,
+    originalClickCount: article.event?.originalClickCount ?? 0,
     cleanContent: article.cleanContent,
     keyPoints: article.keyPoints,
     rawScore: article.rawScore ?? null,

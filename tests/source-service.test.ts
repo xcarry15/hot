@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
-import { getSourceDetail, softDeleteSource, updateSource } from '@/lib/source-service';
+import { DuplicateSourceIdentityError, SourceNotFoundError, getSourceDetail, softDeleteSource, updateSource } from '@/lib/source-service';
 
 const mocks = db as unknown as {
-  source: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+  source: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
   fetchLog: { findMany: ReturnType<typeof vi.fn> };
 };
 
@@ -23,6 +23,8 @@ describe('source-service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sourceServiceMocks.refreshPublicationsForSource.mockResolvedValue(0);
+    mocks.source.findMany.mockResolvedValue([]);
+    mocks.source.findFirst.mockResolvedValue({ id: 's1' });
   });
 
   it('已删除来源不会暴露详情', async () => {
@@ -52,5 +54,22 @@ describe('source-service', () => {
     });
     expect(sourceServiceMocks.refreshPublicationsForSource).toHaveBeenCalledWith('s1');
     expect(sourceServiceMocks.invalidatePublicArticleCache).toHaveBeenCalledOnce();
+  });
+
+  it('编辑 URL 时使用与创建一致的规范化身份拒绝重复来源', async () => {
+    mocks.source.findMany.mockResolvedValue([{ name: '已有源', url: 'https://example.com/news/' }]);
+
+    await expect(updateSource('s2', { url: 'https://EXAMPLE.com/news?utm_source=campaign#top' }))
+      .rejects.toBeInstanceOf(DuplicateSourceIdentityError);
+
+    expect(mocks.source.update).not.toHaveBeenCalled();
+  });
+
+  it('更新或删除不存在、已删除的数据源时返回明确的 404 领域错误', async () => {
+    mocks.source.findFirst.mockResolvedValue(null);
+
+    await expect(updateSource('gone', { enabled: false })).rejects.toBeInstanceOf(SourceNotFoundError);
+    await expect(softDeleteSource('gone')).rejects.toBeInstanceOf(SourceNotFoundError);
+    expect(mocks.source.update).not.toHaveBeenCalled();
   });
 });

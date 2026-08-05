@@ -11,6 +11,7 @@ export async function fetchCrawlLogSnapshot(limit = CRAWL_LOG_DEFAULT_LIMIT): Pr
   return {
     activeJob: data.activeJob ?? null,
     latestJob: data.latestJob ?? null,
+    runtime: data.runtime,
     sources: Array.isArray(data.sources) ? data.sources as SourceProgress[] : [],
     fetchedAt: typeof data.fetchedAt === 'number' ? data.fetchedAt : Date.now(),
     hasMoreArticles: data.hasMoreArticles === true,

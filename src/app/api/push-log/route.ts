@@ -12,10 +12,11 @@ export async function GET(request?: Request) {
     const status = searchParams.get('status'); // success/failure
     const source = searchParams.get('source'); // source name
     const webhookRemark = searchParams.get('webhookRemark'); // webhook remark
+    const emptyWebhookRemark = searchParams.get('emptyWebhookRemark') === 'true';
     const startAt = parseDate(searchParams.get('startAt'));
     const endAt = parseDate(searchParams.get('endAt'));
 
-    return NextResponse.json(await listPushLogs(page, pageSize, status, source, webhookRemark, startAt, endAt));
+    return NextResponse.json(await listPushLogs(page, pageSize, status, source, webhookRemark, emptyWebhookRemark, startAt, endAt));
   } catch (error: unknown) {
     return apiError(error, 'Failed to fetch push logs');
   }

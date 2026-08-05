@@ -42,10 +42,23 @@ describe('GET /api/push-log/stats', () => {
       { name: '源 B', count: 2 },
     ]);
     expect(body.webhooks).toEqual([
-      { remark: '主群', count: 3 },
-      { remark: '(无备注)', count: 3 },
+      { remark: '主群', isEmpty: false, count: 3 },
+      { remark: '(无备注)', isEmpty: true, count: 3 },
     ]);
     expect(mocks.groupBy).toHaveBeenCalledTimes(2);
     expect(mocks.queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('真实备注恰好叫“无备注”时仍保留为命名目标，不与空备注筛选混淆', async () => {
+    mocks.groupBy
+      .mockReset()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ webhookRemark: '(无备注)', _count: { _all: 1 } }]);
+    mocks.queryRaw.mockResolvedValue([]);
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(body.webhooks).toEqual([{ remark: '(无备注)', isEmpty: false, count: 1 }]);
   });
 });

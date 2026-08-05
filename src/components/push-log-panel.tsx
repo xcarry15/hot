@@ -42,7 +42,7 @@ interface PushLogResponse {
 interface PushLogStats {
   status: { all: number; success: number; failure: number }
   sources: { name: string; count: number }[]
-  webhooks: { remark: string; count: number }[]
+  webhooks: { remark: string; isEmpty: boolean; count: number }[]
 }
 
 function formatPushTime(value: string): string {
@@ -55,9 +55,25 @@ function pushStatusLabel(status: string): string {
 }
 
 const HIDDEN_WEBHOOK_LABEL = '已隐藏的 Webhook'
+const EMPTY_WEBHOOK_FILTER = 'empty'
+const WEBHOOK_REMARK_FILTER_PREFIX = 'remark:'
 
 function visibleWebhookValue(value: string): string {
   return value === HIDDEN_WEBHOOK_LABEL ? '' : value
+}
+
+function toWebhookRemarkFilter(remark: string): string {
+  return `${WEBHOOK_REMARK_FILTER_PREFIX}${encodeURIComponent(remark)}`
+}
+
+function getWebhookFilterParams(value: string): { webhookRemark?: string; emptyWebhookRemark?: boolean } {
+  if (value === EMPTY_WEBHOOK_FILTER) return { emptyWebhookRemark: true }
+  if (!value.startsWith(WEBHOOK_REMARK_FILTER_PREFIX)) return {}
+  try {
+    return { webhookRemark: decodeURIComponent(value.slice(WEBHOOK_REMARK_FILTER_PREFIX.length)) }
+  } catch {
+    return {}
+  }
 }
 
 interface PushLogPanelProps {
@@ -88,7 +104,7 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
       pageSize: 20,
       status: statusFilter === 'all' ? undefined : statusFilter,
       source: sourceFilter === 'all' ? undefined : sourceFilter,
-      webhookRemark: webhookFilter === 'all' ? undefined : webhookFilter,
+      ...getWebhookFilterParams(webhookFilter),
       startAt: startAt ?? undefined,
       endAt: endAt ?? undefined,
     }
@@ -184,7 +200,7 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
             <SelectTrigger className="h-7 w-[130px] rounded-none border-border bg-transparent text-[11px] shadow-none focus:ring-1"><SelectValue placeholder="推送方式" /></SelectTrigger>
             <SelectContent className="rounded-none shadow-sm">
               <SelectItem value="all">全部方式</SelectItem>
-              {stats?.webhooks.map((webhook) => <SelectItem key={webhook.remark} value={webhook.remark}>{webhook.remark} ({webhook.count})</SelectItem>)}
+              {stats?.webhooks.map((webhook) => <SelectItem key={`${webhook.isEmpty}:${webhook.remark}`} value={webhook.isEmpty ? EMPTY_WEBHOOK_FILTER : toWebhookRemarkFilter(webhook.remark)}>{webhook.remark} ({webhook.count})</SelectItem>)}
             </SelectContent>
           </Select>
           {data && <span className="ml-auto text-[11px] text-muted-foreground">当前 {data.total} 条</span>}

@@ -85,6 +85,13 @@ export type JobType = 'full' | 'collect' | 'process' | 'ai' | 'cluster' | 'push'
 export type JobStatus = 'queued' | 'running' | 'cancel_requested' | 'succeeded' | 'failed' | 'cancelled' | 'completed';
 export type JobStage = 'collect' | 'process' | 'ai' | 'cluster' | 'push';
 
+/** 工作台顶部的自动化运行真相；只保留管理员下一步判断所需的事实。 */
+export interface CrawlRuntimeStatus {
+  lastCrawlAt: string | null;
+  lastCrawlCount: number | null;
+  nextCrawlAt: string | null;
+}
+
 export interface JobSnapshot {
   id: string;
   type: JobType;
@@ -108,6 +115,7 @@ export interface JobSnapshot {
 export interface CrawlLogSnapshot {
   activeJob: JobSnapshot | null;
   latestJob: JobSnapshot | null;
+  runtime?: CrawlRuntimeStatus;
   sources: SourceProgress[];
   fetchedAt: number;
   /** 本次普通文章窗口是否还有未返回的历史文章。 */
