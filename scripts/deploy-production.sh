@@ -7,6 +7,8 @@ APP_NAME="${APP_NAME:-h2-hot2}"
 SITE_URL="${SITE_URL:-https://hot.kfxz.cn}"
 BACKUP_ROOT="${BACKUP_ROOT:-/www/backup/h2-hot2}"
 CURRENT_MIGRATION_NAME="20260731120000_current_schema_baseline"
+RESET_PRODUCTION="${RESET_PRODUCTION:-NO}"
+RESET_PRODUCTION="${RESET_PRODUCTION^^}"
 RELEASE_DIR="$(mktemp -d /tmp/h2-hot2-release.XXXXXX)"
 SERVICE_WAS_RUNNING=0
 DEPLOY_SUCCEEDED=0
@@ -28,6 +30,8 @@ done
 [[ -f "$RELEASE_ARCHIVE" ]] || { echo "Release archive does not exist: $RELEASE_ARCHIVE" >&2; exit 1; }
 [[ -f "$APP_DIR/.env" ]] || { echo "Production .env is missing: $APP_DIR/.env" >&2; exit 1; }
 [[ -f "$APP_DIR/db/custom.db" ]] || { echo "Production database is missing: $APP_DIR/db/custom.db" >&2; exit 1; }
+[[ "$RESET_PRODUCTION" == "YES" || "$RESET_PRODUCTION" == "NO" ]] \
+  || { echo 'RESET_PRODUCTION must be YES or NO.' >&2; exit 1; }
 grep -Eq '^[[:space:]]*API_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]]+' "$APP_DIR/.env" \
   || { echo 'Production API_TOKEN is missing or empty.' >&2; exit 1; }
 grep -Eq '^[[:space:]]*SETTINGS_ENCRYPTION_KEY[[:space:]]*=[[:space:]]*[^[:space:]]+' "$APP_DIR/.env" \
@@ -35,18 +39,22 @@ grep -Eq '^[[:space:]]*SETTINGS_ENCRYPTION_KEY[[:space:]]*=[[:space:]]*[^[:space
 grep -Eq '^[[:space:]]*NEXT_PUBLIC_SITE_URL[[:space:]]*=[[:space:]]*https?://' "$APP_DIR/.env" \
   || { echo 'Production NEXT_PUBLIC_SITE_URL is missing or invalid.' >&2; exit 1; }
 
-MIGRATION_TABLE_EXISTS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations';")"
-if [[ "$MIGRATION_TABLE_EXISTS" != "1" ]]; then
-  echo "Production database is not initialized with the current migration baseline." >&2
-  echo "Run: CONFIRM_RESET=YES bash scripts/init-production.sh" >&2
-  exit 1
-fi
-UNEXPECTED_MIGRATIONS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name <> '$CURRENT_MIGRATION_NAME';")"
-CURRENT_MIGRATION_COUNT="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name = '$CURRENT_MIGRATION_NAME';")"
-if [[ "$UNEXPECTED_MIGRATIONS" != "0" || "$CURRENT_MIGRATION_COUNT" != "1" ]]; then
-  echo "Production database uses an obsolete migration history; refusing an in-place compatibility upgrade." >&2
-  echo "Back up the database, then run: CONFIRM_RESET=YES bash scripts/init-production.sh" >&2
-  exit 1
+if [[ "$RESET_PRODUCTION" == "NO" ]]; then
+  MIGRATION_TABLE_EXISTS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations';")"
+  if [[ "$MIGRATION_TABLE_EXISTS" != "1" ]]; then
+    echo "Production database is not initialized with the current migration baseline." >&2
+    echo "Run the manual Deploy production workflow with reset_production=yes after explicit approval." >&2
+    exit 1
+  fi
+  UNEXPECTED_MIGRATIONS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name <> '$CURRENT_MIGRATION_NAME';")"
+  CURRENT_MIGRATION_COUNT="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name = '$CURRENT_MIGRATION_NAME';")"
+  if [[ "$UNEXPECTED_MIGRATIONS" != "0" || "$CURRENT_MIGRATION_COUNT" != "1" ]]; then
+    echo "Production database uses an obsolete migration history; refusing an in-place compatibility upgrade." >&2
+    echo "Run the manual Deploy production workflow with reset_production=yes after explicit approval." >&2
+    exit 1
+  fi
+else
+  echo "RESET_PRODUCTION=YES: existing production SQLite will be deleted without backup."
 fi
 
 tar -xzf "$RELEASE_ARCHIVE" -C "$RELEASE_DIR"
@@ -62,10 +70,14 @@ if [[ "$SERVICE_WAS_RUNNING" -ne 1 ]]; then
   exit 1
 fi
 
-backup_dir="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$backup_dir"
-sqlite3 "$APP_DIR/db/custom.db" ".timeout 5000" ".backup '$backup_dir/custom.db'"
-cp -a "$APP_DIR/db/custom.db-wal" "$APP_DIR/db/custom.db-shm" "$backup_dir/" 2>/dev/null || true
+if [[ "$RESET_PRODUCTION" == "YES" ]]; then
+  rm -f -- "$APP_DIR/db/custom.db" "$APP_DIR/db/custom.db-journal" "$APP_DIR/db/custom.db-wal" "$APP_DIR/db/custom.db-shm"
+else
+  backup_dir="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$backup_dir"
+  sqlite3 "$APP_DIR/db/custom.db" ".timeout 5000" ".backup '$backup_dir/custom.db'"
+  cp -a "$APP_DIR/db/custom.db-wal" "$APP_DIR/db/custom.db-shm" "$backup_dir/" 2>/dev/null || true
+fi
 
 rsync -a --delete \
   --exclude='.env' \
@@ -79,6 +91,9 @@ npm ci
 npm run db:migrate:deploy
 npm run db:generate
 npm run db:optimize
+if [[ "$RESET_PRODUCTION" == "YES" ]]; then
+  npm run db:seed
+fi
 
 npm run build
 

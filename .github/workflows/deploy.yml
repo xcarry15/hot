@@ -6,6 +6,15 @@ on:
     types: [completed]
     branches: [master]
   workflow_dispatch:
+    inputs:
+      reset_production:
+        description: "仅在已明确授权时重置生产 SQLite（删除现有业务数据且不备份）"
+        required: false
+        default: "no"
+        type: choice
+        options:
+          - no
+          - yes
 
 permissions:
   contents: read
@@ -88,10 +97,11 @@ jobs:
         run: |
           set -euo pipefail
           DEPLOY_PORT="${DEPLOY_PORT:-22}"
+          RESET_PRODUCTION="${{ github.event_name == 'workflow_dispatch' && inputs.reset_production || 'no' }}"
           scp -P "$DEPLOY_PORT" /tmp/h2-hot2-release.tgz \
             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/h2-hot2-${GITHUB_SHA}.tgz"
           ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "APP_DIR='$APP_DIR' RELEASE_ARCHIVE='/tmp/h2-hot2-${GITHUB_SHA}.tgz' bash -s" \
+            "APP_DIR='$APP_DIR' RELEASE_ARCHIVE='/tmp/h2-hot2-${GITHUB_SHA}.tgz' RESET_PRODUCTION='$RESET_PRODUCTION' bash -s" \
             < scripts/deploy-production.sh
 
       - name: Verify public site
