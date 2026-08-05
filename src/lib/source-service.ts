@@ -4,8 +4,35 @@ import { InvalidParserConfigError, serializeParserConfig } from '@/lib/source-co
 import { sourceUpdateSchema } from '@/lib/source-schema';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshPublicPublicationsForSource } from '@/lib/public-publication-service';
+import { sourceIdentityUrl } from '@/lib/source-identity';
 
 export type SourceUpdateInput = z.infer<typeof sourceUpdateSchema>;
+
+export class DuplicateSourceIdentityError extends Error {
+  readonly status = 409;
+
+  constructor(name: string) {
+    super(`数据源已存在：${name}`);
+    this.name = 'DuplicateSourceIdentityError';
+  }
+}
+
+export class SourceNotFoundError extends Error {
+  readonly status = 404;
+
+  constructor() {
+    super('数据源不存在或已删除');
+    this.name = 'SourceNotFoundError';
+  }
+}
+
+async function assertActiveSource(id: string): Promise<void> {
+  const source = await db.source.findFirst({
+    where: { id, deletedAt: null },
+    select: { id: true },
+  });
+  if (!source) throw new SourceNotFoundError();
+}
 
 export async function getSourceDetail(id: string) {
   const source = await db.source.findUnique({ where: { id }, include: { _count: { select: { articles: true } } } });
@@ -19,6 +46,16 @@ export async function getSourceDetail(id: string) {
 }
 
 export async function updateSource(id: string, input: SourceUpdateInput) {
+  await assertActiveSource(id);
+  if (input.url !== undefined) {
+    const normalizedUrl = sourceIdentityUrl(input.url);
+    const existingSources = await db.source.findMany({
+      where: { deletedAt: null, id: { not: id } },
+      select: { name: true, url: true },
+    });
+    const duplicate = existingSources.find((source) => sourceIdentityUrl(source.url) === normalizedUrl);
+    if (duplicate) throw new DuplicateSourceIdentityError(duplicate.name);
+  }
   const source = await db.source.update({
     where: { id },
     data: {
@@ -37,6 +74,7 @@ export async function updateSource(id: string, input: SourceUpdateInput) {
 }
 
 export async function softDeleteSource(id: string) {
+  await assertActiveSource(id);
   const source = await db.source.update({ where: { id }, data: { deletedAt: new Date(), enabled: false } });
   await refreshPublicPublicationsForSource(id);
   invalidatePublicArticleCache();

@@ -37,6 +37,7 @@ import { useCrawlLogSnapshot } from './crawl-log/use-crawl-log-snapshot'
 import { CrawlLogFilters } from './crawl-log/filters-bar'
 import { TaskStatusPanels } from './crawl-log/task-status-panels'
 import { CrawlLogDetailSheets } from './crawl-log/detail-sheets'
+import { RuntimeStatusBar } from './crawl-log/runtime-status-bar'
 import { EmptyState } from '@/components/ui/empty-state'
 import { fetchSettings, saveSettings, subscribeToSettingsChanged } from '@/features/settings-api.client'
 import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
@@ -49,7 +50,6 @@ import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
 import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
 import { retrySource, retrySources } from '@/features/sources-api.client'
 
-const AUTO_CRAWL_COMMIT_DELAY_MS = 5_000
 type WorkflowStage = 'collect' | 'process' | 'ai' | 'cluster' | 'push'
 type WorkflowAction = WorkflowStage | 'all'
 
@@ -108,15 +108,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const [autoCrawl, setAutoCrawl] = useState<boolean | null>(null)
   const [autoCrawlSaving, setAutoCrawlSaving] = useState(false)
   const autoCrawlSavingRef = useRef(false)
-  const autoCrawlCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autoCrawlPersistedRef = useRef<boolean | null>(null)
-
-  useEffect(() => () => {
-    if (autoCrawlCommitTimerRef.current !== null) {
-      clearTimeout(autoCrawlCommitTimerRef.current)
-      autoCrawlCommitTimerRef.current = null
-    }
-  }, [])
   // 惰性读取 URL，避免挂载时覆盖深链状态。
   const [filterState, setFilterState] = useState<FilterState>(() => readFilterFromCurrentUrl())
   const [refreshing, setRefreshing] = useState(false)
@@ -310,7 +302,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     if (typeof changes.auto_crawl_enabled === 'string') {
       const enabled = changes.auto_crawl_enabled === 'true'
       autoCrawlPersistedRef.current = enabled
-      if (autoCrawlCommitTimerRef.current === null && !autoCrawlSavingRef.current) {
+      if (!autoCrawlSavingRef.current) {
         setAutoCrawl(enabled)
       }
     }
@@ -421,33 +413,24 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   const handleToggleAutoCrawl = (next: boolean) => {
     if (autoCrawlSavingRef.current) return
-
-    if (autoCrawlCommitTimerRef.current !== null) {
-      clearTimeout(autoCrawlCommitTimerRef.current)
-      autoCrawlCommitTimerRef.current = null
-    }
-
-    setAutoCrawl(next)
-
     if (autoCrawlPersistedRef.current === next) return
-
-    autoCrawlCommitTimerRef.current = setTimeout(() => {
-      autoCrawlCommitTimerRef.current = null
-      autoCrawlSavingRef.current = true
-      setAutoCrawlSaving(true)
-      void saveSettings({ auto_crawl_enabled: next ? 'true' : 'false' })
-        .then(() => {
-          autoCrawlPersistedRef.current = next
-        })
-        .catch(() => {
-          setAutoCrawl(autoCrawlPersistedRef.current ?? !next)
-          toast.error('设置保存失败')
-        })
-        .finally(() => {
-          autoCrawlSavingRef.current = false
-          setAutoCrawlSaving(false)
-        })
-    }, AUTO_CRAWL_COMMIT_DELAY_MS)
+    const previous = autoCrawlPersistedRef.current
+    setAutoCrawl(next)
+    autoCrawlSavingRef.current = true
+    setAutoCrawlSaving(true)
+    // 自动抓取是运行控制而非文本输入；必须在开关动作发生时持久化，不能等待防抖。
+    void saveSettings({ auto_crawl_enabled: next ? 'true' : 'false' })
+      .then(() => {
+        autoCrawlPersistedRef.current = next
+      })
+      .catch(() => {
+        setAutoCrawl(previous ?? !next)
+        toast.error('设置保存失败')
+      })
+      .finally(() => {
+        autoCrawlSavingRef.current = false
+        setAutoCrawlSaving(false)
+      })
   }
 
   const handleRetrySource = async (sourceId: string) => {
@@ -671,7 +654,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
             ))}
           </div>
 
-          <div className="hidden flex-1 sm:order-3 sm:block" />
+          <div className="hidden min-w-0 flex-1 sm:order-3 sm:block">
+            <RuntimeStatusBar runtime={snapshot?.runtime} />
+          </div>
 
           <div className="order-2 grid w-full grid-cols-3 gap-1 sm:order-4 sm:flex sm:w-auto sm:items-center sm:gap-2">
             <label className={WORKBENCH_TOGGLE_CLASS}>

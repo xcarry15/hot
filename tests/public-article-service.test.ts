@@ -9,11 +9,20 @@ const mocks = vi.hoisted(() => ({
   articleFindUnique: vi.fn(),
 }));
 
+const interactionMocks = vi.hoisted(() => ({
+  recordView: vi.fn(),
+  recordOriginalClick: vi.fn(),
+}));
+
 vi.mock('@/lib/db', () => ({
   db: {
     event: { findMany: mocks.eventFindMany, findFirst: mocks.eventFindFirst, count: mocks.eventCount, groupBy: mocks.eventGroupBy },
     article: { findMany: mocks.articleFindMany, findUnique: mocks.articleFindUnique },
   },
+}));
+vi.mock('@/lib/public-view-service', () => ({
+  recordPublicEventView: interactionMocks.recordView,
+  recordPublicEventOriginalClick: interactionMocks.recordOriginalClick,
 }));
 
 import { getPublicArticleDetail, listPublicArticleIds, listPublicArticles, recordOriginalClick } from '@/lib/public-article-service';
@@ -66,6 +75,8 @@ describe('public-article-service Event 门禁', () => {
       aiStatus: 'done',
       eventId: 'e1',
     }));
+    interactionMocks.recordView.mockResolvedValue(undefined);
+    interactionMocks.recordOriginalClick.mockResolvedValue(undefined);
   });
 
   it('一个 Event 只输出一张卡片并携带来源数', async () => {
@@ -96,8 +107,9 @@ describe('public-article-service Event 门禁', () => {
     await expect(listPublicArticleIds()).resolves.toEqual([{ id: 'e1', updatedAt: new Date('2026-07-15T01:00:00Z') }]);
   });
 
-  it('原文点击通过 Event 找到代表 Article', async () => {
-    mocks.eventFindFirst.mockResolvedValue({ representativeArticleId: 'a1' });
+  it('原文点击按 Event 与当前代表来源入账', async () => {
+    mocks.eventFindFirst.mockResolvedValue({ id: 'e1', representativeArticle: { sourceId: 's1' } });
     await expect(recordOriginalClick('e1')).resolves.toBe(true);
+    expect(interactionMocks.recordOriginalClick).toHaveBeenCalledWith('e1', 's1');
   });
 });

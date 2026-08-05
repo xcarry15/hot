@@ -10,6 +10,7 @@ export interface PushLogListParams {
   status?: string;
   source?: string;
   webhookRemark?: string;
+  emptyWebhookRemark?: boolean;
   startAt?: string;
   endAt?: string;
 }
@@ -32,6 +33,7 @@ export async function fetchPushLog(
   if (params.status) search.set('status', params.status);
   if (params.source) search.set('source', params.source);
   if (params.webhookRemark) search.set('webhookRemark', params.webhookRemark);
+  if (params.emptyWebhookRemark) search.set('emptyWebhookRemark', 'true');
   if (params.startAt) search.set('startAt', params.startAt);
   if (params.endAt) search.set('endAt', params.endAt);
   return requestJson('GET', `/api/push-log?${search}`, { signal });

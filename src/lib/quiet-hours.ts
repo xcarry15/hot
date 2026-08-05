@@ -52,3 +52,37 @@ export function isWithinQuietHours(
   }
   return current >= startMinutes || current < endMinutes;
 }
+
+/** 返回指定时刻之后最近一次免打扰结束时间；不在免打扰时段时返回 null。 */
+export function getQuietHoursEndAt(
+  now: Date,
+  start: string | null | undefined,
+  end: string | null | undefined,
+  timeZone = SCHEDULER_TIME_ZONE,
+): Date | null {
+  const startMinutes = parseTimeOfDay(start);
+  const endMinutes = parseTimeOfDay(end);
+  if (startMinutes === null || endMinutes === null || startMinutes === endMinutes) return null;
+  if (!isWithinQuietHours(now, start, end, timeZone)) return null;
+
+  // 调度器固定使用 Asia/Shanghai（UTC+8），将业务日期时间转换为 UTC。
+  if (timeZone !== SCHEDULER_TIME_ZONE) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const values = Object.fromEntries(
+    parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]),
+  );
+  const current = getZonedMinutes(now, timeZone);
+  const endDayOffset = startMinutes > endMinutes && current >= startMinutes ? 1 : 0;
+  return new Date(Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day) + endDayOffset,
+    0,
+    endMinutes - 8 * 60,
+  ));
+}

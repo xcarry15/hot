@@ -1,34 +1,54 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { db } from '@/lib/db';
-import { enqueuePublicArticleOriginalClick, enqueuePublicArticleView, flushPublicArticleViews } from '@/lib/public-view-service';
 
-const mocks = db as unknown as {
-  $executeRaw: ReturnType<typeof vi.fn>;
-  $transaction: ReturnType<typeof vi.fn>;
-};
+const mocks = vi.hoisted(() => ({
+  eventUpdate: vi.fn(),
+  interactionUpsert: vi.fn(),
+  transaction: vi.fn(),
+}));
+
+vi.mock('@/lib/db', () => ({
+  db: {
+    event: { update: mocks.eventUpdate },
+    eventInteractionDaily: { upsert: mocks.interactionUpsert },
+    $transaction: mocks.transaction,
+  },
+}));
+
+import { recordPublicEventInteraction } from '@/lib/public-view-service';
 
 describe('public-view-service', () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    mocks.$executeRaw.mockResolvedValue(1);
-    mocks.$transaction.mockImplementation(async (writes: Array<Promise<unknown>>) => Promise.all(writes));
-    await flushPublicArticleViews();
+    mocks.eventUpdate.mockResolvedValue({ id: 'e1' });
+    mocks.interactionUpsert.mockResolvedValue({ eventId: 'e1' });
+    mocks.transaction.mockImplementation(async (writes: Array<Promise<unknown>>) => Promise.all(writes));
   });
 
-  it('聚合浏览量后使用原生 SQL 写入，不触发 Prisma updatedAt', async () => {
-    enqueuePublicArticleView('a1');
-    enqueuePublicArticleView('a1');
-    await flushPublicArticleViews();
+  it('浏览在同一事务中更新 Event 总量与上海业务日明细', async () => {
+    await recordPublicEventInteraction('e1', 's1', 'view', new Date('2026-08-04T16:30:00.000Z'));
 
-    expect(mocks.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.eventUpdate).toHaveBeenCalledWith({
+      where: { id: 'e1' },
+      data: { viewCount: { increment: 1 } },
+    });
+    expect(mocks.interactionUpsert).toHaveBeenCalledWith({
+      where: { eventId_sourceId_dateKey: { eventId: 'e1', sourceId: 's1', dateKey: '2026-08-05' } },
+      create: { eventId: 'e1', sourceId: 's1', dateKey: '2026-08-05', viewCount: 1, originalClickCount: 0 },
+      update: { viewCount: { increment: 1 } },
+    });
+    expect(mocks.transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('浏览和原文点击合并到同一个短事务', async () => {
-    enqueuePublicArticleView('a1');
-    enqueuePublicArticleOriginalClick('a1');
-    await flushPublicArticleViews();
+  it('原文点击只增加对应点击计数，不会借用 Article 入库日期', async () => {
+    await recordPublicEventInteraction('e1', 's1', 'originalClick', new Date('2026-08-05T01:00:00.000Z'));
 
-    expect(mocks.$executeRaw).toHaveBeenCalledTimes(2);
-    expect(mocks.$transaction).toHaveBeenCalledTimes(1);
+    expect(mocks.eventUpdate).toHaveBeenCalledWith({
+      where: { id: 'e1' },
+      data: { originalClickCount: { increment: 1 } },
+    });
+    expect(mocks.interactionUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ viewCount: 0, originalClickCount: 1 }),
+      update: { originalClickCount: { increment: 1 } },
+    }));
   });
 });

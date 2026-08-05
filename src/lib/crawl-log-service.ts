@@ -34,6 +34,14 @@ import {
 } from '@/contracts/crawl-log';
 import { isLowAnalysisConfidence } from '@/contracts/ai-confidence';
 import { getTechnicalWorkQueue } from '@/lib/technical-work-queue-service';
+import { readAllSettings } from '@/lib/settings';
+import { SETTING_KEYS } from '@/lib/settings-catalog';
+import {
+  DEFAULT_QUIET_END,
+  DEFAULT_QUIET_START,
+  getQuietHoursEndAt,
+  SCHEDULER_TIME_ZONE,
+} from '@/lib/quiet-hours';
 import { getPushTargetStatesForEvents } from '@/lib/push/delivery';
 import { ACTIVE_JOB_STATUSES, TERMINAL_JOB_STATUSES } from '@/lib/job-status';
 
@@ -75,6 +83,41 @@ function safeJsonParse<T = Record<string, unknown>>(raw: string | null | undefin
   } catch {
     return null;
   }
+}
+
+function getCollectNewArticles(result: Record<string, unknown> | null): number | null {
+  if (!result) return null;
+  const stages = result.stages as Record<string, unknown> | undefined;
+  const collect = (stages?.collect ?? result.result ?? result) as Record<string, unknown> | undefined;
+  if (!collect) return null;
+  if (typeof collect.totalNewArticles === 'number' && Number.isFinite(collect.totalNewArticles)) {
+    return Math.max(0, collect.totalNewArticles);
+  }
+  if (typeof collect.newArticles === 'number' && Number.isFinite(collect.newArticles)) {
+    return Math.max(0, collect.newArticles);
+  }
+  const sources = collect.sources as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(sources)) return null;
+  const counts = sources
+    .map((source) => source.newArticles)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  return counts.length > 0 ? counts.reduce((total, value) => total + Math.max(0, value), 0) : null;
+}
+
+function isActualCollectionJob(job: Job): boolean {
+  if (job.type === 'collect') return true;
+  if (job.type !== 'full') return false;
+  return safeJsonParse<Record<string, unknown>>(job.payload)?.skipCollect !== true;
+}
+
+function parseCrawlIntervalMinutes(value: string | undefined): number {
+  const parsed = Number.parseInt(value || '120', 10);
+  return Number.isFinite(parsed) ? Math.max(5, parsed) : 120;
+}
+
+function parseSchedulerTimestamp(value: string | undefined): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function toJobSnapshot(job: Job): JobSnapshot {
@@ -153,8 +196,15 @@ export async function getCrawlLogSnapshot(
 
   // Articles + DiscardedItems + Job 用单次 $transaction，
   // 把跨查询的不一致窗口降到最小。
-  const pushSettings = await readPushSettings();
-  const technicalItems = await getTechnicalWorkQueue();
+  // 运行态信息是附加展示，不得让旧的轻量 DB mock 或配置异常阻断工作台主体快照。
+  const hasSettingsStore = Boolean(db.setting);
+  const [pushSettings, schedulerSettings, technicalItems] = await Promise.all([
+    readPushSettings(),
+    hasSettingsStore
+      ? readAllSettings().catch(() => ({} as Record<string, string>))
+      : Promise.resolve<Record<string, string>>({}),
+    getTechnicalWorkQueue(),
+  ]);
   const technicalByArticleId = new Map(technicalItems.map((item) => [item.articleId, item]));
   const technicalArticleIds = technicalItems.map((item) => item.articleId);
 
@@ -207,6 +257,16 @@ export async function getCrawlLogSnapshot(
         })
       : Promise.resolve([]),
   ]);
+  // 独立读取采集终态，避免 UI 的 5 条“最近任务”被后续 AI/处理/推送任务挤掉。
+  const collectionJobs = await Promise.resolve(db.job.findMany({
+    where: {
+      type: { in: ['full', 'collect'] },
+      status: { in: [...TERMINAL_JOB_STATUSES] },
+    },
+    orderBy: { completedAt: 'desc' },
+    // full 的 skipCollect 技术恢复不应污染“上次抓取”；最多扫描近期 500 条即可避开它们。
+    take: 500,
+  })).then((jobs) => Array.isArray(jobs) ? jobs : []);
   const hasMoreArticles = recentArticles.length > limit;
   const hasMoreDiscarded = discarded.length > limit;
   const recentArticleWindow = recentArticles.slice(0, limit);
@@ -230,11 +290,46 @@ export async function getCrawlLogSnapshot(
   }
   const activeJobRaw = activeJobs[0] ?? null;
   const latestJobRaw = activeJobRaw ? null : (latestJobs[0] ?? null);
-  const latestCollectJobRaw = latestJobs.find((job) => job.type === 'full' || job.type === 'collect') ?? null;
+  // 主查询只保留 5 条供 UI 展示；独立查询负责避免被后续非采集任务挤掉。
+  // 后备分支也让轻量测试/故障降级仍可使用已读到的终态事实。
+  const latestCollectJobRaw = collectionJobs.find(isActualCollectionJob)
+    ?? latestJobs.find(isActualCollectionJob)
+    ?? null;
 
   const activeJob = activeJobRaw ? toJobSnapshot(activeJobRaw) : null;
   const latestJob = latestJobRaw ? toJobSnapshot(latestJobRaw) : null;
   const latestCollectJob = latestCollectJobRaw ? toJobSnapshot(latestCollectJobRaw) : null;
+
+  const now = new Date();
+  const quietStart = schedulerSettings[SETTING_KEYS.CRAWL_QUIET_START] || DEFAULT_QUIET_START;
+  const quietEnd = schedulerSettings[SETTING_KEYS.CRAWL_QUIET_END] || DEFAULT_QUIET_END;
+  const autoCrawlEnabled = schedulerSettings[SETTING_KEYS.AUTO_CRAWL_ENABLED] === 'true';
+  const crawlIntervalMin = parseCrawlIntervalMinutes(schedulerSettings[SETTING_KEYS.CRAWL_INTERVAL_MIN]);
+  const lastCrawlAt = latestCollectJobRaw?.completedAt?.toISOString()
+    ?? latestCollectJobRaw?.startedAt?.toISOString()
+    ?? latestCollectJobRaw?.createdAt?.toISOString()
+    ?? null;
+  // 调度器的真实间隔基准是它成功排队时写入的 marker；手动抓取不应虚构改变自动计划。
+  const schedulerLastCrawlAt = parseSchedulerTimestamp(schedulerSettings[SETTING_KEYS.SCHEDULER_LAST_CRAWL_AT]);
+  const scheduledAt = schedulerLastCrawlAt === null
+    ? null
+    : schedulerLastCrawlAt + crawlIntervalMin * 60_000;
+  const nextSchedulerTick = new Date((Math.floor(now.getTime() / 60_000) + 1) * 60_000);
+  const dueAt = scheduledAt === null ? nextSchedulerTick : new Date(scheduledAt);
+  const quietEndAt = getQuietHoursEndAt(now, quietStart, quietEnd, SCHEDULER_TIME_ZONE);
+  const nextCrawlDate = autoCrawlEnabled
+    ? quietEndAt
+      ? (dueAt.getTime() > quietEndAt.getTime() ? dueAt : quietEndAt)
+      : (dueAt.getTime() <= now.getTime()
+        ? nextSchedulerTick
+        : getQuietHoursEndAt(dueAt, quietStart, quietEnd, SCHEDULER_TIME_ZONE) ?? dueAt)
+    : null;
+  const nextCrawlAt = nextCrawlDate?.toISOString() ?? null;
+  const runtime = {
+    lastCrawlAt,
+    lastCrawlCount: getCollectNewArticles(latestCollectJob?.result ?? null),
+    nextCrawlAt,
+  };
 
   const push: PushThresholds = {
     pushMode: pushSettings.pushMode,
@@ -461,6 +556,7 @@ export async function getCrawlLogSnapshot(
   return {
     activeJob,
     latestJob,
+    runtime,
     sources,
     fetchedAt: Date.now(),
     hasMoreArticles,

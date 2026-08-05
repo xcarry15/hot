@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
-import { publicEventWhere } from '@/lib/public-article-service';
+import type { JobStatus } from '@prisma/client';
+import { getPublicDateKey } from '@/lib/shared/public-date';
 
 export type DashboardAnalyticsRange = 'all' | 'today' | '3d' | '7d' | '30d';
 
@@ -36,7 +37,7 @@ type CrawlTrigger = 'auto' | 'manual' | 'unknown';
 export interface CrawlRecordFilters {
   page?: number;
   trigger?: CrawlTrigger;
-  status?: string;
+  status?: JobStatus;
   type?: 'full' | 'collect';
   sourceId?: string;
 }
@@ -44,15 +45,6 @@ export interface CrawlRecordFilters {
 const CRAWL_PAGE_SIZE = 20;
 const DASHBOARD_CACHE_TTL_MS = 15_000;
 const DASHBOARD_CACHE_MAX_ENTRIES = 30;
-const DASHBOARD_TIME_ZONE = 'Asia/Shanghai';
-
-const dashboardDateFormatter = new Intl.DateTimeFormat('en-US', {
-  timeZone: DASHBOARD_TIME_ZONE,
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-});
-
 const RANGE_DAYS: Record<Exclude<DashboardAnalyticsRange, 'all'>, number> = {
   today: 1,
   '3d': 3,
@@ -62,17 +54,23 @@ const RANGE_DAYS: Record<Exclude<DashboardAnalyticsRange, 'all'>, number> = {
 
 export function parseDashboardAnalyticsRange(value: string | null): DashboardAnalyticsRange {
   if (value === 'all') return value;
-  if (value === '3d' || value === '7d' || value === '30d') return value;
+  if (value === 'today' || value === '3d' || value === '7d' || value === '30d') return value;
   return 'all';
 }
 
-function getRangeWindow(range: DashboardAnalyticsRange): RangeWindow {
-  const endAt = new Date();
-  if (range === 'all') return { startAt: null, endAt };
-  const startAt = new Date(endAt);
-  startAt.setHours(0, 0, 0, 0);
-  startAt.setDate(startAt.getDate() - RANGE_DAYS[range] + 1);
-  return { startAt, endAt };
+/**
+ * 所有概览日期都以 Asia/Shanghai 业务日切分，不能依赖部署机器的时区。
+ * 上海无夏令时，+08:00 是这个业务边界的稳定 UTC 表示。
+ */
+export function getDashboardRangeWindow(
+  range: DashboardAnalyticsRange,
+  now = new Date(),
+): RangeWindow {
+  if (range === 'all') return { startAt: null, endAt: now };
+  const endKey = dateKey(now);
+  const startAt = new Date(`${endKey}T00:00:00+08:00`);
+  startAt.setUTCDate(startAt.getUTCDate() - RANGE_DAYS[range] + 1);
+  return { startAt, endAt: now };
 }
 
 function createStats(): MutableStats {
@@ -110,9 +108,12 @@ function ratio(value: number, denominator: number): number {
 }
 
 function dateKey(value: Date): string {
-  const parts = dashboardDateFormatter.formatToParts(value);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
+  return getPublicDateKey(value);
+}
+
+function isWithinRange(value: Date, window: RangeWindow): boolean {
+  return value.getTime() <= window.endAt.getTime()
+    && (window.startAt === null || value.getTime() >= window.startAt.getTime());
 }
 
 function dailyArticleChartKeys(range: DashboardAnalyticsRange, endAt: Date, firstArticleAt: Date | null): string[] {
@@ -164,6 +165,22 @@ function parseItemsFound(type: string, result: Record<string, unknown>): number 
   }, 0);
 }
 
+function parsePayloadSourceIds(payload: Record<string, unknown>): string[] {
+  const sourceIds = Array.isArray(payload.sourceIds) ? payload.sourceIds : [];
+  const singleSourceId = typeof payload.sourceId === 'string' ? [payload.sourceId] : [];
+  return [...new Set([...singleSourceId, ...sourceIds.filter((value): value is string => typeof value === 'string' && value.length > 0)])];
+}
+
+/**
+ * 数据源筛选的语义是“本任务是否会采集此源”。full 且未跳过 collect 的任务会覆盖
+ * 所有启用源，不能因为 payload 没有单个 sourceId 就从历史中消失。
+ */
+function jobCollectsSource(job: { type: string }, payload: Record<string, unknown>, sourceId: string): boolean {
+  const payloadSourceIds = parsePayloadSourceIds(payload);
+  if (payloadSourceIds.length > 0) return payloadSourceIds.includes(sourceId);
+  return job.type === 'full' && payload.skipCollect !== true;
+}
+
 function toQualityStats(stats: MutableStats) {
   const totalArticles = stats.ingested + stats.unmatched + stats.discardedDuplicates;
   return {
@@ -204,13 +221,25 @@ async function buildDashboardAnalytics(
   sourceId?: string,
   crawlFilters: CrawlRecordFilters = {},
 ) {
-  const window = getRangeWindow(range);
+  const window = getDashboardRangeWindow(range);
   const timeWhere = window.startAt
     ? { gte: window.startAt, lte: window.endAt }
     : { lte: window.endAt };
+  const interactionDateWhere = window.startAt
+    ? { gte: dateKey(window.startAt), lte: dateKey(window.endAt) }
+    : { lte: dateKey(window.endAt) };
   const sourceFilter = sourceId ? { sourceId } : {};
+  const eventSourceFilter = sourceId ? { representativeArticle: { is: { sourceId } } } : {};
 
-  const [sources, articles, discardedItems, fetchLogs, topViewedRows] = await Promise.all([
+  const [
+    sources,
+    articles,
+    discardedItems,
+    fetchLogs,
+    interactionBySource,
+    interactionByEvent,
+    eventActivities,
+  ] = await Promise.all([
     db.source.findMany({
       where: { deletedAt: null, ...(sourceId ? { id: sourceId } : {}) },
       select: { id: true, name: true, status: true, enabled: true, lastFetchedAt: true },
@@ -231,16 +260,10 @@ async function buildDashboardAnalytics(
         clusterStatus: true,
         event: {
           select: {
-            status: true,
-            clusterReviewStatus: true,
-            publicStatus: true,
-            pushedAt: true,
             articleCount: true,
             representativeArticleId: true,
           },
         },
-        viewCount: true,
-        originalClickCount: true,
       },
     }),
     db.discardedItem.findMany({
@@ -258,35 +281,38 @@ async function buildDashboardAnalytics(
       where: { createdAt: timeWhere, ...sourceFilter },
       select: { sourceId: true, createdAt: true, status: true, itemsFound: true },
     }),
+    db.eventInteractionDaily.groupBy({
+      where: {
+        dateKey: interactionDateWhere,
+        ...(sourceId ? { sourceId } : {}),
+      },
+      by: ['sourceId'],
+      _sum: { viewCount: true, originalClickCount: true },
+    }),
+    db.eventInteractionDaily.groupBy({
+      where: {
+        dateKey: interactionDateWhere,
+        ...(sourceId ? { sourceId } : {}),
+      },
+      by: ['eventId'],
+      _sum: { viewCount: true, originalClickCount: true },
+    }),
     db.event.findMany({
       where: {
-        ...publicEventWhere,
-        representativeArticle: {
-          is: {
-            aiStatus: 'done',
-            clusterStatus: 'clustered',
-            createdAt: timeWhere,
-            ...(sourceId ? { sourceId } : {}),
-          },
-        },
+        ...eventSourceFilter,
+        OR: [
+          { publicPublishedAt: timeWhere },
+          { pushedAt: timeWhere },
+        ],
       },
       select: {
+        id: true,
+        publicPublishedAt: true,
+        pushedAt: true,
         representativeArticle: {
-          select: {
-            id: true,
-            title: true,
-            viewCount: true,
-            publishedAt: true,
-            score: true,
-            source: { select: { name: true } },
-          },
+          select: { sourceId: true, isAd: true },
         },
       },
-      orderBy: [
-        { representativeArticle: { viewCount: 'desc' } },
-        { id: 'desc' },
-      ],
-      take: 20,
     }),
   ]);
 
@@ -319,8 +345,6 @@ async function buildDashboardAnalytics(
     if (!source) continue;
 
     source.ingested += 1;
-    source.views += row.viewCount;
-    source.originalClicks += row.originalClickCount;
 
     if (row.fetchStatus === 'fetched') {
       source.processed += 1;
@@ -337,15 +361,6 @@ async function buildDashboardAnalytics(
       source.scoreTotal += row.score;
       source.highScore += row.score >= 80 ? 1 : 0;
       source.ads += row.isAd ? 1 : 0;
-    }
-
-    // Event 只会向外投递一次，必须只统计其代表文章；否则同一 Event 的
-    // 多篇转载会把推送量、推送率和软文推送量重复放大。
-    if (isAnalyzed && row.event?.pushedAt && row.event.representativeArticleId === row.id) {
-      source.pushed += 1;
-      if (row.isAd) {
-        source.pushedAds += 1;
-      }
     }
 
     // Event 只有一篇代表文章；重复数应只计非代表成员，
@@ -377,6 +392,24 @@ async function buildDashboardAnalytics(
     source.fetchFailures += row.status === 'failure' ? 1 : 0;
   }
 
+  // 互动按发生日与发生时来源累加，绝不能把 Article 的生命周期累计值归到文章入库日。
+  for (const row of interactionBySource) {
+    const source = getSourceStats(row.sourceId);
+    if (!source) continue;
+    source.views += row._sum.viewCount ?? 0;
+    source.originalClicks += row._sum.originalClickCount ?? 0;
+  }
+
+  // 推送是 Event 级动作；按 pushedAt 统计，避免“旧文章今天被推送”落到其入库日。
+  for (const event of eventActivities) {
+    const representative = event.representativeArticle;
+    if (!representative) continue;
+    const source = getSourceStats(representative.sourceId);
+    if (!source || !event.pushedAt || !isWithinRange(event.pushedAt, window)) continue;
+    source.pushed += 1;
+    if (representative.isAd) source.pushedAds += 1;
+  }
+
   const sourceRows = sources.map((source) => ({
     id: source.id,
     name: source.name,
@@ -398,8 +431,9 @@ async function buildDashboardAnalytics(
   const allCrawlRecords = recentJobs
     .flatMap((job) => {
       const payload = parseRecord(job.payload);
-      const payloadSourceId = typeof payload.sourceId === 'string' ? payload.sourceId : null;
-      if (crawlFilters.sourceId && payloadSourceId !== crawlFilters.sourceId) return [];
+      const payloadSourceIds = parsePayloadSourceIds(payload);
+      const payloadSourceId = payloadSourceIds.length === 1 ? payloadSourceIds[0] : null;
+      if (crawlFilters.sourceId && !jobCollectsSource(job, payload, crawlFilters.sourceId)) return [];
       const startedAt = job.startedAt ?? job.createdAt;
       const completedAt = job.completedAt ?? (job.status === 'running' ? null : job.updatedAt);
       const durationEnd = completedAt ?? new Date();
@@ -408,7 +442,13 @@ async function buildDashboardAnalytics(
         type: job.type as 'full' | 'collect',
         trigger: parseTrigger(payload),
         status: job.status,
-        sourceLabel: payloadSourceId ? (sourceNameById.get(payloadSourceId) ?? '单个数据源') : '全部数据源',
+        sourceLabel: payloadSourceId
+          ? (sourceNameById.get(payloadSourceId) ?? '单个数据源')
+          : payloadSourceIds.length > 1
+            ? `${payloadSourceIds.length} 个数据源`
+            : job.type === 'full' && payload.skipCollect !== true
+              ? '全部数据源'
+              : '未采集数据源',
         startedAt: startedAt.toISOString(),
         completedAt: completedAt?.toISOString() ?? null,
         durationMs: Math.max(0, durationEnd.getTime() - startedAt.getTime()),
@@ -446,15 +486,70 @@ async function buildDashboardAnalytics(
     const counts = dailyArticleCounts.get(key);
     if (!counts) continue;
     counts.newCount += 1;
-    const isRepresentative = article.event?.representativeArticleId === article.id;
-    const isPublic = isRepresentative
-      && article.aiStatus === 'done'
-      && article.clusterStatus === 'clustered'
-      && article.event?.status === 'active'
-      && article.event.clusterReviewStatus === 'confirmed'
-      && article.event.publicStatus === 'published';
-    if (isPublic) counts.publicCount += 1;
-    if (isRepresentative && article.event?.pushedAt) counts.pushedCount += 1;
+  }
+  for (const event of eventActivities) {
+    if (event.publicPublishedAt && isWithinRange(event.publicPublishedAt, window)) {
+      const counts = dailyArticleCounts.get(dateKey(event.publicPublishedAt));
+      if (counts) counts.publicCount += 1;
+    }
+    if (event.pushedAt && isWithinRange(event.pushedAt, window)) {
+      const counts = dailyArticleCounts.get(dateKey(event.pushedAt));
+      if (counts) counts.pushedCount += 1;
+    }
+  }
+
+  const rankedInteractionEvents = interactionByEvent
+    .map((row) => ({
+      eventId: row.eventId,
+      viewCount: row._sum.viewCount ?? 0,
+      originalClickCount: row._sum.originalClickCount ?? 0,
+    }))
+    .filter((row) => row.viewCount > 0 || row.originalClickCount > 0)
+    .sort((left, right) => right.viewCount - left.viewCount
+      || right.originalClickCount - left.originalClickCount
+      || right.eventId.localeCompare(left.eventId));
+  // 已合并的历史 Event 没有代表 Article。分块继续读取直到得到 20 篇，既避免
+  // SQLite IN 参数上限，也不会因前 100 条都已合并而错误显示空 Top 榜。
+  const topViewedArticles: Array<{
+    id: string;
+    title: string;
+    viewCount: number;
+    publishedAt: string | null;
+    score: number;
+    sourceName: string;
+  }> = [];
+  const TOP_EVENT_QUERY_CHUNK_SIZE = 100;
+  for (let offset = 0; offset < rankedInteractionEvents.length && topViewedArticles.length < 20; offset += TOP_EVENT_QUERY_CHUNK_SIZE) {
+    const rankedChunk = rankedInteractionEvents.slice(offset, offset + TOP_EVENT_QUERY_CHUNK_SIZE);
+    const eventRows = await db.event.findMany({
+      where: { id: { in: rankedChunk.map((row) => row.eventId) }, representativeArticleId: { not: null } },
+      select: {
+        id: true,
+        representativeArticle: {
+          select: {
+            id: true,
+            title: true,
+            publishedAt: true,
+            score: true,
+            source: { select: { name: true } },
+          },
+        },
+      },
+    });
+    const eventById = new Map(eventRows.map((event) => [event.id, event]));
+    for (const interaction of rankedChunk) {
+      if (topViewedArticles.length >= 20) break;
+      const article = eventById.get(interaction.eventId)?.representativeArticle;
+      if (!article) continue;
+      topViewedArticles.push({
+        id: article.id,
+        title: article.title,
+        viewCount: interaction.viewCount,
+        publishedAt: article.publishedAt?.toISOString() ?? null,
+        score: article.score,
+        sourceName: article.source.name,
+      });
+    }
   }
 
   return {
@@ -467,16 +562,7 @@ async function buildDashboardAnalytics(
       ...toQualityStats(summaryStats),
     },
     sources: sourceRows,
-    topViewedArticles: topViewedRows
-      .filter((row) => row.representativeArticle !== null)
-      .map((row) => ({
-        id: row.representativeArticle!.id,
-        title: row.representativeArticle!.title,
-        viewCount: row.representativeArticle!.viewCount,
-        publishedAt: row.representativeArticle!.publishedAt?.toISOString() ?? null,
-        score: row.representativeArticle!.score,
-        sourceName: row.representativeArticle!.source.name,
-      })),
+    topViewedArticles,
     dailyNewArticles: dailyArticleKeys.map((date) => ({
       date,
       count: dailyArticleCounts.get(date)?.newCount ?? 0,

@@ -32,4 +32,12 @@ describe('requestJson authorization boundary', () => {
     const secondHeaders = new Headers(mocks.fetch.mock.calls[1]?.[1]?.headers);
     expect(secondHeaders.get('Authorization')).toBe('Bearer explicit-token');
   });
+
+  it('DELETE 携带 JSON body，供资源删除接口接收明确 id', async () => {
+    await requestJson('DELETE', '/api/settings/prompt-versions', { body: { id: 'version-1' } });
+
+    const request = mocks.fetch.mock.calls[0]?.[1] as RequestInit;
+    expect(request.body).toBe(JSON.stringify({ id: 'version-1' }));
+    expect(new Headers(request.headers).get('Content-Type')).toBe('application/json');
+  });
 });

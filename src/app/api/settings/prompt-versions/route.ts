@@ -23,10 +23,11 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const body: unknown = await request.json();
+    const body: unknown = await request.json().catch(() => null);
     const id = body && typeof body === 'object' && 'id' in body && typeof body.id === 'string'
       ? body.id
       : '';
+    if (!id) return NextResponse.json({ error: '提示词版本 id 为必填项' }, { status: 400 });
     const deleted = await runExclusiveMutation('删除提示词版本', () => deletePromptVersion(id));
     if (!deleted) return NextResponse.json({ error: '提示词版本不存在' }, { status: 404 });
     return NextResponse.json({ deleted: true });
