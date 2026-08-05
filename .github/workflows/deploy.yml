@@ -13,8 +13,8 @@ on:
         default: "no"
         type: choice
         options:
-          - no
-          - yes
+          - "no"
+          - "yes"
 
 permissions:
   contents: read
