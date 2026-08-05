@@ -24,6 +24,12 @@ interface CrawlTimeCardProps {
 }
 
 function formatNumber(value: number): string { return value.toLocaleString() }
+function formatPublishedAt(value: string | null): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
 function formatRecordTime(value: string): string {
   const date = new Date(value)
   return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`
@@ -47,72 +53,6 @@ function crawlStatusLabel(status: DashboardAnalytics["crawlRecords"][number]["st
   return "等待中"
 }
 
-export function TrendBody({ points }: { points: DashboardAnalytics['trend'] }) {
-  const maxTotal = Math.max(1, ...points.map((point) => point.stackNew + point.stackAds + point.stackPushed + point.stackDuplicates))
-  const series = [
-    { key: 'stackNew', label: '普通新增（未推送）', color: 'bg-blue-500' },
-    { key: 'stackAds', label: '软文（未推送）', color: 'bg-amber-500' },
-    { key: 'stackPushed', label: '已推送', color: 'bg-emerald-500' },
-    { key: 'stackDuplicates', label: '重复项', color: 'bg-slate-400' },
-  ] as const
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] text-muted-foreground">
-        {series.map((item) => (
-          <span key={item.key} className="inline-flex items-center gap-1"><i className={`h-2 w-2 rounded-sm ${item.color}`} />{item.label}</span>
-        ))}
-      </div>
-
-      <div className="flex h-28 items-end gap-1 border-b border-l px-1.5 pb-1 sm:gap-2">
-        {points.map((point) => (
-          <div key={point.date} className="group relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
-            <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden min-w-[118px] -translate-x-1/2 rounded-md border bg-popover px-2 py-1.5 text-[10px] text-popover-foreground shadow-md group-hover:block group-focus-within:block" role="tooltip">
-              <div className="mb-1 font-medium">{point.label}</div>
-              <div className="flex justify-between gap-3"><span>AI完成</span><span className="tabular-nums">{point.newArticles}</span></div>
-              <div className="flex justify-between gap-3"><span>重复项</span><span className="tabular-nums">{point.duplicates}</span></div>
-              <div className="flex justify-between gap-3"><span>软文</span><span className="tabular-nums">{point.ads}</span></div>
-              <div className="flex justify-between gap-3"><span>已推送</span><span className="tabular-nums">{point.pushed}</span></div>
-            </div>
-            <div
-              className="flex h-20 w-full max-w-12 flex-col-reverse justify-start overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              tabIndex={0}
-              aria-label={`${point.label}：AI完成 ${point.newArticles}，重复项 ${point.duplicates}，软文 ${point.ads}，已推送 ${point.pushed}`}
-            >
-              {series.map((item) => {
-                const value = point[item.key]
-                return <div key={item.key} className={`${item.color} w-full`} style={{ height: value ? `${value / maxTotal * 100}%` : '0%' }} />
-              })}
-            </div>
-            <span className="max-w-full truncate text-[10px] text-muted-foreground">{point.label}</span>
-          </div>
-        ))}
-      </div>
-
-    </div>
-  )
-}
-
-export function TrendCard({
-  title,
-  points,
-}: {
-  title: string
-  points: DashboardAnalytics['trend']
-}) {
-  return (
-    <Card className="rounded-none py-0 shadow-none">
-      <CardContent className="p-2">
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">{title}</h3>
-          {points.length > 1 && <span className="text-[10px] text-muted-foreground">{points.length} 个时间点</span>}
-        </div>
-        {points.length > 0 ? <TrendBody points={points} /> : <div className="py-8 text-center text-xs text-muted-foreground">暂无趋势数据</div>}
-      </CardContent>
-    </Card>
-  )
-}
-
 export function TopViewedArticlesCard({
   articles,
   onArticleClick,
@@ -126,20 +66,27 @@ export function TopViewedArticlesCard({
     <Card className="rounded-none py-0 shadow-none">
       <CardContent className="p-2">
         <div className="mb-1 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium" title="点击文章打开工作台详情">公开浏览 Top 200</h3>
-          <span className="text-[10px] text-muted-foreground">{articles.length}/200 篇</span>
+          <h3 className="text-sm font-medium" title="点击文章打开工作台详情">公开浏览 Top 20</h3>
+          <span className="text-[10px] text-muted-foreground">{articles.length}/20 篇</span>
         </div>
         {articles.length > 0 ? (
-          <div className="max-h-[420px] space-y-0.5 overflow-y-auto pr-1">
+          <div className="max-h-[420px] overflow-auto pr-1">
+            <div className="grid min-w-[360px] grid-cols-[1.5rem_minmax(0,1fr)_6.25rem_2.5rem_3.5rem] items-center gap-2 border-b px-1.5 py-1 text-[10px] text-muted-foreground">
+              <span />
+              <span>文章</span>
+              <span>发布时间</span>
+              <span className="text-right">评分</span>
+              <span className="text-right">浏览</span>
+            </div>
             {articles.map((article, index) => {
               const width = article.viewCount > 0 ? Math.max(2, article.viewCount / maxViews * 100) : 0
               return (
                 <button
                   key={article.id}
                   type="button"
-                  className="group relative flex min-h-7 w-full items-center gap-2 overflow-hidden border-b border-border/40 px-1.5 py-1 text-left text-[11px] hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring"
+                  className="group relative grid min-h-7 w-full min-w-[360px] grid-cols-[1.5rem_minmax(0,1fr)_6.25rem_2.5rem_3.5rem] items-center gap-2 overflow-hidden border-b border-border/40 px-1.5 py-1 text-left text-[11px] hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring"
                   onClick={() => onArticleClick(article.id)}
-                  title={`${article.title} · ${article.sourceName} · ${formatNumber(article.viewCount)} 次公开浏览`}
+                  title={`${article.title} · ${article.sourceName} · 发布时间 ${formatPublishedAt(article.publishedAt)} · ${article.score} 分 · ${formatNumber(article.viewCount)} 次公开浏览`}
                 >
                   <span className="z-10 w-6 shrink-0 text-right tabular-nums text-muted-foreground">{index + 1}</span>
                   <span
@@ -148,13 +95,55 @@ export function TopViewedArticlesCard({
                     aria-hidden="true"
                   />
                   <span className="relative z-10 min-w-0 flex-1 truncate">{article.title}</span>
-                  <span className="relative z-10 shrink-0 tabular-nums text-muted-foreground">{formatNumber(article.viewCount)}</span>
+                  <span className="relative z-10 truncate tabular-nums text-muted-foreground">{formatPublishedAt(article.publishedAt)}</span>
+                  <span className="relative z-10 text-right tabular-nums text-muted-foreground">{article.score}</span>
+                  <span className="relative z-10 text-right tabular-nums text-muted-foreground">{formatNumber(article.viewCount)}</span>
                 </button>
               )
             })}
           </div>
         ) : (
           <div className="py-8 text-center text-xs text-muted-foreground">暂无公开文章浏览数据</div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function DailyNewArticlesCard({
+  articles,
+}: {
+  articles: DashboardAnalytics['dailyNewArticles']
+}) {
+  const total = articles.reduce((sum, item) => sum + item.count, 0)
+  const peak = Math.max(0, ...articles.map((item) => item.count))
+
+  return (
+    <Card className="min-h-[420px] rounded-none py-0 shadow-none">
+      <CardContent className="p-2">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">每日新增文章</h3>
+          <span className="text-[10px] text-muted-foreground">共 {formatNumber(total)} 篇 · 峰值 {peak}</span>
+        </div>
+        {articles.length > 0 ? (
+          <div className="mt-3 flex h-[350px] items-end gap-1 border-b border-l px-1 pb-1 pt-2">
+            {articles.map((item, index) => {
+              const height = peak > 0 && item.count > 0 ? Math.max(4, item.count / peak * 100) : 0
+              const [, month, day] = item.date.split('-')
+              const labelStep = Math.max(1, Math.ceil(articles.length / 6))
+              const showLabel = articles.length <= 7 || index === 0 || index === articles.length - 1 || index % labelStep === 0
+              return (
+                <div key={item.date} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1" title={`${item.date} · ${item.count} 篇`}>
+                  <div className="flex h-[310px] w-full items-end">
+                    <div className="w-full rounded-t-sm bg-primary/70 transition-[height]" style={{ height: `${height}%` }} />
+                  </div>
+                  <span className="h-3 text-[9px] tabular-nums text-muted-foreground">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</span>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="py-8 text-center text-xs text-muted-foreground">暂无新增文章数据</div>
         )}
       </CardContent>
     </Card>
@@ -173,11 +162,11 @@ export function CrawlTimeCard({
   onPageChange,
 }: CrawlTimeCardProps) {
   return (
-    <Card className="rounded-none py-0 shadow-none">
+    <Card className="h-[420px] overflow-y-auto rounded-none py-0 shadow-none">
       <CardContent className="p-2">
         <div className="mb-1 flex flex-wrap items-center gap-1">
           <div className="mr-2 shrink-0">
-            <h3 className="text-sm font-medium">任务中心</h3>
+            <h3 className="text-sm font-medium">抓取记录</h3>
             <p className="text-[10px] text-muted-foreground">共 {pagination.total} 条 · 自动任务与手动任务</p>
           </div>
           <Select value={filters.trigger} onValueChange={(value) => onTriggerChange(value as CrawlTriggerFilter)}>

@@ -10,10 +10,15 @@ export interface PushLogListParams {
   status?: string;
   source?: string;
   webhookRemark?: string;
+  startAt?: string;
+  endAt?: string;
 }
 
-export async function fetchPushLogStats(signal?: AbortSignal): Promise<Record<string, unknown>> {
-  return requestJson<Record<string, unknown>>('GET', '/api/push-log/stats', { signal });
+export async function fetchPushLogStats(params: Pick<PushLogListParams, 'startAt' | 'endAt'> = {}, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  const search = new URLSearchParams();
+  if (params.startAt) search.set('startAt', params.startAt);
+  if (params.endAt) search.set('endAt', params.endAt);
+  return requestJson<Record<string, unknown>>('GET', `/api/push-log/stats?${search}`, { signal });
 }
 
 export async function fetchPushLog(
@@ -27,5 +32,7 @@ export async function fetchPushLog(
   if (params.status) search.set('status', params.status);
   if (params.source) search.set('source', params.source);
   if (params.webhookRemark) search.set('webhookRemark', params.webhookRemark);
+  if (params.startAt) search.set('startAt', params.startAt);
+  if (params.endAt) search.set('endAt', params.endAt);
   return requestJson('GET', `/api/push-log?${search}`, { signal });
 }

@@ -6,7 +6,6 @@ export type DashboardAnalyticsRange = 'all' | 'today' | '3d' | '7d' | '30d';
 interface RangeWindow {
   startAt: Date | null;
   endAt: Date;
-  days: number | null;
 }
 
 interface MutableStats {
@@ -32,10 +31,6 @@ interface MutableStats {
   originalClicks: number;
 }
 
-interface MutableTrendStats extends MutableStats {
-  date: Date;
-}
-
 type CrawlTrigger = 'auto' | 'manual' | 'unknown';
 
 export interface CrawlRecordFilters {
@@ -49,6 +44,14 @@ export interface CrawlRecordFilters {
 const CRAWL_PAGE_SIZE = 20;
 const DASHBOARD_CACHE_TTL_MS = 15_000;
 const DASHBOARD_CACHE_MAX_ENTRIES = 30;
+const DASHBOARD_TIME_ZONE = 'Asia/Shanghai';
+
+const dashboardDateFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: DASHBOARD_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
 
 const RANGE_DAYS: Record<Exclude<DashboardAnalyticsRange, 'all'>, number> = {
   today: 1,
@@ -65,11 +68,11 @@ export function parseDashboardAnalyticsRange(value: string | null): DashboardAna
 
 function getRangeWindow(range: DashboardAnalyticsRange): RangeWindow {
   const endAt = new Date();
-  if (range === 'all') return { startAt: null, endAt, days: null };
+  if (range === 'all') return { startAt: null, endAt };
   const startAt = new Date(endAt);
   startAt.setHours(0, 0, 0, 0);
   startAt.setDate(startAt.getDate() - RANGE_DAYS[range] + 1);
-  return { startAt, endAt, days: RANGE_DAYS[range] };
+  return { startAt, endAt };
 }
 
 function createStats(): MutableStats {
@@ -97,17 +100,6 @@ function createStats(): MutableStats {
   };
 }
 
-function createTrendStats(date: Date): MutableTrendStats {
-  return { date, ...createStats() };
-}
-
-function dateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 function round(value: number, digits = 1): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
@@ -115,6 +107,29 @@ function round(value: number, digits = 1): number {
 
 function ratio(value: number, denominator: number): number {
   return denominator > 0 ? round(value / denominator, 4) : 0;
+}
+
+function dateKey(value: Date): string {
+  const parts = dashboardDateFormatter.formatToParts(value);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function dailyArticleChartKeys(range: DashboardAnalyticsRange, endAt: Date, firstArticleAt: Date | null): string[] {
+  const endKey = dateKey(endAt);
+  const cursor = new Date(`${endKey}T00:00:00.000Z`);
+  const firstKey = firstArticleAt ? dateKey(firstArticleAt) : endKey;
+  const firstDay = new Date(`${firstKey}T00:00:00.000Z`);
+  const days = range === 'all'
+    ? Math.max(0, Math.floor((cursor.getTime() - firstDay.getTime()) / 86_400_000) + 1)
+    : RANGE_DAYS[range];
+  const keys: string[] = [];
+  for (let index = days - 1; index >= 0; index -= 1) {
+    const day = new Date(cursor);
+    day.setUTCDate(day.getUTCDate() - index);
+    keys.push(day.toISOString().slice(0, 10));
+  }
+  return keys;
 }
 
 function parseRecord(value: string): Record<string, unknown> {
@@ -150,7 +165,6 @@ function parseItemsFound(type: string, result: Record<string, unknown>): number 
 }
 
 function toQualityStats(stats: MutableStats) {
-  const pushedNonAds = Math.max(0, stats.pushed - stats.pushedAds);
   const totalArticles = stats.ingested + stats.unmatched + stats.discardedDuplicates;
   return {
     found: stats.found,
@@ -182,11 +196,6 @@ function toQualityStats(stats: MutableStats) {
     views: stats.views,
     originalClicks: stats.originalClicks,
     clickRate: ratio(stats.originalClicks, stats.views),
-    // 互斥堆叠分层：AI完成按普通/软文/已推送拆分，避免同一篇文章重复累加。
-    stackNew: Math.max(0, stats.newArticles - stats.ads - pushedNonAds),
-    stackAds: Math.max(0, stats.ads - stats.pushedAds),
-    stackPushed: stats.pushed,
-    stackDuplicates: stats.duplicates,
   };
 }
 
@@ -240,13 +249,25 @@ async function buildDashboardAnalytics(
       select: { sourceId: true, createdAt: true, status: true, itemsFound: true },
     }),
     db.event.findMany({
-      where: publicEventWhere,
+      where: {
+        ...publicEventWhere,
+        representativeArticle: {
+          is: {
+            aiStatus: 'done',
+            clusterStatus: 'clustered',
+            createdAt: timeWhere,
+            ...(sourceId ? { sourceId } : {}),
+          },
+        },
+      },
       select: {
         representativeArticle: {
           select: {
             id: true,
             title: true,
             viewCount: true,
+            publishedAt: true,
+            score: true,
             source: { select: { name: true } },
           },
         },
@@ -255,12 +276,12 @@ async function buildDashboardAnalytics(
         { representativeArticle: { viewCount: 'desc' } },
         { id: 'desc' },
       ],
-      take: 200,
+      take: 20,
     }),
   ]);
 
   const recentJobs = await db.job.findMany({
-    where: { type: { in: ['full', 'collect'] } },
+    where: { type: { in: ['full', 'collect'] }, createdAt: timeWhere },
     orderBy: { createdAt: 'desc' },
     // 运营页只显示近期历史；避免为了当前分页读取无限 Job。
     take: 500,
@@ -281,43 +302,18 @@ async function buildDashboardAnalytics(
   const sourceStats = new Map<string, MutableStats>();
   for (const source of sources) sourceStats.set(source.id, createStats());
 
-  const trendStats = new Map<string, MutableTrendStats>();
-  if (window.startAt && window.days !== null) {
-    const cursor = new Date(window.startAt);
-    for (let index = 0; index < window.days; index += 1) {
-      const date = new Date(cursor);
-      date.setDate(window.startAt.getDate() + index);
-      trendStats.set(dateKey(date), createTrendStats(date));
-    }
-  }
-
   const getSourceStats = (id: string) => sourceStats.get(id);
-  const getTrendStats = (date: Date) => {
-    const key = dateKey(date);
-    const existing = trendStats.get(key);
-    if (existing || window.days !== null) return existing;
-    const bucketDate = new Date(date);
-    bucketDate.setHours(0, 0, 0, 0);
-    const created = createTrendStats(bucketDate);
-    trendStats.set(key, created);
-    return created;
-  };
 
   for (const row of articles) {
     const source = getSourceStats(row.sourceId);
-    const trend = getTrendStats(row.createdAt);
-    if (!source || !trend) continue;
+    if (!source) continue;
 
     source.ingested += 1;
-    trend.ingested += 1;
     source.views += row.viewCount;
     source.originalClicks += row.originalClickCount;
-    trend.views += row.viewCount;
-    trend.originalClicks += row.originalClickCount;
 
     if (row.fetchStatus === 'fetched') {
       source.processed += 1;
-      trend.processed += 1;
     }
 
     const businessSkipAnalyzed = row.aiStatus === 'skipped'
@@ -327,25 +323,18 @@ async function buildDashboardAnalytics(
       && (row.aiStatus === 'done' || businessSkipAnalyzed);
     if (isAnalyzed) {
       source.newArticles += 1;
-      trend.newArticles += 1;
       source.analyzed += 1;
       source.scoreTotal += row.score;
       source.highScore += row.score >= 80 ? 1 : 0;
       source.ads += row.isAd ? 1 : 0;
-      trend.analyzed += 1;
-      trend.scoreTotal += row.score;
-      trend.highScore += row.score >= 80 ? 1 : 0;
-      trend.ads += row.isAd ? 1 : 0;
     }
 
     // Event 只会向外投递一次，必须只统计其代表文章；否则同一 Event 的
     // 多篇转载会把推送量、推送率和软文推送量重复放大。
     if (isAnalyzed && row.event?.pushedAt && row.event.representativeArticleId === row.id) {
       source.pushed += 1;
-      trend.pushed += 1;
       if (row.isAd) {
         source.pushedAds += 1;
-        trend.pushedAds += 1;
       }
     }
 
@@ -354,40 +343,28 @@ async function buildDashboardAnalytics(
     if ((row.event?.articleCount ?? 0) > 1 && row.event?.representativeArticleId !== row.id) {
       source.duplicates += 1;
       source.duplicateArticles += 1;
-      trend.duplicates += 1;
-      trend.duplicateArticles += 1;
     }
   }
 
   for (const row of discardedItems) {
     const source = getSourceStats(row.sourceId);
-    const trend = getTrendStats(row.createdAt);
-    if (!source || !trend) continue;
+    if (!source) continue;
     if (row.reason === 'filter:keyword') {
       source.unmatched += 1;
-      trend.unmatched += 1;
     } else {
       source.duplicates += 1;
       source.discardedDuplicates += 1;
-      trend.duplicates += 1;
-      trend.discardedDuplicates += 1;
     }
   }
 
   for (const row of fetchLogs) {
     const source = getSourceStats(row.sourceId);
-    const trend = getTrendStats(row.createdAt);
-    if (!source || !trend) continue;
+    if (!source) continue;
     source.found += row.itemsFound;
     source.fetchRuns += 1;
     source.fetchSuccesses += row.status === 'success' ? 1 : 0;
     source.fetchWarnings += row.status === 'warning' ? 1 : 0;
     source.fetchFailures += row.status === 'failure' ? 1 : 0;
-    trend.found += row.itemsFound;
-    trend.fetchRuns += 1;
-    trend.fetchSuccesses += row.status === 'success' ? 1 : 0;
-    trend.fetchWarnings += row.status === 'warning' ? 1 : 0;
-    trend.fetchFailures += row.status === 'failure' ? 1 : 0;
   }
 
   const sourceRows = sources.map((source) => ({
@@ -406,14 +383,6 @@ async function buildDashboardAnalytics(
     }
     return total;
   }, createStats());
-
-  const trend = Array.from(trendStats.values())
-    .sort((left, right) => left.date.getTime() - right.date.getTime())
-    .map((item) => ({
-      date: dateKey(item.date),
-      label: `${item.date.getMonth() + 1}/${item.date.getDate()}`,
-      ...toQualityStats(item),
-    }));
 
   const sourceNameById = new Map(sources.map((source) => [source.id, source.name]));
   const allCrawlRecords = recentJobs
@@ -453,6 +422,18 @@ async function buildDashboardAnalytics(
     crawlPage * CRAWL_PAGE_SIZE,
   );
 
+  const firstArticleAt = articles.reduce<Date | null>((first, article) => (
+    first === null || article.createdAt.getTime() < first.getTime() ? article.createdAt : first
+  ), null);
+  const dailyArticleKeys = dailyArticleChartKeys(range, window.endAt, firstArticleAt);
+  const dailyArticleCounts = new Map(dailyArticleKeys.map((key) => [key, 0]));
+  for (const article of articles) {
+    const key = dateKey(article.createdAt);
+    if (dailyArticleCounts.has(key)) {
+      dailyArticleCounts.set(key, (dailyArticleCounts.get(key) ?? 0) + 1);
+    }
+  }
+
   return {
     range,
     sourceId: sourceId ?? null,
@@ -469,9 +450,14 @@ async function buildDashboardAnalytics(
         id: row.representativeArticle!.id,
         title: row.representativeArticle!.title,
         viewCount: row.representativeArticle!.viewCount,
+        publishedAt: row.representativeArticle!.publishedAt?.toISOString() ?? null,
+        score: row.representativeArticle!.score,
         sourceName: row.representativeArticle!.source.name,
       })),
-    trend,
+    dailyNewArticles: dailyArticleKeys.map((date) => ({
+      date,
+      count: dailyArticleCounts.get(date) ?? 0,
+    })),
     crawlRecords,
     crawlPagination: {
       page: crawlPage,

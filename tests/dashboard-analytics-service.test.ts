@@ -46,13 +46,15 @@ describe('运营统计重复口径', () => {
     expect(parseDashboardAnalyticsRange('all')).toBe('all');
   });
 
-  it('只返回公开事件代表文章中浏览量最高的前 200 篇', async () => {
+  it('只返回公开事件代表文章中浏览量最高的前 20 篇', async () => {
     mocks.eventFindMany.mockResolvedValue([
       {
         representativeArticle: {
           id: 'article-top',
           title: '浏览最多',
           viewCount: 99,
+          publishedAt: new Date('2026-08-05T08:00:00.000Z'),
+          score: 92,
           source: { name: '测试源' },
         },
       },
@@ -61,6 +63,8 @@ describe('运营统计重复口径', () => {
           id: 'article-second',
           title: '第二名',
           viewCount: 20,
+          publishedAt: null,
+          score: 78,
           source: { name: '测试源' },
         },
       },
@@ -69,6 +73,11 @@ describe('运营统计重复口径', () => {
     const result = await getDashboardAnalytics('all');
 
     expect(result.topViewedArticles.map((article) => article.id)).toEqual(['article-top', 'article-second']);
+    expect(result.topViewedArticles[0]).toMatchObject({
+      publishedAt: '2026-08-05T08:00:00.000Z',
+      score: 92,
+    });
+    expect(mocks.eventFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 20 }));
   });
 
   it('同一 Event 只把非代表 Article 计为重复', async () => {

@@ -15,13 +15,11 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import PushLogPanel from '@/components/push-log-panel'
 import {
-  AlertTriangle,
   HelpCircle,
   RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { CrawlTimeCard, TopViewedArticlesCard, TrendCard } from './dashboard/dashboard-cards'
-import { buildSourceAttention, statusConfig } from './dashboard/source-attention'
+import { CrawlTimeCard, DailyNewArticlesCard, TopViewedArticlesCard } from './dashboard/dashboard-cards'
 
 type SourceSort = 'found' | 'totalArticles' | 'avgScore' | 'ingested' | 'processed' | 'analyzed' | 'pushed' | 'unmatched' | 'duplicates' | 'ads'
 
@@ -179,8 +177,6 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
     })
   }, [analytics, sourceSort])
 
-  const attention = analytics ? buildSourceAttention(analytics) : []
-
   if (loading) {
     return (
       <div className="space-y-1 pt-1">
@@ -234,7 +230,6 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-medium">数据源质量</h3>
-                  <p className="text-[10px] text-muted-foreground">点击列标题查看说明</p>
                 </div>
                 <select
                   value={sourceSort}
@@ -449,68 +444,28 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
             </CardContent>
           </Card>
 
-          {attention.length > 0 && (
-            <Card className="border-amber-200 dark:border-amber-900/50">
-              <CardContent className="p-2">
-                <div className="mb-1 flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                  <span className="text-sm font-medium">需要关注</span>
-                  <span className="ml-auto text-[11px] text-muted-foreground">{attention.length} 个数据源</span>
-                </div>
-                <div className="grid gap-x-3 gap-y-1 border-t pt-1 md:grid-cols-2 xl:grid-cols-3">
-                  {attention.map((item) => (
-                    <div key={item.sourceId} className="min-w-0">
-                      <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
-                        <span className="font-medium text-sm">{item.sourceName}</span>
-                        <Badge variant={statusConfig(item.sourceStatus, item.sourceEnabled).variant} className="px-1.5 py-0 text-[10px]">
-                          {statusConfig(item.sourceStatus, item.sourceEnabled).label}
-                        </Badge>
-                        <div className="ml-auto flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                          <span className="text-red-600 font-medium">{item.summary.criticalCount} 严重</span>
-                          <span className="text-amber-600 font-medium">{item.summary.warningCount} 警告</span>
-                        </div>
-                      </div>
-                      <div className="space-y-0.5">
-                        {item.alerts.map((alert, idx) => (
-                          <div key={idx} title={alert.detail} className={`flex items-center gap-1.5 border-l-2 px-1.5 py-0.5 text-[11px] ${alert.level === 'critical' ? 'border-red-500 text-red-700 dark:text-red-300' : 'border-amber-500 text-amber-700 dark:text-amber-300'}`}>
-                            <alert.icon className="h-3 w-3 shrink-0" />
-                            <span className="font-medium">{alert.label}</span>
-                            <span className="font-medium">{alert.value}</span>
-                            <span className="ml-auto shrink-0 text-muted-foreground">阈值：{alert.threshold}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
           <div className="grid min-w-0 items-start gap-1 xl:grid-cols-2">
-            <div className="grid min-w-0 items-start gap-1">
-              <TopViewedArticlesCard
-                articles={analytics.topViewedArticles}
-                onArticleClick={openPopularArticle}
-              />
+            <CrawlTimeCard
+              records={analytics.crawlRecords}
+              pagination={analytics.crawlPagination}
+              sources={analytics.sources}
+              filters={{ trigger: crawlTrigger, status: crawlStatus, type: crawlType, sourceId: crawlSourceId }}
+              onTriggerChange={(value) => { setCrawlTrigger(value); setCrawlPage(1) }}
+              onStatusChange={(value) => { setCrawlStatus(value); setCrawlPage(1) }}
+              onTypeChange={(value) => { setCrawlType(value); setCrawlPage(1) }}
+              onSourceChange={(value) => { setCrawlSourceId(value); setCrawlPage(1) }}
+              onPageChange={setCrawlPage}
+            />
 
-              <CrawlTimeCard
-                records={analytics.crawlRecords}
-                pagination={analytics.crawlPagination}
-                sources={analytics.sources}
-                filters={{ trigger: crawlTrigger, status: crawlStatus, type: crawlType, sourceId: crawlSourceId }}
-                onTriggerChange={(value) => { setCrawlTrigger(value); setCrawlPage(1) }}
-                onStatusChange={(value) => { setCrawlStatus(value); setCrawlPage(1) }}
-                onTypeChange={(value) => { setCrawlType(value); setCrawlPage(1) }}
-                onSourceChange={(value) => { setCrawlSourceId(value); setCrawlPage(1) }}
-                onPageChange={setCrawlPage}
-              />
-            </div>
+            <PushLogPanel active={active} refreshToken={refreshToken} startAt={analytics.startAt} endAt={analytics.endAt} />
 
-            <div className="grid min-w-0 items-start gap-1">
-              <TrendCard title={`${RANGE_OPTIONS.find((option) => option.value === range)?.label ?? ''}文章处理结果趋势`} points={analytics.trend} />
-              <PushLogPanel active={active} refreshToken={refreshToken} />
-            </div>
+            <TopViewedArticlesCard
+              articles={analytics.topViewedArticles}
+              onArticleClick={openPopularArticle}
+            />
+
+            <DailyNewArticlesCard articles={analytics.dailyNewArticles} />
+
           </div>
 
           {suggestions.length > 0 && <Card><CardContent className="p-2"><div className="mb-1 flex items-center gap-2"><span className="text-sm font-medium">人工反馈建议</span><Badge variant="secondary" className="rounded-none text-[10px]">需确认</Badge></div><div className="divide-y border-t">{suggestions.slice(0, 5).map((item) => <div key={item.id} className="py-1.5"><div className="flex items-center gap-2"><span className="text-xs font-medium">{item.title}</span><span className="ml-auto text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span></div><p className="mt-0.5 text-[11px] text-muted-foreground">{item.detail}</p><div className="mt-1 flex gap-1"><Button size="sm" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'apply')}>确认应用</Button><Button size="sm" variant="ghost" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'dismiss')}>忽略</Button></div></div>)}</div></CardContent></Card>}

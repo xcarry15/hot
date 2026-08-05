@@ -54,7 +54,20 @@ function pushStatusLabel(status: string): string {
   return status === 'success' ? '成功' : '失败'
 }
 
-export default function PushLogPanel({ active = true, refreshToken = 0 }: { active?: boolean; refreshToken?: number }) {
+const HIDDEN_WEBHOOK_LABEL = '已隐藏的 Webhook'
+
+function visibleWebhookValue(value: string): string {
+  return value === HIDDEN_WEBHOOK_LABEL ? '' : value
+}
+
+interface PushLogPanelProps {
+  active?: boolean
+  refreshToken?: number
+  startAt?: string | null
+  endAt?: string | null
+}
+
+export default function PushLogPanel({ active = true, refreshToken = 0, startAt = null, endAt = null }: PushLogPanelProps) {
   const [data, setData] = useState<PushLogResponse | null>(null)
   const [stats, setStats] = useState<PushLogStats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -76,6 +89,8 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
       status: statusFilter === 'all' ? undefined : statusFilter,
       source: sourceFilter === 'all' ? undefined : sourceFilter,
       webhookRemark: webhookFilter === 'all' ? undefined : webhookFilter,
+      startAt: startAt ?? undefined,
+      endAt: endAt ?? undefined,
     }
 
     try {
@@ -101,14 +116,19 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
         if (!controller.signal.aborted) setLoading(false)
       }
     }
-  }, [page, sourceFilter, statusFilter, webhookFilter])
+  }, [endAt, page, sourceFilter, startAt, statusFilter, webhookFilter])
 
   useEffect(() => {
-    if (!active || stats) return
-    void fetchPushLogStats()
-      .then((result) => setStats(result as unknown as PushLogStats))
+    if (!active) return
+    setStats(null)
+    const controller = new AbortController()
+    void fetchPushLogStats({ startAt: startAt ?? undefined, endAt: endAt ?? undefined }, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setStats(result as unknown as PushLogStats)
+      })
       .catch(() => undefined)
-  }, [active, stats])
+    return () => controller.abort()
+  }, [active, endAt, startAt])
 
   useEffect(() => {
     if (!active) return
@@ -136,13 +156,13 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
   }
 
   return (
-    <Card className="py-0">
+    <Card className="h-[420px] overflow-y-auto py-0">
       <CardContent className="p-2">
         <div className="mb-1 flex flex-wrap items-center gap-1">
           <div className="mr-2 shrink-0">
             <h3 className="text-sm font-medium">推送记录</h3>
             <p className="text-[10px] text-muted-foreground">
-              {stats ? `全量 ${stats.status.all} 条 · 成功 ${stats.status.success} · 失败 ${stats.status.failure}` : '全量记录每次 Webhook 目标投递结果'}
+              {stats ? `当前范围 ${stats.status.all} 条 · 成功 ${stats.status.success} · 失败 ${stats.status.failure}` : '当前范围内的 Webhook 投递结果'}
             </p>
           </div>
           <Select value={statusFilter} onValueChange={(value) => updateFilter(setStatusFilter, value)}>
@@ -174,7 +194,7 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
           <LoadingList count={6} />
         ) : data && data.items.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] whitespace-nowrap border-collapse text-[11px]">
+            <table className="w-full min-w-[680px] whitespace-nowrap border-collapse text-[11px]">
               <thead>
                 <tr className="border-b text-left text-[11px] text-muted-foreground">
                   <th className="px-1.5 py-1 font-medium">推送时间</th>
@@ -189,9 +209,10 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
                 {data.items.map((log) => (
                   <tr key={log.id} className="border-b last:border-0" title={log.errorMessage || undefined}>
                     <td className="px-1.5 py-1 tabular-nums">{formatPushTime(log.createdAt)}</td>
-                    <td className="max-w-[180px] px-1.5 py-1">
-                      <div className="max-w-[180px] truncate font-medium" title={log.webhookTarget || undefined}>
-                        {log.webhookRemark !== '已隐藏的 Webhook' && <>{log.webhookRemark || '飞书 Webhook'} <span className="font-normal text-muted-foreground">· {log.webhookTarget || '未记录目标'}</span></>}
+                    <td className="w-[90px] max-w-[90px] px-1.5 py-1">
+                      <div className="max-w-[90px] truncate font-medium" title={visibleWebhookValue(log.webhookTarget) || undefined}>
+                        {visibleWebhookValue(log.webhookRemark) || (visibleWebhookValue(log.webhookTarget) ? '飞书 Webhook' : '')}
+                        {visibleWebhookValue(log.webhookTarget) && <span className="font-normal text-muted-foreground"> · {visibleWebhookValue(log.webhookTarget)}</span>}
                       </div>
                     </td>
                     <td className="max-w-[320px] px-1.5 py-1">
