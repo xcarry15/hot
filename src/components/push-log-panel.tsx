@@ -137,7 +137,7 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
 
   return (
     <Card className="py-0">
-      <CardContent className="p-2.5">
+      <CardContent className="p-2">
         <div className="mb-1 flex flex-wrap items-center gap-1">
           <div className="mr-2 shrink-0">
             <h3 className="text-sm font-medium">推送记录</h3>

@@ -17,11 +17,10 @@ import PushLogPanel from '@/components/push-log-panel'
 import {
   AlertTriangle,
   HelpCircle,
-  Loader2,
   RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { CrawlTimeCard, TrendBody, TrendCard } from './dashboard/dashboard-cards'
+import { CrawlTimeCard, TopViewedArticlesCard, TrendCard } from './dashboard/dashboard-cards'
 import { buildSourceAttention, statusConfig } from './dashboard/source-attention'
 
 type SourceSort = 'found' | 'totalArticles' | 'avgScore' | 'ingested' | 'processed' | 'analyzed' | 'pushed' | 'unmatched' | 'duplicates' | 'ads'
@@ -90,9 +89,6 @@ function rateColor(rate: number, inverse = false): string {
 export default function DashboardTab({ active = true }: { active?: boolean }) {
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
   const [range, setRange] = useState<DashboardAnalyticsRange>('all')
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
-  const [sourceDetail, setSourceDetail] = useState<DashboardAnalytics | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
   const [sourceSort, setSourceSort] = useState<SourceSort>('analyzed')
   const [loading, setLoading] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -139,6 +135,13 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
     void fetchData()
   }
 
+  const openPopularArticle = useCallback((articleId: string) => {
+    if (typeof window === 'undefined') return
+    const url = new URL('/admin', window.location.origin)
+    url.searchParams.set('articleId', articleId)
+    window.location.assign(url.toString())
+  }, [])
+
   useEffect(() => {
     if (!active) return
     const handle = setTimeout(fetchData, 0)
@@ -168,28 +171,6 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
     return () => document.removeEventListener('click', handleClick)
   }, [tooltipInfo])
 
-  useEffect(() => {
-    if (!active || !selectedSourceId) {
-      setSourceDetail(null)
-      return
-    }
-    let cancelled = false
-    setDetailLoading(true)
-    fetchDashboardAnalytics(range, selectedSourceId)
-      .then((result) => {
-        if (!cancelled) setSourceDetail(result)
-      })
-      .catch(() => {
-        if (!cancelled) toast.error('获取数据源详情失败')
-      })
-      .finally(() => {
-        if (!cancelled) setDetailLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [active, range, selectedSourceId])
-
   const sortedSources = useMemo(() => {
     if (!analytics) return []
     return [...analytics.sources].sort((a, b) => {
@@ -202,12 +183,12 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
 
   if (loading) {
     return (
-      <div className="space-y-1.5 pt-2">
-        <div className="flex items-center justify-between gap-2 border-b pb-2">
+      <div className="space-y-1 pt-1">
+        <div className="flex min-h-9 items-center justify-between gap-2 border bg-border">
           <Skeleton className="h-5 w-16" />
           <Skeleton className="h-7 w-20" />
         </div>
-        <Card className="py-0"><CardContent className="space-y-2.5 p-3"><Skeleton className="h-4 w-24" /><Skeleton className="h-36 w-full" /></CardContent></Card>
+        <Card className="py-0"><CardContent className="space-y-2 p-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-32 w-full" /></CardContent></Card>
       </div>
     )
   }
@@ -216,33 +197,33 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
 
   const summary = analytics.summary
   return (
-    <div className="space-y-1 pt-1 [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:shadow-none">
-      <div className="flex min-h-12 flex-wrap items-stretch border bg-border">
-        <div className="flex items-center gap-1.5 bg-background px-2">
+    <div className="space-y-1 pt-0 [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:shadow-none">
+      <div className="flex min-h-10 flex-wrap items-stretch border bg-border">
+        <div className="flex items-center gap-1 bg-background px-1.5">
           <h2 className="text-sm font-semibold">概览</h2>
           <select
             id="overview-range"
             value={range}
             onChange={(event) => setRange(event.target.value as DashboardAnalyticsRange)}
-            className="h-7 border bg-background px-2 text-[11px] outline-none focus:ring-1 focus:ring-ring"
+            className="h-6 border bg-background px-1.5 text-[10px] outline-none focus:ring-1 focus:ring-ring"
           >
             {RANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
           <button
-            className={`h-7 border px-2 text-[11px] transition-colors hover:bg-muted ${autoRefresh ? 'text-foreground' : 'text-muted-foreground'}`}
+            className={`h-6 border px-1.5 text-[10px] transition-colors hover:bg-muted ${autoRefresh ? 'text-foreground' : 'text-muted-foreground'}`}
             onClick={() => setAutoRefresh(!autoRefresh)}
             aria-pressed={autoRefresh}
           >
             自动更新 {autoRefresh ? '开' : '关'}
           </button>
-          <Button size="sm" variant="ghost" className="h-7 gap-1 rounded-none px-2 text-[11px]" onClick={handleRefresh}>
-            <RefreshCw className="h-3.5 w-3.5" />刷新
+          <Button size="sm" variant="ghost" className="h-6 gap-1 rounded-none px-1.5 text-[10px]" onClick={handleRefresh}>
+            <RefreshCw className="h-3 w-3" />刷新
           </Button>
         </div>
-        <div className="grid min-w-[360px] flex-1 grid-cols-3 gap-px">
-          <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">公开浏览</span><strong className="text-base tabular-nums">{formatNumber(summary.views)}</strong></div>
-          <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">查看原文</span><strong className="text-base tabular-nums">{formatNumber(summary.originalClicks)}</strong></div>
-          <div className="flex items-center justify-between gap-2 bg-background px-2.5"><span className="text-[10px] text-muted-foreground">点击率</span><strong className="text-base tabular-nums">{formatPercent(summary.clickRate)}</strong></div>
+        <div className="grid min-w-[300px] flex-1 grid-cols-3 gap-px">
+          <div className="flex items-center justify-between gap-2 bg-background px-2"><span className="text-[10px] text-muted-foreground">公开浏览</span><strong className="text-sm tabular-nums">{formatNumber(summary.views)}</strong></div>
+          <div className="flex items-center justify-between gap-2 bg-background px-2"><span className="text-[10px] text-muted-foreground">查看原文</span><strong className="text-sm tabular-nums">{formatNumber(summary.originalClicks)}</strong></div>
+          <div className="flex items-center justify-between gap-2 bg-background px-2"><span className="text-[10px] text-muted-foreground">点击率</span><strong className="text-sm tabular-nums">{formatPercent(summary.clickRate)}</strong></div>
         </div>
       </div>
 
@@ -253,7 +234,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-medium">数据源质量</h3>
-                  <p className="text-[10px] text-muted-foreground">点击行查看详情，点击列标题查看说明</p>
+                  <p className="text-[10px] text-muted-foreground">点击列标题查看说明</p>
                 </div>
                 <select
                   value={sourceSort}
@@ -427,8 +408,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                     {sortedSources.map((source) => (
                       <tr
                         key={source.id}
-                        className={`cursor-pointer border-b last:border-0 hover:bg-muted/50 ${selectedSourceId === source.id ? 'bg-muted/60' : ''}`}
-                        onClick={() => setSelectedSourceId((current) => current === source.id ? null : source.id)}
+                        className="border-b last:border-0 hover:bg-muted/50"
                       >
                         <td className="max-w-[220px] px-2 py-1.5">
                           <div className="truncate font-medium" title={source.name}>{source.name}</div>
@@ -469,36 +449,18 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
             </CardContent>
           </Card>
 
-          <CrawlTimeCard
-            records={analytics.crawlRecords}
-            pagination={analytics.crawlPagination}
-            sources={analytics.sources}
-            filters={{ trigger: crawlTrigger, status: crawlStatus, type: crawlType, sourceId: crawlSourceId }}
-            onTriggerChange={(value) => { setCrawlTrigger(value); setCrawlPage(1) }}
-            onStatusChange={(value) => { setCrawlStatus(value); setCrawlPage(1) }}
-            onTypeChange={(value) => { setCrawlType(value); setCrawlPage(1) }}
-            onSourceChange={(value) => { setCrawlSourceId(value); setCrawlPage(1) }}
-            onPageChange={setCrawlPage}
-          />
-
-          <PushLogPanel active={active} refreshToken={refreshToken} />
-
-          <TrendCard title={`${RANGE_OPTIONS.find((option) => option.value === range)?.label ?? ''}文章处理结果趋势`} points={analytics.trend} />
-
-          {suggestions.length > 0 && <Card><CardContent className="p-2.5"><div className="mb-1.5 flex items-center gap-2"><span className="text-sm font-medium">人工反馈建议</span><Badge variant="secondary" className="rounded-none text-[10px]">需确认</Badge></div><div className="divide-y border-t">{suggestions.slice(0, 5).map((item) => <div key={item.id} className="py-2"><div className="flex items-center gap-2"><span className="text-xs font-medium">{item.title}</span><span className="ml-auto text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span></div><p className="mt-0.5 text-[11px] text-muted-foreground">{item.detail}</p><div className="mt-1.5 flex gap-1"><Button size="sm" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'apply')}>确认应用</Button><Button size="sm" variant="ghost" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'dismiss')}>忽略</Button></div></div>)}</div></CardContent></Card>}
-
           {attention.length > 0 && (
             <Card className="border-amber-200 dark:border-amber-900/50">
-              <CardContent className="p-3">
-                <div className="mb-2 flex items-center gap-2">
+              <CardContent className="p-2">
+                <div className="mb-1 flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
                   <span className="text-sm font-medium">需要关注</span>
                   <span className="ml-auto text-[11px] text-muted-foreground">{attention.length} 个数据源</span>
                 </div>
-                <div className="divide-y border-t">
+                <div className="grid gap-x-3 gap-y-1 border-t pt-1 md:grid-cols-2 xl:grid-cols-3">
                   {attention.map((item) => (
-                    <div key={item.sourceId} className="py-2">
-                      <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <div key={item.sourceId} className="min-w-0">
+                      <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
                         <span className="font-medium text-sm">{item.sourceName}</span>
                         <Badge variant={statusConfig(item.sourceStatus, item.sourceEnabled).variant} className="px-1.5 py-0 text-[10px]">
                           {statusConfig(item.sourceStatus, item.sourceEnabled).label}
@@ -508,10 +470,10 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                           <span className="text-amber-600 font-medium">{item.summary.warningCount} 警告</span>
                         </div>
                       </div>
-                      <div className="space-y-1">
+                      <div className="space-y-0.5">
                         {item.alerts.map((alert, idx) => (
-                          <div key={idx} title={alert.detail} className={`flex items-center gap-2 border-l-2 px-2 py-1 text-[11px] ${alert.level === 'critical' ? 'border-red-500 text-red-700 dark:text-red-300' : 'border-amber-500 text-amber-700 dark:text-amber-300'}`}>
-                            <alert.icon className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                          <div key={idx} title={alert.detail} className={`flex items-center gap-1.5 border-l-2 px-1.5 py-0.5 text-[11px] ${alert.level === 'critical' ? 'border-red-500 text-red-700 dark:text-red-300' : 'border-amber-500 text-amber-700 dark:text-amber-300'}`}>
+                            <alert.icon className="h-3 w-3 shrink-0" />
                             <span className="font-medium">{alert.label}</span>
                             <span className="font-medium">{alert.value}</span>
                             <span className="ml-auto shrink-0 text-muted-foreground">阈值：{alert.threshold}</span>
@@ -525,24 +487,33 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
             </Card>
           )}
 
-          {selectedSourceId && (
-            detailLoading ? (
-              <Card className="py-0"><CardContent className="flex items-center justify-center gap-2 p-8 text-xs text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />正在加载数据源详情</CardContent></Card>
-            ) : sourceDetail?.sources[0] ? (
-              <Card className="py-0">
-                <CardContent className="p-3 sm:p-4">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-medium">{sourceDetail.sources[0].name} · 周期详情</h3>
-                                                <p className="text-[10px] text-muted-foreground">可结合任务中心查看具体失败文章和过滤原因</p>
-                    </div>
-                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setSelectedSourceId(null)}>收起</Button>
-                  </div>
-                  <TrendBody points={sourceDetail.trend} />
-                </CardContent>
-              </Card>
-            ) : null
-          )}
+          <div className="grid min-w-0 items-start gap-1 xl:grid-cols-2">
+            <div className="grid min-w-0 items-start gap-1">
+              <TopViewedArticlesCard
+                articles={analytics.topViewedArticles}
+                onArticleClick={openPopularArticle}
+              />
+
+              <CrawlTimeCard
+                records={analytics.crawlRecords}
+                pagination={analytics.crawlPagination}
+                sources={analytics.sources}
+                filters={{ trigger: crawlTrigger, status: crawlStatus, type: crawlType, sourceId: crawlSourceId }}
+                onTriggerChange={(value) => { setCrawlTrigger(value); setCrawlPage(1) }}
+                onStatusChange={(value) => { setCrawlStatus(value); setCrawlPage(1) }}
+                onTypeChange={(value) => { setCrawlType(value); setCrawlPage(1) }}
+                onSourceChange={(value) => { setCrawlSourceId(value); setCrawlPage(1) }}
+                onPageChange={setCrawlPage}
+              />
+            </div>
+
+            <div className="grid min-w-0 items-start gap-1">
+              <TrendCard title={`${RANGE_OPTIONS.find((option) => option.value === range)?.label ?? ''}文章处理结果趋势`} points={analytics.trend} />
+              <PushLogPanel active={active} refreshToken={refreshToken} />
+            </div>
+          </div>
+
+          {suggestions.length > 0 && <Card><CardContent className="p-2"><div className="mb-1 flex items-center gap-2"><span className="text-sm font-medium">人工反馈建议</span><Badge variant="secondary" className="rounded-none text-[10px]">需确认</Badge></div><div className="divide-y border-t">{suggestions.slice(0, 5).map((item) => <div key={item.id} className="py-1.5"><div className="flex items-center gap-2"><span className="text-xs font-medium">{item.title}</span><span className="ml-auto text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span></div><p className="mt-0.5 text-[11px] text-muted-foreground">{item.detail}</p><div className="mt-1 flex gap-1"><Button size="sm" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'apply')}>确认应用</Button><Button size="sm" variant="ghost" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'dismiss')}>忽略</Button></div></div>)}</div></CardContent></Card>}
 
           {tooltipInfo && SOURCE_FIELD_HELP[tooltipInfo.field] && (
             <div

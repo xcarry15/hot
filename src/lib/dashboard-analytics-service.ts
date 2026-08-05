@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { publicEventWhere } from '@/lib/public-article-service';
 
 export type DashboardAnalyticsRange = 'all' | 'today' | '3d' | '7d' | '30d';
 
@@ -200,7 +201,7 @@ async function buildDashboardAnalytics(
     : { lte: window.endAt };
   const sourceFilter = sourceId ? { sourceId } : {};
 
-  const [sources, articles, discardedItems, fetchLogs] = await Promise.all([
+  const [sources, articles, discardedItems, fetchLogs, topViewedRows] = await Promise.all([
     db.source.findMany({
       where: { deletedAt: null, ...(sourceId ? { id: sourceId } : {}) },
       select: { id: true, name: true, status: true, enabled: true, lastFetchedAt: true },
@@ -237,6 +238,24 @@ async function buildDashboardAnalytics(
     db.fetchLog.findMany({
       where: { createdAt: timeWhere, ...sourceFilter },
       select: { sourceId: true, createdAt: true, status: true, itemsFound: true },
+    }),
+    db.event.findMany({
+      where: publicEventWhere,
+      select: {
+        representativeArticle: {
+          select: {
+            id: true,
+            title: true,
+            viewCount: true,
+            source: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: [
+        { representativeArticle: { viewCount: 'desc' } },
+        { id: 'desc' },
+      ],
+      take: 200,
     }),
   ]);
 
@@ -444,6 +463,14 @@ async function buildDashboardAnalytics(
       ...toQualityStats(summaryStats),
     },
     sources: sourceRows,
+    topViewedArticles: topViewedRows
+      .filter((row) => row.representativeArticle !== null)
+      .map((row) => ({
+        id: row.representativeArticle!.id,
+        title: row.representativeArticle!.title,
+        viewCount: row.representativeArticle!.viewCount,
+        sourceName: row.representativeArticle!.source.name,
+      })),
     trend,
     crawlRecords,
     crawlPagination: {
