@@ -115,7 +115,7 @@ export interface DashboardAnalytics {
     score: number;
     sourceName: string;
   }>;
-  dailyNewArticles: Array<{ date: string; count: number }>;
+  dailyNewArticles: Array<{ date: string; count: number; publicCount: number; pushedCount: number }>;
   crawlRecords: Array<{
     id: string;
     type: 'full' | 'collect';

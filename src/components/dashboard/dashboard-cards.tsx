@@ -115,32 +115,49 @@ export function DailyNewArticlesCard({
 }: {
   articles: DashboardAnalytics['dailyNewArticles']
 }) {
-  const total = articles.reduce((sum, item) => sum + item.count, 0)
-  const peak = Math.max(0, ...articles.map((item) => item.count))
+  const totals = articles.reduce((result, item) => ({
+    newCount: result.newCount + item.count,
+    publicCount: result.publicCount + item.publicCount,
+    pushedCount: result.pushedCount + item.pushedCount,
+  }), { newCount: 0, publicCount: 0, pushedCount: 0 })
+  const peak = Math.max(0, ...articles.flatMap((item) => [item.count, item.publicCount, item.pushedCount]))
+  const labelStep = Math.max(1, Math.ceil(articles.length / 6))
+  const series = [
+    { key: 'new', label: '新增', color: 'bg-primary/75', getValue: (item: typeof articles[number]) => item.count },
+    { key: 'public', label: '公开', color: 'bg-emerald-500/75', getValue: (item: typeof articles[number]) => item.publicCount },
+    { key: 'pushed', label: '推送', color: 'bg-violet-500/75', getValue: (item: typeof articles[number]) => item.pushedCount },
+  ] as const
 
   return (
     <Card className="min-h-[420px] rounded-none py-0 shadow-none">
       <CardContent className="p-2">
         <div className="mb-1 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">每日新增文章</h3>
-          <span className="text-[10px] text-muted-foreground">共 {formatNumber(total)} 篇 · 峰值 {peak}</span>
+          <h3 className="text-sm font-medium">每日文章动态</h3>
+          <span className="text-[10px] text-muted-foreground">新增 {formatNumber(totals.newCount)} · 公开 {formatNumber(totals.publicCount)} · 推送 {formatNumber(totals.pushedCount)}</span>
+        </div>
+        <div className="mb-1 flex items-center gap-3 text-[10px] text-muted-foreground">
+          {series.map((item) => <span key={item.key} className="inline-flex items-center gap-1"><i className={`h-1.5 w-1.5 rounded-full ${item.color}`} />{item.label}</span>)}
         </div>
         {articles.length > 0 ? (
-          <div className="mt-3 flex h-[350px] items-end gap-1 border-b border-l px-1 pb-1 pt-2">
-            {articles.map((item, index) => {
-              const height = peak > 0 && item.count > 0 ? Math.max(4, item.count / peak * 100) : 0
-              const [, month, day] = item.date.split('-')
-              const labelStep = Math.max(1, Math.ceil(articles.length / 6))
-              const showLabel = articles.length <= 7 || index === 0 || index === articles.length - 1 || index % labelStep === 0
-              return (
-                <div key={item.date} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1" title={`${item.date} · ${item.count} 篇`}>
-                  <div className="flex h-[310px] w-full items-end">
-                    <div className="w-full rounded-t-sm bg-primary/70 transition-[height]" style={{ height: `${height}%` }} />
+          <div className="mt-2 h-[335px] overflow-x-auto border-b border-l px-1 pb-1 pt-2">
+            <div className="flex h-full min-w-full w-max items-end justify-center gap-3 px-3">
+              {articles.map((item, index) => {
+                const [, month, day] = item.date.split('-')
+                const showLabel = articles.length <= 7 || index === 0 || index === articles.length - 1 || index % labelStep === 0
+                return (
+                  <div key={item.date} className="flex w-14 shrink-0 flex-col items-center justify-end gap-1" title={`${item.date} · 新增 ${item.count} · 公开 ${item.publicCount} · 推送 ${item.pushedCount}`}>
+                    <div className="flex h-[295px] items-end justify-center gap-1">
+                      {series.map((entry) => {
+                        const value = entry.getValue(item)
+                        const height = peak > 0 && value > 0 ? Math.max(4, value / peak * 100) : 0
+                        return <div key={entry.key} className={`w-3 rounded-t-sm ${entry.color} transition-[height]`} style={{ height: `${height}%` }} />
+                      })}
+                    </div>
+                    <span className="h-3 text-[9px] tabular-nums text-muted-foreground">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</span>
                   </div>
-                  <span className="h-3 text-[9px] tabular-nums text-muted-foreground">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</span>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
         ) : (
           <div className="py-8 text-center text-xs text-muted-foreground">暂无新增文章数据</div>

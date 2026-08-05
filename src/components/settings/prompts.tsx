@@ -250,8 +250,19 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
       }
       if (Object.keys(imported).length === 0) throw new Error('备份文件中没有可识别的提示词')
 
+      const importedSnapshot = buildPromptVersionSnapshot({ ...settings, ...imported })
       await onImportPrompts(imported)
-      toast.success(`已导入并保存 ${Object.keys(imported).length} 项提示词，已立即生效`)
+      try {
+        const sourceName = typeof backup.sourceVersion?.name === 'string'
+          ? backup.sourceVersion.name
+          : file.name.replace(/\.json$/i, '')
+        const versionName = `导入 · ${safeFileNamePart(sourceName)}`.slice(0, 40)
+        const version = await createPromptVersion({ name: versionName, prompts: importedSnapshot })
+        setVersions(current => [version, ...current].slice(0, PROMPT_VERSION_LIMIT))
+        toast.success(`已导入 ${Object.keys(imported).length} 项提示词，并保存为版本「${version.name}」`)
+      } catch (error) {
+        toast.warning(error instanceof Error ? `提示词已导入，但版本保存失败：${error.message}` : '提示词已导入，但版本保存失败')
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '导入提示词失败')
     }
@@ -312,17 +323,8 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b pb-1.5">
             <MessageSquareText className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-semibold">提示词</span>
-            <span className="text-xs text-muted-foreground">— 手动编辑需点底部「保存设置」；导入会自动保存</span>
+            <span className="text-xs text-muted-foreground">— 手动编辑需点底部「保存设置」；备份导入/导出已归入版本管理</span>
             <div className="ml-auto flex flex-wrap items-center gap-1">
-              <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={exportPrompts}>
-                <Download className="h-3 w-3" />
-                一键导出
-              </Button>
-              <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => fileInputRef.current?.click()} disabled={saving}>
-                <FileUp className="h-3 w-3" />
-                一键导入
-              </Button>
-              <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={importPrompts} className="hidden" />
               <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={openVersionDialog}>
                 <History className="h-3 w-3" />
                 版本管理
@@ -458,8 +460,19 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
         <DialogContent className="max-h-[min(680px,calc(100vh-2rem))] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>提示词版本</DialogTitle>
-            <DialogDescription>保存 System 与 9 个评判块的命名快照；评分权重和其他设置不随版本切换。</DialogDescription>
+            <DialogDescription>保存 System 与 9 个评判块的命名快照；评分权重和其他设置不随版本切换。导入备份会自动生成一个可回退版本。</DialogDescription>
           </DialogHeader>
+          <div className="flex flex-wrap items-center gap-1 border-y py-2">
+            <Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={exportPrompts}>
+              <Download className="h-3 w-3" />
+              导出当前提示词
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => fileInputRef.current?.click()} disabled={saving}>
+              <FileUp className="h-3 w-3" />
+              导入提示词备份
+            </Button>
+            <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={importPrompts} className="hidden" />
+          </div>
           <div className="flex gap-2">
             <Input
               value={versionName}

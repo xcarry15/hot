@@ -228,7 +228,17 @@ async function buildDashboardAnalytics(
         aiSnapshot: true,
         score: true,
         isAd: true,
-        event: { select: { pushedAt: true, articleCount: true, representativeArticleId: true } },
+        clusterStatus: true,
+        event: {
+          select: {
+            status: true,
+            clusterReviewStatus: true,
+            publicStatus: true,
+            pushedAt: true,
+            articleCount: true,
+            representativeArticleId: true,
+          },
+        },
         viewCount: true,
         originalClickCount: true,
       },
@@ -426,12 +436,25 @@ async function buildDashboardAnalytics(
     first === null || article.createdAt.getTime() < first.getTime() ? article.createdAt : first
   ), null);
   const dailyArticleKeys = dailyArticleChartKeys(range, window.endAt, firstArticleAt);
-  const dailyArticleCounts = new Map(dailyArticleKeys.map((key) => [key, 0]));
+  const dailyArticleCounts = new Map(dailyArticleKeys.map((key) => [key, {
+    newCount: 0,
+    publicCount: 0,
+    pushedCount: 0,
+  }]));
   for (const article of articles) {
     const key = dateKey(article.createdAt);
-    if (dailyArticleCounts.has(key)) {
-      dailyArticleCounts.set(key, (dailyArticleCounts.get(key) ?? 0) + 1);
-    }
+    const counts = dailyArticleCounts.get(key);
+    if (!counts) continue;
+    counts.newCount += 1;
+    const isRepresentative = article.event?.representativeArticleId === article.id;
+    const isPublic = isRepresentative
+      && article.aiStatus === 'done'
+      && article.clusterStatus === 'clustered'
+      && article.event?.status === 'active'
+      && article.event.clusterReviewStatus === 'confirmed'
+      && article.event.publicStatus === 'published';
+    if (isPublic) counts.publicCount += 1;
+    if (isRepresentative && article.event?.pushedAt) counts.pushedCount += 1;
   }
 
   return {
@@ -456,7 +479,9 @@ async function buildDashboardAnalytics(
       })),
     dailyNewArticles: dailyArticleKeys.map((date) => ({
       date,
-      count: dailyArticleCounts.get(date) ?? 0,
+      count: dailyArticleCounts.get(date)?.newCount ?? 0,
+      publicCount: dailyArticleCounts.get(date)?.publicCount ?? 0,
+      pushedCount: dailyArticleCounts.get(date)?.pushedCount ?? 0,
     })),
     crawlRecords,
     crawlPagination: {
