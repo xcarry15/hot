@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   discardedFindMany: vi.fn(),
   fetchLogFindMany: vi.fn(),
   jobFindMany: vi.fn(),
+  eventFindMany: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -16,6 +17,7 @@ vi.mock('@/lib/db', () => ({
     discardedItem: { findMany: mocks.discardedFindMany },
     fetchLog: { findMany: mocks.fetchLogFindMany },
     job: { findMany: mocks.jobFindMany },
+    event: { findMany: mocks.eventFindMany },
   },
 }));
 
@@ -26,9 +28,11 @@ describe('运营统计重复口径', () => {
     vi.clearAllMocks();
     invalidateDashboardAnalyticsCache();
     mocks.articleCount.mockResolvedValue(0);
+    mocks.articleFindMany.mockResolvedValue([]);
     mocks.discardedFindMany.mockResolvedValue([]);
     mocks.fetchLogFindMany.mockResolvedValue([]);
     mocks.jobFindMany.mockResolvedValue([]);
+    mocks.eventFindMany.mockResolvedValue([]);
     mocks.sourceFindMany.mockResolvedValue([{
       id: 'source-1',
       name: '测试源',
@@ -40,6 +44,31 @@ describe('运营统计重复口径', () => {
 
   it('支持全部时间范围', () => {
     expect(parseDashboardAnalyticsRange('all')).toBe('all');
+  });
+
+  it('只返回公开事件代表文章中浏览量最高的前 200 篇', async () => {
+    mocks.eventFindMany.mockResolvedValue([
+      {
+        representativeArticle: {
+          id: 'article-top',
+          title: '浏览最多',
+          viewCount: 99,
+          source: { name: '测试源' },
+        },
+      },
+      {
+        representativeArticle: {
+          id: 'article-second',
+          title: '第二名',
+          viewCount: 20,
+          source: { name: '测试源' },
+        },
+      },
+    ]);
+
+    const result = await getDashboardAnalytics('all');
+
+    expect(result.topViewedArticles.map((article) => article.id)).toEqual(['article-top', 'article-second']);
   });
 
   it('同一 Event 只把非代表 Article 计为重复', async () => {

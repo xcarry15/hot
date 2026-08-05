@@ -107,6 +107,12 @@ export interface DashboardAnalytics {
     originalClicks: number;
     clickRate: number;
   }>;
+  topViewedArticles: Array<{
+    id: string;
+    title: string;
+    viewCount: number;
+    sourceName: string;
+  }>;
   trend: Array<{
     date: string;
     label: string;

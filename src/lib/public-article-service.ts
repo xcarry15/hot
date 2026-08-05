@@ -61,7 +61,7 @@ type PublicEventListRow = Prisma.EventGetPayload<{
   };
 }>;
 
-const publicEventWhere = {
+export const publicEventWhere = {
   status: 'active',
   clusterReviewStatus: 'confirmed',
   publicStatus: 'published',
