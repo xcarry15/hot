@@ -15,7 +15,7 @@ export interface StepFilterChip {
 }
 
 export const PRIMARY_FILTER_CHIPS: readonly StepFilterChip[] = [
-  { key: 'all', label: '全部', description: '显示当前文章，数量包含已忽略' },
+  { key: 'all', label: '全部', description: '显示当前窗口文章，数量包含已忽略' },
   { key: 'normal-all', label: '正常', description: '按预期流转，无需人工介入' },
   { key: 'anomaly-all', label: '异常', description: '需要关注、复核或恢复的文章' },
   { key: 'ignored', label: '已忽略', description: '已从技术待办中忽略的文章；可恢复，不代表人工内容审核结论' },

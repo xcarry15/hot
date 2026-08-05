@@ -21,6 +21,7 @@ import {
   serializeWebhookConfigsForEditor,
 } from '@/contracts/webhook'
 import { previewPushSettings, testWebhook as testWebhookApi, type PushPreviewResult } from '@/features/settings-api.client'
+import { DEFAULT_QUIET_END, DEFAULT_QUIET_START } from '@/lib/quiet-hours'
 
 
 interface Props {
@@ -297,6 +298,32 @@ export default function PushTab({ settings, setSettings }: Props) {
               max="10080"
             />
             <p className="text-[11px] text-muted-foreground">自动抓取开启后，调度器按此间隔检查并创建全流程任务。</p>
+          </div>
+          <div className="space-y-1.5 border-t pt-2">
+            <Label className="text-xs">免打扰时段</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label htmlFor="crawl-quiet-start" className="text-[11px] text-muted-foreground">开始</Label>
+                <Input
+                  id="crawl-quiet-start"
+                  type="time"
+                  value={settings.crawl_quiet_start || DEFAULT_QUIET_START}
+                  onChange={(e) => updateSetting('crawl_quiet_start', e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="crawl-quiet-end" className="text-[11px] text-muted-foreground">结束</Label>
+                <Input
+                  id="crawl-quiet-end"
+                  type="time"
+                  value={settings.crawl_quiet_end || DEFAULT_QUIET_END}
+                  onChange={(e) => updateSetting('crawl_quiet_end', e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">时段内暂停自动抓取、自动恢复和自动推送；手动操作不受影响。支持跨午夜，默认 22:00–08:00；起止时间相同表示关闭免打扰。</p>
           </div>
         </CardContent>
       </Card>

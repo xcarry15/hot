@@ -104,8 +104,11 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
   // Use PushDelivery for latest per-target state
   const deliveries = await db.pushDelivery.findMany({
     where: { eventId: { in: uniqueEventIds }, targetId: { in: targets.map((target) => target.id) } },
-    orderBy: { createdAt: 'desc' },
-    select: { eventId: true, targetId: true, status: true, createdAt: true, leaseExpiresAt: true, lastError: true },
+    // 同一条 ledger 行会在重试时原地更新，createdAt 不能代表最近状态。
+    // updatedAt 由 Prisma @updatedAt 在 claim/settle/cleanup 时推进，避免旧的
+    // succeeded 行覆盖刚刚进入 sending/failed 的当前状态。
+    orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+    select: { eventId: true, targetId: true, status: true, createdAt: true, updatedAt: true, leaseExpiresAt: true, lastError: true },
   });
 
   const latest = new Map<string, typeof deliveries[number]>();

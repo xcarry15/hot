@@ -6,7 +6,7 @@ import {
   parseDashboardAnalyticsRange,
 } from '@/lib/dashboard-analytics-service';
 
-// GET /api/dashboard/analytics?range=today|3d|7d|30d&sourceId=...&crawlPage=1&crawlTrigger=auto&crawlStatus=completed&crawlType=full&crawlSourceId=...
+// GET /api/dashboard/analytics?range=all|today|3d|7d|30d&sourceId=...&crawlPage=1&crawlTrigger=auto&crawlStatus=completed&crawlType=full&crawlSourceId=...
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);

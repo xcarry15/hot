@@ -27,6 +27,7 @@ import { buildSourceAttention, statusConfig } from './dashboard/source-attention
 type SourceSort = 'found' | 'totalArticles' | 'avgScore' | 'ingested' | 'processed' | 'analyzed' | 'pushed' | 'unmatched' | 'duplicates' | 'ads'
 
 const RANGE_OPTIONS: Array<{ value: DashboardAnalyticsRange; label: string }> = [
+  { value: 'all', label: '全部' },
   { value: 'today', label: '今天' },
   { value: '3d', label: '近 3 天' },
   { value: '7d', label: '近 1 周' },
@@ -88,7 +89,7 @@ function rateColor(rate: number, inverse = false): string {
 
 export default function DashboardTab({ active = true }: { active?: boolean }) {
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
-  const [range, setRange] = useState<DashboardAnalyticsRange>('today')
+  const [range, setRange] = useState<DashboardAnalyticsRange>('all')
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
   const [sourceDetail, setSourceDetail] = useState<DashboardAnalytics | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)

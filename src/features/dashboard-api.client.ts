@@ -20,7 +20,7 @@ export async function updateFeedbackSuggestion(id: string, action: 'apply' | 'di
   return requestJson('POST', '/api/feedback', { body: { id, action } });
 }
 
-export type DashboardAnalyticsRange = 'today' | '3d' | '7d' | '30d';
+export type DashboardAnalyticsRange = 'all' | 'today' | '3d' | '7d' | '30d';
 
 export type DashboardCrawlTrigger = 'auto' | 'manual' | 'unknown';
 export type DashboardCrawlStatus = 'queued' | 'running' | 'cancel_requested' | 'succeeded' | 'completed' | 'failed' | 'cancelled';
@@ -37,7 +37,7 @@ export interface DashboardCrawlQuery {
 export interface DashboardAnalytics {
   range: DashboardAnalyticsRange;
   sourceId: string | null;
-  startAt: string;
+  startAt: string | null;
   endAt: string;
   summary: {
     sourceCount: number;
@@ -166,7 +166,7 @@ export interface DashboardAnalytics {
 }
 
 export async function fetchDashboardAnalytics(
-  range: DashboardAnalyticsRange,
+  range: DashboardAnalyticsRange = 'all',
   sourceId?: string,
   signal?: AbortSignal,
   crawl?: DashboardCrawlQuery,

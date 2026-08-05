@@ -1,12 +1,13 @@
 /**
- * 推送策略（纯策略）。
+ * 推送策略与统一门禁。
  *
- * 不读数据库、不依赖全局状态。所有策略行为（pushable where 重用、紧急度、
- * retry 资格）都收敛到本模块的纯函数。
+ * pushable where、紧急度和 retry 资格收敛到本模块；只有读取运行时设置的
+ * 推送模式和免打扰时段保留为异步门禁，避免组件或 Route Handler 各自复制口径。
  */
 import type { PushMode } from '@/contracts/push';
 import { parsePushMode } from '@/contracts/push';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
+import { DEFAULT_QUIET_END, DEFAULT_QUIET_START, isWithinQuietHours } from '@/lib/quiet-hours';
 
 export const PUSH_RETRY_DELAY_MS = 6 * 60 * 60 * 1000; // 6h
 export const PUSH_MAX_RETRIES = 5;
@@ -29,8 +30,18 @@ export async function readPushSettings(): Promise<PushSettings> {
 }
 
 /** full-pipeline job 跑完后是否需要立即推送：realtime 才推。 */
-export async function shouldPushAtPipelineEnd(): Promise<boolean> {
-  return (await readPushSettings()).pushMode === 'realtime';
+export async function isWithinConfiguredQuietHours(now = new Date()): Promise<boolean> {
+  const [start, end] = await Promise.all([
+    getSetting(SETTING_KEYS.CRAWL_QUIET_START),
+    getSetting(SETTING_KEYS.CRAWL_QUIET_END),
+  ]);
+  return isWithinQuietHours(now, start || DEFAULT_QUIET_START, end || DEFAULT_QUIET_END);
+}
+
+export async function shouldPushAtPipelineEnd(options?: { respectQuietHours?: boolean; now?: Date }): Promise<boolean> {
+  if ((await readPushSettings()).pushMode !== 'realtime') return false;
+  if (options?.respectQuietHours && await isWithinConfiguredQuietHours(options.now)) return false;
+  return true;
 }
 
 /**

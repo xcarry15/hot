@@ -45,7 +45,7 @@ export const SourceBlock = memo(function SourceBlock({
   isJobRunning,
 }: {
   source: SourceProgress
-  /** 筛选只影响列表；标题统计始终读取该数据源的完整快照。 */
+  /** 筛选只影响列表；标题统计始终读取该数据源的当前窗口快照。 */
   summarySource?: SourceProgress
   onToggle: () => void
   onStepAction?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => void
@@ -65,7 +65,7 @@ export const SourceBlock = memo(function SourceBlock({
   const StatusIcon = statusConfig.icon
 
   const lastRunLabel = source.lastRunStatus === 'success'
-    ? `本次发现 ${source.lastRunItemsFound ?? 0}`
+    ? `新增 ${source.lastRunNewArticles ?? 0}`
     : source.lastRunStatus === 'failed'
       ? '本次失败'
       : source.lastRunStatus === 'warning'
@@ -186,7 +186,7 @@ export const SourceBlock = memo(function SourceBlock({
     <div className="w-full min-w-0 max-w-full overflow-hidden rounded-none border border-border bg-card">
       <button
         onClick={onToggle}
-        className={`w-full flex flex-wrap items-center gap-x-1 gap-y-0.5 border-b px-2 py-1.5 text-left text-sm ${statusConfig.panelClass} transition-opacity hover:opacity-80`}
+        className={`w-full grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-1 border-b px-2 py-1.5 text-left text-sm ${statusConfig.panelClass} transition-opacity hover:opacity-80`}
       >
         <div className="flex min-w-0 items-center gap-1.5">
           <StatusIcon className={`h-4 w-4 ${statusConfig.iconClass}`} />
@@ -195,12 +195,12 @@ export const SourceBlock = memo(function SourceBlock({
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
           <Badge
             variant="secondary"
-            className={`rounded-none px-1.5 py-0 text-[10px] ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
+            className={`rounded-none px-1.5 py-0 text-xs ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
             title={humanizeSourceError(source.lastRunError) || '源级最近一次采集结果'}
           >
             {lastRunLabel}
           </Badge>
-          <span className="text-xs text-muted-foreground">文章 {totalCount}</span>
+          <span className="text-xs text-muted-foreground">当前窗口文章 {totalCount}</span>
           <span className="text-xs text-sky-700">公开 {publicCount}</span>
           <span className="text-xs text-emerald-700">推送 {pushedCount}</span>
           <span className={`text-xs ${anomalyCount > 0 ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>异常 {anomalyCount}</span>

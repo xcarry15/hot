@@ -190,7 +190,9 @@ export default function PushLogPanel({ active = true, refreshToken = 0 }: { acti
                   <tr key={log.id} className="border-b last:border-0" title={log.errorMessage || undefined}>
                     <td className="px-1.5 py-1 tabular-nums">{formatPushTime(log.createdAt)}</td>
                     <td className="max-w-[180px] px-1.5 py-1">
-                      <div className="max-w-[180px] truncate font-medium" title={log.webhookTarget || undefined}>{log.webhookRemark || '飞书 Webhook'} <span className="font-normal text-muted-foreground">· {log.webhookTarget || '未记录目标'}</span></div>
+                      <div className="max-w-[180px] truncate font-medium" title={log.webhookTarget || undefined}>
+                        {log.webhookRemark !== '已隐藏的 Webhook' && <>{log.webhookRemark || '飞书 Webhook'} <span className="font-normal text-muted-foreground">· {log.webhookTarget || '未记录目标'}</span></>}
+                      </div>
                     </td>
                     <td className="max-w-[320px] px-1.5 py-1">
                       {log.article

@@ -1,7 +1,7 @@
 /**
  * crawl-log-service 单元测试。
  *
- * 锁定查询上限 500、active/latest Job 互斥、articles 分组排序等不变量。
+ * 锁定工作台窗口默认值与上限、active/latest Job 互斥、articles 分组排序等不变量。
  * 端到端 HTTP 形态仍由 crawl-log-snapshot.test.ts 通过 Route 覆盖。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -64,10 +64,10 @@ describe('crawl-log-service', () => {
   });
 
   describe('clampCrawlLogLimit', () => {
-    it('缺省或非法输入 → 500', () => {
-      expect(clampCrawlLogLimit(undefined)).toBe(500);
-      expect(clampCrawlLogLimit(null)).toBe(500);
-      expect(clampCrawlLogLimit(Number.NaN)).toBe(500);
+    it('缺省或非法输入 → 250', () => {
+      expect(clampCrawlLogLimit(undefined)).toBe(250);
+      expect(clampCrawlLogLimit(null)).toBe(250);
+      expect(clampCrawlLogLimit(Number.NaN)).toBe(250);
     });
 
     it('上限 500；超过截断', () => {
@@ -222,11 +222,17 @@ describe('crawl-log-service', () => {
   });
 
   describe('source 分组与排序', () => {
-    function setupWithArticles(articles: Array<{ sourceId: string; id: string; name?: string }>) {
+    function setupWithArticles(articles: Array<{
+      sourceId: string;
+      id: string;
+      name?: string;
+      createdAt?: Date;
+      publishedAt?: Date;
+    }>) {
       const records = articles.map((a) => ({
         id: a.id,
         title: 't',
-        publishedAt: new Date(),
+        publishedAt: a.publishedAt ?? new Date(),
         sourceId: a.sourceId,
         fetchStatus: 'fetched',
         clusterStatus: 'clustered',
@@ -237,7 +243,7 @@ describe('crawl-log-service', () => {
         nextClusterRetryAt: null,
         nextAiRetryAt: null,
         relevance: 0,
-        createdAt: new Date(),
+        createdAt: a.createdAt ?? new Date(),
         updatedAt: new Date(),
         summary: '',
         skipReason: null,
@@ -262,14 +268,47 @@ describe('crawl-log-service', () => {
       expect(snapshot.sources[1].articles).toHaveLength(1);
     });
 
+    it('按 createdAt 截取最近窗口，并标记窗口外仍有文章', async () => {
+      setupWithArticles([
+        {
+          sourceId: 's1',
+          id: 'old-ingested-late-published',
+          createdAt: new Date('2026-07-10T10:00:00Z'),
+          publishedAt: new Date('2026-07-10T15:00:00Z'),
+        },
+        {
+          sourceId: 's1',
+          id: 'new-ingested-old-published',
+          createdAt: new Date('2026-07-10T12:00:00Z'),
+          publishedAt: new Date('2026-07-10T09:00:00Z'),
+        },
+        {
+          sourceId: 's1',
+          id: 'middle-ingested',
+          createdAt: new Date('2026-07-10T11:00:00Z'),
+          publishedAt: new Date('2026-07-10T11:00:00Z'),
+        },
+      ]);
+
+      const snapshot = await getCrawlLogSnapshot({ limit: 2 });
+
+      expect(snapshot.hasMoreArticles).toBe(true);
+      expect(snapshot.sources[0].articles.map((article) => article.id)).toEqual([
+        'old-ingested-late-published',
+        'new-ingested-old-published',
+      ]);
+    });
+
     it('同一源内按 publishedAt desc 排序', async () => {
-      const t1 = new Date('2026-07-10T10:00:00Z').getTime();
-      const t2 = new Date('2026-07-10T12:00:00Z').getTime();
+      const createdEarly = new Date('2026-07-10T10:00:00Z');
+      const createdLate = new Date('2026-07-10T12:00:00Z');
+      const publishedEarly = new Date('2026-07-10T09:00:00Z');
+      const publishedLate = new Date('2026-07-10T15:00:00Z');
       const records = [
         {
-          id: 'older',
-          title: 'older',
-          publishedAt: new Date(t1),
+          id: 'older-published',
+          title: 'older-published',
+          publishedAt: publishedEarly,
           sourceId: 's1',
           fetchStatus: 'fetched',
           clusterStatus: 'clustered',
@@ -280,16 +319,16 @@ describe('crawl-log-service', () => {
           nextClusterRetryAt: null,
           nextAiRetryAt: null,
           relevance: 0,
-          createdAt: new Date(),
+          createdAt: createdLate,
           updatedAt: new Date(),
           summary: '',
           skipReason: null,
           source: { name: 'S' },
         },
         {
-          id: 'newer',
-          title: 'newer',
-          publishedAt: new Date(t2),
+          id: 'newer-published',
+          title: 'newer-published',
+          publishedAt: publishedLate,
           sourceId: 's1',
           fetchStatus: 'fetched',
           clusterStatus: 'clustered',
@@ -300,7 +339,7 @@ describe('crawl-log-service', () => {
           nextClusterRetryAt: null,
           nextAiRetryAt: null,
           relevance: 0,
-          createdAt: new Date(),
+          createdAt: createdEarly,
           updatedAt: new Date(),
           summary: '',
           skipReason: null,
@@ -311,9 +350,9 @@ describe('crawl-log-service', () => {
 
       const snapshot = await getCrawlLogSnapshot();
       const s1 = snapshot.sources[0];
-      // 同一 source 内的 articles 数组按 publishedAt desc 排序
-      expect(s1.articles[0].id).toBe('newer');
-      expect(s1.articles[1].id).toBe('older');
+      // 同一 source 内优先按文章发布时间倒序，而不是按进入系统时间。
+      expect(s1.articles[0].id).toBe('newer-published');
+      expect(s1.articles[1].id).toBe('older-published');
     });
 
     it('只有未入库项的 source 也应出现在快照中', async () => {
@@ -426,11 +465,29 @@ describe('crawl-log-service', () => {
       id: 'collect', type: 'collect', status: 'succeeded', payload: '{}', error: '', currentStage: 'collect',
       progressTotal: 1, progressDone: 1, progressErrors: 0, currentItemLabel: '', heartbeatAt: null,
       startedAt: new Date(), completedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
-      result: JSON.stringify({ result: { sources: [{ sourceId: 's1', sourceName: 'S', success: true, itemsFound: 0, error: '0 items parsed' }] } }),
+      result: JSON.stringify({ result: { sources: [{ sourceId: 's1', sourceName: 'S', success: true, itemsFound: 0, newArticles: 0, error: '0 items parsed' }] } }),
     };
     mocks.transaction.mockImplementation(async () => [[], [job], [], [], [{ id: 's1', name: 'S' }]]);
 
     const snapshot = await getCrawlLogSnapshot();
     expect(snapshot.sources[0]).toMatchObject({ status: 'warning', lastRunStatus: 'warning' });
+  });
+
+  it('数据源本次新增使用实际新建 Article 数量，不使用解析条目数', async () => {
+    const job = {
+      id: 'collect-new', type: 'collect', status: 'succeeded', payload: '{}', error: '', currentStage: 'collect',
+      progressTotal: 1, progressDone: 1, progressErrors: 0, currentItemLabel: '', heartbeatAt: null,
+      startedAt: new Date(), completedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
+      result: JSON.stringify({ result: { sources: [{ sourceId: 's1', sourceName: 'S', success: true, itemsFound: 12, newArticles: 3 }] } }),
+    };
+    mocks.transaction.mockImplementation(async () => [[], [job], [], [], [{ id: 's1', name: 'S' }]]);
+
+    const snapshot = await getCrawlLogSnapshot();
+
+    expect(snapshot.sources[0]).toMatchObject({
+      itemsFound: 12,
+      lastRunNewArticles: 3,
+      lastRunStatus: 'success',
+    });
   });
 });

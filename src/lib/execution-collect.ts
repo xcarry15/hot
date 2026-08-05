@@ -61,6 +61,7 @@ export async function executeCollectJob(
       result: {
         success: sourceResult?.success ?? false,
         itemsFound: sourceResult?.items.length ?? 0,
+        newArticles: sourceResult?.createdCount ?? 0,
         error: sourceResult?.error,
       },
     };

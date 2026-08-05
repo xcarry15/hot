@@ -220,7 +220,7 @@ export const ArticleRow = memo(function ArticleRow({
             title={retryWaiting && article.pushRetryAt ? `推送将在 ${new Date(article.pushRetryAt).toLocaleString('zh-CN')} 自动重试` : article.technicalErrorReasons.push || (article.push === 'failed' ? '点击重试投递' : undefined)}
           />
           </div>
-          <span className="hidden w-14 shrink-0 truncate text-right font-mono text-[11px] tabular-nums text-muted-foreground/50 sm:inline" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
+          <span className="hidden w-20 shrink-0 truncate text-right font-mono text-[11px] tabular-nums text-muted-foreground/50 sm:inline" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
             {lastTimeLabel}
           </span>
         </div>

@@ -185,7 +185,7 @@ describe.sequential('global job execution invariant', () => {
     const [, result] = mocks.markJobCompleted.mock.calls.find(call => call[0] === 'job-source')!;
     expect(result).toEqual({
       sourceId: 'src-1',
-      result: { success: true, itemsFound: 1, error: undefined },
+      result: { success: true, itemsFound: 1, newArticles: 0, error: undefined },
     });
   });
 

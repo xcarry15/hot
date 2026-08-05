@@ -1,11 +1,11 @@
 import { db } from '@/lib/db';
 
-export type DashboardAnalyticsRange = 'today' | '3d' | '7d' | '30d';
+export type DashboardAnalyticsRange = 'all' | 'today' | '3d' | '7d' | '30d';
 
 interface RangeWindow {
-  startAt: Date;
+  startAt: Date | null;
   endAt: Date;
-  days: number;
+  days: number | null;
 }
 
 interface MutableStats {
@@ -49,7 +49,7 @@ const CRAWL_PAGE_SIZE = 20;
 const DASHBOARD_CACHE_TTL_MS = 15_000;
 const DASHBOARD_CACHE_MAX_ENTRIES = 30;
 
-const RANGE_DAYS: Record<DashboardAnalyticsRange, number> = {
+const RANGE_DAYS: Record<Exclude<DashboardAnalyticsRange, 'all'>, number> = {
   today: 1,
   '3d': 3,
   '7d': 7,
@@ -57,12 +57,14 @@ const RANGE_DAYS: Record<DashboardAnalyticsRange, number> = {
 };
 
 export function parseDashboardAnalyticsRange(value: string | null): DashboardAnalyticsRange {
+  if (value === 'all') return value;
   if (value === '3d' || value === '7d' || value === '30d') return value;
-  return 'today';
+  return 'all';
 }
 
 function getRangeWindow(range: DashboardAnalyticsRange): RangeWindow {
   const endAt = new Date();
+  if (range === 'all') return { startAt: null, endAt, days: null };
   const startAt = new Date(endAt);
   startAt.setHours(0, 0, 0, 0);
   startAt.setDate(startAt.getDate() - RANGE_DAYS[range] + 1);
@@ -188,12 +190,14 @@ function toQualityStats(stats: MutableStats) {
 }
 
 async function buildDashboardAnalytics(
-  range: DashboardAnalyticsRange = 'today',
+  range: DashboardAnalyticsRange = 'all',
   sourceId?: string,
   crawlFilters: CrawlRecordFilters = {},
 ) {
   const window = getRangeWindow(range);
-  const timeWhere = { gte: window.startAt, lte: window.endAt };
+  const timeWhere = window.startAt
+    ? { gte: window.startAt, lte: window.endAt }
+    : { lte: window.endAt };
   const sourceFilter = sourceId ? { sourceId } : {};
 
   const [sources, articles, discardedItems, fetchLogs] = await Promise.all([
@@ -259,15 +263,26 @@ async function buildDashboardAnalytics(
   for (const source of sources) sourceStats.set(source.id, createStats());
 
   const trendStats = new Map<string, MutableTrendStats>();
-  const cursor = new Date(window.startAt);
-  for (let index = 0; index < window.days; index += 1) {
-    const date = new Date(cursor);
-    date.setDate(window.startAt.getDate() + index);
-    trendStats.set(dateKey(date), createTrendStats(date));
+  if (window.startAt && window.days !== null) {
+    const cursor = new Date(window.startAt);
+    for (let index = 0; index < window.days; index += 1) {
+      const date = new Date(cursor);
+      date.setDate(window.startAt.getDate() + index);
+      trendStats.set(dateKey(date), createTrendStats(date));
+    }
   }
 
   const getSourceStats = (id: string) => sourceStats.get(id);
-  const getTrendStats = (date: Date) => trendStats.get(dateKey(date));
+  const getTrendStats = (date: Date) => {
+    const key = dateKey(date);
+    const existing = trendStats.get(key);
+    if (existing || window.days !== null) return existing;
+    const bucketDate = new Date(date);
+    bucketDate.setHours(0, 0, 0, 0);
+    const created = createTrendStats(bucketDate);
+    trendStats.set(key, created);
+    return created;
+  };
 
   for (const row of articles) {
     const source = getSourceStats(row.sourceId);
@@ -373,11 +388,13 @@ async function buildDashboardAnalytics(
     return total;
   }, createStats());
 
-  const trend = Array.from(trendStats.values()).map((item) => ({
-    date: dateKey(item.date),
-    label: `${item.date.getMonth() + 1}/${item.date.getDate()}`,
-    ...toQualityStats(item),
-  }));
+  const trend = Array.from(trendStats.values())
+    .sort((left, right) => left.date.getTime() - right.date.getTime())
+    .map((item) => ({
+      date: dateKey(item.date),
+      label: `${item.date.getMonth() + 1}/${item.date.getDate()}`,
+      ...toQualityStats(item),
+    }));
 
   const sourceNameById = new Map(sources.map((source) => [source.id, source.name]));
   const allCrawlRecords = recentJobs
@@ -420,7 +437,7 @@ async function buildDashboardAnalytics(
   return {
     range,
     sourceId: sourceId ?? null,
-    startAt: window.startAt.toISOString(),
+    startAt: window.startAt?.toISOString() ?? null,
     endAt: window.endAt.toISOString(),
     summary: {
       sourceCount: sources.length,
@@ -449,7 +466,7 @@ export function invalidateDashboardAnalyticsCache(): void {
 }
 
 export function getDashboardAnalytics(
-  range: DashboardAnalyticsRange = 'today',
+  range: DashboardAnalyticsRange = 'all',
   sourceId?: string,
   crawlFilters: CrawlRecordFilters = {},
 ): Promise<DashboardAnalyticsResult> {

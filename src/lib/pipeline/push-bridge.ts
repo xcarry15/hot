@@ -5,7 +5,15 @@ import { assertNotAborted } from '@/lib/worker-stop'
 import { advanceJobProgress, startJobStage } from '@/lib/job-progress'
 import { pushableWhere } from '@/lib/push/policy'
 
-export async function pushAllPendingArticles(signal?: AbortSignal, jobId?: string): Promise<{ total: number; processed: number; errors: number }> {
+export interface PushExecutionOptions {
+  respectQuietHours?: boolean;
+}
+
+export async function pushAllPendingArticles(
+  signal?: AbortSignal,
+  jobId?: string,
+  options?: PushExecutionOptions,
+): Promise<{ total: number; processed: number; errors: number }> {
   assertNotAborted(signal)
   const pushSettings = await readPushSettings()
   const estimate = pushSettings.pushMode === 'off' ? 0 : await db.event.count({ where: pushableWhere(pushSettings) })
@@ -14,6 +22,6 @@ export async function pushAllPendingArticles(signal?: AbortSignal, jobId?: strin
   const result = await pushAllUnpushed(signal, pushSettings, async (done, failed) => {
     if (!jobId) return
     await advanceJobProgress(jobId, { doneDelta: done, errorDelta: failed, currentItemLabel: '推送处理中' })
-  })
+  }, options)
   return { total: result.success + result.failed + result.skipped, processed: result.success, errors: result.failed }
 }

@@ -13,9 +13,15 @@ export type StepStatus =
   | 'not_applicable'
   | 'running';
 
+/** 工作台只展示最近采集窗口，历史文章通过文章库服务端分页查询。 */
+export const CRAWL_LOG_DEFAULT_LIMIT = 250;
+export const CRAWL_LOG_MAX_LIMIT = 500;
+
 export interface ArticleProgress {
   id: string;
   title: string;
+  /** 文章进入系统的时间；工作台窗口按此时间截取，列表优先按 publishedAt 排序。 */
+  createdAt: string;
   publishedAt?: string | null;
   crawl: StepStatus;
   process: StepStatus;
@@ -69,8 +75,8 @@ export interface SourceProgress {
   expanded: boolean;
   /** 最近一次采集运行的状态（来源于 Job result，非从 articles 推导） */
   lastRunStatus?: 'success' | 'warning' | 'failed' | 'not-run';
-  /** 最近一次采集运行中发现的条目数（来自 FetchLog/Job result） */
-  lastRunItemsFound?: number;
+  /** 最近一次采集运行中实际新建的 Article 数量（不含重复和已丢弃条目） */
+  lastRunNewArticles?: number;
   /** 最近一次采集运行的错误信息 */
   lastRunError?: string;
 }
@@ -104,6 +110,10 @@ export interface CrawlLogSnapshot {
   latestJob: JobSnapshot | null;
   sources: SourceProgress[];
   fetchedAt: number;
+  /** 本次普通文章窗口是否还有未返回的历史文章。 */
+  hasMoreArticles: boolean;
+  /** 未入库记录独立窗口是否还有未返回的历史记录。 */
+  hasMoreDiscarded: boolean;
   technicalTotal: number;
   autoRetryTotal?: number;
 }

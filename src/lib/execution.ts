@@ -13,7 +13,7 @@ import { analyzeAllPending } from './pipeline/analyze';
 import { clusterAllPending } from './pipeline/cluster';
 import { pushAllPendingArticles } from './pipeline/push-bridge';
 import { runStages, type PipelineStageTask } from './pipeline/stage-runner';
-import { shouldPushAtPipelineEnd } from './push/policy';
+import { isWithinConfiguredQuietHours, shouldPushAtPipelineEnd } from './push/policy';
 import { db } from './db';
 import { invalidateTechnicalWorkQueueCache } from './technical-work-queue-service';
 import { invalidateDashboardAnalyticsCache } from './dashboard-analytics-service';
@@ -416,6 +416,7 @@ async function executeFullJob(
   const skipCollect = payload.skipCollect === true;
   const forceRetry = payload.forceRetry === true;
   const pushEnabled = await shouldPushAtPipelineEnd();
+  const respectQuietHours = payload.trigger === 'auto' || payload.trigger === 'auto_retry';
   const tasks: PipelineStageTask[] = [
     {
       key: 'collect',
@@ -451,7 +452,18 @@ async function executeFullJob(
       run: () => clusterAllPending(signal, jobId, forceRetry),
     },
   ];
-  if (pushEnabled) tasks.push({ key: 'push', run: () => pushAllPendingArticles(signal, jobId) });
+  if (pushEnabled) {
+    tasks.push({
+      key: 'push',
+      run: async () => {
+        // 在阶段真正开始前再次检查，覆盖“任务在免打扰开始前启动、推送阶段在之后才到达”的情况。
+        if (respectQuietHours && await isWithinConfiguredQuietHours()) {
+          return { skipped: true, reason: 'quiet-hours' };
+        }
+        return pushAllPendingArticles(signal, jobId, { respectQuietHours });
+      },
+    });
+  }
 
   const stages = await runStages(tasks, {
     signal,

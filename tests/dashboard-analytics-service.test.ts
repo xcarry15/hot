@@ -19,7 +19,7 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-import { getDashboardAnalytics, invalidateDashboardAnalyticsCache } from '@/lib/dashboard-analytics-service';
+import { getDashboardAnalytics, invalidateDashboardAnalyticsCache, parseDashboardAnalyticsRange } from '@/lib/dashboard-analytics-service';
 
 describe('运营统计重复口径', () => {
   beforeEach(() => {
@@ -36,6 +36,10 @@ describe('运营统计重复口径', () => {
       enabled: true,
       lastFetchedAt: null,
     }]);
+  });
+
+  it('支持全部时间范围', () => {
+    expect(parseDashboardAnalyticsRange('all')).toBe('all');
   });
 
   it('同一 Event 只把非代表 Article 计为重复', async () => {

@@ -30,6 +30,8 @@ export interface Settings extends Record<PromptBlockKey, string> {
   public_hide_ads: string
   auto_crawl_enabled: string
   crawl_interval_min: string
+  crawl_quiet_start: string
+  crawl_quiet_end: string
   ai_provider: string
   ai_temperature: string
   ai_max_tokens: string

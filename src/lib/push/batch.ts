@@ -1,16 +1,21 @@
 import { db } from '@/lib/db'
 import { assertNotAborted } from '@/lib/worker-stop'
 import { getPushTargetStatesForEvents, pushEventToFeishu } from '@/lib/push/delivery'
-import { PUSH_MAX_RETRIES, pushableWhere, readPushSettings, type PushSettings } from '@/lib/push/policy'
+import { isWithinConfiguredQuietHours, PUSH_MAX_RETRIES, pushableWhere, readPushSettings, type PushSettings } from '@/lib/push/policy'
 import { getWebhookConfigs } from '@/lib/settings'
 
 const PUSH_EVENT_BATCH_SIZE = 100
 const PUSH_CONCURRENCY = 3
 
+export interface PushExecutionOptions {
+  respectQuietHours?: boolean;
+}
+
 export async function pushAllUnpushed(
   signal?: AbortSignal,
   settings?: PushSettings,
   onProgress?: (done: number, failed: number) => void | Promise<void>,
+  options?: PushExecutionOptions,
 ): Promise<{ success: number; failed: number; skipped: number }> {
   const snap = settings ?? (await readPushSettings())
   if (snap.pushMode === 'off') return { success: 0, failed: 0, skipped: 0 }
@@ -24,6 +29,9 @@ export async function pushAllUnpushed(
   // Event 推送会改变 pushedAt / nextPushRetryAt，因此每轮只取固定窗口；处理完成的
   // 记录自然离开 where。不能一次把全部积压 Event 留在 Node 内存里。
   while (true) {
+    if (options?.respectQuietHours && await isWithinConfiguredQuietHours()) {
+      return { success, failed, skipped }
+    }
     assertNotAborted(signal)
     const events = await db.event.findMany({
       where: pushableWhere(snap),
@@ -55,6 +63,9 @@ export async function pushAllUnpushed(
       .sort((left, right) => (right.representativeArticle?.score ?? 0) - (left.representativeArticle?.score ?? 0))
 
     for (let i = 0; i < automaticEvents.length; i += PUSH_CONCURRENCY) {
+      if (options?.respectQuietHours && await isWithinConfiguredQuietHours()) {
+        return { success, failed, skipped }
+      }
       assertNotAborted(signal)
       const batch = automaticEvents.slice(i, i + PUSH_CONCURRENCY)
       const outcomes = await Promise.allSettled(batch.map(event => pushEventToFeishu(event.id, 'normal', signal)))

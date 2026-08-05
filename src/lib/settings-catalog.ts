@@ -9,6 +9,7 @@
 import { z } from 'zod';
 import { AI_PROVIDERS, providerSettingKey, type AIProviderId } from '@/contracts/ai-provider';
 import { PUSH_MODES } from '@/contracts/push';
+import { DEFAULT_QUIET_END, DEFAULT_QUIET_START } from './quiet-hours';
 import {
   DEFAULT_BLOCK_AD,
   DEFAULT_BLOCK_BRAND,
@@ -36,8 +37,11 @@ export const SETTING_KEYS = {
   PUBLIC_HIDE_ADS: 'public_hide_ads',
   AUTO_CRAWL_ENABLED: 'auto_crawl_enabled',
   CRAWL_INTERVAL_MIN: 'crawl_interval_min',
+  CRAWL_QUIET_START: 'crawl_quiet_start',
+  CRAWL_QUIET_END: 'crawl_quiet_end',
   SCHEDULER_LAST_CRAWL_AT: 'scheduler_last_crawl_at',
   SCHEDULER_LAST_PUSH_DATE: 'scheduler_last_push_date',
+  SCHEDULER_PUSH_JOB: 'scheduler_push_job',
 
   AI_PROVIDER: 'ai_provider',
   AI_TEMPERATURE: 'ai_temperature',
@@ -133,8 +137,11 @@ const definitions: SettingDefinition[] = [
   { key: SETTING_KEYS.PUBLIC_HIDE_ADS, defaultValue: 'true', schema: z.enum(['true', 'false']), sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.AUTO_CRAWL_ENABLED, defaultValue: 'false', schema: z.enum(['true', 'false']), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.CRAWL_INTERVAL_MIN, defaultValue: '120', schema: intRange(5, 10080, '爬取间隔（分钟）'), sensitive: false, exportable: true, frontend: true, seed: true },
+  { key: SETTING_KEYS.CRAWL_QUIET_START, defaultValue: DEFAULT_QUIET_START, schema: pushTimeSchema, sensitive: false, exportable: true, frontend: true, seed: true },
+  { key: SETTING_KEYS.CRAWL_QUIET_END, defaultValue: DEFAULT_QUIET_END, schema: pushTimeSchema, sensitive: false, exportable: true, frontend: true, seed: true },
   { key: SETTING_KEYS.SCHEDULER_LAST_CRAWL_AT, defaultValue: '', schema: text, sensitive: false, exportable: false, frontend: false, seed: false },
   { key: SETTING_KEYS.SCHEDULER_LAST_PUSH_DATE, defaultValue: '', schema: text, sensitive: false, exportable: false, frontend: false, seed: false },
+  { key: SETTING_KEYS.SCHEDULER_PUSH_JOB, defaultValue: '', schema: text, sensitive: false, exportable: false, frontend: false, seed: false },
 
   { key: SETTING_KEYS.AI_PROVIDER, defaultValue: 'opencode', schema: z.enum(AI_PROVIDER_IDS), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_TEMPERATURE, defaultValue: '0.3', schema: decimalRange(0, 2, '温度'), sensitive: false, exportable: true, frontend: true, seed: false },
@@ -188,6 +195,7 @@ export const EXPORTABLE_SETTING_KEYS = SETTING_DEFINITIONS
 const SCHEDULER_RUNTIME_KEYS = new Set<string>([
   SETTING_KEYS.SCHEDULER_LAST_CRAWL_AT,
   SETTING_KEYS.SCHEDULER_LAST_PUSH_DATE,
+  SETTING_KEYS.SCHEDULER_PUSH_JOB,
 ]);
 
 /** 允许通过 API 写入的配置键。排除纯运行态键（scheduler 状态）。 */

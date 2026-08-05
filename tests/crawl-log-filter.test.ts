@@ -25,6 +25,7 @@ function article(partial: Partial<ArticleProgress>): ArticleProgress {
   const base: ArticleProgress = {
     id: 'a',
     title: 't',
+    createdAt: new Date(0).toISOString(),
     crawl: 'done',
     process: 'done',
     cluster: 'done',

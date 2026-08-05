@@ -5,6 +5,7 @@ import {
 import { clusterAllPending } from './pipeline/cluster';
 import { processAllPending } from './pipeline/process';
 import { pushAllPendingArticles } from './pipeline/push-bridge';
+import { isWithinConfiguredQuietHours } from './push/policy';
 
 export async function executeClusterJob(
   payload: Record<string, unknown>,
@@ -31,6 +32,10 @@ export async function executePushJob(
   jobId?: string,
 ): Promise<Record<string, unknown>> {
   if (isSingleWorkflow(payload)) return executeSingleArticleWorkflow(payload, signal, jobId);
-  const result = await pushAllPendingArticles(signal, jobId);
+  const respectQuietHours = payload.trigger === 'auto' || payload.trigger === 'auto_retry';
+  if (respectQuietHours && await isWithinConfiguredQuietHours()) {
+    return { skipped: true, reason: 'quiet-hours' };
+  }
+  const result = await pushAllPendingArticles(signal, jobId, { respectQuietHours });
   return { result };
 }

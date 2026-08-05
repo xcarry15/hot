@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CrawlLogSnapshot } from '@/contracts/crawl-log'
+import { CRAWL_LOG_DEFAULT_LIMIT, type CrawlLogSnapshot } from '@/contracts/crawl-log'
 import { fetchCrawlLogJobStatus, fetchCrawlLogSnapshot } from '@/features/crawl-log-api.client'
 
 export type { CrawlLogSnapshot, JobSnapshot } from '@/contracts/crawl-log'
@@ -27,7 +27,7 @@ export type { CrawlLogSnapshot, JobSnapshot } from '@/contracts/crawl-log'
 interface UseCrawlLogSnapshotOptions {
   /** 页面是否处于前台；隐藏但保留挂载时暂停请求。 */
   enabled?: boolean
-  /** snapshot 接口 limit，默认 500 */
+  /** snapshot 接口 limit，默认使用工作台最近窗口大小 */
   limit?: number
   /** 兜底轮询间隔（毫秒），默认 3000 */
   pollIntervalMs?: number
@@ -52,7 +52,7 @@ export { fetchCrawlLogSnapshot }
 export function useCrawlLogSnapshot(
   options: UseCrawlLogSnapshotOptions = {},
 ): UseCrawlLogSnapshotReturn {
-  const { enabled = true, limit = 500, pollIntervalMs = 3000, idlePollIntervalMs = 15_000 } = options
+  const { enabled = true, limit = CRAWL_LOG_DEFAULT_LIMIT, pollIntervalMs = 3000, idlePollIntervalMs = 15_000 } = options
 
   const [snapshot, setSnapshot] = useState<CrawlLogSnapshot | null>(null)
   const [loading, setLoading] = useState(true)

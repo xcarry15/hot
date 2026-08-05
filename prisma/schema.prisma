@@ -317,6 +317,7 @@ model PushDelivery {
   leaseOwner              String    @default("")
   leaseExpiresAt          DateTime?
   createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
   sentAt                  DateTime?
   completedAt             DateTime?
 
@@ -324,6 +325,7 @@ model PushDelivery {
   target PushTarget @relation(fields: [targetId], references: [id])
 
   @@unique([eventId, targetId, contentVersion, mode])
+  @@index([eventId, targetId, updatedAt])
   @@index([status, leaseExpiresAt])
   @@index([idempotencyKey])
   @@map("push_deliveries")

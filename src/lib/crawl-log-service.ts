@@ -10,7 +10,7 @@
  *
  * 设计约束：
  *   - 不依赖 Next.js Request / Response；
- *   - 普通文章查询上限 500；技术待办按 id 补齐；Job 排序、Source 分组与 active/latest 语义不变；
+ *   - 普通文章按进入系统时间保留最近窗口；窗口内各数据源文章按发布时间倒序展示，无发布时间时回退到进入系统时间；技术待办按 id 补齐；Job 排序、Source 分组与 active/latest 语义不变；
  *   - Service 内部不出现 no-cache 之类的 HTTP 头，那是 Route 的职责。
  */
 import { db } from '@/lib/db';
@@ -23,20 +23,20 @@ import {
   type PushThresholds,
 } from '@/lib/article-pipeline-status';
 import type { Job, Prisma } from '@prisma/client';
-import type {
-  ArticleProgress,
-  CrawlLogJobStatusSnapshot,
-  CrawlLogSnapshot,
-  JobSnapshot,
-  SourceProgress,
+import {
+  CRAWL_LOG_DEFAULT_LIMIT,
+  CRAWL_LOG_MAX_LIMIT,
+  type ArticleProgress,
+  type CrawlLogJobStatusSnapshot,
+  type CrawlLogSnapshot,
+  type JobSnapshot,
+  type SourceProgress,
 } from '@/contracts/crawl-log';
 import { isLowAnalysisConfidence } from '@/contracts/ai-confidence';
 import { getTechnicalWorkQueue } from '@/lib/technical-work-queue-service';
 import { getPushTargetStatesForEvents } from '@/lib/push/delivery';
 import { ACTIVE_JOB_STATUSES, TERMINAL_JOB_STATUSES } from '@/lib/job-status';
 
-const DEFAULT_LIMIT = 500;
-const MAX_LIMIT = 500;
 const ACTIVE_JOBS_LIMIT = 5;
 const LATEST_JOBS_LIMIT = 5;
 
@@ -110,8 +110,8 @@ function toJobSnapshot(job: Job): JobSnapshot {
 
 /** raw limit（来自 query string）→ 实际生效值；上限 500。 */
 export function clampCrawlLogLimit(rawLimit: number | null | undefined): number {
-  if (rawLimit == null || Number.isNaN(rawLimit)) return DEFAULT_LIMIT;
-  return Math.min(Math.max(1, rawLimit), MAX_LIMIT);
+  if (rawLimit == null || Number.isNaN(rawLimit)) return CRAWL_LOG_DEFAULT_LIMIT;
+  return Math.min(Math.max(1, rawLimit), CRAWL_LOG_MAX_LIMIT);
 }
 
 export interface GetCrawlLogSnapshotParams {
@@ -149,7 +149,7 @@ export async function getCrawlLogJobStatus(): Promise<CrawlLogJobStatusSnapshot>
 export async function getCrawlLogSnapshot(
   params: GetCrawlLogSnapshotParams = {},
 ): Promise<CrawlLogSnapshot> {
-  const limit = clampCrawlLogLimit(params.limit ?? DEFAULT_LIMIT);
+  const limit = clampCrawlLogLimit(params.limit ?? CRAWL_LOG_DEFAULT_LIMIT);
 
   // Articles + DiscardedItems + Job 用单次 $transaction，
   // 把跨查询的不一致窗口降到最小。
@@ -172,14 +172,16 @@ export async function getCrawlLogSnapshot(
       }),
       db.article.findMany({
         where: { source: { enabled: true, deletedAt: null } },
-        take: limit,
-        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+        // 多取一条只用于判断窗口外是否还有文章，响应仍严格裁成 limit 条。
+        take: limit + 1,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: crawlLogArticleSelect,
       }),
       db.discardedItem.findMany({
         where: { source: { enabled: true, deletedAt: null } },
-        take: limit,
-        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+        // 未入库记录也按进入系统的时间判断窗口，避免旧发布时间挤掉刚发现的记录。
+        take: limit + 1,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: {
           id: true,
           sourceId: true,
@@ -205,9 +207,13 @@ export async function getCrawlLogSnapshot(
         })
       : Promise.resolve([]),
   ]);
+  const hasMoreArticles = recentArticles.length > limit;
+  const hasMoreDiscarded = discarded.length > limit;
+  const recentArticleWindow = recentArticles.slice(0, limit);
+  const discardedWindow = discarded.slice(0, limit);
   // 普通流水线保持最近 limit 篇；技术待办不受时间窗口限制，并按 id 去重合并。
   const articles = Array.from(new Map(
-    [...recentArticles, ...technicalArticles].map((article) => [article.id, article]),
+    [...recentArticleWindow, ...technicalArticles].map((article) => [article.id, article]),
   ).values());
   // 技术队列可能处于短暂缓存中；以本次快照实际可见的文章为准，避免摘要出现列表中找不到的待办。
   const visibleTechnicalArticleIds = new Set(technicalArticles.map((article) => article.id));
@@ -250,6 +256,7 @@ export async function getCrawlLogSnapshot(
     sourceName: string;
     success: boolean;
     itemsFound: number;
+    newArticles?: number;
     error?: string;
   }
   const sourceRunResults = new Map<string, SourceRunResult>();
@@ -263,6 +270,22 @@ export async function getCrawlLogSnapshot(
       for (const s of sources) {
         sourceRunResults.set(s.sourceId, s);
       }
+      return true;
+    }
+
+    // 单数据源 collect Job 的 result 结构与 full Job 不同：
+    // { sourceId, result: { success, itemsFound, newArticles, error } }。
+    const singleSourceId = typeof result.sourceId === 'string' ? result.sourceId : null;
+    const singleResult = result.result as Record<string, unknown> | undefined;
+    if (singleSourceId && singleResult) {
+      sourceRunResults.set(singleSourceId, {
+        sourceId: singleSourceId,
+        sourceName: typeof result.sourceName === 'string' ? result.sourceName : '',
+        success: singleResult.success === true,
+        itemsFound: typeof singleResult.itemsFound === 'number' ? singleResult.itemsFound : 0,
+        newArticles: typeof singleResult.newArticles === 'number' ? singleResult.newArticles : 0,
+        error: typeof singleResult.error === 'string' ? singleResult.error : undefined,
+      });
       return true;
     }
     return false;
@@ -281,12 +304,12 @@ export async function getCrawlLogSnapshot(
       let status: SourceProgress['status'] = 'not-run';
       let error: string | undefined;
       let lastRunStatus: SourceProgress['lastRunStatus'] = 'not-run';
-      let lastRunItemsFound: number | undefined;
+      let lastRunNewArticles: number | undefined;
       let lastRunError: string | undefined;
       if (runResult) {
         const isWarning = runResult.error === '0 items parsed';
         lastRunStatus = isWarning ? 'warning' : runResult.success ? 'success' : 'failed';
-        lastRunItemsFound = runResult.itemsFound;
+        lastRunNewArticles = runResult.newArticles ?? 0;
         lastRunError = runResult.error;
         status = isWarning ? 'warning' : runResult.success ? 'success' : 'error';
         error = isWarning ? undefined : runResult.error;
@@ -303,7 +326,7 @@ export async function getCrawlLogSnapshot(
         expanded: true,
         error,
         lastRunStatus,
-        lastRunItemsFound,
+        lastRunNewArticles,
         lastRunError,
       });
     }
@@ -345,6 +368,7 @@ export async function getCrawlLogSnapshot(
     const articleProgress: ArticleProgress = {
       id: a.id,
       title: a.title,
+      createdAt: a.createdAt.toISOString(),
       publishedAt: a.publishedAt ? a.publishedAt.toISOString() : null,
       crawl: projection.crawl,
       process: projection.process,
@@ -386,7 +410,7 @@ export async function getCrawlLogSnapshot(
     group.articles.push(articleProgress);
   }
 
-  for (const d of discarded) {
+  for (const d of discardedWindow) {
     const group = ensureSourceGroup(d.sourceId, d.source?.name);
     group.discarded.push({
       id: d.id,
@@ -427,9 +451,10 @@ export async function getCrawlLogSnapshot(
   });
   for (const s of sources) {
     s.articles.sort((a, b) => {
-      const at = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
-      const bt = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
-      return bt - at;
+      const at = new Date(a.publishedAt ?? a.createdAt).getTime();
+      const bt = new Date(b.publishedAt ?? b.createdAt).getTime();
+      const createdAtDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      return bt - at || createdAtDiff || b.id.localeCompare(a.id);
     });
   }
 
@@ -438,6 +463,8 @@ export async function getCrawlLogSnapshot(
     latestJob,
     sources,
     fetchedAt: Date.now(),
+    hasMoreArticles,
+    hasMoreDiscarded,
     technicalTotal: visibleTechnicalItems.filter((item) => item.state === 'manual').length,
     autoRetryTotal: visibleTechnicalItems.filter((item) => item.state === 'auto_retry' || item.state === 'waiting').length,
   };

@@ -12,7 +12,11 @@ import {
 import type {
   FilterState, StepFilterKey,
 } from './crawl-log/types'
-import type { JobSnapshot, SourceProgress } from '@/contracts/crawl-log'
+import {
+  CRAWL_LOG_DEFAULT_LIMIT,
+  type JobSnapshot,
+  type SourceProgress,
+} from '@/contracts/crawl-log'
 import { EMPTY_FILTER_STATE, isFilterStateActive } from './crawl-log/types'
 import {
   ANOMALY_FILTER_CHIPS,
@@ -75,8 +79,6 @@ const WORKBENCH_PRIMARY_ACTION_CLASS = `${WORKBENCH_ACTION_CLASS} whitespace-now
 
 export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const { snapshot, error, refreshSnapshot } = useCrawlLogSnapshot({
-    // 项目日处理量低于 200；保留一定余量即可，避免每轮传输 1000 条明细。
-    limit: 250,
     enabled: active,
   })
   const sources: SourceProgress[] = useMemo(() => snapshot?.sources ?? [], [snapshot?.sources])
@@ -238,7 +240,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       const articles = filterState.publishedToday
         ? src.articles.filter(article => article.publishedAt && new Date(article.publishedAt).toDateString() === today)
         : src.articles
-      // “全部”展示当前快照文章总数；已忽略虽默认不展开，仍属于文章总量。
+      // “全部”展示当前工作台窗口文章总数；已忽略虽默认不展开，仍属于窗口总量。
       counts.all = (counts.all ?? 0) + articles.length
       for (const a of articles) {
         for (const chip of STEP_FILTER_CHIPS) {
@@ -761,6 +763,12 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           secondaryFilterChips={secondaryFilterChips}
           filterCounts={filterCounts}
         />
+
+        {(snapshot?.hasMoreArticles || snapshot?.hasMoreDiscarded) && (
+          <div className="px-1 text-[11px] text-muted-foreground">
+            工作台显示最近采集窗口（文章最多 {CRAWL_LOG_DEFAULT_LIMIT} 条）；历史文章请点击“搜索”，技术待办会始终保留。
+          </div>
+        )}
 
         <TaskStatusPanels
           activeTaskView={activeTaskView}
