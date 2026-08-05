@@ -29,7 +29,7 @@ Hot2 生产部署与更新
 4. 执行 `npm ci`、`db:migrate:deploy`、`db:generate`、`db:optimize` 和生产构建。
 5. 以单实例启动 PM2，检查 `/api/health` 和 Next.js CSS 资源。
 
-当前仓库只有 `20260731120000_current_schema_baseline` 一个 migration。线上历史不匹配时，普通部署会在停止服务前拒绝执行；如明确放弃现有生产数据，可在 GitHub Actions 的 `Deploy production` 手动运行时选择 `reset_production=yes`，系统会跳过备份、删除 SQLite 并按 baseline migration 和 seed 全新初始化。部署失败不会自动回滚代码或 migration。
+生产发布以 release 包中 `prisma/migrations` 目录的完整 migration 集合为准。线上历史不匹配时，普通部署会在停止服务前拒绝执行；如明确放弃现有生产数据，可在 GitHub Actions 的 `Deploy production` 手动运行时选择 `reset_production=yes`，系统会跳过备份、删除 SQLite 并按完整 migration 集合和 seed 全新初始化。部署失败不会自动回滚代码或 migration。
 
 手动运行 GitHub Actions 的 `Deploy production` 不会重新执行 CI，只能用于已经确认通过 CI 的提交。
 

@@ -137,7 +137,7 @@ npm run db:cleanup-logs
 
 自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh` 完成：验证当前 migration、备份 SQLite、`rsync --delete` 同步代码、安装依赖、应用 migration、构建、单实例启动 PM2，并检查健康接口和 Next.js CSS。部署会保留服务器上的 `.env` 和 `db/`；不会自动回滚代码或 migration。只有在明确授权时，才可手动运行该工作流并选择 `reset_production=yes`；该选项会删除现有生产 SQLite 且不备份，再从 baseline migration 和 seed 重新初始化。
 
-当前仓库只有 `prisma/migrations/20260731120000_current_schema_baseline` 一个 migration。发现线上 migration 历史不匹配时，普通部署会拒绝继续；项目不维护旧数据库兼容层。若确认放弃现有生产数据，可手动运行 `Deploy production` 并选择 `reset_production=yes` 重新初始化。
+生产发布以 release 包中 `prisma/migrations` 目录的完整 migration 集合为准。发现线上 migration 历史不匹配时，普通部署会拒绝继续；项目不维护旧数据库兼容层。若确认放弃现有生产数据，可手动运行 `Deploy production` 并选择 `reset_production=yes` 重新初始化。
 
 ## 安全与运行约束
 

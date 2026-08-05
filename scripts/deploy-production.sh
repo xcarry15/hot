@@ -6,7 +6,6 @@ RELEASE_ARCHIVE="${RELEASE_ARCHIVE:?RELEASE_ARCHIVE is required}"
 APP_NAME="${APP_NAME:-h2-hot2}"
 SITE_URL="${SITE_URL:-https://hot.kfxz.cn}"
 BACKUP_ROOT="${BACKUP_ROOT:-/www/backup/h2-hot2}"
-CURRENT_MIGRATION_NAME="20260731120000_current_schema_baseline"
 RESET_PRODUCTION="${RESET_PRODUCTION:-NO}"
 RESET_PRODUCTION="${RESET_PRODUCTION^^}"
 RELEASE_DIR="$(mktemp -d /tmp/h2-hot2-release.XXXXXX)"
@@ -39,16 +38,25 @@ grep -Eq '^[[:space:]]*SETTINGS_ENCRYPTION_KEY[[:space:]]*=[[:space:]]*[^[:space
 grep -Eq '^[[:space:]]*NEXT_PUBLIC_SITE_URL[[:space:]]*=[[:space:]]*https?://' "$APP_DIR/.env" \
   || { echo 'Production NEXT_PUBLIC_SITE_URL is missing or invalid.' >&2; exit 1; }
 
+tar -xzf "$RELEASE_ARCHIVE" -C "$RELEASE_DIR"
+[[ -f "$RELEASE_DIR/package.json" ]] || { echo 'Release archive is invalid' >&2; exit 1; }
+[[ -d "$RELEASE_DIR/prisma/migrations" ]] || { echo 'Release archive is missing prisma migrations' >&2; exit 1; }
+mapfile -t EXPECTED_MIGRATIONS < <(find "$RELEASE_DIR/prisma/migrations" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+[[ "${#EXPECTED_MIGRATIONS[@]}" -gt 0 ]] || { echo 'Release archive contains no migrations' >&2; exit 1; }
+EXPECTED_MIGRATION_COUNT="${#EXPECTED_MIGRATIONS[@]}"
+EXPECTED_MIGRATION_SQL="$(printf "'%s'," "${EXPECTED_MIGRATIONS[@]}")"
+EXPECTED_MIGRATION_SQL="${EXPECTED_MIGRATION_SQL%,}"
+
 if [[ "$RESET_PRODUCTION" == "NO" ]]; then
   MIGRATION_TABLE_EXISTS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations';")"
   if [[ "$MIGRATION_TABLE_EXISTS" != "1" ]]; then
-    echo "Production database is not initialized with the current migration baseline." >&2
+    echo "Production database is not initialized with the release migration set." >&2
     echo "Run the manual Deploy production workflow with reset_production=yes after explicit approval." >&2
     exit 1
   fi
-  UNEXPECTED_MIGRATIONS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name <> '$CURRENT_MIGRATION_NAME';")"
-  CURRENT_MIGRATION_COUNT="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name = '$CURRENT_MIGRATION_NAME';")"
-  if [[ "$UNEXPECTED_MIGRATIONS" != "0" || "$CURRENT_MIGRATION_COUNT" != "1" ]]; then
+  UNEXPECTED_MIGRATIONS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name NOT IN ($EXPECTED_MIGRATION_SQL) OR finished_at IS NULL;")"
+  CURRENT_MIGRATION_COUNT="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(DISTINCT migration_name) FROM _prisma_migrations WHERE migration_name IN ($EXPECTED_MIGRATION_SQL) AND finished_at IS NOT NULL;")"
+  if [[ "$UNEXPECTED_MIGRATIONS" != "0" || "$CURRENT_MIGRATION_COUNT" != "$EXPECTED_MIGRATION_COUNT" ]]; then
     echo "Production database uses an obsolete migration history; refusing an in-place compatibility upgrade." >&2
     echo "Run the manual Deploy production workflow with reset_production=yes after explicit approval." >&2
     exit 1
@@ -56,9 +64,6 @@ if [[ "$RESET_PRODUCTION" == "NO" ]]; then
 else
   echo "RESET_PRODUCTION=YES: existing production SQLite will be deleted without backup."
 fi
-
-tar -xzf "$RELEASE_ARCHIVE" -C "$RELEASE_DIR"
-[[ -f "$RELEASE_DIR/package.json" ]] || { echo 'Release archive is invalid' >&2; exit 1; }
 
 if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
   SERVICE_WAS_RUNNING=1
