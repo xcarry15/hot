@@ -52,6 +52,7 @@ import {
 import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
 import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
 import { retrySource, retrySources } from '@/features/sources-api.client'
+import { getPublicDateKey } from '@/lib/shared/public-date'
 
 type WorkflowStage = 'collect' | 'process' | 'ai' | 'cluster' | 'push'
 type WorkflowAction = WorkflowStage | 'all'
@@ -230,10 +231,10 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   const filterCounts = useMemo(() => {
     const counts: Partial<Record<FilterChipKey, number>> = {}
-    const today = new Date().toDateString()
+    const today = getPublicDateKey(new Date())
     for (const src of sources) {
       const articles = filterState.publishedToday
-        ? src.articles.filter(article => article.publishedAt && new Date(article.publishedAt).toDateString() === today)
+        ? src.articles.filter(article => article.publishedAt && getPublicDateKey(article.publishedAt) === today)
         : src.articles
       // “全部”展示当前工作台窗口文章总数；已忽略虽默认不展开，仍属于窗口总量。
       counts.all = (counts.all ?? 0) + articles.length

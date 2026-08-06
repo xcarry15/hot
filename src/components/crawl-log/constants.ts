@@ -42,6 +42,7 @@ export const ANOMALY_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'anomaly-filtered', label: '未达门槛', description: '评分或相关性未达到推送要求，未进入自动推送' },
   { key: 'anomaly-no-value', label: '无价值', description: 'AI 已完成分析，但内容不具备保留价值' },
   { key: 'anomaly-ad', label: '软文', description: 'AI 判定为广告或软文的文章' },
+  { key: 'anomaly-duplicate', label: '重复', description: '同一事件中的非代表报道' },
 ] as const
 
 /** 人工关注是独立维度，允许与“正常/异常”重叠。 */

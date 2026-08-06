@@ -56,7 +56,7 @@ export interface FilterState {
   sourceId: string
   /** 是否把该 source 的 discarded 项也纳入可见集合（管理员调试去重/过滤原因用） */
   includeDiscarded: boolean
-  /** 是否只看今天发布的文章（基于文章自身的 publishedAt） */
+  /** 是否只看今天发布的文章（基于文章自身的 publishedAt，Asia/Shanghai 自然日） */
   publishedToday: boolean
 }
 

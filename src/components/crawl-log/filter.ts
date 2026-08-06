@@ -9,6 +9,7 @@ import {
 } from './types'
 import { URL_PARAM_CHIPS, URL_PARAM_SRC, URL_PARAM_DISC, URL_PARAM_TODAY } from './constants'
 import { isTechnicalSkipReason } from '@/lib/article-pipeline-status'
+import { getPublicDateKey } from '@/lib/shared/public-date'
 
 export type ArticleFilterBucket =
   | 'normal-processing'
@@ -156,7 +157,7 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
  * 规则：
  * - sourceId !== 'all' → 只保留该 source
  * - 选中状态 → 文章只按该状态过滤
- * - publishedToday = true → 只保留 publishedAt 为今天的文章
+ * - publishedToday = true → 按 Asia/Shanghai 自然日只保留 publishedAt 为今天的文章
  * - includeDiscarded = false → 清空 discarded 字段（隐藏"未入库"段，不渲染）
  * - 末尾过滤掉无 articles 且无 discarded 的 source
  */
@@ -165,7 +166,7 @@ export function applyFilterState(
   state: FilterState,
 ): SourceProgress[] {
   const selectedChip = state.chips.values().next().value as StepFilterKey | undefined
-  const today = new Date().toDateString()
+  const today = getPublicDateKey(new Date())
   return sources
     .filter(s => state.sourceId === 'all' || s.id === state.sourceId)
     .map(s => {
@@ -176,7 +177,7 @@ export function applyFilterState(
       if (state.publishedToday) {
         articles = articles.filter(a => {
           if (!a.publishedAt) return false
-          return new Date(a.publishedAt).toDateString() === today
+          return getPublicDateKey(a.publishedAt) === today
         })
       }
       // P0-5: 状态筛选激活时，未入库条目也受约束。
@@ -191,7 +192,7 @@ export function applyFilterState(
           discarded = discarded.filter(d => {
             const dateStr = d.publishedAt || d.createdAt
             if (!dateStr) return false
-            return new Date(dateStr).toDateString() === today
+            return getPublicDateKey(dateStr) === today
           })
         }
       } else {
