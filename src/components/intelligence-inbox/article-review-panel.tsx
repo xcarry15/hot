@@ -3,11 +3,10 @@
 import { Loader2, RefreshCw, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScoreBadge } from '@/components/ui/score-badge';
 import { Textarea } from '@/components/ui/textarea';
 import type { ArticleDetailDto } from '@/contracts/articles';
 import type { ArticleEditorialDraft, PushTargetSummary } from './types';
-import { InlineMetric, StatusPill } from './workspace-primitives';
+import { StatusPill } from './workspace-primitives';
 import {
   processingLabel,
   publicResultLabel,
@@ -141,20 +140,6 @@ export function ArticleReviewPanel({
             <span className="min-w-0 basis-full break-words text-[11px] text-muted-foreground sm:basis-auto">
               文章覆盖：{detail.publicOverride === 'auto' ? '自动公开' : detail.publicOverride === 'public' ? '强制公开' : '人工隐藏'} · 公开门禁：{releaseGateMessage}
             </span>
-          </div>
-
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
-            <span className="inline-flex items-center gap-1 whitespace-nowrap">
-              <span className="text-muted-foreground">综合</span>
-              <ScoreBadge score={detail.score} variant="compact-square" />
-            </span>
-            <InlineMetric label="内容" value={detail.contentScore} />
-            <InlineMetric label="事件" value={detail.eventScore} />
-            <InlineMetric label="相关" value={detail.relevance} />
-            <InlineMetric label="AI 分析置信度" value={detail.aiConfidence} suffix="%" />
-            <InlineMetric label="广告" value={detail.adProbability} suffix="%" danger={detail.isAd} />
-            <InlineMetric label="事件身份置信度" value={detail.eventKeyConfidence} suffix="%" />
-            <InlineMetric label="原始评分" value={detail.rawScore} />
           </div>
 
           {!isRepresentative && (

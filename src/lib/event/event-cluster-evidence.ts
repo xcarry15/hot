@@ -208,8 +208,8 @@ export function buildRuleCandidateAuditEvidence(candidates: RuleCandidateAudit[]
 }
 
 /**
- * 仅决定是否把“相近但未合并”的候选写入审计，绝不影响自动归并或人工复核。
- * 这样运营人员能看到系统曾比较过什么，同时证据不足的文章仍直接独立建 Event。
+ * 候选关系没有足够证据自动归并时，必须进入人工复核，而不是被当成
+ * 已确认的独立 Event。候选是提示，`needs_review` 才是公开/推送安全门。
  */
 function isAuditableNearbyCandidate(evidence: {
   eventKeyMatch: boolean;
@@ -251,6 +251,39 @@ function isAuditableNearbyCandidate(evidence: {
     || identitySignal
     || titleSignal
     || contentSignal;
+}
+
+/**
+ * 识别“不能自动归并、也不能安全放行”的候选。
+ *
+ * 低置信事件身份仍可能生成完全相同的确定性 eventKey。此时正文/标题
+ * 改写会让最终 pair decision 变成 reject，但相同 eventKey + 无冲突身份
+ * 已足以证明需要人工确认，不能继续创建 confirmed Event。
+ */
+export function isReviewWorthyCandidate(evidence: Pick<
+  PairEvidence,
+  | 'decision'
+  | 'eventKeyMatch'
+  | 'identityConfidence'
+  | 'identityScore'
+  | 'subjectSimilarity'
+  | 'actionSimilarity'
+  | 'objectSimilarity'
+  | 'phaseConflict'
+  | 'identityConflict'
+  | 'qualifierConflictOnPair'
+>): boolean {
+  if (evidence.decision === 'ambiguous') return true;
+  return evidence.decision === 'reject'
+    && evidence.eventKeyMatch
+    && evidence.identityConfidence < EVENT_CLUSTER_MIN_KEY_CONFIDENCE
+    && evidence.identityScore >= 0.75
+    && evidence.subjectSimilarity >= 0.8
+    && evidence.actionSimilarity >= 0.7
+    && evidence.objectSimilarity >= 0.7
+    && !evidence.phaseConflict
+    && !evidence.identityConflict
+    && !evidence.qualifierConflictOnPair;
 }
 
 export function articleDate(article: { publishedAt: Date | null; createdAt: Date }): Date {

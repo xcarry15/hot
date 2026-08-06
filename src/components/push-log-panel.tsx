@@ -101,7 +101,7 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
 
     const params = {
       page,
-      pageSize: 20,
+      pageSize: 10,
       status: statusFilter === 'all' ? undefined : statusFilter,
       source: sourceFilter === 'all' ? undefined : sourceFilter,
       ...getWebhookFilterParams(webhookFilter),
@@ -172,7 +172,7 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
   }
 
   return (
-    <Card className="h-[420px] overflow-y-auto py-0">
+    <Card className="h-[372px] max-h-[372px] overflow-hidden rounded-none py-0 shadow-none">
       <CardContent className="p-2">
         <div className="mb-1 flex flex-wrap items-center gap-1">
           <div className="mr-2 shrink-0">
@@ -203,7 +203,6 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
               {stats?.webhooks.map((webhook) => <SelectItem key={`${webhook.isEmpty}:${webhook.remark}`} value={webhook.isEmpty ? EMPTY_WEBHOOK_FILTER : toWebhookRemarkFilter(webhook.remark)}>{webhook.remark} ({webhook.count})</SelectItem>)}
             </SelectContent>
           </Select>
-          {data && <span className="ml-auto text-[11px] text-muted-foreground">当前 {data.total} 条</span>}
         </div>
 
         {loading ? (

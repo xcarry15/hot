@@ -56,13 +56,23 @@ const sectionLoaders: Record<string, () => Promise<unknown>> = {
   data: loadData,
 }
 
-function buildSettingsSavePayload(settings: SettingsType, providerConfigs: ProviderConfigs): Record<string, string> {
+type SensitiveTab = 'ai-model' | 'push'
+type SensitiveRevealState = Record<SensitiveTab, 'idle' | 'loading' | 'ready' | 'error'>
+
+function buildSettingsSavePayload(
+  settings: SettingsType,
+  providerConfigs: ProviderConfigs,
+  sensitiveReady: Record<SensitiveTab, boolean>,
+): Record<string, string> {
   const payload: Record<string, string> = { ...settings }
+  // GET /api/settings 只返回脱敏占位值。未完成 reveal 时禁止提交敏感字段，
+  // 避免一次普通设置保存把服务端仍然存在的密钥/Webhook 覆盖掉。
+  if (!sensitiveReady.push) delete payload[SETTING_KEYS.FEISHU_WEBHOOK_URL]
   // 前端按当前显示值完整保存；提示词空白值由服务端统一归一化为当前默认文本。
   for (const id of Object.keys(AI_PROVIDERS) as AIProviderId[]) {
     const config = providerConfigs[id]
     if (!config) continue
-    payload[providerKey(id, 'api_key')] = config.apiKey
+    if (sensitiveReady['ai-model']) payload[providerKey(id, 'api_key')] = config.apiKey
     payload[providerKey(id, 'base_url')] = config.baseUrl
     payload[providerKey(id, 'model')] = config.model
   }
@@ -84,6 +94,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   })
 
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('dashboard')
   const settingsBaselineRef = useRef<string | null>(null)
@@ -91,12 +102,15 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   const providerBaselineRef = useRef<ProviderConfigs | null>(null)
   const revealedSensitiveTabsRef = useRef<Set<'ai-model' | 'push'>>(new Set())
   const pendingRevealBaselineRef = useRef<string | null>(null)
-  // reveal 401 只提示一次：避免 StrictMode 双跑 / 刷新 / 切回设置页重复打扰；
-  // 用户在「账户」填好 token 后下一次 fetchSettings 会自动恢复明文回显。
+  // reveal 401 只提示一次：避免 StrictMode 双跑 / 刷新 / 切回设置页重复打扰。
   const warnedAuthRef = useRef(false)
   const mountedRef = useRef(true)
   const latestSettingsRef = useRef(settings)
   const latestProviderConfigsRef = useRef(providerConfigs)
+  const [sensitiveRevealState, setSensitiveRevealState] = useState<SensitiveRevealState>({
+    'ai-model': 'idle',
+    push: 'idle',
+  })
 
   // 异步保存期间用户仍可能继续编辑；保存完成时必须以最新状态判断是否还有未保存内容。
   latestSettingsRef.current = settings
@@ -127,8 +141,21 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   }, [hasUnsavedChanges])
 
   const loadSettingsTab = useCallback(async () => {
+    setLoading(true)
+    setLoadError(false)
     try {
       const data = await fetchSettings()
+      const requiredKeys = [
+        ...FRONTEND_SETTING_KEYS,
+        ...(Object.keys(AI_PROVIDERS) as AIProviderId[]).flatMap((id) => [
+          providerKey(id, 'api_key'),
+          providerKey(id, 'base_url'),
+          providerKey(id, 'model'),
+        ]),
+      ]
+      if (requiredKeys.some((key) => typeof data[key] !== 'string')) {
+        throw new Error('设置响应不完整')
+      }
 
       // 1. 基础设置(非敏感 key)
       const newSettings: Partial<SettingsType> = {}
@@ -148,8 +175,10 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         }
       }
       setProviderConfigs(baseConfigs)
+      setSensitiveRevealState({ 'ai-model': 'idle', push: 'idle' })
 
     } catch {
+      setLoadError(true)
       toast.error('获取设置失败')
     } finally {
       setLoading(false)
@@ -159,11 +188,15 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   const revealSensitiveSettingsForEditor = useCallback(async (tab: 'ai-model' | 'push') => {
     const capturedSettings = settings
     const capturedProviders = providerConfigs
+    setSensitiveRevealState((current) => ({ ...current, [tab]: 'loading' }))
     try {
       const revealKeys = tab === 'push'
         ? [SETTING_KEYS.FEISHU_WEBHOOK_URL]
         : (Object.keys(AI_PROVIDERS) as AIProviderId[]).map((id) => providerKey(id, 'api_key'))
       const revealed = await revealSettings(revealKeys)
+      if (revealKeys.some((key) => typeof revealed[key] !== 'string')) {
+        throw new Error('敏感配置响应不完整')
+      }
       const revealedWebhook = typeof revealed.feishu_webhook_url === 'string'
         ? revealed.feishu_webhook_url
         : undefined
@@ -200,14 +233,16 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         }
         return next
       })
+      setSensitiveRevealState((current) => ({ ...current, [tab]: 'ready' }))
     } catch (err) {
       // 同一类敏感配置加载失败时允许下一次进入该页重试；另一类配置互不影响。
       revealedSensitiveTabsRef.current.delete(tab)
+      setSensitiveRevealState((current) => ({ ...current, [tab]: 'error' }))
       if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
         if (!warnedAuthRef.current) {
           warnedAuthRef.current = true
-          toast.warning('未授权访问密钥,请在「账户」标签页填写 API Token', {
-            description: '留空输入框保存 = 保持原值不变',
+          toast.warning('当前会话无权读取敏感配置，请重新登录后重试', {
+            description: '为保护已有密钥，敏感配置已锁定，普通设置仍可保存。',
           })
         }
       }
@@ -220,14 +255,14 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   }, [loadSettingsTab])
 
   useEffect(() => {
-    if (!loading) {
+    if (!loading && !loadError) {
       settingsBaselineRef.current = currentSettingsFingerprint
       settingsBaselineStateRef.current = settings
       providerBaselineRef.current = providerConfigs
     }
     // 仅在初次加载结束时建立基线；后续编辑不能覆盖基线。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading])
+  }, [loading, loadError])
 
   useEffect(() => subscribeToSettingsChanged((changes) => {
     setSettings(prev => ({ ...prev, ...changes }))
@@ -242,10 +277,16 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
 
   useEffect(() => {
     const tab = activeTab === 'ai-model' || activeTab === 'push' ? activeTab : null
-    if (loading || !tab || revealedSensitiveTabsRef.current.has(tab)) return
+    if (loading || loadError || !tab || revealedSensitiveTabsRef.current.has(tab)) return
     revealedSensitiveTabsRef.current.add(tab)
     void revealSensitiveSettingsForEditor(tab)
-  }, [activeTab, loading, revealSensitiveSettingsForEditor])
+  }, [activeTab, loading, loadError, revealSensitiveSettingsForEditor])
+
+  const retrySensitiveSettings = useCallback((tab: SensitiveTab) => {
+    revealedSensitiveTabsRef.current.delete(tab)
+    revealedSensitiveTabsRef.current.add(tab)
+    void revealSensitiveSettingsForEditor(tab)
+  }, [revealSensitiveSettingsForEditor])
 
   useEffect(() => {
     const pending = pendingRevealBaselineRef.current
@@ -283,22 +324,51 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   const handleSave = async () => {
     const submittedSettings = latestSettingsRef.current
     const submittedProviderConfigs = latestProviderConfigsRef.current
-    const submittedFingerprint = settingsFingerprint(submittedSettings, submittedProviderConfigs)
-    const payload = buildSettingsSavePayload(submittedSettings, submittedProviderConfigs)
+    const sensitiveReady = {
+      'ai-model': sensitiveRevealState['ai-model'] === 'ready',
+      push: sensitiveRevealState.push === 'ready',
+    }
+    const payload = buildSettingsSavePayload(submittedSettings, submittedProviderConfigs, sensitiveReady)
+    const priorSettings = settingsBaselineStateRef.current
+    const priorProviders = providerBaselineRef.current
+    const persistedBaselineSettings = { ...submittedSettings }
+    const persistedBaselineProviders = { ...submittedProviderConfigs }
+    const pushSensitiveDirty = !sensitiveReady.push
+      && Boolean(priorSettings)
+      && submittedSettings.feishu_webhook_url !== priorSettings?.feishu_webhook_url
+    const aiSensitiveDirty = !sensitiveReady['ai-model']
+      && Boolean(priorProviders)
+      && (Object.keys(AI_PROVIDERS) as AIProviderId[]).some((id) => (
+        submittedProviderConfigs[id]?.apiKey !== priorProviders?.[id]?.apiKey
+      ))
+    if (!sensitiveReady.push && priorSettings) {
+      persistedBaselineSettings.feishu_webhook_url = priorSettings.feishu_webhook_url
+    }
+    if (!sensitiveReady['ai-model'] && priorProviders) {
+      for (const id of Object.keys(AI_PROVIDERS) as AIProviderId[]) {
+        persistedBaselineProviders[id] = {
+          ...persistedBaselineProviders[id],
+          apiKey: priorProviders[id]?.apiKey ?? persistedBaselineProviders[id]?.apiKey ?? '',
+        }
+      }
+    }
+    const persistedFingerprint = settingsFingerprint(persistedBaselineSettings, persistedBaselineProviders)
     setSaving(true)
     try {
       const result = await saveSettings(payload) as { rebuildQueued?: boolean; rebuildJobQueued?: boolean }
       if (mountedRef.current) {
         // 基线对应本次真正提交的快照；若请求期间继续编辑，后续改动仍会保持“未保存”。
-        settingsBaselineRef.current = submittedFingerprint
-        settingsBaselineStateRef.current = submittedSettings
-        providerBaselineRef.current = submittedProviderConfigs
+        settingsBaselineRef.current = persistedFingerprint
+        settingsBaselineStateRef.current = persistedBaselineSettings
+        providerBaselineRef.current = persistedBaselineProviders
         const details = [
           result.rebuildQueued
             ? result.rebuildJobQueued
               ? '后台正在同步评分和公开状态'
               : '评分和公开状态将在当前任务结束后自动同步'
             : '',
+          aiSensitiveDirty ? 'AI 密钥未保存（尚未完成安全读取）' : '',
+          pushSensitiveDirty ? 'Webhook 未保存（尚未完成安全读取）' : '',
         ].filter(Boolean).join('，')
         toast.success(details ? `设置已保存，${details}` : '设置已保存')
       }
@@ -334,6 +404,16 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         {Array.from({ length: 4 }).map((_, i) => (
           <Skeleton key={i} className="h-20 w-full" />
         ))}
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-sm font-medium">设置读取失败</p>
+        <p className="text-xs text-muted-foreground">为避免用默认值覆盖服务器配置，当前未开放编辑和保存。</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => void loadSettingsTab()}>重新读取</Button>
       </div>
     )
   }
@@ -390,6 +470,8 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
             setSettings={setSettings}
             providerConfigs={providerConfigs}
             setProviderConfigs={setProviderConfigs}
+            sensitiveStatus={sensitiveRevealState['ai-model']}
+            onRetrySensitive={() => retrySensitiveSettings('ai-model')}
           />
         </TabsContent>
 
@@ -398,7 +480,12 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         </TabsContent>
 
         <TabsContent value="push" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
-          <PushTab settings={settings} setSettings={setSettings} />
+          <PushTab
+            settings={settings}
+            setSettings={setSettings}
+            sensitiveStatus={sensitiveRevealState.push}
+            onRetrySensitive={() => retrySensitiveSettings('push')}
+          />
         </TabsContent>
 
         <TabsContent value="account" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">

@@ -3,11 +3,12 @@
 import { ExternalLink } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ScoreBadge } from '@/components/ui/score-badge';
 import type { ArticleDetailDto } from '@/contracts/articles';
 import { isBusinessSkipReason } from '@/lib/article-pipeline-status';
 import type { ManualOverrideField } from '@/lib/shared/article-calibration';
 import type { WorkspaceStatusTone } from './types';
-import { MetaRow, StatusPill } from './workspace-primitives';
+import { InlineMetric, MetaRow, StatusPill } from './workspace-primitives';
 import {
   fullTimeLabel,
   manualFieldLabel,
@@ -63,6 +64,19 @@ export function ArticleWorkspaceHeader({
             <h1 className="break-words text-base font-semibold leading-6 sm:text-lg">
               {detail.title}
             </h1>
+            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                <span className="text-muted-foreground">综合</span>
+                <ScoreBadge score={detail.score} variant="compact-square" />
+              </span>
+              <InlineMetric label="内容" value={detail.contentScore} />
+              <InlineMetric label="事件" value={detail.eventScore} />
+              <InlineMetric label="相关" value={detail.relevance} />
+              <InlineMetric label="AI 分析置信度" value={detail.aiConfidence} suffix="%" />
+              <InlineMetric label="广告" value={detail.adProbability} suffix="%" danger={detail.isAd} />
+              <InlineMetric label="事件身份置信度" value={detail.eventKeyConfidence} suffix="%" />
+              <InlineMetric label="原始评分" value={detail.rawScore} />
+            </div>
             <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               <span className="min-w-0 truncate">{detail.source.name}</span>
               <span>·</span>

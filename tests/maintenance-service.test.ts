@@ -8,6 +8,7 @@ const mocks = db as unknown as {
   fetchLog: { count: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn> };
   pushLog: { count: ReturnType<typeof vi.fn> };
   discardedItem: { count: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn> };
+  discardedRetryAudit: { count: ReturnType<typeof vi.fn> };
   job: { count: ReturnType<typeof vi.fn> };
 };
 
@@ -24,11 +25,11 @@ vi.mock('@/lib/event-service', () => ({ recalculateEventsInTransaction }));
 describe('maintenance-service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.article.count.mockResolvedValueOnce(100).mockResolvedValueOnce(4).mockResolvedValueOnce(7);
-    mocks.event.count.mockResolvedValueOnce(6).mockResolvedValueOnce(9);
+    mocks.article.count.mockResolvedValueOnce(100).mockResolvedValueOnce(4).mockResolvedValueOnce(7).mockResolvedValueOnce(7);
     mocks.fetchLog.count.mockResolvedValue(11);
     mocks.pushLog.count.mockResolvedValue(12);
     mocks.discardedItem.count.mockResolvedValue(13);
+    mocks.discardedRetryAudit.count.mockResolvedValue(2);
     mocks.job.count.mockResolvedValue(14);
     getDbFileSize.mockReturnValue(2048);
   });
@@ -37,12 +38,13 @@ describe('maintenance-service', () => {
     await expect(getCleanupStats()).resolves.toEqual({
       articlesTotal: 100,
       articlesLowQuality: 4,
-      articlesPushed: 6,
+      articlesPushed: 7,
       articlesPending: 7,
-      dedupLogs: 9,
+      dedupLogs: 13,
       fetchLogs: 11,
       pushLogs: 12,
       discardedTotal: 13,
+      discardedRetryAudits: 2,
       jobsTotal: 14,
       dbSizeBytes: 2048,
     });

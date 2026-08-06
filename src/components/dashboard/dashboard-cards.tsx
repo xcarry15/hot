@@ -24,6 +24,13 @@ interface CrawlTimeCardProps {
 }
 
 function formatNumber(value: number): string { return value.toLocaleString() }
+function getChartAxisMax(value: number): number {
+  if (value <= 0) return 1
+  const magnitude = 10 ** Math.floor(Math.log10(value))
+  const normalized = value / magnitude
+  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
+  return step * magnitude
+}
 function formatPublishedAt(value: string | null): string {
   if (!value) return '—'
   const date = new Date(value)
@@ -120,13 +127,30 @@ export function DailyNewArticlesCard({
     publicCount: result.publicCount + item.publicCount,
     pushedCount: result.pushedCount + item.pushedCount,
   }), { newCount: 0, publicCount: 0, pushedCount: 0 })
-  const peak = Math.max(0, ...articles.flatMap((item) => [item.count, item.publicCount, item.pushedCount]))
+  const newAxisMax = getChartAxisMax(Math.max(0, ...articles.map((item) => item.count)))
+  const activityAxisMax = getChartAxisMax(Math.max(0, ...articles.flatMap((item) => [item.publicCount, item.pushedCount])))
   const labelStep = Math.max(1, Math.ceil(articles.length / 6))
-  const series = [
-    { key: 'new', label: '新增', color: 'bg-primary/75', getValue: (item: typeof articles[number]) => item.count },
-    { key: 'public', label: '公开', color: 'bg-emerald-500/75', getValue: (item: typeof articles[number]) => item.publicCount },
-    { key: 'pushed', label: '推送', color: 'bg-violet-500/75', getValue: (item: typeof articles[number]) => item.pushedCount },
-  ] as const
+  const chartHeight = 300
+  const plotTop = 14
+  const plotBottom = chartHeight - 30
+  const plotHeight = plotBottom - plotTop
+  const axisLeft = 38
+  const axisRight = 38
+  const slotWidth = Math.max(56, 560 / Math.max(1, articles.length))
+  const plotWidth = Math.max(560, articles.length * slotWidth)
+  const chartWidth = axisLeft + plotWidth + axisRight
+  const getX = (index: number) => axisLeft + slotWidth * (index + 0.5)
+  const getRightY = (value: number) => plotBottom - (value / activityAxisMax) * plotHeight
+  const axisTicks = Array.from({ length: 5 }, (_, index) => {
+    const ratio = index / 4
+    return {
+      y: plotBottom - ratio * plotHeight,
+      left: Math.round(newAxisMax * ratio),
+      right: Math.round(activityAxisMax * ratio),
+    }
+  })
+  const publicLine = articles.map((item, index) => `${getX(index)},${getRightY(item.publicCount)}`).join(' ')
+  const pushedLine = articles.map((item, index) => `${getX(index)},${getRightY(item.pushedCount)}`).join(' ')
 
   return (
     <Card className="min-h-[420px] rounded-none py-0 shadow-none">
@@ -136,28 +160,59 @@ export function DailyNewArticlesCard({
           <span className="text-[10px] text-muted-foreground">新增 {formatNumber(totals.newCount)} · 公开 {formatNumber(totals.publicCount)} · 推送 {formatNumber(totals.pushedCount)}</span>
         </div>
         <div className="mb-1 flex items-center gap-3 text-[10px] text-muted-foreground">
-          {series.map((item) => <span key={item.key} className="inline-flex items-center gap-1"><i className={`h-1.5 w-1.5 rounded-full ${item.color}`} />{item.label}</span>)}
+          <span className="inline-flex items-center gap-1"><i className="h-1.5 w-1.5 rounded-sm bg-primary/75" />新增</span>
+          <span className="inline-flex items-center gap-1"><i className="h-px w-3 bg-emerald-500" />公开</span>
+          <span className="inline-flex items-center gap-1"><i className="h-px w-3 bg-violet-500" />推送</span>
         </div>
         {articles.length > 0 ? (
           <div className="mt-2 h-[335px] overflow-x-auto border-b border-l px-1 pb-1 pt-2">
-            <div className="flex h-full min-w-full w-max items-end justify-center gap-3 px-3">
+            <svg
+              className="block"
+              width={chartWidth}
+              height={chartHeight}
+              role="img"
+              aria-label="每日新增文章、公开文章和推送文章趋势"
+            >
+              {axisTicks.map((tick) => (
+                <g key={tick.y}>
+                  <line x1={axisLeft} x2={axisLeft + plotWidth} y1={tick.y} y2={tick.y} stroke="hsl(var(--border))" strokeDasharray="2 3" />
+                  <text x={axisLeft - 6} y={tick.y + 3} textAnchor="end" fill="hsl(var(--muted-foreground))" className="text-[10px]">{formatNumber(tick.left)}</text>
+                  <text x={axisLeft + plotWidth + 6} y={tick.y + 3} fill="hsl(var(--muted-foreground))" className="text-[10px]">{formatNumber(tick.right)}</text>
+                </g>
+              ))}
+              <line x1={axisLeft} x2={axisLeft} y1={plotTop} y2={plotBottom} stroke="hsl(var(--border))" />
+              <line x1={axisLeft + plotWidth} x2={axisLeft + plotWidth} y1={plotTop} y2={plotBottom} stroke="hsl(var(--border))" />
+              <line x1={axisLeft} x2={axisLeft + plotWidth} y1={plotBottom} y2={plotBottom} stroke="hsl(var(--border))" />
+
               {articles.map((item, index) => {
+                const x = getX(index)
                 const [, month, day] = item.date.split('-')
                 const showLabel = articles.length <= 7 || index === 0 || index === articles.length - 1 || index % labelStep === 0
+                const barHeight = (item.count / newAxisMax) * plotHeight
+                const barLabelY = Math.max(10, plotBottom - barHeight - 5)
                 return (
-                  <div key={item.date} className="flex w-14 shrink-0 flex-col items-center justify-end gap-1" title={`${item.date} · 新增 ${item.count} · 公开 ${item.publicCount} · 推送 ${item.pushedCount}`}>
-                    <div className="flex h-[295px] items-end justify-center gap-1">
-                      {series.map((entry) => {
-                        const value = entry.getValue(item)
-                        const height = peak > 0 && value > 0 ? Math.max(4, value / peak * 100) : 0
-                        return <div key={entry.key} className={`w-3 rounded-t-sm ${entry.color} transition-[height]`} style={{ height: `${height}%` }} />
-                      })}
-                    </div>
-                    <span className="h-3 text-[9px] tabular-nums text-muted-foreground">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</span>
-                  </div>
+                  <g key={item.date}>
+                    <title>{`新增 ${item.count} · 公开 ${item.publicCount} · 推送 ${item.pushedCount}`}</title>
+                    <rect x={x - Math.min(12, slotWidth * 0.2)} y={plotBottom - barHeight} width={Math.min(24, slotWidth * 0.4)} height={barHeight} rx={3} fill="hsl(var(--primary))" opacity={0.75} />
+                    <text x={x} y={barLabelY} textAnchor="middle" fill="hsl(var(--foreground))" className="text-[9px] tabular-nums">{formatNumber(item.count)}</text>
+                    <text x={x} y={chartHeight - 8} textAnchor="middle" fill="hsl(var(--muted-foreground))" className="text-[9px] tabular-nums">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</text>
+                  </g>
                 )
               })}
-            </div>
+
+              <polyline points={publicLine} fill="none" stroke="hsl(160 84% 39%)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points={pushedLine} fill="none" stroke="hsl(262 83% 58%)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+              {articles.map((item, index) => {
+                const x = getX(index)
+                return (
+                  <g key={`${item.date}-points`}>
+                    <title>{`公开 ${item.publicCount} · 推送 ${item.pushedCount}`}</title>
+                    <circle cx={x} cy={getRightY(item.publicCount)} r={3} fill="hsl(160 84% 39%)" />
+                    <circle cx={x} cy={getRightY(item.pushedCount)} r={3} fill="hsl(262 83% 58%)" />
+                  </g>
+                )
+              })}
+            </svg>
           </div>
         ) : (
           <div className="py-8 text-center text-xs text-muted-foreground">暂无新增文章数据</div>
@@ -179,12 +234,12 @@ export function CrawlTimeCard({
   onPageChange,
 }: CrawlTimeCardProps) {
   return (
-    <Card className="h-[420px] overflow-y-auto rounded-none py-0 shadow-none">
+    <Card className="h-[372px] max-h-[372px] overflow-hidden rounded-none py-0 shadow-none">
       <CardContent className="p-2">
         <div className="mb-1 flex flex-wrap items-center gap-1">
           <div className="mr-2 shrink-0">
             <h3 className="text-sm font-medium">抓取记录</h3>
-            <p className="text-[10px] text-muted-foreground">共 {pagination.total} 条 · 自动任务与手动任务</p>
+            <p className="text-[10px] text-muted-foreground">共 {pagination.total} 条</p>
           </div>
           <Select value={filters.trigger} onValueChange={(value) => onTriggerChange(value as CrawlTriggerFilter)}>
             <SelectTrigger className="h-7 w-[92px] rounded-none border-border bg-transparent text-[11px] shadow-none focus:ring-1"><SelectValue placeholder="触发方式" /></SelectTrigger>
@@ -223,11 +278,6 @@ export function CrawlTimeCard({
               {sources.map((source) => <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>)}
             </SelectContent>
           </Select>
-          <div className="ml-auto flex items-center gap-2 text-[10px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1"><i className="h-1.5 w-1.5 rounded-full bg-blue-500" />自动</span>
-            <span className="inline-flex items-center gap-1"><i className="h-1.5 w-1.5 rounded-full bg-violet-500" />手动</span>
-            {pagination.totalPages > 1 && <span>第 {pagination.page}/{pagination.totalPages} 页</span>}
-          </div>
         </div>
 
         {records.length > 0 ? (
@@ -240,7 +290,7 @@ export function CrawlTimeCard({
                   <th className="px-1.5 py-1 font-medium">任务 / 范围</th>
                   <th className="px-1.5 py-1 font-medium">结果</th>
                   <th className="px-1.5 py-1 font-medium">耗时</th>
-                  <th className="px-1.5 py-1 font-medium">发现</th>
+                  <th className="px-1.5 py-1 font-medium">新增</th>
                 </tr>
               </thead>
               <tbody>
@@ -261,7 +311,7 @@ export function CrawlTimeCard({
                       </Badge>
                     </td>
                     <td className="px-1.5 py-1 text-muted-foreground tabular-nums">{formatDuration(record.durationMs)}</td>
-                    <td className="px-1.5 py-1 tabular-nums">{record.itemsFound == null ? '—' : formatNumber(record.itemsFound)}</td>
+                    <td className="px-1.5 py-1 tabular-nums">{record.newArticles == null ? '—' : formatNumber(record.newArticles)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -273,8 +323,8 @@ export function CrawlTimeCard({
 
         {pagination.totalPages > 1 && (
           <div className="mt-1.5 flex items-center justify-between border-t pt-1.5">
-            <span className="text-[11px] text-muted-foreground">每页 {pagination.pageSize} 条</span>
-            <div className="flex gap-1.5">
+            <span className="text-[11px] text-muted-foreground">第 {pagination.page}/{pagination.totalPages} 页</span>
+            <div className="flex gap-2">
               <Button size="sm" variant="outline" className="h-7 px-2" disabled={pagination.page <= 1} onClick={() => onPageChange(pagination.page - 1)} aria-label="上一页"><ChevronLeft className="h-3.5 w-3.5" /></Button>
               <Button size="sm" variant="outline" className="h-7 px-2" disabled={pagination.page >= pagination.totalPages} onClick={() => onPageChange(pagination.page + 1)} aria-label="下一页"><ChevronRight className="h-3.5 w-3.5" /></Button>
             </div>

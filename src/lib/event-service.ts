@@ -77,12 +77,23 @@ export async function autoConfirmSingleArticleReviewEvents(): Promise<number> {
     select: {
       id: true,
       articles: { select: { id: true, aiStatus: true, clusterStatus: true } },
+      assignedAudits: {
+        where: {
+          candidateEventId: { not: null },
+          candidateEvent: { is: { status: 'active' } },
+        },
+        select: { id: true },
+        take: 1,
+      },
     },
   });
   let confirmed = 0;
   for (const candidate of candidates) {
     const article = candidate.articles[0];
     if (candidate.articles.length !== 1 || !article || article.aiStatus !== 'done' || article.clusterStatus !== 'needs_review') continue;
+    // 候选关系导致的单篇待复核 Event 不能自动确认，否则会再次绕过
+    // 公开/推送安全门。只有没有候选 Event 的历史单篇 review 才能自动收口。
+    if (candidate.assignedAudits.length > 0) continue;
     const updated = await db.$transaction(async (tx) => {
       const current = await tx.article.findFirst({
         where: { id: article.id, eventId: candidate.id, aiStatus: 'done', clusterStatus: 'needs_review' },

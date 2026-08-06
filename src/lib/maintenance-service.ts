@@ -36,6 +36,7 @@ export interface CleanupStats {
   fetchLogs: number;
   pushLogs: number;
   discardedTotal: number;
+  discardedRetryAudits: number;
   jobsTotal: number;
   dbSizeBytes: number;
 }
@@ -50,6 +51,7 @@ export async function getCleanupStats(): Promise<CleanupStats> {
     fetchLogs,
     pushLogs,
     discardedTotal,
+    discardedRetryAudits,
     jobsTotal,
     dbSizeBytes,
   ] = await Promise.all([
@@ -61,12 +63,13 @@ export async function getCleanupStats(): Promise<CleanupStats> {
         skipReason: { startsWith: '内容不足' },
       },
     }),
-    db.event.count({ where: { pushedAt: { not: null } } }),
+    db.article.count({ where: { event: { is: { pushedAt: { not: null } } } } }),
     db.article.count({ where: { aiStatus: { in: ['pending', 'failed'] } } }),
-    db.event.count({ where: { articleCount: { gt: 1 } } }),
+    db.discardedItem.count({ where: { reason: { startsWith: 'dedup:' } } }),
     db.fetchLog.count(),
     db.pushLog.count(),
     db.discardedItem.count(),
+    db.discardedRetryAudit.count(),
     db.job.count(),
     getDbFileSize(),
   ]);
@@ -80,6 +83,7 @@ export async function getCleanupStats(): Promise<CleanupStats> {
     fetchLogs,
     pushLogs,
     discardedTotal,
+    discardedRetryAudits,
     jobsTotal,
     dbSizeBytes,
   };

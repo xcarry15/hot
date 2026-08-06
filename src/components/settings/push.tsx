@@ -27,17 +27,25 @@ import { DEFAULT_QUIET_END, DEFAULT_QUIET_START } from '@/lib/quiet-hours'
 interface Props {
   settings: Settings
   setSettings: React.Dispatch<React.SetStateAction<Settings>>
+  sensitiveStatus: 'idle' | 'loading' | 'ready' | 'error'
+  onRetrySensitive: () => void
+}
+
+interface WebhookTestState {
+  testing: boolean
+  result: WebhookTestResult | null
+  url: string
 }
 
 /** 编辑态序列化：保留空输入条目，便于用户继续填写 */
 const serializeWebhooks = serializeWebhookConfigsForEditor
 
-export default function PushTab({ settings, setSettings }: Props) {
+export default function PushTab({ settings, setSettings, sensitiveStatus, onRetrySensitive }: Props) {
   // 从 settings JSON 字符串派生 webhook 列表
   const webhooks = useMemo(() => parseWebhookConfigs(settings.feishu_webhook_url), [settings.feishu_webhook_url])
 
   // 各 webhook 的测试状态
-  const [testStates, setTestStates] = useState<Record<number, { testing: boolean; result: WebhookTestResult | null }>>({})
+  const [testStates, setTestStates] = useState<Record<number, WebhookTestState>>({})
   const [preview, setPreview] = useState<PushPreviewResult | null>(null)
   const [previewing, setPreviewing] = useState(false)
 
@@ -49,6 +57,14 @@ export default function PushTab({ settings, setSettings }: Props) {
   const updateWebhook = useCallback((index: number, field: keyof WebhookConfig, value: string | boolean) => {
     const next = webhooks.map((w, i) => i === index ? { ...w, [field]: value } : w)
     updateSetting('feishu_webhook_url', serializeWebhooks(next))
+    // 测试结果只对测试时的 URL 有效；任何编辑都必须清除旧状态，
+    // 同时让进行中的旧请求无法回写到新配置。
+    setTestStates(prev => {
+      if (!(index in prev)) return prev
+      const nextStates = { ...prev }
+      delete nextStates[index]
+      return nextStates
+    })
   }, [webhooks, updateSetting])
 
   /** 删除 webhook */
@@ -56,7 +72,7 @@ export default function PushTab({ settings, setSettings }: Props) {
     const next = webhooks.filter((_, i) => i !== index)
     updateSetting('feishu_webhook_url', serializeWebhooks(next))
     setTestStates(prev => {
-      const next2: Record<number, { testing: boolean; result: WebhookTestResult | null }> = {}
+      const next2: Record<number, WebhookTestState> = {}
       Object.entries(prev).forEach(([k, v]) => {
         const oldIdx = parseInt(k)
         if (oldIdx < index) next2[oldIdx] = v
@@ -82,20 +98,28 @@ export default function PushTab({ settings, setSettings }: Props) {
       toast.error('请先填写 Webhook URL')
       return
     }
-    setTestStates(prev => ({ ...prev, [index]: { testing: true, result: null } }))
+    const requestedUrl = url.trim()
+    setTestStates(prev => ({ ...prev, [index]: { testing: true, result: null, url: requestedUrl } }))
     try {
-      const result = await testWebhookApi(url)
-      setTestStates(prev => ({ ...prev, [index]: { testing: false, result } }))
+      const result = await testWebhookApi(requestedUrl)
+      setTestStates(prev => {
+        const current = prev[index]
+        return current?.url === requestedUrl
+          ? { ...prev, [index]: { testing: false, result, url: requestedUrl } }
+          : prev
+      })
       if (result.success) {
         toast.success(`Webhook "${webhooks[index]?.remark || '未命名'}" 测试成功！`)
       } else {
         toast.error(result.error || 'Webhook 测试失败')
       }
     } catch {
-      setTestStates(prev => ({
-        ...prev,
-        [index]: { testing: false, result: { success: false, error: '请求失败' } },
-      }))
+      setTestStates(prev => {
+        const current = prev[index]
+        return current?.url === requestedUrl
+          ? { ...prev, [index]: { testing: false, result: { success: false, error: '请求失败' }, url: requestedUrl } }
+          : prev
+      })
       toast.error('Webhook 测试失败')
     }
   }, [webhooks])
@@ -127,6 +151,17 @@ export default function PushTab({ settings, setSettings }: Props) {
             <Label className="text-xs">Webhook URL</Label>
             <p className="text-xs text-muted-foreground">支持配置多个 Webhook URL，推送时依次发送。可添加备注区分不同飞书群。</p>
 
+            {sensitiveStatus !== 'ready' && (
+              <div className="flex items-center justify-between gap-2 border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                <span>{sensitiveStatus === 'error' ? 'Webhook 配置读取失败，已锁定编辑，避免覆盖已有密钥。' : '正在安全读取 Webhook 配置，暂不可编辑。'}</span>
+                {sensitiveStatus === 'error' && (
+                  <Button type="button" size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={onRetrySensitive}>
+                    重试
+                  </Button>
+                )}
+              </div>
+            )}
+
             <div className="mt-1.5 space-y-1">
               {webhooks.length === 0 && (
                 <div className="border border-dashed py-3 text-center text-xs text-muted-foreground">
@@ -141,18 +176,21 @@ export default function PushTab({ settings, setSettings }: Props) {
                     <Switch
                       checked={webhook.enabled}
                       onCheckedChange={(checked) => updateWebhook(index, 'enabled', checked)}
+                      disabled={sensitiveStatus !== 'ready'}
                       aria-label={webhook.enabled ? '禁用此 Webhook' : '启用此 Webhook'}
                       className="scale-75 origin-center shrink-0"
                     />
                     <Input
                       value={webhook.url}
                       onChange={(e) => updateWebhook(index, 'url', e.target.value)}
+                      disabled={sensitiveStatus !== 'ready'}
                       className="h-8 text-xs flex-1 font-mono"
                       placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
                     />
                     <Input
                       value={webhook.remark}
                       onChange={(e) => updateWebhook(index, 'remark', e.target.value)}
+                      disabled={sensitiveStatus !== 'ready'}
                       className="h-8 text-xs w-20 shrink-0"
                       placeholder="备注"
                     />
@@ -160,7 +198,7 @@ export default function PushTab({ settings, setSettings }: Props) {
                       size="sm"
                       variant="ghost"
                       className="h-8 px-2 shrink-0"
-                      disabled={ts?.testing || !webhook.url.trim()}
+                      disabled={sensitiveStatus !== 'ready' || ts?.testing || !webhook.url.trim()}
                       onClick={() => testWebhook(index, webhook.url)}
                     >
                       {ts?.testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
@@ -169,7 +207,7 @@ export default function PushTab({ settings, setSettings }: Props) {
                       size="sm"
                       variant="ghost"
                       className="h-8 px-1.5 shrink-0 text-muted-foreground hover:text-destructive"
-                      disabled={anyTesting}
+                      disabled={sensitiveStatus !== 'ready' || anyTesting}
                       onClick={() => removeWebhook(index)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -188,7 +226,7 @@ export default function PushTab({ settings, setSettings }: Props) {
               size="sm"
               variant="outline"
               className="h-7 gap-1.5 px-2.5 text-xs"
-              disabled={webhooks.length >= WEBHOOK_MAX_COUNT || anyTesting}
+              disabled={sensitiveStatus !== 'ready' || webhooks.length >= WEBHOOK_MAX_COUNT || anyTesting}
               onClick={addWebhook}
             >
               <Plus className="h-3.5 w-3.5" />

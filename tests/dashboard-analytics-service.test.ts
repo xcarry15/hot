@@ -133,7 +133,7 @@ describe('运营统计时间与 Event 口径', () => {
     const now = new Date();
     mocks.jobFindMany.mockResolvedValue([
       {
-        id: 'full', type: 'full', status: 'succeeded', payload: JSON.stringify({ trigger: 'auto' }), result: '{}', error: '',
+        id: 'full', type: 'full', status: 'succeeded', payload: JSON.stringify({ trigger: 'auto' }), result: JSON.stringify({ stages: { collect: { totalNewArticles: 3, sources: [{ itemsFound: 12, newArticles: 3 }] } } }), error: '',
         createdAt: now, startedAt: now, completedAt: now, updatedAt: now,
       },
       {
@@ -146,5 +146,6 @@ describe('运营统计时间与 Event 口径', () => {
 
     expect(result.crawlRecords.map((record) => record.id)).toEqual(['full']);
     expect(result.crawlRecords[0]?.sourceLabel).toBe('全部数据源');
+    expect(result.crawlRecords[0]?.newArticles).toBe(3);
   });
 });

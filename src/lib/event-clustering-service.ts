@@ -23,6 +23,7 @@ import {
   buildRuleCandidateAuditEvidence,
   candidateArticleSelect,
   isStrongPushedDuplicate,
+  isReviewWorthyCandidate,
   type Candidate,
   type PairEvidence,
   type RuleCandidateAudit,
@@ -31,6 +32,7 @@ export {
   buildRuleCandidateAuditEvidence,
   hasDuplicateReportEvidence,
   isNearExactReprint,
+  isReviewWorthyCandidate,
   isStrongEventKeyDuplicate,
   type RuleCandidateAudit,
 } from '@/lib/event/event-cluster-evidence';
@@ -433,10 +435,10 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     return { eventId, action: 'attach' };
   }
 
-  // 事件候选只使用主分析已提取的身份和本地证据。证据不足时默认独立建 Event，
-  // 把人工复核保留给多主题稿和身份不完整稿，避免免费模型的二次判断扩大成本和噪声。
+  // 事件候选只使用主分析已提取的身份和本地证据。无法安全确认独立事件时
+  // 必须进入待复核，避免候选关系被 confirmed Event 吞掉后直接公开或推送。
   const nearbyCandidates: RuleCandidateAudit[] = ranked
-    .filter(({ evidence }) => evidence.decision === 'ambiguous')
+    .filter(({ evidence }) => isReviewWorthyCandidate(evidence))
     .map(({ candidate, evidence }) => ({
       candidateEventId: candidate.id,
       matchedMemberArticleId: evidence.matchedMemberArticleId,
@@ -456,10 +458,11 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
         object: article.eventObject,
       },
       reason: nearbyCandidates.length > 0
-        ? '存在相近候选但未达到自动归并条件，按独立事件创建'
+        ? '存在无法自动确认的相近候选，进入待复核并阻断公开/推送'
         : '未发现可自动归并的候选事件',
       ...buildRuleCandidateAuditEvidence(nearbyCandidates, null),
     },
+    needsReview: nearbyCandidates.length > 0,
     candidateEventId: nearbyCandidates[0]?.candidateEventId,
   }));
   return { eventId, action: 'create' };

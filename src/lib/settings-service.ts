@@ -44,12 +44,18 @@ export async function revealSensitiveSettings(requestedKeys?: string[]) {
     ? requestedKeys.filter((key) => SENSITIVE_SETTING_KEYS.has(key))
     : Array.from(SENSITIVE_SETTING_KEYS);
   const rows = await db.setting.findMany({ where: { key: { in: keys } } });
-  return Object.fromEntries(rows.map((row) => [
-    row.key,
-    row.key === SETTING_KEYS.FEISHU_WEBHOOK_URL
-      ? decryptWebhookConfigsForRuntime(row.value)
-      : row.value,
-  ]));
+  const rowMap = new Map(rows.map((row) => [row.key, row.value]));
+  // 敏感配置允许尚未创建数据库行（例如新安装尚未填写 API Key）。
+  // 仍按请求键返回空值，客户端才能区分“安全读取成功但为空”和“读取失败”。
+  return Object.fromEntries(keys.map((key) => {
+    const value = rowMap.get(key) ?? '';
+    return [
+      key,
+      key === SETTING_KEYS.FEISHU_WEBHOOK_URL
+        ? (value ? decryptWebhookConfigsForRuntime(value) : '[]')
+        : value,
+    ];
+  }));
 }
 
 export async function updateSettings(input: unknown): Promise<

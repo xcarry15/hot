@@ -66,7 +66,7 @@ export default function DataTab() {
       toast.success('配置已导出')
     } catch (err) {
       if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
-        toast.warning('未授权导出，请先在「账户」标签页填写 API Token')
+        toast.warning('当前会话无权导出配置，请重新登录后重试')
       } else {
         toast.error('导出失败')
       }
@@ -305,7 +305,7 @@ export default function DataTab() {
               一键清空所有数据
             </Button>
             <span className="text-xs text-muted-foreground">
-              {cleanupStats ? `${(cleanupStats.articlesTotal ?? 0) + (cleanupStats.discardedTotal ?? 0) + (cleanupStats.fetchLogs ?? 0) + (cleanupStats.pushLogs ?? 0) + (cleanupStats.jobsTotal ?? 0)} 条` : '—'}
+              {cleanupStats ? `${(cleanupStats.articlesTotal ?? 0) + (cleanupStats.discardedTotal ?? 0) + (cleanupStats.discardedRetryAudits ?? 0) + (cleanupStats.fetchLogs ?? 0) + (cleanupStats.pushLogs ?? 0) + (cleanupStats.jobsTotal ?? 0)} 条` : '—'}
             </span>
           </div>
 

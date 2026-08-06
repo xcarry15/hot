@@ -48,6 +48,7 @@ import {
   fetchKeywords,
   importKeywordsXlsx,
   fetchKeywordCandidates,
+  dismissKeywordCandidates,
   updateKeywordCandidate,
   type KeywordCandidate,
 } from '@/features/keywords-api.client'
@@ -228,6 +229,21 @@ export default function KeywordsTab() {
   })
   const pendingCandidates = candidates.filter(candidate => candidate.status === 'pending')
   const reviewedCandidates = candidates.filter(candidate => candidate.status !== 'pending')
+
+  const handleDismissAllCandidates = async () => {
+    if (pendingCandidates.length === 0 || bulkLoading) return
+    setBulkLoading(true)
+    try {
+      const result = await dismissKeywordCandidates(pendingCandidates.map((candidate) => candidate.id))
+      await loadKeywords()
+      toast.success(`已忽略 ${result.dismissed} 个候选词`)
+    } catch {
+      toast.error('候选词操作失败')
+    } finally {
+      setBulkLoading(false)
+    }
+  }
+
   // 采用候选词后会同步写入“提取”关键词；“已采用”只是同一条记录的历史状态，不再重复展示。
   const reviewedCandidateGroups = [
     { key: 'dismissed', label: '永久忽略', items: reviewedCandidates.filter(candidate => candidate.status === 'dismissed') },
@@ -449,7 +465,16 @@ export default function KeywordsTab() {
               <div className="flex h-7 items-center gap-1.5 border-b border-amber-300 px-1.5">
                 <span className="text-xs font-medium">待确认候选</span>
                 <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">{pendingCandidates.length}</Badge>
-                <span className="truncate text-[10px] text-muted-foreground">确认后加入词库</span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="ml-auto h-5 min-h-5 shrink-0 px-1 text-[10px] leading-none"
+                  onClick={() => void handleDismissAllCandidates()}
+                  disabled={bulkLoading}
+                >
+                  {bulkLoading ? <Loader2 className="mr-0.5 h-3 w-3 animate-spin" /> : null}
+                  一键忽略
+                </Button>
               </div>
               <div className="max-h-[520px] overflow-y-auto divide-y divide-border/60 bg-background">
                 {pendingCandidates.map(renderCandidate)}

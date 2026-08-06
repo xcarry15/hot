@@ -47,6 +47,7 @@ import {
   type PromptVersionSnapshot,
 } from '@/lib/prompts'
 import { comparePromptSnapshots } from '@/lib/prompt-diff'
+import { getSettingDefaults, SETTING_KEYS } from '@/lib/settings-catalog'
 import { Settings } from './types'
 import {
   createPromptVersion,
@@ -64,6 +65,8 @@ interface Props {
 }
 
 type PromptBackupKey = 'ai_system_prompt' | PromptBlockKey
+
+const DEFAULT_STEP2_CONTENT_MAX_CHARS = getSettingDefaults()[SETTING_KEYS.AI_STEP2_CONTENT_MAX_CHARS]
 
 interface PromptBackupPayload {
   type: 'hot2-prompt-backup'
@@ -284,7 +287,7 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
       ai_weight_event: String(SCORE_WEIGHT_META.event.defaultWeight),
       ai_weight_content: String(SCORE_WEIGHT_META.content.defaultWeight),
       ai_keyword_match_bonus: '5',
-      ai_step2_content_max_chars: '5000',
+      ai_step2_content_max_chars: DEFAULT_STEP2_CONTENT_MAX_CHARS,
     }))
   }
 
@@ -414,8 +417,8 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
 
             <div className="space-y-1.5 border p-2.5">
               <Label className="text-xs">正文最大长度 <span className="text-muted-foreground">(500-10000)</span></Label>
-              <Input type="number" value={settings.ai_step2_content_max_chars} onChange={(e) => updateSetting('ai_step2_content_max_chars', e.target.value.replace(/[^\d]/g, ''))} className="h-7 text-xs" min="500" max="10000" placeholder="5000" />
-              <p className="text-[11px] leading-4 text-muted-foreground">控制单篇送入 AI 的正文长度，默认 5000 字符。</p>
+              <Input type="number" value={settings.ai_step2_content_max_chars} onChange={(e) => updateSetting('ai_step2_content_max_chars', e.target.value.replace(/[^\d]/g, ''))} className="h-7 text-xs" min="500" max="10000" placeholder={DEFAULT_STEP2_CONTENT_MAX_CHARS} />
+              <p className="text-[11px] leading-4 text-muted-foreground">控制单篇送入 AI 的正文长度，默认 {DEFAULT_STEP2_CONTENT_MAX_CHARS} 字符。</p>
             </div>
           </div>
 
@@ -590,7 +593,7 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
           <AlertDialogHeader>
             <AlertDialogTitle>确认恢复全部提示词为默认值？</AlertDialogTitle>
             <AlertDialogDescription>
-              系统角色、9 个评判块、评分权重都会重置，保存后生效。
+              系统角色、9 个评判块、评分权重和正文最大长度（{DEFAULT_STEP2_CONTENT_MAX_CHARS} 字符）都会重置，保存后生效。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

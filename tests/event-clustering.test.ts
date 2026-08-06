@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors, sharedQuantifiedFacts } from '@/contracts/event-clustering';
 import { buildCanonicalEventKey, normalizeEventAction, normalizeEventIdentity } from '@/contracts/event-identity';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
-import { buildRuleCandidateAuditEvidence, hasDuplicateReportEvidence, isNearExactReprint, isStrongEventKeyDuplicate } from '@/lib/event-clustering-service';
+import { buildRuleCandidateAuditEvidence, hasDuplicateReportEvidence, isNearExactReprint, isReviewWorthyCandidate, isStrongEventKeyDuplicate } from '@/lib/event-clustering-service';
 import { bestPairEvidenceForCandidate, type Candidate } from '@/lib/event/event-cluster-evidence';
 
 type ClusterArticle = Candidate['articles'][number];
@@ -375,6 +375,58 @@ describe('规则归并对抗样例', () => {
     const evidence = pairEvidence(article, member);
     expect(evidence.preciseIdentity).toBe(false);
     expect(evidence.decision).not.toBe('strong');
+  });
+
+  it('低置信但相同 eventKey 的拒绝候选必须进入待复核', () => {
+    const article = makeClusterArticle({
+      id: 'same-key-new',
+      title: '软壳鼻祖猛犸象可能也要越来越贵了',
+      cleanContent: '报道关注猛犸象品牌价格变化。',
+      eventSubjects: '["CPE源峰"]',
+      eventAction: '完成收购',
+      eventObject: '猛犸象',
+      eventKey: 'CPE源峰/完成收购/猛犸象',
+      eventKeyConfidence: 60,
+    });
+    const member = makeClusterArticle({
+      id: 'same-key-old',
+      title: '市场都在等安踏，猛犸象却被CPE源峰买走了',
+      cleanContent: '文章介绍CPE源峰收购猛犸象的交易。',
+      eventSubjects: '["CPE源峰"]',
+      eventAction: '完成收购',
+      eventObject: '猛犸象',
+      eventKey: 'CPE源峰/完成收购/猛犸象',
+      eventKeyConfidence: 60,
+    });
+
+    const evidence = pairEvidence(article, member);
+    expect(evidence.decision).toBe('reject');
+    expect(isReviewWorthyCandidate(evidence)).toBe(true);
+  });
+
+  it('阶段冲突不能仅凭相同低置信 eventKey 阻断独立事件', () => {
+    const article = makeClusterArticle({
+      id: 'phase-new',
+      title: '某品牌收购项目已经完成',
+      eventSubjects: '["某品牌"]',
+      eventAction: '收购',
+      eventObject: '某项目',
+      eventKey: '某品牌/收购/某项目',
+      eventKeyConfidence: 60,
+    });
+    const member = makeClusterArticle({
+      id: 'phase-old',
+      title: '某品牌计划收购某项目',
+      eventSubjects: '["某品牌"]',
+      eventAction: '收购',
+      eventObject: '某项目',
+      eventKey: '某品牌/收购/某项目',
+      eventKeyConfidence: 60,
+    });
+
+    const evidence = pairEvidence(article, member);
+    expect(evidence.phaseConflict).toBe(true);
+    expect(isReviewWorthyCandidate(evidence)).toBe(false);
   });
 
   it('同品牌不同门店只记录相近候选，不自动合并', () => {

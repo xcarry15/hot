@@ -36,6 +36,8 @@ interface Props {
   setSettings: React.Dispatch<React.SetStateAction<Settings>>
   providerConfigs: ProviderConfigs
   setProviderConfigs: React.Dispatch<React.SetStateAction<ProviderConfigs>>
+  sensitiveStatus: 'idle' | 'loading' | 'ready' | 'error'
+  onRetrySensitive: () => void
 }
 
 const OPENCODE_MODELS_STORAGE_KEY = 'hot2:opencode-free-models:v1'
@@ -66,7 +68,7 @@ function cacheOpencodeModels(models: string[]): void {
   }
 }
 
-export default function AiModelTab({ settings, setSettings, providerConfigs, setProviderConfigs }: Props) {
+export default function AiModelTab({ settings, setSettings, providerConfigs, setProviderConfigs, sensitiveStatus, onRetrySensitive }: Props) {
   const [testingAI, setTestingAI] = useState(false)
   const [aiTestResult, setAiTestResult] = useState<AiTestResult | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
@@ -181,12 +183,23 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
         {currentProvider.needsApiKey && (
           <div className="space-y-1">
             <Label className="text-xs">API Key <span className="text-muted-foreground">({currentProvider.name})</span></Label>
+            {sensitiveStatus !== 'ready' && (
+              <div className="flex items-center justify-between gap-2 border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                <span>{sensitiveStatus === 'error' ? 'API Key 读取失败，已锁定编辑，避免覆盖已有密钥。' : '正在安全读取 API Key，暂不可编辑。'}</span>
+                {sensitiveStatus === 'error' && (
+                  <Button type="button" size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={onRetrySensitive}>
+                    重试
+                  </Button>
+                )}
+              </div>
+            )}
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Input
                   type={showApiKey ? 'text' : 'password'}
                   value={currentConfig.apiKey}
                   onChange={(e) => updateProviderConfig(currentProvider.id, 'apiKey', e.target.value)}
+                  disabled={sensitiveStatus !== 'ready'}
                   className="h-8 pr-9 font-mono text-xs"
                   placeholder="sk-..."
                 />
@@ -195,6 +208,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                   variant="ghost"
                   size="sm"
                   className="absolute right-0 top-0 h-8 w-8 px-0"
+                  disabled={sensitiveStatus !== 'ready'}
                   onClick={() => setShowApiKey(!showApiKey)}
                 >
                   {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
