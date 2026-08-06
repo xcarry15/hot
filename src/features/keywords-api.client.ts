@@ -42,6 +42,13 @@ export async function updateKeywordCandidate(
   return requestJson('POST', '/api/keywords', { body: { id, action }, signal });
 }
 
+export async function dismissKeywordCandidates(
+  ids: string[],
+  signal?: AbortSignal,
+): Promise<{ dismissed: number }> {
+  return requestJson('POST', '/api/keywords', { body: { action: 'dismiss-candidates', ids }, signal });
+}
+
 export async function fetchKeywords(
   params: KeywordListParams = {},
   signal?: AbortSignal,

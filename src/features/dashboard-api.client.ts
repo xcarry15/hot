@@ -125,7 +125,7 @@ export interface DashboardAnalytics {
     startedAt: string;
     completedAt: string | null;
     durationMs: number;
-    itemsFound: number | null;
+    newArticles: number | null;
     error: string | null;
   }>;
   crawlPagination: {

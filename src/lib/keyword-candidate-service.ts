@@ -201,6 +201,16 @@ export async function updateKeywordCandidate(id: string, action: 'approve' | 'di
   return { id, action, restored: 0, articleIds: [] as string[], restoreLimit: MAX_CANDIDATE_RESTORE };
 }
 
+export async function dismissKeywordCandidates(ids: string[]): Promise<number> {
+  const candidateIds = [...new Set(ids.filter(Boolean))];
+  if (candidateIds.length === 0) return 0;
+  const result = await db.keywordCandidate.updateMany({
+    where: { id: { in: candidateIds }, status: 'pending' },
+    data: { status: 'dismissed' },
+  });
+  return result.count;
+}
+
 export async function deleteKeywordCandidate(id: string): Promise<void> {
   const candidate = await db.keywordCandidate.findUnique({ where: { id } });
   if (!candidate) return;

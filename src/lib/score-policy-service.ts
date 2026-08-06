@@ -1,6 +1,8 @@
 import { db } from './db';
 import { applyScorePolicy } from './score-policy';
 import { getWebhookConfigs } from './settings';
+import { parsePushMode } from '@/contracts/push';
+import { pushableWhere } from '@/lib/push/policy';
 
 export async function previewScorePolicy(weightEvent: number, weightContent: number, keywordBonus: number) {
   const articles = await db.article.findMany({
@@ -57,14 +59,13 @@ export async function previewPublicPublication(minScore: number, minRelevance: n
 }
 
 export async function previewPushDelivery(minScore: number, minRelevance: number, pushMode: string) {
+  // 预览必须复用真实推送队列的统一门禁；否则“预计推送数”会和实际执行结果漂移。
   const pushable = await db.event.count({
-    where: {
-      pushedAt: null,
-      status: 'active',
-      clusterReviewStatus: 'confirmed',
-      representativeArticle: { is: { aiStatus: 'done', clusterStatus: 'clustered', score: { gte: minScore }, relevance: { gte: minRelevance } } },
-      OR: [{ nextPushRetryAt: null }, { nextPushRetryAt: { lte: new Date() } }],
-    },
+    where: pushableWhere({
+      pushMode: parsePushMode(pushMode),
+      minScore,
+      minRelevance,
+    }),
   });
   const webhookCount = (await getWebhookConfigs()).filter((config) => config.enabled && config.url.trim()).length;
   return { pushMode, pushable, webhookCount, willPush: pushMode !== 'off' && webhookCount > 0 ? pushable : 0 };

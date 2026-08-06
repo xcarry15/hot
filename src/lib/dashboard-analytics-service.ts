@@ -42,7 +42,7 @@ export interface CrawlRecordFilters {
   sourceId?: string;
 }
 
-const CRAWL_PAGE_SIZE = 20;
+const CRAWL_PAGE_SIZE = 10;
 const DASHBOARD_CACHE_TTL_MS = 15_000;
 const DASHBOARD_CACHE_MAX_ENTRIES = 30;
 const RANGE_DAYS: Record<Exclude<DashboardAnalyticsRange, 'all'>, number> = {
@@ -148,20 +148,21 @@ function parseTrigger(payload: Record<string, unknown>): CrawlTrigger {
   return payload.trigger === 'auto' || payload.trigger === 'manual' ? payload.trigger : 'unknown';
 }
 
-function parseItemsFound(type: string, result: Record<string, unknown>): number | null {
+function parseNewArticles(type: string, result: Record<string, unknown>): number | null {
   const stageResult = type === 'full'
     ? (result.stages as Record<string, unknown> | undefined)?.collect
     : result.result;
   if (!stageResult || typeof stageResult !== 'object' || Array.isArray(stageResult)) return null;
 
   const data = stageResult as Record<string, unknown>;
-  if (typeof data.itemsFound === 'number') return data.itemsFound;
+  if (typeof data.totalNewArticles === 'number') return Math.max(0, data.totalNewArticles);
+  if (typeof data.newArticles === 'number') return Math.max(0, data.newArticles);
   const sources = data.sources;
   if (!Array.isArray(sources)) return null;
   return sources.reduce((total, item) => {
     if (!item || typeof item !== 'object') return total;
-    const itemsFound = (item as Record<string, unknown>).itemsFound;
-    return total + (typeof itemsFound === 'number' ? itemsFound : 0);
+    const newArticles = (item as Record<string, unknown>).newArticles;
+    return total + (typeof newArticles === 'number' ? Math.max(0, newArticles) : 0);
   }, 0);
 }
 
@@ -452,7 +453,7 @@ async function buildDashboardAnalytics(
         startedAt: startedAt.toISOString(),
         completedAt: completedAt?.toISOString() ?? null,
         durationMs: Math.max(0, durationEnd.getTime() - startedAt.getTime()),
-        itemsFound: parseItemsFound(job.type, parseRecord(job.result)),
+        newArticles: parseNewArticles(job.type, parseRecord(job.result)),
         error: job.error || null,
       }];
     })

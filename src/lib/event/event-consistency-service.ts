@@ -1,6 +1,8 @@
 import { db } from '@/lib/db';
 import { recalculateEventById } from '@/lib/event/event-recalculation-service';
 import { recalculateEvent } from '@/lib/event/event-recalculation-service';
+import { refreshEventPublicPublication } from '@/lib/public-publication-service';
+import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import type { Prisma } from '@prisma/client';
 
 const EVENT_REPAIR_BATCH_SIZE = 100;
@@ -152,6 +154,203 @@ export async function repairAttachedClusterFailures(limit = EVENT_REPAIR_BATCH_S
       console.error(`[event-consistency] attached Article repair failed article=${article.id}:`, error);
     }
   }
+  return repaired;
+}
+
+/**
+ * 历史数据可能已经把相同确定性 eventKey 建成多个 confirmed Event。
+ * 保留最早 Event 作为待确认的基准，把后续 Event 的同 key 成员降为
+ * needs_review；这样旧数据也重新经过公开/推送安全门，而不会继续重复对外释放。
+ */
+export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BATCH_SIZE): Promise<number> {
+  const rows = await db.article.findMany({
+    where: {
+      eventId: { not: null },
+      aiStatus: 'done',
+      clusterStatus: 'clustered',
+      eventKey: { not: '' },
+      event: { is: { status: 'active', clusterReviewStatus: 'confirmed' } },
+    },
+    select: {
+      id: true,
+      eventId: true,
+      eventKey: true,
+      event: { select: { id: true, createdAt: true } },
+    },
+    orderBy: [{ eventKey: 'asc' }, { createdAt: 'asc' }],
+  });
+
+  const byKey = new Map<string, Map<string, { eventId: string; eventCreatedAt: Date }>>();
+  for (const row of rows) {
+    if (!row.eventId || !row.event) continue;
+    const events = byKey.get(row.eventKey) ?? new Map();
+    events.set(row.eventId, { eventId: row.eventId, eventCreatedAt: row.event.createdAt });
+    byKey.set(row.eventKey, events);
+  }
+
+  const targets: Array<{ eventId: string; eventKey: string; candidateEventId: string }> = [];
+  for (const [eventKey, events] of byKey) {
+    const ordered = [...events.values()].sort((left, right) => left.eventCreatedAt.getTime() - right.eventCreatedAt.getTime());
+    const canonical = ordered[0];
+    if (!canonical || ordered.length < 2) continue;
+    for (const duplicate of ordered.slice(1)) {
+      targets.push({ eventId: duplicate.eventId, eventKey, candidateEventId: canonical.eventId });
+    }
+  }
+
+  let repaired = 0;
+  for (const target of targets.slice(0, Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)))) {
+    const changed = await db.$transaction(async (tx) => {
+      const event = await tx.event.findFirst({
+        where: { id: target.eventId, status: 'active', clusterReviewStatus: 'confirmed' },
+        select: { id: true },
+      });
+      if (!event) return false;
+      const members = await tx.article.findMany({
+        where: {
+          eventId: target.eventId,
+          eventKey: target.eventKey,
+          aiStatus: 'done',
+          clusterStatus: 'clustered',
+        },
+        select: { id: true },
+      });
+      const unresolvedMembers: Array<{ id: string }> = [];
+      for (const member of members) {
+        const manuallyConfirmed = await tx.eventClusterAudit.findFirst({
+          where: {
+            articleId: member.id,
+            assignedEventId: target.eventId,
+            actor: 'admin',
+            action: 'confirm_independent',
+          },
+          select: { id: true },
+        });
+        if (!manuallyConfirmed) unresolvedMembers.push(member);
+      }
+      if (unresolvedMembers.length === 0) return false;
+      await tx.article.updateMany({
+        where: { id: { in: unresolvedMembers.map((member) => member.id) } },
+        data: { clusterStatus: 'needs_review', clusterError: null },
+      });
+      for (const member of unresolvedMembers) {
+        const existingAudit = await tx.eventClusterAudit.findFirst({
+          where: {
+            articleId: member.id,
+            assignedEventId: target.eventId,
+            candidateEventId: target.candidateEventId,
+            action: 'fallback_create',
+          },
+          select: { id: true },
+        });
+        if (!existingAudit) {
+          await tx.eventClusterAudit.create({
+            data: {
+              articleId: member.id,
+              assignedEventId: target.eventId,
+              candidateEventId: target.candidateEventId,
+              actor: 'system',
+              action: 'fallback_create',
+              decisionSource: 'rule',
+              confidence: null,
+              evidence: JSON.stringify({
+                ruleVersion: 'event-cluster-v11',
+                eventKey: target.eventKey,
+                selectedCandidateEventId: target.candidateEventId,
+                reason: '历史数据存在相同 eventKey 的多个 Event，自动降级为待复核，阻断公开/推送',
+              }),
+            },
+          });
+        }
+      }
+      await recalculateEvent(tx, target.eventId);
+      return true;
+    });
+    if (!changed) continue;
+    repaired++;
+    try {
+      await refreshEventPublicPublication(target.eventId);
+    } catch (error) {
+      console.error(`[event-consistency] duplicate eventKey publication repair failed event=${target.eventId}:`, error);
+      await markEventDirty(target.eventId, `duplicate-event-key-publication-repair: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (repaired > 0) invalidatePublicArticleCache();
+  return repaired;
+}
+
+/**
+ * 旧版本虽已把候选写入审计，却仍把 Article/Event 保持为 confirmed。
+ * 将这类仍指向 active 候选 Event 的记录收敛为待复核，避免历史候选继续
+ * 绕过公开与推送门禁；已失效候选不再阻断正常数据。
+ */
+export async function repairPersistedCandidateReviews(limit = EVENT_REPAIR_BATCH_SIZE): Promise<number> {
+  const audits = await db.eventClusterAudit.findMany({
+    where: {
+      actor: 'system',
+      action: { in: ['create', 'fallback_create'] },
+      candidateEventId: { not: null },
+      assignedEvent: { is: { status: 'active', clusterReviewStatus: 'confirmed' } },
+      candidateEvent: { is: { status: 'active' } },
+      article: { is: { aiStatus: 'done', clusterStatus: 'clustered' } },
+    },
+    select: { articleId: true, assignedEventId: true, createdAt: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  const targets = [...new Map(audits.map((audit) => [
+    `${audit.assignedEventId}:${audit.articleId}`,
+    audit,
+  ])).values()].slice(0, Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)));
+
+  let repaired = 0;
+  const refreshed = new Set<string>();
+  for (const target of targets) {
+    const changed = await db.$transaction(async (tx) => {
+      const article = await tx.article.findFirst({
+        where: {
+          id: target.articleId,
+          eventId: target.assignedEventId,
+          aiStatus: 'done',
+          clusterStatus: 'clustered',
+        },
+        select: { id: true },
+      });
+      const event = await tx.event.findFirst({
+        where: { id: target.assignedEventId, status: 'active', clusterReviewStatus: 'confirmed' },
+        select: { id: true },
+      });
+      if (!article || !event) return false;
+      const manuallyConfirmed = await tx.eventClusterAudit.findFirst({
+        where: {
+          articleId: target.articleId,
+          assignedEventId: target.assignedEventId,
+          actor: 'admin',
+          action: 'confirm_independent',
+          createdAt: { gt: target.createdAt },
+        },
+        select: { id: true },
+      });
+      if (manuallyConfirmed) return false;
+      await tx.article.update({
+        where: { id: article.id },
+        data: { clusterStatus: 'needs_review', clusterError: null },
+      });
+      await recalculateEvent(tx, event.id);
+      return true;
+    });
+    if (!changed) continue;
+    repaired++;
+    refreshed.add(target.assignedEventId);
+  }
+  for (const eventId of refreshed) {
+    try {
+      await refreshEventPublicPublication(eventId);
+    } catch (error) {
+      console.error(`[event-consistency] persisted candidate publication repair failed event=${eventId}:`, error);
+      await markEventDirty(eventId, `persisted-candidate-publication-repair: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (refreshed.size > 0) invalidatePublicArticleCache();
   return repaired;
 }
 

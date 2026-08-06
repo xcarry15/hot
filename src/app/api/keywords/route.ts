@@ -5,7 +5,7 @@ import {
   keywordsToXlsx, listKeywordCategories, listKeywords,
 } from '@/lib/keyword-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
-import { deleteKeywordCandidate, listKeywordCandidates, listKeywordCandidatesForExport, updateKeywordCandidate } from '@/lib/keyword-candidate-service';
+import { deleteKeywordCandidate, dismissKeywordCandidates, listKeywordCandidates, listKeywordCandidatesForExport, updateKeywordCandidate } from '@/lib/keyword-candidate-service';
 import { runJob } from '@/lib/execution';
 
 // GET /api/keywords - List all keywords
@@ -38,9 +38,10 @@ export async function GET(request: Request) {
   }
 }
 
-// POST /api/keywords - Add keyword(s)
+// POST /api/keywords - Add keyword(s) or update candidate decisions
 //   { word }              → 单个添加
 //   { text, category }    → 批量添加（每行一个词，category 默认为 default）
+//   { action: 'dismiss-candidates', ids } → 批量忽略候选词
 //   XLSX body       → 导入正式关键词及候选词处理状态
 export async function POST(request: Request) {
   try {
@@ -56,6 +57,9 @@ export async function POST(request: Request) {
 
     const result = await runExclusiveMutation('更新关键词', async () => {
       const body = await request.json();
+      if (body.action === 'dismiss-candidates' && Array.isArray(body.ids)) {
+        return { kind: 'candidate-bulk' as const, count: await dismissKeywordCandidates(body.ids.filter((id: unknown): id is string => typeof id === 'string')) };
+      }
       if ((body.action === 'approve-candidate' || body.action === 'dismiss-candidate') && typeof body.id === 'string') {
         const result = await updateKeywordCandidate(body.id, body.action === 'approve-candidate' ? 'approve' : 'dismiss');
         if (!result) return { kind: 'invalid' as const };
@@ -77,6 +81,7 @@ export async function POST(request: Request) {
         : false;
       return NextResponse.json({ ...result.data, processQueued });
     }
+    if (result.kind === 'candidate-bulk') return NextResponse.json({ dismissed: result.count });
     if (result.kind === 'ok') return NextResponse.json(result.data);
 
     return NextResponse.json(result.data, { status: 201 });

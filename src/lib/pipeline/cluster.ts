@@ -3,7 +3,7 @@ import { EVENT_CLUSTER_MAX_RETRIES } from '@/contracts/event-clustering';
 import { db } from '@/lib/db';
 import { clusterArticle, markClusterFailure } from '@/lib/event-clustering-service';
 import { autoConfirmSingleArticleReviewEvents, repairStaleEventRepresentatives } from '@/lib/event-service';
-import { repairAttachedClusterFailures, repairDirtyEvents } from '@/lib/event/event-consistency-service';
+import { repairAttachedClusterFailures, repairDirtyEvents, repairDuplicateEventKeyCandidates, repairPersistedCandidateReviews } from '@/lib/event/event-consistency-service';
 import { advanceJobProgress, startJobStage } from '@/lib/job-progress';
 import { assertNotAborted } from '@/lib/worker-stop';
 
@@ -34,6 +34,14 @@ export function buildClusterPendingWhere(now = new Date(), forceRetry = false): 
 }
 
 export async function clusterAllPending(signal?: AbortSignal, jobId?: string, forceRetry = false): Promise<{ total: number; processed: number; errors: number }> {
+  const repairedDuplicateEventKeys = await repairDuplicateEventKeyCandidates();
+  if (repairedDuplicateEventKeys > 0) {
+    console.warn(`[clusterAllPending] moved ${repairedDuplicateEventKeys} duplicate eventKey Event(s) to review`);
+  }
+  const repairedPersistedCandidates = await repairPersistedCandidateReviews();
+  if (repairedPersistedCandidates > 0) {
+    console.warn(`[clusterAllPending] moved ${repairedPersistedCandidates} persisted candidate Article(s) to review`);
+  }
   const autoConfirmedReviewEvents = await autoConfirmSingleArticleReviewEvents();
   if (autoConfirmedReviewEvents > 0) {
     console.warn(`[clusterAllPending] auto-confirmed ${autoConfirmedReviewEvents} standalone review Event(s)`);
