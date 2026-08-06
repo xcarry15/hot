@@ -84,9 +84,10 @@ describe('buildStep2Prompt', () => {
 
   it('洞察要求一针见血并保留默认人设', () => {
     const prompt = buildStep2Prompt(blocks, '正文');
-    expect(prompt).toContain('【summary｜100~150字】');
-    expect(prompt).toContain('一针见血，直指本质。');
-    expect(prompt).toContain('口吻暴躁、毒辣。');
+    expect(prompt).toContain('【summary｜111~222字】');
+    expect(prompt).toContain('基于第一性原理');
+    expect(prompt).toContain('贴吧老哥嘴臭风格');
+    expect(prompt).toContain('犀利、毒舌，一针见血');
     expect(prompt).toContain('真实算盘');
   });
 });

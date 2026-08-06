@@ -14,17 +14,64 @@ export type ArticleFilterBucket =
   | 'normal-processing'
   | 'normal-ai'
   | 'normal-cluster'
-  | 'normal-filtered'
   | 'normal-not-push'
+  | 'normal-public'
   | 'normal-push'
   | 'normal-pushed'
   | 'anomaly-manual'
   | 'anomaly-no-value'
   | 'anomaly-retrying'
   | 'anomaly-review'
+  | 'anomaly-filtered'
   | 'anomaly-business'
   | 'anomaly-failure'
   | 'ignored'
+
+const PROCESSING_BUCKETS = new Set<ArticleFilterBucket>([
+  'normal-processing',
+  'normal-ai',
+  'normal-cluster',
+  'normal-push',
+])
+
+const OPERATIONAL_ANOMALY_BUCKETS = new Set<ArticleFilterBucket>([
+  'anomaly-manual',
+  'anomaly-no-value',
+  'anomaly-retrying',
+  'anomaly-filtered',
+  'anomaly-failure',
+])
+
+/** 二级标签是事实维度，不能仅依赖互斥 bucket，否则公开文章的异常事实会被吞掉。 */
+function isFilteredArticle(article: ArticleProgress): boolean {
+  return article.push === 'filtered' && article.ai === 'done' && article.cluster === 'done'
+}
+
+function hasBusinessAnomaly(article: ArticleProgress): boolean {
+  return article.anomalyLabels?.some(label => label === 'ad' || label === 'duplicate') ?? false
+}
+
+function isPendingPushArticle(article: ArticleProgress): boolean {
+  return article.ai === 'done'
+    && article.cluster === 'done'
+    && article.clusterStatus === 'clustered'
+    && article.push === 'pending'
+}
+
+export function isOperationalAnomalyArticle(article: ArticleProgress): boolean {
+  // 一级“正常”以已公开为准；公开事实优先，异常事实仍可通过人工关注/文章标签查看。
+  if (article.technicalState === 'ignored' || article.isPublic) return false
+  const bucket = getArticleFilterBucket(article)
+  return OPERATIONAL_ANOMALY_BUCKETS.has(bucket)
+    || (bucket === 'anomaly-business' && hasBusinessAnomaly(article))
+    || article.technicalState === 'manual'
+    || article.technicalState === 'auto_retry'
+    || article.technicalState === 'waiting'
+    || isArticleFailed(article)
+    || isFilteredArticle(article)
+    || article.skipReason === '无价值'
+    || hasBusinessAnomaly(article)
+}
 
 export function getArticleFilterBucket(article: ArticleProgress): ArticleFilterBucket {
   if (article.technicalState === 'ignored') return 'ignored'
@@ -36,10 +83,13 @@ export function getArticleFilterBucket(article: ArticleProgress): ArticleFilterB
     || isArticleFailed(article)
     || Boolean(isTechnicalSkipReason(article.skipReason) && (article.crawl === 'skipped' || article.ai === 'skipped'))
   ) return 'anomaly-failure'
+  if (article.push === 'done') return 'normal-pushed'
+  // 一级“正常”以公开端事实为准。公开文章即使有业务提示标签，也应计入
+  // 已公开总数；软文/重复/低置信等标签仍由对应的二级筛选独立展示。
+  if (article.isPublic) return 'normal-public'
   if (article.skipReason === '无价值') return 'anomaly-no-value'
   if ((article.anomalyLabels?.length ?? 0) > 0) return 'anomaly-business'
-  if (article.push === 'done') return 'normal-pushed'
-  if (article.push === 'filtered' && article.ai === 'done' && article.cluster === 'done') return 'normal-filtered'
+  if (article.push === 'filtered' && article.ai === 'done' && article.cluster === 'done') return 'anomaly-filtered'
   if (article.push === 'not_applicable' && article.ai === 'done' && article.cluster === 'done') return 'normal-not-push'
   if (article.ai === 'done' && article.cluster === 'pending') return 'normal-cluster'
   if (article.cluster === 'done' && article.push === 'pending') return 'normal-push'
@@ -48,32 +98,51 @@ export function getArticleFilterBucket(article: ArticleProgress): ArticleFilterB
 }
 
 export function hasArticleAnomaly(article: ArticleProgress): boolean {
-  return getArticleFilterBucket(article).startsWith('anomaly-')
+  return isOperationalAnomalyArticle(article)
 }
 
 /**
  * 单个 chip 对一篇文章的命中判断。
  *
  * 这是 filter 的最小判定单元，每个 key 都应是"互不蕴含"的可观察谓词。
- * 例如一篇文章可同时命中软文和重复，但一级状态仍保持互斥。
+ * 例如一篇文章可同时命中已公开和低分析置信；人工关注属于快捷入口，
+ * 不参与正常/异常的事实互斥。
  */
 export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boolean {
   const bucket = getArticleFilterBucket(article)
   switch (key) {
+    case 'processing-all':
+      return PROCESSING_BUCKETS.has(bucket) || isPendingPushArticle(article)
     case 'normal-all':
-      return bucket.startsWith('normal-')
+      return article.isPublic
     case 'anomaly-all':
-      return bucket.startsWith('anomaly-')
+      return isOperationalAnomalyArticle(article)
+    case 'attention-all':
+      return bucket === 'ignored'
+        || bucket === 'anomaly-review'
+        || (article.anomalyLabels?.includes('low-confidence') ?? false)
     case 'anomaly-ad':
-      return article.anomalyLabels?.includes('ad') ?? false
+      return !article.isPublic && (article.anomalyLabels?.includes('ad') ?? false)
     case 'anomaly-duplicate':
-      return article.anomalyLabels?.includes('duplicate') ?? false
+      return !article.isPublic && (article.anomalyLabels?.includes('duplicate') ?? false)
     case 'anomaly-low-confidence':
       return article.anomalyLabels?.includes('low-confidence') ?? false
+    case 'anomaly-review':
+      return article.clusterStatus === 'needs_review'
     case 'anomaly-no-value':
-      return article.skipReason === '无价值'
+      return !article.isPublic && article.skipReason === '无价值'
+    case 'anomaly-filtered':
+      return !article.isPublic && isFilteredArticle(article)
     case 'normal-public':
       return article.isPublic
+    case 'normal-pushed':
+      return article.isPublic && article.push === 'done'
+    case 'normal-push':
+      return isPendingPushArticle(article)
+    case 'anomaly-manual':
+    case 'anomaly-retrying':
+    case 'anomaly-failure':
+      return !article.isPublic && bucket === key
     case 'ignored':
       return bucket === 'ignored'
     default:

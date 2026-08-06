@@ -86,9 +86,11 @@ describe('matchStepChip 单谓词命中', () => {
     expect(matchStepChip(skipped, 'normal-processing')).toBe(false)
   })
 
-  it('未达推送门槛和推送关闭不再误归入处理中', () => {
+  it('未达推送门槛归入异常，推送关闭保持正常', () => {
     const filtered = article({ ai: 'done', cluster: 'done', push: 'filtered' })
-    expect(matchStepChip(filtered, 'normal-filtered')).toBe(true)
+    expect(matchStepChip(filtered, 'anomaly-filtered')).toBe(true)
+    expect(matchStepChip(filtered, 'anomaly-all')).toBe(true)
+    expect(matchStepChip(filtered, 'normal-all')).toBe(false)
     expect(matchStepChip(filtered, 'normal-processing')).toBe(false)
 
     const notPushable = article({ ai: 'done', cluster: 'done', push: 'not_applicable' })
@@ -111,6 +113,51 @@ describe('matchStepChip 单谓词命中', () => {
     expect(matchStepChip(article({ isPublic: false }), 'normal-public')).toBe(false)
   })
 
+  it('正常总数以已公开为准，不依赖已推送状态', () => {
+    const publicPendingPush = article({ isPublic: true, ai: 'done', cluster: 'done', push: 'pending' })
+    expect(matchStepChip(publicPendingPush, 'normal-all')).toBe(true)
+    expect(matchStepChip(publicPendingPush, 'normal-public')).toBe(true)
+    expect(matchStepChip(publicPendingPush, 'normal-push')).toBe(true)
+    expect(matchStepChip(publicPendingPush, 'processing-all')).toBe(true)
+    expect(matchStepChip(publicPendingPush, 'normal-pushed')).toBe(false)
+
+    const publicAndPushed = article({ isPublic: true, ai: 'done', cluster: 'done', push: 'done' })
+    expect(matchStepChip(publicAndPushed, 'normal-public')).toBe(true)
+    expect(matchStepChip(publicAndPushed, 'normal-pushed')).toBe(true)
+    expect(matchStepChip(article({ isPublic: false, push: 'done' }), 'normal-pushed')).toBe(false)
+
+    const publicLowConfidence = article({
+      isPublic: true, ai: 'done', cluster: 'done', push: 'filtered', anomalyLabels: ['low-confidence'],
+    })
+    expect(matchStepChip(publicLowConfidence, 'normal-all')).toBe(true)
+    // 一级状态保持互斥：已公开优先；低置信仍从“待操作”入口定位。
+    expect(matchStepChip(publicLowConfidence, 'anomaly-all')).toBe(false)
+    expect(matchStepChip(publicLowConfidence, 'anomaly-filtered')).toBe(false)
+    expect(matchStepChip(publicLowConfidence, 'anomaly-low-confidence')).toBe(true)
+  })
+
+  it('软文在异常分类中可筛选，公开文章不被异常子类反向纳入', () => {
+    expect(matchStepChip(article({ anomalyLabels: ['ad'] }), 'anomaly-ad')).toBe(true)
+    expect(matchStepChip(article({ isPublic: true, anomalyLabels: ['ad'] }), 'anomaly-ad')).toBe(false)
+  })
+
+  it('处理中是流水线待办集合，待操作是可重叠的人工作业集合', () => {
+    const waitingAi = article({ ai: 'pending', cluster: 'blocked', clusterStatus: 'pending', push: 'blocked' })
+    expect(matchStepChip(waitingAi, 'processing-all')).toBe(true)
+    expect(matchStepChip(waitingAi, 'normal-ai')).toBe(true)
+
+    const publicLowConfidence = article({
+      isPublic: true, ai: 'done', cluster: 'done', push: 'done', anomalyLabels: ['low-confidence'],
+    })
+    expect(matchStepChip(publicLowConfidence, 'normal-all')).toBe(true)
+    expect(matchStepChip(publicLowConfidence, 'attention-all')).toBe(true)
+    expect(matchStepChip(publicLowConfidence, 'anomaly-low-confidence')).toBe(true)
+
+    const lowConfidenceOnly = article({ anomalyLabels: ['low-confidence'], push: 'not_applicable' })
+    expect(matchStepChip(lowConfidenceOnly, 'anomaly-all')).toBe(false)
+    expect(matchStepChip(lowConfidenceOnly, 'attention-all')).toBe(true)
+  })
+
   it('技术失败的原因随文章快照保留，供工作台展示', () => {
     const item = article({ technicalErrorReasons: { process: '正文页请求超时' } })
     expect(item.technicalErrorReasons.process).toBe('正文页请求超时')
@@ -123,7 +170,7 @@ describe('matchStepChip 单谓词命中', () => {
 describe('applyFilterState', () => {
   const s1 = source('s1', [
     article({ id: '1', ai: 'done', cluster: 'pending', clusterStatus: 'pending', push: 'blocked' }),
-    article({ id: '2', ai: 'done', push: 'done' }),
+    article({ id: '2', ai: 'done', push: 'done', isPublic: true }),
   ], [{ id: 'd1', title: 'd', reason: 'filter:keyword' }])
 
   const s2 = source('s2', [

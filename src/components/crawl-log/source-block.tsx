@@ -186,26 +186,26 @@ export const SourceBlock = memo(function SourceBlock({
     <div className="w-full min-w-0 max-w-full overflow-hidden rounded-none border border-border bg-card">
       <button
         onClick={onToggle}
-        className={`w-full grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-1 border-b px-2 py-1.5 text-left text-sm ${statusConfig.panelClass} transition-opacity hover:opacity-80`}
+        className={`w-full grid grid-cols-[6.25rem_minmax(0,1fr)] items-center gap-x-1 border-b px-2 py-1.5 text-left text-sm sm:grid-cols-[7.5rem_minmax(0,1fr)] ${statusConfig.panelClass} transition-opacity hover:opacity-80`}
       >
         <div className="flex min-w-0 items-center gap-1.5">
           <StatusIcon className={`h-4 w-4 ${statusConfig.iconClass}`} />
-          <span className="min-w-0 truncate font-semibold">{source.name}</span>
+          <span className="min-w-0 truncate font-semibold" title={source.name}>{source.name}</span>
         </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+        <div className="flex min-w-0 flex-nowrap items-center gap-x-1 overflow-hidden whitespace-nowrap text-[11px] sm:gap-x-1.5 sm:text-xs">
           <Badge
             variant="secondary"
-            className={`rounded-none px-1.5 py-0 text-xs ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
+            className={`shrink-0 rounded-none px-1.5 py-0 text-[11px] sm:text-xs ${source.lastRunStatus === 'failed' ? 'bg-red-100 text-red-700' : source.lastRunStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'text-muted-foreground'}`}
             title={humanizeSourceError(source.lastRunError) || '源级最近一次采集结果'}
           >
             {lastRunLabel}
           </Badge>
-          <span className="text-xs text-muted-foreground">当前窗口文章 {totalCount}</span>
-          <span className="text-xs text-sky-700">公开 {publicCount}</span>
-          <span className="text-xs text-emerald-700">推送 {pushedCount}</span>
-          <span className={`text-xs ${anomalyCount > 0 ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>异常 {anomalyCount}</span>
-          {manualCount > 0 && <span className="text-xs font-medium text-red-700">需人工处理 {manualCount}</span>}
-          {autoRetryCount > 0 && <span className="text-xs font-medium text-blue-700">自动恢复 {autoRetryCount}</span>}
+          <span className="shrink-0 text-muted-foreground">文章 {totalCount}</span>
+          <span className="shrink-0 text-sky-700">公开 {publicCount}</span>
+          <span className="shrink-0 text-emerald-700">推送 {pushedCount}</span>
+          <span className={`shrink-0 ${anomalyCount > 0 ? 'font-medium text-red-700' : 'text-muted-foreground'}`}>异常 {anomalyCount}</span>
+          {manualCount > 0 && <span className="shrink-0 font-medium text-red-700">需人工处理 {manualCount}</span>}
+          {autoRetryCount > 0 && <span className="shrink-0 font-medium text-blue-700">自动恢复 {autoRetryCount}</span>}
         </div>
       </button>
 

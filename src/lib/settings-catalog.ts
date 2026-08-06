@@ -162,7 +162,7 @@ const definitions: SettingDefinition[] = [
   { key: SETTING_KEYS.AI_WEIGHT_EVENT, defaultValue: String(SCORE_WEIGHT_META.event.defaultWeight), schema: intRange(0, 100, '事件权重'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_WEIGHT_CONTENT, defaultValue: String(SCORE_WEIGHT_META.content.defaultWeight), schema: intRange(0, 100, '内容权重'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_KEYWORD_MATCH_BONUS, defaultValue: '5', schema: intRange(0, 20, '关键词命中加分'), sensitive: false, exportable: true, frontend: true, seed: false },
-  { key: SETTING_KEYS.AI_CONCURRENCY, defaultValue: '3', schema: intRange(1, 10, 'AI并发数'), sensitive: false, exportable: true, frontend: true, seed: false },
+  { key: SETTING_KEYS.AI_CONCURRENCY, defaultValue: '1', schema: intRange(1, 10, 'AI并发数'), sensitive: false, exportable: true, frontend: true, seed: false },
 
   // Provider 专属配置由 AI_PROVIDERS 契约派生，避免 URL / 默认模型漂移。
   ...providerSettingDefinitions,

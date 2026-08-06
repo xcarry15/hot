@@ -33,6 +33,7 @@ export interface ArticleProgress {
   anomalyLabels: Array<'ad' | 'duplicate' | 'low-confidence'>;
   push: StepStatus;
   skipReason?: string;
+  /** 工作台时间列使用文章首次采集入库时间（createdAt），而非会被流水线更新刷新的 updatedAt。 */
   lastTime: number;
   /** P1-6: 推送失败后的重试时间 */
   pushRetryAt?: string | null;

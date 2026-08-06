@@ -20,8 +20,11 @@ import {
 import { EMPTY_FILTER_STATE, isFilterStateActive } from './crawl-log/types'
 import {
   ANOMALY_FILTER_CHIPS,
+  ATTENTION_FILTER_CHIPS,
   NORMAL_FILTER_CHIPS,
+  PROCESSING_FILTER_CHIPS,
   STEP_FILTER_CHIPS,
+  getPrimaryFilterKey,
   type FilterChipKey,
   URL_PARAM_DETAIL,
   URL_PARAM_DETAIL_KIND,
@@ -271,18 +274,16 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     [sourcesWithExpansion, filterState],
   )
   const selectedFilter = filterState.chips.values().next().value as StepFilterKey | undefined
-  const activePrimaryFilter: FilterChipKey = selectedFilter?.startsWith('normal-')
-    ? 'normal-all'
-    : selectedFilter?.startsWith('anomaly-')
-      ? 'anomaly-all'
-      : selectedFilter === 'ignored'
-        ? 'ignored'
-        : 'all'
-  const secondaryFilterChips = activePrimaryFilter === 'normal-all'
-    ? NORMAL_FILTER_CHIPS
-    : activePrimaryFilter === 'anomaly-all'
-      ? ANOMALY_FILTER_CHIPS
-      : []
+  const activePrimaryFilter: FilterChipKey = getPrimaryFilterKey(selectedFilter)
+  const secondaryFilterChips = activePrimaryFilter === 'processing-all'
+    ? PROCESSING_FILTER_CHIPS
+    : activePrimaryFilter === 'normal-all'
+      ? NORMAL_FILTER_CHIPS
+      : activePrimaryFilter === 'anomaly-all'
+        ? ANOMALY_FILTER_CHIPS
+        : activePrimaryFilter === 'attention-all'
+          ? ATTENTION_FILTER_CHIPS
+          : []
 
   // Fetch initial auto-crawl state
   useEffect(() => {

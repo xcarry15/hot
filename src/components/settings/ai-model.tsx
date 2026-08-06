@@ -301,7 +301,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
               min="1"
               max="10"
               step="1"
-              placeholder="3"
+              placeholder="1"
             />
             <p className="text-[11px] text-muted-foreground">调高可缩短处理时间，但更容易触发服务商限流。</p>
           </div>

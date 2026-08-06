@@ -479,7 +479,8 @@ export async function getCrawlLogSnapshot(
       ],
       push: projection.push,
       skipReason,
-      lastTime: a.updatedAt.getTime(),
+      // 工作台时间列显示文章首次进入系统的采集入库时间；updatedAt 会被后续流水线/人工修改反复刷新。
+      lastTime: a.createdAt.getTime(),
       // P1-6: 推送/AI 重试时间，方便管理员判断"何时自动重试"
       pushRetryAt: projection.pushRetryAt ?? (a.event?.nextPushRetryAt ? a.event.nextPushRetryAt.toISOString() : null),
       processRetryAt: a.fetchStatus === 'failed' && a.nextFetchRetryAt ? a.nextFetchRetryAt.toISOString() : null,

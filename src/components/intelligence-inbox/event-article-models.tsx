@@ -34,33 +34,41 @@ function matchedText(value: string, matched: boolean): ReactNode {
 
 function brandDisplay(value: string, representative: string | null): ReactNode {
   const brands = splitBrands(value);
-  if (!representative || brands.length === 0) return value || '—';
-  const representativeBrands = new Set(splitBrands(representative).map(normalizedIdentityToken));
+  if (brands.length === 0) return '—';
+  // 待复核事件暂时没有代表文章，仍按已解析身份展示统一的标签样式，不能回退到 JSON 原文。
+  const representativeBrands = representative
+    ? new Set(splitBrands(representative).map(normalizedIdentityToken))
+    : null;
 
   return brands.map((brand, index) => (
     <Fragment key={`${brand}-${index}`}>
       {index > 0 && ' / '}
-      {matchedText(brand, representativeBrands.has(normalizedIdentityToken(brand)))}
+      {matchedText(brand, representativeBrands === null || representativeBrands.has(normalizedIdentityToken(brand)))}
     </Fragment>
   ));
 }
 
 function eventKeyDisplay(value: string, representative: string | null): ReactNode {
-  if (!representative || !value) return value || '—';
+  if (!value) return '—';
   const currentParts = parseEventKeyParts(value);
-  const representativeParts = parseEventKeyParts(representative);
+  const representativeParts = representative ? parseEventKeyParts(representative) : null;
   const currentSubjects = currentParts.subjects === '—'
     ? []
     : currentParts.subjects.split('+').map((subject) => subject.trim()).filter(Boolean);
-  const representativeSubjects = new Set(
-    representativeParts.subjects === '—'
-      ? []
-      : representativeParts.subjects.split('+').map(normalizedIdentityToken),
-  );
-  const sameAction = currentParts.action !== '—'
+  const representativeSubjects = representativeParts
+    ? new Set(
+        representativeParts.subjects === '—'
+          ? []
+          : representativeParts.subjects.split('+').map(normalizedIdentityToken),
+      )
+    : null;
+  const sameAction = representativeParts !== null
+    && currentParts.action !== '—'
     && normalizedIdentityToken(currentParts.action) === normalizedIdentityToken(representativeParts.action);
-  const sameObject = currentParts.object !== '—'
+  const sameObject = representativeParts !== null
+    && currentParts.object !== '—'
     && normalizedIdentityToken(currentParts.object) === normalizedIdentityToken(representativeParts.object);
+  const highlightAll = representativeParts === null;
 
   return (
     <>
@@ -68,14 +76,14 @@ function eventKeyDisplay(value: string, representative: string | null): ReactNod
         ? currentSubjects.map((subject, index) => (
             <Fragment key={`${subject}-${index}`}>
               {index > 0 && '+'}
-              {matchedText(subject, representativeSubjects.has(normalizedIdentityToken(subject)))}
+              {matchedText(subject, highlightAll || representativeSubjects?.has(normalizedIdentityToken(subject)) === true)}
             </Fragment>
           ))
         : currentParts.subjects}
       /
-      {matchedText(currentParts.action, sameAction)}
+      {matchedText(currentParts.action, highlightAll || sameAction)}
       /
-      {matchedText(currentParts.object, sameObject)}
+      {matchedText(currentParts.object, highlightAll || sameObject)}
     </>
   );
 }

@@ -27,7 +27,7 @@ export function CrawlLogFilters({
   return (
     <div className="flex min-w-0 w-full flex-col gap-1">
       <div
-        className="grid min-w-0 grid-cols-4 gap-1 pb-0.5 overscroll-contain sm:flex sm:items-center sm:overflow-x-auto"
+        className="grid min-w-0 grid-cols-5 gap-1 pb-0.5 overscroll-contain sm:flex sm:items-center sm:overflow-x-auto"
         role="radiogroup"
         aria-label="任务状态分类"
       >
@@ -89,6 +89,11 @@ export function CrawlLogFilters({
           })}
         </div>
       )}
+
+      <div className="flex items-center justify-end gap-2 px-1 text-[10px] text-muted-foreground sm:text-[11px]">
+        <span>已公开 <b className="font-medium tabular-nums text-sky-700">{filterCounts['normal-public'] ?? 0}</b></span>
+        <span>已推送 <b className="font-medium tabular-nums text-emerald-700">{filterCounts['normal-pushed'] ?? 0}</b></span>
+      </div>
     </div>
   )
 }

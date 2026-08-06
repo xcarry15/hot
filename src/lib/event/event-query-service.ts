@@ -104,13 +104,29 @@ export async function getEventArticles(eventId: string, articleId?: string) {
   if (event.representativeArticleId && currentRepresentativeStatus !== 'none') {
     articlePushStatuses.set(event.representativeArticleId, currentRepresentativeStatus);
   }
+  const parsedAudits = event.assignedAudits.map((audit) => ({ ...audit, evidence: parseAuditEvidence(audit.evidence) }));
   const focusArticle = event.articles.find((article) => article.id === articleId)
     ?? event.articles.find((article) => article.id === event.representativeArticleId)
     ?? event.articles[0];
+  const focusArticleId = articleId ?? focusArticle?.id;
+  // 候选关联区域展示的是当前文章审计中选中的候选 Event 代表文章；
+  // 同品牌区域是更宽的召回，必须排除已经在候选关联展示的 Event，避免同一文章跨区重复。
+  const displayedCandidateEventId = parsedAudits.find((audit) => (
+    audit.articleId === focusArticleId
+    && audit.actor === 'system'
+    && (audit.action === 'create' || audit.action === 'fallback_create')
+    && audit.candidateEventId !== null
+    && audit.candidateEventId !== event.id
+    && audit.candidateEvent?.status === 'active'
+    && audit.candidateEvent.representativeArticle !== null
+  ))?.candidateEventId ?? null;
   const brandCandidates = focusArticle
-    ? await getSameBrandCandidates(eventId, focusArticle.brand)
+    ? await getSameBrandCandidates(
+        eventId,
+        focusArticle.brand,
+        displayedCandidateEventId ? [displayedCandidateEventId] : [],
+      )
     : [];
-  const parsedAudits = event.assignedAudits.map((audit) => ({ ...audit, evidence: parseAuditEvidence(audit.evidence) }));
   const candidateIds = [...new Set(parsedAudits.flatMap((audit) => {
     const candidates = audit.evidence.candidates;
     if (!Array.isArray(candidates)) return [];
@@ -241,8 +257,15 @@ function getPushStatusFromDeliveries(deliveries: Array<{ targetId: string; statu
 }
 
 
-/** 查询正文抽屉中的同品牌候选文章，查询规则集中在 Event 查询层。 */
-export async function getSameBrandCandidates(eventId: string, brand: string) {
+/**
+ * 查询正文抽屉中的同品牌候选文章，查询规则集中在 Event 查询层。
+ * excludedEventIds 用于排除已在“候选关联”区域展示的候选 Event，保证两个区域互斥。
+ */
+export async function getSameBrandCandidates(
+  eventId: string,
+  brand: string,
+  excludedEventIds: readonly string[] = [],
+) {
   const brands = splitBrands(brand);
   if (brands.length === 0) return [];
 
@@ -253,8 +276,9 @@ export async function getSameBrandCandidates(eventId: string, brand: string) {
       { publishedAt: null, createdAt: { gte: cutoff } },
     ],
   };
+  const excludedEvents = [...new Set([eventId, ...excludedEventIds].filter(Boolean))];
   const baseWhere = {
-    eventId: { not: eventId },
+    eventId: { notIn: excludedEvents },
     aiStatus: 'done',
     event: { is: { status: 'active' } },
     source: { deletedAt: null },

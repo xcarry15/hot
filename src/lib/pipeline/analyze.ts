@@ -7,7 +7,7 @@
  *
  * 历史：
  *   - 逻辑原先内联在 `crawler.ts.analyzeAllPending`；B13 抽离后保留：
- *     · MAX_BATCH_SIZE=500、CONCURRENCY=ai_concurrency(默认3)/DELAY_MS=300、timeout=90_000
+ *     · MAX_BATCH_SIZE=500、CONCURRENCY=ai_concurrency(默认1)/DELAY_MS=300、timeout=90_000
  *     · 退避 where：OR[ nextAiRetryAt=null, nextAiRetryAt <= now ]
  *     · Promise.allSettled 把 rejected 计入 errors
  */
@@ -24,7 +24,7 @@ import {
 
 const AI_TIMEOUT_MS = 90_000;
 const MAX_BATCH_SIZE = 500;
-const DEFAULT_AI_CONCURRENCY = 3;
+const DEFAULT_AI_CONCURRENCY = 1;
 const MIN_AI_CONCURRENCY = 1;
 const MAX_AI_CONCURRENCY = 10;
 const AI_DELAY_MS = 300;
@@ -38,7 +38,7 @@ function isTransientBatchError(reason: unknown): boolean {
 
 /**
  * Stage 3: Run AI for fetched, not-yet-clustered articles with aiStatus=pending or failed.
- * Batches with concurrency from settings.ai_concurrency (1-10, default 3)
+ * Batches with concurrency from settings.ai_concurrency (1-10, default 1)
  * and 300ms delay between batches.
  */
 export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, forceRetry = false): Promise<{
@@ -105,7 +105,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   let processed = 0;
   let errors = 0;
   let deferred = 0;
-  // AI 并发可配置（设置项 ai_concurrency，默认 3，范围 1-10）。
+  // AI 并发可配置（设置项 ai_concurrency，默认 1，范围 1-10）。
   // 调高可缩短批处理时间但撞 429 风险增大；provider 故障时降低可减少无效请求。
   const rawConcurrency = parseInt(await getSetting(SETTING_KEYS.AI_CONCURRENCY) || String(DEFAULT_AI_CONCURRENCY), 10);
   const concurrency = Math.max(
