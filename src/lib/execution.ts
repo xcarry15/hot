@@ -168,22 +168,33 @@ async function renewLease(jobId: string): Promise<boolean> {
  * detached executor. Poll the persisted state so a DB-only cancellation also
  * reaches the executor's AbortSignal while a stage is still running.
  */
-function startJobCancellationWatcher(jobId: string, controller: AbortController): NodeJS.Timeout {
-  return setInterval(() => {
-    void (async () => {
-      try {
-        const job = await db.job.findUnique({
-          where: { id: jobId },
-          select: { status: true },
-        });
-        if ((job?.status === 'cancel_requested' || job?.status === 'cancelled') && !controller.signal.aborted) {
-          controller.abort(new Error('Job cancelled'));
-        }
-      } catch (error) {
-        console.error(`[execution] cancellation check failed for ${jobId}:`, error);
+function startJobCancellationWatcher(jobId: string, controller: AbortController): { stop(): void } {
+  let stopped = false;
+  let timer: NodeJS.Timeout | null = null;
+
+  const poll = async () => {
+    try {
+      const job = await db.job.findUnique({
+        where: { id: jobId },
+        select: { status: true },
+      });
+      if ((job?.status === 'cancel_requested' || job?.status === 'cancelled') && !controller.signal.aborted) {
+        controller.abort(new Error('Job cancelled'));
       }
-    })();
-  }, CANCELLATION_POLL_INTERVAL_MS);
+    } catch (error) {
+      console.error(`[execution] cancellation check failed for ${jobId}:`, error);
+    } finally {
+      if (!stopped) timer = setTimeout(() => { void poll(); }, CANCELLATION_POLL_INTERVAL_MS);
+    }
+  };
+
+  timer = setTimeout(() => { void poll(); }, CANCELLATION_POLL_INTERVAL_MS);
+  return {
+    stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
 }
 
 /**
@@ -319,12 +330,12 @@ async function runPipeline(
 ): Promise<void> {
   let heartbeat: NodeJS.Timeout | null = null;
   let leaseTimer: NodeJS.Timeout | null = null;
-  let cancellationTimer: NodeJS.Timeout | null = null;
+  let cancellationWatcher: { stop(): void } | null = null;
   console.log(`[execution] starting job ${jobId} (${type})`);
 
   try {
     const activeController = createJobAbortController(jobId);
-    cancellationTimer = startJobCancellationWatcher(jobId, activeController);
+    cancellationWatcher = startJobCancellationWatcher(jobId, activeController);
     heartbeat = startJobHeartbeat(jobId, HEARTBEAT_INTERVAL_MS);
 
     // Periodic lease renewal — if the process hangs, the lease expires and
@@ -373,7 +384,7 @@ async function runPipeline(
     invalidateDashboardAnalyticsCache();
     stopJobHeartbeat(heartbeat);
     if (leaseTimer) clearInterval(leaseTimer);
-    if (cancellationTimer) clearInterval(cancellationTimer);
+    cancellationWatcher?.stop();
     try {
       await runnerLease.release();
     } catch (error) {
