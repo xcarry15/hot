@@ -66,7 +66,13 @@ export const publicEventWhere = {
   clusterReviewStatus: 'confirmed',
   publicStatus: 'published',
   representativeArticleId: { not: null },
-  representativeArticle: { is: { aiStatus: 'done', clusterStatus: 'clustered' } },
+  representativeArticle: {
+    is: {
+      aiStatus: 'done',
+      clusterStatus: 'clustered',
+      source: { is: { publicEnabled: true, deletedAt: null } },
+    },
+  },
 } as const;
 
 function normalizeText(value: string | undefined, maxLength: number): string {
@@ -138,6 +144,7 @@ function buildSearchWhere(search: string) {
       is: {
         aiStatus: 'done',
         clusterStatus: 'clustered',
+        source: { is: { publicEnabled: true, deletedAt: null } },
         OR: [
           { title: { contains: search } },
           { summary: { contains: search } },
@@ -322,7 +329,7 @@ export async function getPublicArticleDetail(id: string): Promise<PublicArticleD
 
 export async function recordPublicArticleView(id: string): Promise<void> {
   const event = await db.event.findFirst({
-    where: { id, status: 'active', publicStatus: 'published' },
+    where: { ...publicEventWhere, id },
     select: { id: true, representativeArticle: { select: { sourceId: true } } },
   });
   if (!event?.representativeArticle) return;
@@ -349,7 +356,7 @@ export async function listPublicArticleIds(): Promise<Array<{ id: string; update
 
 export async function recordOriginalClick(id: string): Promise<boolean> {
   const event = await db.event.findFirst({
-    where: { id, status: 'active', publicStatus: 'published' },
+    where: { ...publicEventWhere, id },
     select: { id: true, representativeArticle: { select: { sourceId: true } } },
   });
   if (!event?.representativeArticle) return false;

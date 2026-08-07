@@ -1,9 +1,8 @@
-import { getZAI } from './zai';
 import type { CrawlResult } from '@/contracts/crawl';
 import { assertNotAborted } from './worker-stop';
 import { ensureResponseTextWithinLimit } from './http';
-import { assertSafeOutboundUrl } from './outbound-url';
 import { resolveUrl } from './url-utils';
+import { readZaiPage } from '@/lib/zai-page-reader';
 
 interface RssConfig {
   feedUrl?: string;
@@ -35,11 +34,7 @@ export async function parseRss(url: string, parserConfigStr: string, signal?: Ab
       : url;
     const maxItems = normalizeMaxItems(config.maxItems);
 
-    await assertSafeOutboundUrl(feedUrl);
-    const zai = await getZAI();
-    const result = await zai.functions.invoke('page_reader', {
-      url: feedUrl,
-    });
+    const result = await readZaiPage(feedUrl, signal);
     assertNotAborted(signal);
 
     if (!result?.data?.html) {

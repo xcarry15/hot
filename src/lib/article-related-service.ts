@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { splitBrands } from '@/lib/shared/article-codecs';
 
 const RELATED_WINDOW_DAYS = 30;
+const RELATED_CANDIDATE_TAKE = 300;
 
 type RelatedArticleBase = {
   id: string;
@@ -98,7 +99,13 @@ function buildEventVisibilityWhere(options: RelatedArticleOptions): Prisma.Event
       clusterReviewStatus: 'confirmed',
       publicStatus: 'published',
       representativeArticleId: { not: null },
-      representativeArticle: { is: { aiStatus: 'done', clusterStatus: 'clustered' } },
+      representativeArticle: {
+        is: {
+          aiStatus: 'done',
+          clusterStatus: 'clustered',
+          source: { is: { publicEnabled: true, deletedAt: null } },
+        },
+      },
     };
   }
 
@@ -106,7 +113,13 @@ function buildEventVisibilityWhere(options: RelatedArticleOptions): Prisma.Event
     status: 'active',
     pushedAt: { not: null },
     representativeArticleId: { not: null },
-    representativeArticle: { is: { aiStatus: 'done', clusterStatus: 'clustered' } },
+    representativeArticle: {
+      is: {
+        aiStatus: 'done',
+        clusterStatus: 'clustered',
+        source: { is: { deletedAt: null } },
+      },
+    },
   };
 }
 
@@ -151,9 +164,9 @@ function toRelatedArticle(
 }
 
 /**
- * Return all other articles from the same Event and same-brand Events in the
- * recent 30-day window. Both public pages and Feishu cards use this service so
- * their recent-article sections cannot drift apart.
+ * Return a bounded list of other articles from the same Event and same-brand
+ * Events in the recent 30-day window. Both public pages and Feishu cards use
+ * this service so their recent-article sections cannot drift apart.
  */
 export async function getRelatedArticles(
   id: string,
@@ -178,6 +191,7 @@ export async function getRelatedArticles(
 
   const brands = splitBrands(article.brand);
   const cutoff = new Date(Date.now() - RELATED_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const visibility = options.visibility ?? (options.onlyPushed ? 'pushed' : null);
   const eventVisibilityWhere = buildEventVisibilityWhere(options);
   const sameEventBranch: Prisma.ArticleWhereInput | null = article.eventId
     ? {
@@ -203,6 +217,11 @@ export async function getRelatedArticles(
       id: { not: id },
       AND: [
         { OR: relationBranches },
+        ...(visibility === 'public'
+          ? [{ source: { is: { publicEnabled: true, deletedAt: null } } }]
+          : visibility === 'pushed'
+            ? [{ source: { is: { deletedAt: null } } }]
+            : []),
         {
           OR: [
             { publishedAt: { gte: cutoff } },
@@ -213,6 +232,8 @@ export async function getRelatedArticles(
         },
       ],
     },
+    orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+    take: RELATED_CANDIDATE_TAKE,
     select: relatedCandidateSelect,
   });
 
@@ -228,7 +249,7 @@ export async function getRelatedArticles(
     .sort(compareByEffectiveTime);
 
   const take = typeof requestedTake === 'number' && Number.isFinite(requestedTake) && requestedTake > 0
-    ? Math.floor(requestedTake)
-    : null;
-  return take ? related.slice(0, take) : related;
+    ? Math.min(Math.floor(requestedTake), 50)
+    : 50;
+  return related.slice(0, take);
 }

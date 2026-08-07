@@ -17,7 +17,7 @@
 
 import iconv from 'iconv-lite';
 import { abortableDelay, withTimeout } from './shared/async';
-import { assertSafeOutboundUrl } from './outbound-url';
+import { assertSafeOutboundUrl, getSafeOutboundDispatcher } from './outbound-url';
 
 const CHARSET_RE = /charset\s*=\s*([^"'\s;>]+)/i;
 const META_CHARSET_RE = /<meta[^>]+charset\s*=\s*["']?([^"'\s;>]+)/i;
@@ -88,6 +88,27 @@ function requestHeadersWithCookies(target: URL, headers: HeadersInit | undefined
   return requestHeaders;
 }
 
+/**
+ * 认证头只允许留在原始请求及同源重定向链中。
+ * 即使出站 URL 已通过 SSRF 校验，也不能把调用方的密钥交给另一个合法公网主机。
+ */
+function stripSensitiveRedirectHeaders(headers: HeadersInit | undefined): Headers {
+  // 跨源重定向只保留标准、非凭据请求头。使用 allowlist，避免遗漏新的
+  // 自定义认证头（例如 api-key、x-access-token）导致凭据泄露。
+  const safeHeaderNames = new Set([
+    'accept',
+    'accept-language',
+    'cache-control',
+    'pragma',
+    'user-agent',
+  ]);
+  const safeHeaders = new Headers();
+  for (const [name, value] of new Headers(headers)) {
+    if (safeHeaderNames.has(name)) safeHeaders.set(name, value);
+  }
+  return safeHeaders;
+}
+
 /** HTTP 200 也可能是要求浏览器写 Cookie 后刷新的验证壳，不能视为有效页面。 */
 function isLikelyJavaScriptVerificationPage(html: string): boolean {
   return html.length <= 4 * 1024
@@ -113,12 +134,14 @@ async function fetchSafeWithCookieJar(
   cookieJar: RequestCookieJar,
 ): Promise<Response> {
   let target = await assertSafeOutboundUrl(rawUrl);
+  let requestHeaders: HeadersInit | undefined = options.headers;
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
     const response = await fetch(target, {
       ...options,
-      headers: requestHeadersWithCookies(target, options.headers, cookieJar),
+      headers: requestHeadersWithCookies(target, requestHeaders, cookieJar),
       redirect: 'manual',
-    });
+      dispatcher: getSafeOutboundDispatcher(),
+    } as RequestInit);
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     // 部分站点会在同域 302 中下发一次性验证 Cookie。Node fetch 不自带
     // Cookie jar，这里只在当前请求的同域重定向链里暂存，避免长期保存或跨域泄露。
@@ -126,7 +149,11 @@ async function fetchSafeWithCookieJar(
     const location = response.headers.get('location');
     if (!location) throw new Error(`重定向缺少 Location: ${target}`);
     await response.body?.cancel();
-    target = await assertSafeOutboundUrl(new URL(location, target).toString());
+    const nextTarget = await assertSafeOutboundUrl(new URL(location, target).toString());
+    if (nextTarget.origin !== target.origin) {
+      requestHeaders = stripSensitiveRedirectHeaders(requestHeaders);
+    }
+    target = nextTarget;
   }
   throw new Error(`重定向次数超过 ${MAX_REDIRECTS}`);
 }

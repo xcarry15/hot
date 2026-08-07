@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   fetchDashboardAnalytics,
   fetchFeedbackSuggestions,
+  generateFeedbackSuggestions,
   updateFeedbackSuggestion,
   type FeedbackSuggestion,
   type DashboardAnalytics,
@@ -87,7 +88,9 @@ function rateColor(rate: number, inverse = false): string {
 
 export default function DashboardTab({ active = true }: { active?: boolean }) {
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
-  const [range, setRange] = useState<DashboardAnalyticsRange>('all')
+  // 默认只读取近期窗口；“全部”仍保留为显式筛选，避免概览首次打开就
+  // 把全量 Article/DiscardedItem/FetchLog 载入内存并参与 30 秒轮询。
+  const [range, setRange] = useState<DashboardAnalyticsRange>('30d')
   const [sourceSort, setSourceSort] = useState<SourceSort>('analyzed')
   const [loading, setLoading] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -102,6 +105,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
   const intervalRef = useRef<number | null>(null)
   const analyticsRequestRef = useRef<AbortController | null>(null)
   const analyticsRequestVersionRef = useRef(0)
+  const feedbackGenerationAttemptedRef = useRef(false)
 
   const fetchData = useCallback(async () => {
     analyticsRequestRef.current?.abort()
@@ -109,6 +113,11 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
     analyticsRequestRef.current = controller
     const requestVersion = ++analyticsRequestVersionRef.current
     try {
+      const shouldGenerateFeedback = !feedbackGenerationAttemptedRef.current
+      feedbackGenerationAttemptedRef.current = true
+      const feedbackRequest = shouldGenerateFeedback
+        ? generateFeedbackSuggestions(controller.signal).catch(() => fetchFeedbackSuggestions(controller.signal))
+        : fetchFeedbackSuggestions(controller.signal)
       const [analyticsJson, nextSuggestions] = await Promise.all([
         fetchDashboardAnalytics(range, undefined, controller.signal, {
           page: crawlPage,
@@ -117,7 +126,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
           type: crawlType === 'all' ? undefined : crawlType,
           sourceId: crawlSourceId === 'all' ? undefined : crawlSourceId,
         }),
-        fetchFeedbackSuggestions(controller.signal).catch(() => []),
+        feedbackRequest.catch(() => []),
       ])
       if (controller.signal.aborted || requestVersion !== analyticsRequestVersionRef.current) return
       setAnalytics(analyticsJson)

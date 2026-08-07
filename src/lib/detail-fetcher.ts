@@ -1,9 +1,8 @@
 import * as cheerio from 'cheerio';
 import { db } from './db';
-import { getZAI } from './zai';
 import { fetchCanyin88Detail } from './parser-canyin88';
 import { cleanContent, extractArticleBody, meaningfulTextLength } from './cleaner';
-import { abortableDelay, withTimeout } from './shared/async';
+import { abortableDelay } from './shared/async';
 import { MIN_MEANINGFUL_CHARS } from './shared/content-policy';
 import {
   ensureResponseTextWithinLimit,
@@ -11,12 +10,11 @@ import {
   BROWSER_HEADERS,
   isLikelyJavaScriptVerificationPage,
 } from './http';
-import { assertSafeOutboundUrl } from './outbound-url';
 import { extractMetaPublishedAt } from './date-utils';
 import { computeContentFingerprint } from './content-fingerprint';
 import { assertNotAborted } from './worker-stop';
+import { readZaiPage } from '@/lib/zai-page-reader';
 
-const PAGE_READER_TIMEOUT_MS = 30000;
 const DIRECT_FETCH_TIMEOUT_MS = 20000;
 export const FETCH_MAX_RETRIES = 5;
 export const FETCH_RETRY_DELAY_MS = 2 * 60 * 60 * 1000;
@@ -115,6 +113,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
 
   const isCanyin88 = article.source?.type === 'canyin88' || article.url.includes('canyin88.com');
   let lastError: Error | null = null;
+  let pageReaderTimedOut = false;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -150,24 +149,18 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
         }
 
         // Step 2: Fall back to ZAI page_reader if direct returned no usable article body.
-        if (!html) {
+        if (!html && !pageReaderTimedOut) {
           try {
-            await assertSafeOutboundUrl(article.url);
-            const zai = await getZAI();
-            const pageResult = await withTimeout(
-              async timeoutSignal => {
-                const value = await zai.functions.invoke('page_reader', { url: article.url });
-                assertNotAborted(timeoutSignal);
-                return value;
-              },
-              PAGE_READER_TIMEOUT_MS,
-              `ZAI page_reader timeout: ${article.url}`,
-              signal,
-            );
+            const pageResult = await readZaiPage(article.url, signal);
             html = pageResult?.data?.html ? ensureResponseTextWithinLimit(pageResult.data.html) : null;
             if (html) fetchMethod = 'zai';
           } catch (error) {
             if (signal?.aborted) throw error;
+            if (error instanceof Error && error.message.includes('ZAI page_reader timeout')) {
+              // 当前 ZAI SDK 没有 AbortSignal 接口。超时只会中止本地等待，
+              // 若立刻重试会让同一文章挂起多个远程 page_reader 调用。
+              pageReaderTimedOut = true;
+            }
             // Both methods failed
           }
         }

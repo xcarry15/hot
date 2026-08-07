@@ -27,7 +27,6 @@ export {
   type ArticleDeletionEventResult,
 } from '@/lib/event/event-recalculation-service';
 export {
-  autoRepairEventConsistency,
   scanEventConsistency,
   type ConsistencyViolation,
 } from '@/lib/event/event-consistency-service';
@@ -183,24 +182,42 @@ export async function moveArticleToEvent(sourceEventId: string, articleId: strin
 }
 
 export async function setEventRepresentative(eventId: string, articleId: string): Promise<boolean> {
-  const [event, member] = await Promise.all([
-    db.event.findUnique({ where: { id: eventId }, select: { status: true, clusterReviewStatus: true } }),
-    db.article.findFirst({
-      where: { id: articleId, eventId },
-      select: {
-        id: true, clusterStatus: true, aiStatus: true, score: true, relevance: true,
-        cleanContent: true, publishedAt: true, createdAt: true,
-        source: { select: { publicEnabled: true, deletedAt: true } },
-      },
-    }),
-  ]);
-  if (event?.status !== 'active' || event.clusterReviewStatus !== 'confirmed' || !member || !isReleaseRepresentativeEligible(member)) return false;
-  await db.$transaction(async (tx) => {
+  const updated = await db.$transaction(async (tx) => {
+    // Membership and eligibility must be read in the same transaction as the
+    // pointer update. Otherwise a concurrent move can make the Event point at
+    // an article that no longer belongs to it.
+    const [event, member] = await Promise.all([
+      tx.event.findUnique({ where: { id: eventId }, select: { status: true, clusterReviewStatus: true } }),
+      tx.article.findFirst({
+        where: { id: articleId, eventId },
+        select: {
+          id: true, clusterStatus: true, aiStatus: true, score: true, relevance: true,
+          cleanContent: true, publishedAt: true, createdAt: true,
+          source: { select: { publicEnabled: true, deletedAt: true } },
+        },
+      }),
+    ]);
+    if (event?.status !== 'active' || event.clusterReviewStatus !== 'confirmed' || !member || !isReleaseRepresentativeEligible(member)) return false;
     await releaseRepresentativeOwnership(tx, eventId, articleId);
-    await tx.event.update({
-      where: { id: eventId },
+    // 用关系条件把“仍属于该 Event”绑定到指针写入本身；若文章在读取后
+    // 被移动，updateMany 不会更新代表指针，整个事务也会回滚。
+    const pointerUpdate = await tx.event.updateMany({
+      where: {
+        id: eventId,
+        status: 'active',
+        clusterReviewStatus: 'confirmed',
+        articles: {
+          some: {
+            id: articleId,
+            clusterStatus: 'clustered',
+            aiStatus: 'done',
+            source: { is: { deletedAt: null } },
+          },
+        },
+      },
       data: { representativeArticleId: articleId, representativeManual: true },
     });
+    if (pointerUpdate.count !== 1) return false;
     await tx.eventClusterAudit.create({
       data: {
         articleId,
@@ -212,7 +229,9 @@ export async function setEventRepresentative(eventId: string, articleId: string)
         evidence: JSON.stringify({ representativeArticleId: articleId }),
       },
     });
+    return true;
   });
+  if (!updated) return false;
   await refreshEventPublicPublication(eventId);
   invalidatePublicArticleCache();
   return true;

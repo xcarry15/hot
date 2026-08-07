@@ -5,11 +5,6 @@ import { runExclusiveMutation } from '@/lib/mutation-guard';
 
 export async function GET() {
   try {
-    try {
-      await runExclusiveMutation('生成反馈建议', generateTuningSuggestions);
-    } catch {
-      // 抓取/分析任务占用写入门禁时，仍返回已有建议，不影响概览读取。
-    }
     return NextResponse.json(await listTuningSuggestions());
   } catch (error: unknown) {
     return apiError(error, 'Failed to fetch feedback suggestions');
@@ -19,6 +14,14 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    if (body.action === 'generate') {
+      try {
+        await runExclusiveMutation('生成反馈建议', generateTuningSuggestions);
+      } catch {
+        // 抓取/分析任务占用写入门禁时，仍返回已有建议，不影响概览读取。
+      }
+      return NextResponse.json(await listTuningSuggestions());
+    }
     const id = typeof body.id === 'string' ? body.id : '';
     if (!id || (body.action !== 'apply' && body.action !== 'dismiss')) return NextResponse.json({ error: '参数无效' }, { status: 400 });
     const result = body.action === 'apply'

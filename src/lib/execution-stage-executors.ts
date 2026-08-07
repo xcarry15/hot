@@ -13,7 +13,7 @@ export async function executeClusterJob(
   jobId?: string,
 ): Promise<Record<string, unknown>> {
   if (isSingleWorkflow(payload)) return executeSingleArticleWorkflow(payload, signal, jobId);
-  return { result: await clusterAllPending(signal, jobId) };
+  return { result: await clusterAllPending(signal, jobId, false, payload.repairOnly === true) };
 }
 
 export async function executeProcessJob(

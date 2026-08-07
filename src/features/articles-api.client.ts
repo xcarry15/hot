@@ -21,6 +21,8 @@ const DETAIL_CACHE_TTL_MS = 15_000;
 const MAX_DETAIL_CACHE_ENTRIES = 100;
 const PREFETCH_DELAY_MS = 120;
 const articleDetailPrefetchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const articleDetailPrefetchControllers = new Map<string, AbortController>();
+let articleDetailCacheVersion = 0;
 const articleDetailCache = new Map<string, {
   expiresAt: number;
   value: Promise<ArticleDetailDto>;
@@ -46,6 +48,7 @@ function withAbort<T>(value: Promise<T>, signal?: AbortSignal): Promise<T> {
 }
 
 export function primeArticleDetailCache(article: ArticleDetailDto): void {
+  articleDetailCacheVersion++;
   articleDetailCache.delete(article.id);
   articleDetailCache.set(article.id, {
     expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
@@ -63,6 +66,7 @@ function trimArticleDetailCache(): void {
 }
 
 export function invalidateArticleDetailCache(articleId?: string): void {
+  articleDetailCacheVersion++;
   if (articleId) articleDetailCache.delete(articleId);
   else articleDetailCache.clear();
 }
@@ -123,6 +127,7 @@ export async function fetchArticleDetail(
   if (cached && cached.expiresAt > Date.now()) return withAbort(cached.value, signal);
   if (cached) articleDetailCache.delete(articleId);
 
+  // 缓存中的请求不能绑定调用方 signal，否则抽屉关闭会取消仍被其他调用复用的请求。
   const value = requestJson<ArticleDetailDto>('GET', `/api/articles/${articleId}`);
   articleDetailCache.set(articleId, {
     expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
@@ -139,16 +144,36 @@ export function prefetchArticleDetail(articleId: string): void {
   if (articleDetailPrefetchTimers.has(articleId)) return;
   const timer = setTimeout(() => {
     articleDetailPrefetchTimers.delete(articleId);
-    void fetchArticleDetail(articleId).catch(() => undefined);
+    const controller = new AbortController();
+    articleDetailPrefetchControllers.set(articleId, controller);
+    const requestVersion = articleDetailCacheVersion;
+    // 预取请求独立于详情缓存请求，取消预取不会影响用户已经打开的详情。
+    void requestJson<ArticleDetailDto>('GET', `/api/articles/${articleId}`, { signal: controller.signal })
+      .then((article) => {
+        // 预取期间若发生编辑/失效，旧响应不能回写覆盖新缓存。
+        if (requestVersion === articleDetailCacheVersion) primeArticleDetailCache(article);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (articleDetailPrefetchControllers.get(articleId) === controller) {
+          articleDetailPrefetchControllers.delete(articleId);
+        }
+      });
   }, PREFETCH_DELAY_MS);
   articleDetailPrefetchTimers.set(articleId, timer);
 }
 
 export function cancelArticleDetailPrefetch(articleId: string): void {
   const timer = articleDetailPrefetchTimers.get(articleId);
-  if (!timer) return;
-  clearTimeout(timer);
-  articleDetailPrefetchTimers.delete(articleId);
+  if (timer) {
+    clearTimeout(timer);
+    articleDetailPrefetchTimers.delete(articleId);
+  }
+  const controller = articleDetailPrefetchControllers.get(articleId);
+  if (controller) {
+    controller.abort();
+    articleDetailPrefetchControllers.delete(articleId);
+  }
 }
 export async function triggerArticleWorkflow(
   articleId: string,

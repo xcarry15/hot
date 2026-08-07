@@ -101,15 +101,37 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
   });
   const targetByHash = new Map(targets.map((target) => [target.urlHash, target.id]));
 
-  // Use PushDelivery for latest per-target state
-  const deliveries = await db.pushDelivery.findMany({
-    where: { eventId: { in: uniqueEventIds }, targetId: { in: targets.map((target) => target.id) } },
-    // 同一条 ledger 行会在重试时原地更新，createdAt 不能代表最近状态。
-    // updatedAt 由 Prisma @updatedAt 在 claim/settle/cleanup 时推进，避免旧的
-    // succeeded 行覆盖刚刚进入 sending/failed 的当前状态。
-    orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
-    select: { eventId: true, targetId: true, status: true, createdAt: true, updatedAt: true, leaseExpiresAt: true, lastError: true },
-  });
+  const targetIds = targets.map((target) => target.id);
+  if (targetIds.length === 0) return result;
+  const deliveryWhere = { eventId: { in: uniqueEventIds }, targetId: { in: targetIds } };
+  // 先在数据库按 event/target 聚合出最新 updatedAt，再回查少量完整行，
+  // 避免把长期累积的整张 PushDelivery ledger 读入 Node 内存。
+  // 轻量单测 mock 没有 groupBy 时保留 findMany 降级路径。
+  const deliveries = typeof db.pushDelivery.groupBy === 'function'
+    ? await db.$transaction(async (tx) => {
+        const latestKeys = await tx.pushDelivery.groupBy({
+          by: ['eventId', 'targetId'],
+          where: deliveryWhere,
+          _max: { updatedAt: true },
+        });
+        if (latestKeys.length === 0) return [];
+        return tx.pushDelivery.findMany({
+          where: {
+            OR: latestKeys.map((key) => ({
+              eventId: key.eventId,
+              targetId: key.targetId,
+              updatedAt: key._max.updatedAt!,
+            })),
+          },
+          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+          select: { eventId: true, targetId: true, status: true, createdAt: true, updatedAt: true, leaseExpiresAt: true, lastError: true },
+        });
+      })
+    : await db.pushDelivery.findMany({
+        where: deliveryWhere,
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+        select: { eventId: true, targetId: true, status: true, createdAt: true, updatedAt: true, leaseExpiresAt: true, lastError: true },
+      });
 
   const latest = new Map<string, typeof deliveries[number]>();
   for (const delivery of deliveries) {

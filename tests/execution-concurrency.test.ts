@@ -60,7 +60,7 @@ vi.mock('@/lib/job-progress', () => ({
   advanceJobProgress: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { abortRunningJob, resetOrphanedJobs, resumeQueuedJob, runJob } from '@/lib/execution';
+import { abortRunningJob, computeIdempotencyKey, resetOrphanedJobs, resumeQueuedJob, runJob } from '@/lib/execution';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -90,6 +90,15 @@ describe.sequential('global job execution invariant', () => {
       release: mocks.runnerLeaseRelease.mockResolvedValue(undefined),
     });
     mocks.clearExpiredJobRunnerLease.mockResolvedValue(undefined);
+  });
+
+  it('为自动重试任务按 Job 类型生成不同幂等键', () => {
+    const fullKey = computeIdempotencyKey('full', { trigger: 'auto_retry' });
+    const clusterKey = computeIdempotencyKey('cluster', { trigger: 'auto_retry' });
+
+    expect(fullKey).toMatch(/^technical-retry:full:/);
+    expect(clusterKey).toMatch(/^technical-retry:cluster:/);
+    expect(fullKey).not.toBe(clusterKey);
   });
 
   it('persists a stop request when the executor is in another module instance', async () => {

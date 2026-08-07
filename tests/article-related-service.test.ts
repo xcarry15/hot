@@ -156,4 +156,16 @@ describe('getRelatedArticles', () => {
       }),
     }));
   });
+
+  it('公开场景同时过滤自身来源不可见的成员文章', async () => {
+    await getRelatedArticles(currentArticle.id, 3, { visibility: 'public' });
+
+    expect(mocks.articleFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        AND: expect.arrayContaining([
+          { source: { is: { publicEnabled: true, deletedAt: null } } },
+        ]),
+      }),
+    }));
+  });
 });

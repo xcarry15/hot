@@ -8,6 +8,7 @@
 
 export class MutationConflictError extends Error {
   readonly status = 409;
+  readonly exposeToClient = true;
 
   constructor(readonly activeName: string) {
     super(`当前正在执行${activeName}，请等待完成后再操作`);

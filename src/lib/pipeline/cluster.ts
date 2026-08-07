@@ -33,7 +33,21 @@ export function buildClusterPendingWhere(now = new Date(), forceRetry = false): 
   };
 }
 
-export async function clusterAllPending(signal?: AbortSignal, jobId?: string, forceRetry = false): Promise<{ total: number; processed: number; errors: number }> {
+export async function clusterAllPending(
+  signal?: AbortSignal,
+  jobId?: string,
+  forceRetry = false,
+  repairOnly = false,
+): Promise<{ total: number; processed: number; errors: number }> {
+  // 调度器的 repairOnly 只负责脏 Event 的快速校正，不能顺带扫描重复键、
+  // 候选审核、挂载失败和过期代表文章等全量修复队列。
+  if (repairOnly) {
+    const repairedDirtyEvents = await repairDirtyEvents(undefined, signal);
+    if (repairedDirtyEvents > 0) {
+      console.warn(`[clusterAllPending] repaired ${repairedDirtyEvents} dirty Event(s)`);
+    }
+    return { total: 0, processed: 0, errors: 0 };
+  }
   const repairedDuplicateEventKeys = await repairDuplicateEventKeyCandidates();
   if (repairedDuplicateEventKeys > 0) {
     console.warn(`[clusterAllPending] moved ${repairedDuplicateEventKeys} duplicate eventKey Event(s) to review`);
@@ -50,7 +64,7 @@ export async function clusterAllPending(signal?: AbortSignal, jobId?: string, fo
   if (repairedAttachedFailures > 0) {
     console.warn(`[clusterAllPending] repaired ${repairedAttachedFailures} attached failed Article(s)`);
   }
-  const repairedDirtyEvents = await repairDirtyEvents();
+  const repairedDirtyEvents = await repairDirtyEvents(undefined, signal);
   if (repairedDirtyEvents > 0) {
     console.warn(`[clusterAllPending] repaired ${repairedDirtyEvents} dirty Event(s)`);
   }

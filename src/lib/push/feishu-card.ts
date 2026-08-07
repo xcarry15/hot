@@ -46,6 +46,14 @@ export interface FeishuCardOptions {
   relatedArticles?: FeishuCardRelated[];
 }
 
+function escapeLarkMarkdown(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/[\\`*_{}\[\]()#+!|]/g, '\\$&');
+}
+
 /**
  * 判定推送紧急度（用于 header 配色与可选前缀）。
  *   - score ≥ 95 → urgent
@@ -100,9 +108,9 @@ export function buildFeishuCard(
   // 元信息行:时间 · 品牌 · 分类 · 中文来源名
   const metaParts = [
     timeStr,
-    brandLabel ? `**${brandLabel}**` : '',
-    article.category,
-    article.originalSource || article.source?.name || '',
+    brandLabel ? `**${escapeLarkMarkdown(brandLabel)}**` : '',
+    escapeLarkMarkdown(article.category),
+    escapeLarkMarkdown(article.originalSource || article.source?.name || ''),
   ].filter(Boolean);
   if (metaParts.length > 0) {
     lines.push(`<font color='grey'>${metaParts.join(' · ')}</font>`);
@@ -113,7 +121,7 @@ export function buildFeishuCard(
     lines.push('');
     lines.push(`<font color='orange'>**📌 要点**</font>`);
     for (const p of keyPoints) {
-      lines.push(`› ${p}`);
+      lines.push(`› ${escapeLarkMarkdown(p)}`);
     }
   }
 
@@ -121,19 +129,19 @@ export function buildFeishuCard(
   if (article.summary) {
     lines.push('');
     lines.push(`<font color='green'>**💡 洞察**</font>`);
-    lines.push(article.summary);
+    lines.push(escapeLarkMarkdown(article.summary));
   }
 
   // 近期关联动态：把单点信息升级为趋势感知，title 截 50 字 + 省略号控制卡片高度
   if (relatedArticles.length > 0) {
-    const brandName = splitBrands(article.brand).join(' | ') || '相关品牌';
+    const brandName = escapeLarkMarkdown(splitBrands(article.brand).join(' | ') || '相关品牌');
     lines.push('');
     lines.push(`<font color='blue'>**🔗 ${brandName}近期另有${relatedArticles.length}篇**</font>`);
     for (const r of relatedArticles) {
       const relatedDate = r.publishedAt ?? r.createdAt;
       const rTime = formatDaysAgo(relatedDate instanceof Date ? relatedDate.toISOString() : relatedDate);
       const rTitle = r.title.length > 50 ? r.title.slice(0, 50) + '…' : r.title;
-      lines.push(`▪ <font color='grey'>${rTime}</font> ${rTitle}`);
+      lines.push(`▪ <font color='grey'>${escapeLarkMarkdown(rTime)}</font> ${escapeLarkMarkdown(rTitle)}`);
     }
   }
 

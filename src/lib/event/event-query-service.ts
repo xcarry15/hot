@@ -5,6 +5,30 @@ import { getPushTargetStates } from '@/lib/push/delivery';
 
 const SAME_BRAND_CANDIDATE_TAKE = 30;
 const SAME_BRAND_CANDIDATE_WINDOW_DAYS = 30;
+const MAX_EVENT_DETAIL_ARTICLES = 400;
+
+const eventArticleSelect = {
+  id: true,
+  title: true,
+  url: true,
+  eventKey: true,
+  score: true,
+  relevance: true,
+  eventScore: true,
+  contentScore: true,
+  aiConfidence: true,
+  aiStatus: true,
+  publicStatus: true,
+  publicOverride: true,
+  isAd: true,
+  brand: true,
+  category: true,
+  clusterStatus: true,
+  publishedAt: true,
+  createdAt: true,
+  source: { select: { name: true, type: true, publicEnabled: true, deletedAt: true } },
+} as const;
+
 export async function getEventArticles(eventId: string, articleId?: string) {
   const event = await db.event.findUnique({
     where: { id: eventId },
@@ -19,41 +43,10 @@ export async function getEventArticles(eventId: string, articleId?: string) {
       pushedAt: true,
       firstSeenAt: true,
       lastSeenAt: true,
-      pushLogs: {
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        select: {
-          id: true,
-          representativeArticleId: true,
-          targetId: true,
-          status: true,
-          webhookUrl: true,
-          webhookRemark: true,
-        },
-      },
       articles: {
         orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-        select: {
-          id: true,
-          title: true,
-          url: true,
-          eventKey: true,
-          score: true,
-          relevance: true,
-          eventScore: true,
-          contentScore: true,
-          aiConfidence: true,
-          aiStatus: true,
-          publicStatus: true,
-          publicOverride: true,
-          isAd: true,
-          brand: true,
-          category: true,
-          clusterStatus: true,
-          publishedAt: true,
-          createdAt: true,
-          source: { select: { name: true, type: true, publicEnabled: true, deletedAt: true } },
-        },
+        take: MAX_EVENT_DETAIL_ARTICLES,
+        select: eventArticleSelect,
       },
       assignedAudits: {
         orderBy: { createdAt: 'desc' },
@@ -93,21 +86,28 @@ export async function getEventArticles(eventId: string, articleId?: string) {
     },
   });
   if (!event) return null;
-  const { pushLogs, ...eventData } = event;
-  const articlePushStatuses = getLatestArticlePushStatuses(pushLogs);
-  const currentDeliveries = await db.pushDelivery.findMany({
-    where: { eventId },
-    orderBy: { createdAt: 'desc' },
-    select: { targetId: true, status: true },
-  });
-  const currentRepresentativeStatus = getPushStatusFromDeliveries(currentDeliveries);
-  if (event.representativeArticleId && currentRepresentativeStatus !== 'none') {
+  let articles = event.articles;
+  // 成员列表有上限，但详情抽屉打开的目标文章不能因排序靠后而丢失。
+  if (articleId && !articles.some((article) => article.id === articleId)) {
+    const focusedArticle = await db.article.findFirst({
+      where: { id: articleId, eventId },
+      select: eventArticleSelect,
+    });
+    if (focusedArticle) articles = [...articles, focusedArticle];
+  }
+  const eventData = event;
+  const articlePushStatuses = new Map<string, ArticlePushStatus>();
+  const pushTargetStates = await getPushTargetStates(eventId);
+  const currentRepresentativeStatus = getPushStatusFromTargetStates(pushTargetStates);
+  if (event.representativeArticleId) {
+    // 当前启用目标没有任何投递记录时也必须覆盖历史 PushLog 状态，
+    // 否则旧目标的“已推送”会错误地残留在详情页。
     articlePushStatuses.set(event.representativeArticleId, currentRepresentativeStatus);
   }
   const parsedAudits = event.assignedAudits.map((audit) => ({ ...audit, evidence: parseAuditEvidence(audit.evidence) }));
-  const focusArticle = event.articles.find((article) => article.id === articleId)
-    ?? event.articles.find((article) => article.id === event.representativeArticleId)
-    ?? event.articles[0];
+  const focusArticle = articles.find((article) => article.id === articleId)
+    ?? articles.find((article) => article.id === event.representativeArticleId)
+    ?? articles[0];
   const focusArticleId = articleId ?? focusArticle?.id;
   // 候选关联区域展示的是当前文章审计中选中的候选 Event 代表文章；
   // 同品牌区域是更宽的召回，必须排除已经在候选关联展示的 Event，避免同一文章跨区重复。
@@ -141,7 +141,6 @@ export async function getEventArticles(eventId: string, articleId?: string) {
     select: { id: true, representativeArticle: { select: { title: true } } },
   });
   const candidateTitles = new Map(candidateEvents.map((candidate) => [candidate.id, candidate.representativeArticle?.title ?? '']));
-  const pushTargetStates = await getPushTargetStates(eventId);
   return {
     ...eventData,
     pushedAt: event.pushedAt?.toISOString() ?? null,
@@ -181,7 +180,7 @@ export async function getEventArticles(eventId: string, articleId?: string) {
         } : null,
       } : null,
     })),
-    articles: event.articles.map((article) => ({
+    articles: articles.map((article) => ({
       ...article,
       pushStatus: articlePushStatuses.get(article.id) ?? 'none',
       source: {
@@ -208,49 +207,10 @@ function parseAuditEvidence(value: string): Record<string, unknown> {
 
 type ArticlePushStatus = 'success' | 'partial' | 'failure' | 'none';
 
-function getLatestArticlePushStatuses(logs: Array<{
-  id: string;
-  representativeArticleId: string | null;
-  targetId: string | null;
-  status: string;
-  webhookUrl: string;
-  webhookRemark: string;
-}>): Map<string, ArticlePushStatus> {
-  const latestByTarget = new Map<string, (typeof logs)[number]>();
-  for (const log of logs) {
-    const target = log.targetId || log.webhookRemark || log.webhookUrl || log.id;
-    if (!latestByTarget.has(target)) latestByTarget.set(target, log);
-  }
-
-  const statuses = new Map<string, { success: boolean; failure: boolean }>();
-  for (const log of latestByTarget.values()) {
-    if (!log.representativeArticleId) continue;
-    const current = statuses.get(log.representativeArticleId) ?? { success: false, failure: false };
-    if (log.status === 'success') current.success = true;
-    else current.failure = true;
-    statuses.set(log.representativeArticleId, current);
-  }
-
-  return new Map([...statuses].map(([articleId, status]) => [
-    articleId,
-    status.success && status.failure
-      ? 'partial'
-      : status.success
-        ? 'success'
-        : 'failure',
-  ]));
-}
-
-function getPushStatusFromDeliveries(deliveries: Array<{ targetId: string; status: string }>): ArticlePushStatus {
-  const latestByTarget = new Map<string, (typeof deliveries)[number]>();
-  for (const delivery of deliveries) {
-    if (!latestByTarget.has(delivery.targetId)) latestByTarget.set(delivery.targetId, delivery);
-  }
-  const latest = [...latestByTarget.values()];
+function getPushStatusFromTargetStates(targets: Array<{ latestStatus: string }>): ArticlePushStatus {
+  const latest = targets.filter((target) => target.latestStatus !== 'never_attempted');
   if (latest.length === 0) return 'none';
-  const successCount = latest.filter((delivery) => delivery.status === 'succeeded').length;
-  const attemptedCount = latest.filter((delivery) => delivery.status !== 'pending').length;
-  if (attemptedCount === 0) return 'none';
+  const successCount = latest.filter((target) => target.latestStatus === 'success').length;
   if (successCount === latest.length) return 'success';
   if (successCount > 0) return 'partial';
   return 'failure';

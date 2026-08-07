@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CRAWL_LOG_DEFAULT_LIMIT, type CrawlLogSnapshot } from '@/contracts/crawl-log'
 import { fetchCrawlLogJobStatus, fetchCrawlLogSnapshot } from '@/features/crawl-log-api.client'
+import { isRequestAborted } from '@/lib/request-json.client'
 
 export type { CrawlLogSnapshot, JobSnapshot } from '@/contracts/crawl-log'
 
@@ -65,6 +66,8 @@ export function useCrawlLogSnapshot(
   const unmountedRef = useRef<boolean>(false)
   const refreshSnapshotRef = useRef<(() => Promise<boolean>) | null>(null)
   const inFlightPromiseRef = useRef<Promise<boolean> | null>(null)
+  const requestAbortRef = useRef<AbortController | null>(null)
+  const pollingAbortRef = useRef<AbortController | null>(null)
   const snapshotRef = useRef<CrawlLogSnapshot | null>(null)
   const refreshSnapshotRefForPolling = useRef<() => Promise<boolean>>(async () => false)
 
@@ -77,8 +80,10 @@ export function useCrawlLogSnapshot(
     const request = (async () => {
       inFlightRef.current = true
       const myRequestId = ++requestIdRef.current
+      const controller = new AbortController()
+      requestAbortRef.current = controller
       try {
-        const data = await fetchCrawlLogSnapshot(limit)
+        const data = await fetchCrawlLogSnapshot(limit, controller.signal)
         if (unmountedRef.current) return false
         // 慢响应不能覆盖快响应：只应用最后一次响应。
         if (myRequestId !== requestIdRef.current) return false
@@ -88,13 +93,14 @@ export function useCrawlLogSnapshot(
         setError(null)
         return true
       } catch (err: unknown) {
-        if (unmountedRef.current) return false
+        if (unmountedRef.current || isRequestAborted(err)) return false
         if (myRequestId !== requestIdRef.current) return false
         const msg = err instanceof Error ? err.message : String(err)
         setError(msg)
         return false
       } finally {
         inFlightRef.current = false
+        if (requestAbortRef.current === controller) requestAbortRef.current = null
         // 同一 refresh 调用期间收到新的拉取请求，立即补拉一次。
         if (dirtyRef.current && !unmountedRef.current) {
           dirtyRef.current = false
@@ -138,8 +144,11 @@ export function useCrawlLogSnapshot(
             // 轻量 Job 请求可能与手动/完整 snapshot 请求并发；若期间
             // 已开始新的完整请求，不能让旧的轻量结果回写覆盖新快照。
             const pollRequestId = requestIdRef.current
+            const pollController = new AbortController()
+            pollingAbortRef.current = pollController
+            const pollTimeout = window.setTimeout(() => pollController.abort(), 10_000)
             try {
-              const jobs = await fetchCrawlLogJobStatus()
+              const jobs = await fetchCrawlLogJobStatus(pollController.signal)
               if (!unmountedRef.current && pollRequestId === requestIdRef.current) {
                 const jobChanged = jobs.activeJob?.id !== current.activeJob.id
                 const stageChanged = jobs.activeJob?.currentStage !== current.activeJob.currentStage
@@ -155,6 +164,9 @@ export function useCrawlLogSnapshot(
               }
             } catch {
               // 轻快照失败不清空已有页面，下一轮继续。
+            } finally {
+              window.clearTimeout(pollTimeout)
+              if (pollingAbortRef.current === pollController) pollingAbortRef.current = null
             }
           } else {
             await refreshSnapshotRefForPolling.current()
@@ -166,6 +178,8 @@ export function useCrawlLogSnapshot(
     schedule()
     return () => {
       unmountedRef.current = true
+      requestAbortRef.current?.abort()
+      pollingAbortRef.current?.abort()
       if (timer !== undefined) window.clearTimeout(timer)
     }
   }, [enabled, idlePollIntervalMs, pollIntervalMs, refreshSnapshot])

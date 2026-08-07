@@ -4,6 +4,7 @@ import { recalculateEvent } from '@/lib/event/event-recalculation-service';
 import { refreshEventPublicPublication } from '@/lib/public-publication-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import type { Prisma } from '@prisma/client';
+import { assertNotAborted } from '@/lib/worker-stop';
 
 const EVENT_REPAIR_BATCH_SIZE = 100;
 
@@ -12,7 +13,6 @@ export interface ConsistencyViolation {
   issue: string;
   severity: 'error' | 'warning';
 }
-
 /**
  * 事件归属的基础事实必须在同一事务内提交；此表只记录事务后公开快照刷新失败、
  * 或旧版本留下的待修复状态，供受控的后台恢复使用。
@@ -45,7 +45,8 @@ async function refreshDirtyEvent(eventId: string): Promise<boolean> {
 }
 
 /** 只修复被明确标记的 Event，避免每分钟扫描整张 Event 表。 */
-export async function repairDirtyEvents(limit = EVENT_REPAIR_BATCH_SIZE): Promise<number> {
+export async function repairDirtyEvents(limit = EVENT_REPAIR_BATCH_SIZE, signal?: AbortSignal): Promise<number> {
+  assertNotAborted(signal);
   const rows = await db.eventDirty.findMany({
     take: Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)),
     select: { eventId: true },
@@ -54,8 +55,10 @@ export async function repairDirtyEvents(limit = EVENT_REPAIR_BATCH_SIZE): Promis
   let repaired = 0;
   for (const eventId of eventIds) {
     try {
+      assertNotAborted(signal);
       if (await refreshDirtyEvent(eventId)) repaired++;
     } catch (error) {
+      if (signal?.aborted) throw error;
       console.error(`[event-consistency] dirty Event repair failed event=${eventId}:`, error);
     }
   }
@@ -456,26 +459,4 @@ export async function scanEventConsistency(): Promise<ConsistencyViolation[]> {
   }
 
   return violations;
-}
-
-/**
- * 自动修复已知的不一致。批处理，不中断。
- */
-export async function autoRepairEventConsistency(): Promise<number> {
-  let repairs = await repairAttachedClusterFailures();
-
-  // 优先消费显式脏记录；正常运行不再做全表重算。
-  repairs += await repairDirtyEvents();
-
-  // 管理员手动触发的全量一致性校验仍保留，用于诊断历史残留。
-  const events = await db.event.findMany({
-    where: { status: 'active' },
-    select: { id: true },
-  });
-  for (const { id } of events) {
-    await recalculateEventById(id);
-    repairs++;
-  }
-
-  return repairs;
 }

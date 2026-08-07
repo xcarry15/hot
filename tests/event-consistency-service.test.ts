@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
-import { markEventDirty } from '@/lib/event/event-consistency-service';
+import { markEventDirty, repairDirtyEvents } from '@/lib/event/event-consistency-service';
 
 describe('Event 脏标记', () => {
   beforeEach(() => {
@@ -16,5 +16,19 @@ describe('Event 脏标记', () => {
       create: expect.objectContaining({ eventId: 'event-1', reason: 'x'.repeat(500) }),
       update: expect.objectContaining({ reason: 'x'.repeat(500) }),
     }));
+  });
+
+  it('脏 Event 修复过程中取消会立即向上抛出', async () => {
+    const controller = new AbortController();
+    const eventDirtyFindMany = db.eventDirty.findMany as unknown as {
+      mockImplementationOnce: (implementation: () => Promise<Array<{ eventId: string }>>) => void;
+    };
+    eventDirtyFindMany.mockImplementationOnce(async () => {
+      controller.abort();
+      return [{ eventId: 'event-1' }];
+    });
+
+    await expect(repairDirtyEvents(undefined, controller.signal)).rejects.toThrow();
+    expect(db.event.findUnique).not.toHaveBeenCalled();
   });
 });

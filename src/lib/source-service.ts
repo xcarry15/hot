@@ -10,6 +10,7 @@ export type SourceUpdateInput = z.infer<typeof sourceUpdateSchema>;
 
 export class DuplicateSourceIdentityError extends Error {
   readonly status = 409;
+  readonly exposeToClient = true;
 
   constructor(name: string) {
     super(`数据源已存在：${name}`);
@@ -19,6 +20,7 @@ export class DuplicateSourceIdentityError extends Error {
 
 export class SourceNotFoundError extends Error {
   readonly status = 404;
+  readonly exposeToClient = true;
 
   constructor() {
     super('数据源不存在或已删除');
@@ -68,16 +70,20 @@ export async function updateSource(id: string, input: SourceUpdateInput) {
     },
   });
   // 先提交来源状态，再分批同步派生公开快照；不能把整来源文章放进同一事务。
-  if (input.publicEnabled !== undefined) await refreshPublicPublicationsForSource(id);
-  if (input.publicEnabled !== undefined) invalidatePublicArticleCache();
+  if (input.publicEnabled !== undefined) {
+    // 先清掉详情/列表缓存。即使后续派生同步因锁或进程故障中断，
+    // 公开读取也不会继续命中旧的已公开内容。
+    invalidatePublicArticleCache();
+    await refreshPublicPublicationsForSource(id);
+  }
   return source;
 }
 
 export async function softDeleteSource(id: string) {
   await assertActiveSource(id);
   const source = await db.source.update({ where: { id }, data: { deletedAt: new Date(), enabled: false } });
-  await refreshPublicPublicationsForSource(id);
   invalidatePublicArticleCache();
+  await refreshPublicPublicationsForSource(id);
   return source;
 }
 
