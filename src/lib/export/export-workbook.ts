@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import * as XLSX from 'xlsx';
-import type { ExportFilter } from '@/contracts/data-export';
+import { EXPORT_FORMAT_VERSION, type ExportFilter } from '@/contracts/data-export';
 
 export const EXPORT_BATCH_SIZE = 250;
 export const EXPORT_CONTENT_CHUNK_SIZE = 30_000;
@@ -22,6 +22,12 @@ export interface ExportWorkbookResult {
   mainRecordTotal: number;
 }
 
+export interface ExportWorkbookOptions {
+  exportJobId: string;
+  applicationVersion?: string;
+  exportStartedAt?: Date;
+}
+
 interface SheetBuilder {
   append(rows: SheetRow[]): void;
   count: number;
@@ -29,19 +35,53 @@ interface SheetBuilder {
 
 const SENSITIVE_KEY_PATTERN = /(?:api[-_]?key|authorization|cookie|credential|password|secret|signature|token|webhook)/i;
 const SENSITIVE_QUERY_KEY_PATTERN = /(?:api[-_]?key|authorization|cookie|credential|password|secret|signature|token|webhook)/i;
+const STATUS_LABELS: Record<string, string> = {
+  pending: '待处理',
+  fetched: '已抓取',
+  failed: '失败',
+  clustered: '已聚类',
+  needs_review: '待复核',
+  done: '已完成',
+  skipped: '已跳过',
+  unpublished: '未公开',
+  published: '已公开',
+  revoked: '已撤回',
+  active: '有效',
+  never_fetched: '未抓取',
+  normal: '正常',
+  breaker: '熔断中',
+  merged: '已合并',
+  confirmed: '已确认',
+  queued: '排队中',
+  running: '运行中',
+  cancel_requested: '取消中',
+  succeeded: '成功',
+  completed: '已完成',
+  cancelled: '已取消',
+  success: '成功',
+  failure: '失败',
+  warning: '警告',
+  sending: '发送中',
+  disabled: '已停用',
+  ignored: '已忽略',
+  applied: '已应用',
+  dismissed: '已驳回',
+  approved: '已批准',
+  unknown: '未知',
+};
 
 const ARTICLE_HEADERS = [
   'articleId', 'sourceId', 'sourceName', 'url', 'title', 'originalSource', 'contentHash',
-  'rawContentLength', 'cleanContentLength', 'articleBodyLength', 'searchText',
-  'eventId', 'clusterStatus', 'clusteredAt', 'clusterError', 'clusterRetryCount', 'nextClusterRetryAt',
+  'rawContentLength', 'cleanContentLength', 'articleBodyLength', 'searchText', 'searchIndexUpdatedAt',
+  'eventId', 'clusterStatus', 'clusterStatusLabel', 'clusteredAt', 'clusterError', 'clusterRetryCount', 'nextClusterRetryAt',
   'eventSubjects', 'eventAction', 'eventObject', 'eventKey', 'eventKeyConfidence',
-  'fetchStatus', 'fetchError', 'fetchRetryCount', 'nextFetchRetryAt', 'technicalIgnoredAt',
+  'fetchStatus', 'fetchStatusLabel', 'fetchError', 'fetchRetryCount', 'nextFetchRetryAt', 'technicalIgnoredAt',
   'relevance', 'summary', 'brand', 'category', 'keyPoints', 'score', 'keywordMatched',
   'eventScore', 'contentScore', 'rawScore', 'adProbability', 'aiConfidence',
   'scorePolicyVersion', 'aiModel', 'aiProvider', 'promptHash', 'scorePolicySnapshot',
-  'promptVersion', 'aiStatus', 'aiError', 'aiSnapshot', 'manualOverrides', 'manualCorrectedAt',
+  'promptVersion', 'aiStatus', 'aiStatusLabel', 'aiError', 'aiSnapshot', 'manualOverrides', 'manualCorrectedAt',
   'skipReason', 'aiRetryCount', 'nextAiRetryAt', 'isAd',
-  'publicOverride', 'publicStatus', 'publicPublishedAt', 'publicRevokedAt',
+  'publicOverride', 'publicStatus', 'publicStatusLabel', 'publicPublishedAt', 'publicRevokedAt',
   'publicPublicationReason', 'publicPublicationEvaluatedAt', 'publicContentUpdatedAt',
   'viewCount', 'originalClickCount', 'publishedAt', 'createdAt', 'updatedAt',
   'isRepresentative', 'representativeEventId', 'eventStatus', 'eventPushedAt',
@@ -49,9 +89,9 @@ const ARTICLE_HEADERS = [
 
 const ARTICLE_CONTENT_HEADERS = ['articleId', 'contentType', 'chunkNo', 'chunkTotal', 'contentChunk'] as const;
 const EVENT_HEADERS = [
-  'eventId', 'status', 'clusterReviewStatus', 'mergedIntoId', 'representativeArticleId',
+  'eventId', 'status', 'statusLabel', 'clusterReviewStatus', 'clusterReviewStatusLabel', 'mergedIntoId', 'representativeArticleId',
   'representativeManual', 'firstSeenAt', 'lastSeenAt', 'articleCount', 'publicStatus',
-  'publicPublishedAt', 'publicRevokedAt', 'publicDateKey', 'publicSortAt', 'pushedAt',
+  'publicStatusLabel', 'publicPublishedAt', 'publicRevokedAt', 'publicDateKey', 'publicSortAt', 'pushedAt',
   'viewCount', 'originalClickCount', 'nextPushRetryAt', 'pushRetryCount', 'createdAt', 'updatedAt',
   'dirtyReason',
 ] as const;
@@ -63,12 +103,12 @@ const EVENT_AUDIT_HEADERS = [
   'decisionSource', 'confidence', 'evidence', 'createdAt',
 ] as const;
 const SOURCE_HEADERS = [
-  'sourceId', 'name', 'type', 'url', 'parserConfig', 'enabled', 'publicEnabled', 'status',
+  'sourceId', 'name', 'type', 'url', 'parserConfig', 'enabled', 'publicEnabled', 'status', 'statusLabel',
   'consecutiveFailures', 'circuitBreakerUntil', 'lastFetchedAt', 'createdAt', 'updatedAt', 'deletedAt',
 ] as const;
-const FETCH_LOG_HEADERS = ['fetchLogId', 'sourceId', 'status', 'errorMessage', 'itemsFound', 'createdAt'] as const;
+const FETCH_LOG_HEADERS = ['fetchLogId', 'sourceId', 'status', 'statusLabel', 'errorMessage', 'itemsFound', 'createdAt'] as const;
 const JOB_HEADERS = [
-  'jobId', 'type', 'status', 'payload', 'result', 'error', 'currentStage', 'progressTotal',
+  'jobId', 'type', 'status', 'statusLabel', 'payload', 'result', 'error', 'currentStage', 'progressTotal',
   'progressDone', 'progressErrors', 'currentItemLabel', 'heartbeatAt', 'leaseOwner',
   'leaseExpiresAt', 'attempt', 'maxAttempts', 'idempotencyKey', 'availableAt', 'cancelRequestedAt',
   'createdAt', 'updatedAt', 'startedAt', 'completedAt',
@@ -76,11 +116,11 @@ const JOB_HEADERS = [
 const PUSH_TARGET_HEADERS = ['targetId', 'name', 'urlHash', 'enabled', 'createdAt', 'updatedAt'] as const;
 const PUSH_DELIVERY_HEADERS = [
   'deliveryId', 'eventId', 'targetId', 'representativeArticleId', 'contentVersion', 'mode',
-  'status', 'idempotencyKey', 'attempt', 'lastError', 'leaseOwner', 'leaseExpiresAt',
+  'status', 'statusLabel', 'idempotencyKey', 'attempt', 'lastError', 'leaseOwner', 'leaseExpiresAt',
   'createdAt', 'updatedAt', 'sentAt', 'completedAt',
 ] as const;
 const PUSH_LOG_HEADERS = [
-  'pushLogId', 'eventId', 'representativeArticleId', 'targetId', 'status', 'errorMessage',
+  'pushLogId', 'eventId', 'representativeArticleId', 'targetId', 'status', 'statusLabel', 'errorMessage',
   'retryCount', 'webhookRemark', 'createdAt',
 ] as const;
 const INTERACTION_HEADERS = [
@@ -88,8 +128,8 @@ const INTERACTION_HEADERS = [
 ] as const;
 const KEYWORD_HIT_HEADERS = ['articleId', 'keywordId', 'createdAt'] as const;
 const KEYWORD_HEADERS = ['keywordId', 'category', 'word', 'createdAt'] as const;
-const KEYWORD_CANDIDATE_HEADERS = ['candidateId', 'phrase', 'occurrences', 'sampleTitles', 'status', 'createdAt', 'updatedAt'] as const;
-const TUNING_HEADERS = ['suggestionId', 'kind', 'title', 'detail', 'payload', 'status', 'createdAt', 'appliedAt'] as const;
+const KEYWORD_CANDIDATE_HEADERS = ['candidateId', 'phrase', 'occurrences', 'sampleTitles', 'status', 'statusLabel', 'createdAt', 'updatedAt'] as const;
+const TUNING_HEADERS = ['suggestionId', 'kind', 'title', 'detail', 'payload', 'status', 'statusLabel', 'createdAt', 'appliedAt'] as const;
 const DISCARDED_HEADERS = [
   'discardedId', 'sourceId', 'title', 'url', 'reason', 'detail', 'winnerArticleId', 'publishedAt', 'createdAt',
 ] as const;
@@ -120,10 +160,13 @@ function redactUnknown(value: unknown, key = ''): unknown {
 }
 
 function redactSensitiveText(value: string): string {
-  return value.replace(
+  return value
+    .replace(/\bAuthorization\s*[:=]?\s*Bearer\s+\S+/gi, 'Authorization=[REDACTED]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(
     /((?:api[-_]?key|authorization|cookie|credential|password|secret|signature|token|webhook))\s*[:=]\s*("[^"]*"|'[^']*'|[^\s,;]+)/gi,
     '$1=[REDACTED]',
-  );
+    );
 }
 
 function redactJson(value: string | null | undefined): string {
@@ -147,16 +190,6 @@ function safeUrl(value: string | null | undefined): string {
     return url.toString();
   } catch {
     return redactSensitiveText(value);
-  }
-}
-
-function readableJsonArray(value: string | null | undefined): string {
-  if (!value) return '';
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map((item) => String(item)).join('、') : '';
-  } catch {
-    return '';
   }
 }
 
@@ -256,7 +289,7 @@ function buildArticleWhere(filter: ExportFilter, snapshotAt: Date): Prisma.Artic
   if (filter.dateField === 'createdAt') {
     conditions[0] = { createdAt: { lte: snapshotAt, ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } };
   } else if (filter.dateField === 'publishedAt') {
-    conditions.push({ publishedAt: { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } });
+    conditions.push({ publishedAt: { lte: snapshotAt, ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } });
   } else {
     conditions.push({ updatedAt: { lte: snapshotAt, ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } });
   }
@@ -269,8 +302,8 @@ function buildDiscardedWhere(filter: ExportFilter, snapshotAt: Date): Prisma.Dis
   const from = parseDate(filter.from);
   const to = parseDate(filter.to);
   if (filter.dateField === 'publishedAt') {
-    where.publishedAt = { ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) };
-  } else if (filter.dateField === 'createdAt') {
+    where.publishedAt = { lte: snapshotAt, ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) };
+  } else if (filter.dateField === 'createdAt' || filter.dateField === 'updatedAt') {
     where.createdAt = { lte: snapshotAt, ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) };
   }
   return where;
@@ -296,7 +329,7 @@ function makeArticleRow(article: Prisma.ArticleGetPayload<{
     source: true;
     searchIndex: true;
     event: { select: { id: true; status: true; pushedAt: true } };
-    representedEvent: { select: { id: true } };
+    representedEvent: { select: { id: true; representativeManual: true } };
   };
 }>): SheetRow {
   return [
@@ -311,8 +344,10 @@ function makeArticleRow(article: Prisma.ArticleGetPayload<{
     article.cleanContent.length,
     article.articleBody.length,
     article.searchIndex?.searchText ?? '',
+    dateCell(article.searchIndex?.updatedAt),
     article.eventId ?? '',
     article.clusterStatus,
+    STATUS_LABELS[article.clusterStatus] ?? article.clusterStatus,
     dateCell(article.clusteredAt),
     redactSensitiveText(article.clusterError ?? ''),
     article.clusterRetryCount,
@@ -323,6 +358,7 @@ function makeArticleRow(article: Prisma.ArticleGetPayload<{
     article.eventKey,
     article.eventKeyConfidence,
     article.fetchStatus,
+    STATUS_LABELS[article.fetchStatus] ?? article.fetchStatus,
     redactSensitiveText(article.fetchError ?? ''),
     article.fetchRetryCount,
     dateCell(article.nextFetchRetryAt),
@@ -346,9 +382,10 @@ function makeArticleRow(article: Prisma.ArticleGetPayload<{
     redactJson(article.scorePolicySnapshot),
     article.promptVersion,
     article.aiStatus,
+    STATUS_LABELS[article.aiStatus] ?? article.aiStatus,
     redactSensitiveText(article.aiError ?? ''),
     redactJson(article.aiSnapshot),
-    jsonText(article.manualOverrides),
+    redactJson(article.manualOverrides),
     dateCell(article.manualCorrectedAt),
     redactSensitiveText(article.skipReason ?? ''),
     article.aiRetryCount,
@@ -356,6 +393,7 @@ function makeArticleRow(article: Prisma.ArticleGetPayload<{
     article.isAd,
     article.publicOverride,
     article.publicStatus,
+    STATUS_LABELS[article.publicStatus] ?? article.publicStatus,
     dateCell(article.publicPublishedAt),
     dateCell(article.publicRevokedAt),
     article.publicPublicationReason,
@@ -380,7 +418,9 @@ function makeEventRow(
   return [
     event.id,
     event.status,
+    STATUS_LABELS[event.status] ?? event.status,
     event.clusterReviewStatus,
+    STATUS_LABELS[event.clusterReviewStatus] ?? event.clusterReviewStatus,
     event.mergedIntoId ?? '',
     event.representativeArticleId ?? '',
     event.representativeManual,
@@ -388,6 +428,7 @@ function makeEventRow(
     dateCell(event.lastSeenAt),
     event.articleCount,
     event.publicStatus,
+    STATUS_LABELS[event.publicStatus] ?? event.publicStatus,
     dateCell(event.publicPublishedAt),
     dateCell(event.publicRevokedAt),
     event.publicDateKey,
@@ -408,6 +449,7 @@ export async function buildExportWorkbook(
   filter: ExportFilter,
   snapshotAt: Date,
   onProgress?: (progress: ExportProgress) => Promise<void>,
+  options: ExportWorkbookOptions = { exportJobId: '' },
 ): Promise<ExportWorkbookResult> {
   const workbook = XLSX.utils.book_new();
   const sheets: Record<string, SheetBuilder> = {};
@@ -457,7 +499,7 @@ export async function buildExportWorkbook(
         source: true,
         searchIndex: true,
         event: { select: { id: true, status: true, pushedAt: true } },
-        representedEvent: { select: { id: true } },
+        representedEvent: { select: { id: true, representativeManual: true } },
       },
       orderBy: { id: 'asc' },
       take: EXPORT_BATCH_SIZE,
@@ -469,7 +511,7 @@ export async function buildExportWorkbook(
       article.id,
       article.eventId ?? '',
       Boolean(article.representedEvent),
-      Boolean(article.representedEvent),
+      Boolean(article.representedEvent?.representativeManual),
       article.event?.status ?? '',
       article.eventKey,
     ]));
@@ -567,6 +609,7 @@ export async function buildExportWorkbook(
     source.enabled,
     source.publicEnabled,
     source.status,
+    STATUS_LABELS[source.status] ?? source.status,
     source.consecutiveFailures,
     dateCell(source.circuitBreakerUntil),
     dateCell(source.lastFetchedAt),
@@ -582,13 +625,22 @@ export async function buildExportWorkbook(
       await appendByIdChunks(sourceIds, async (chunk) => tx.fetchLog.findMany({ where: { sourceId: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' } }), (loaded) => rows.push(...loaded));
       return rows;
     })();
-  sheets.FetchLogs.append(fetchLogs.map((row) => [row.id, row.sourceId, row.status, redactSensitiveText(row.errorMessage), row.itemsFound, dateCell(row.createdAt)]));
+  sheets.FetchLogs.append(fetchLogs.map((row) => [
+    row.id,
+    row.sourceId,
+    row.status,
+    STATUS_LABELS[row.status] ?? row.status,
+    redactSensitiveText(row.errorMessage),
+    row.itemsFound,
+    dateCell(row.createdAt),
+  ]));
 
   const jobs = await tx.job.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' } });
   sheets.Jobs.append(jobs.map((job) => [
     job.id,
     job.type,
     job.status,
+    STATUS_LABELS[job.status] ?? job.status,
     redactJson(job.payload),
     redactJson(job.result),
     redactSensitiveText(job.error),
@@ -623,15 +675,42 @@ export async function buildExportWorkbook(
   const keywords = await tx.keyword.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' } });
   sheets.Keywords.append(keywords.map((row) => [row.id, row.category, row.word, dateCell(row.createdAt)]));
   const candidates = await tx.keywordCandidate.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' } });
-  sheets.KeywordCandidates.append(candidates.map((row) => [row.id, row.phrase, row.occurrences, jsonText(row.sampleTitles), row.status, dateCell(row.createdAt), dateCell(row.updatedAt)]));
+  sheets.KeywordCandidates.append(candidates.map((row) => [
+    row.id,
+    row.phrase,
+    row.occurrences,
+    jsonText(row.sampleTitles),
+    row.status,
+    STATUS_LABELS[row.status] ?? row.status,
+    dateCell(row.createdAt),
+    dateCell(row.updatedAt),
+  ]));
   const suggestions = await tx.tuningSuggestion.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' } });
-  sheets.TuningSuggestions.append(suggestions.map((row) => [row.id, row.kind, row.title, row.detail, redactJson(row.payload), row.status, dateCell(row.createdAt), dateCell(row.appliedAt)]));
+  sheets.TuningSuggestions.append(suggestions.map((row) => [
+    row.id,
+    row.kind,
+    row.title,
+    row.detail,
+    redactJson(row.payload),
+    row.status,
+    STATUS_LABELS[row.status] ?? row.status,
+    dateCell(row.createdAt),
+    dateCell(row.appliedAt),
+  ]));
 
   const retryAudits = !filter.includeDiscarded
     ? []
     : fullScope
       ? await tx.discardedRetryAudit.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' } })
-      : await tx.discardedRetryAudit.findMany({ where: { sourceId: { in: [...sourceIds] }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' } });
+      : await (async () => {
+        const rows: Prisma.DiscardedRetryAuditGetPayload<object>[] = [];
+        await appendByIdChunks(
+          discardedIds,
+          async (chunk) => tx.discardedRetryAudit.findMany({ where: { discardedId: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' } }),
+          (loaded) => rows.push(...loaded),
+        );
+        return rows;
+      })();
   sheets.DiscardedRetryAudits.append(retryAudits.map((row) => [
     row.id,
     row.discardedId,
@@ -662,6 +741,7 @@ export async function buildExportWorkbook(
     row.contentVersion,
     row.mode,
     row.status,
+    STATUS_LABELS[row.status] ?? row.status,
     row.idempotencyKey,
     row.attempt,
     redactSensitiveText(row.lastError),
@@ -687,6 +767,7 @@ export async function buildExportWorkbook(
     row.representativeArticleId ?? '',
     row.targetId ?? '',
     row.status,
+    STATUS_LABELS[row.status] ?? row.status,
     redactSensitiveText(row.errorMessage),
     row.retryCount,
     redactSensitiveText(row.webhookRemark),
@@ -720,16 +801,31 @@ export async function buildExportWorkbook(
     dateCell(row.updatedAt),
   ]));
 
-  const counts = Object.fromEntries(Object.entries(sheets).map(([name, builder]) => [name, builder.count]));
-  sheets.ExportMeta.append([
-    ['exportFormatVersion', 1],
+  const exportCompletedAt = new Date();
+  const metadataRows: SheetRow[] = [
+    ['exportJobId', options.exportJobId],
+    ['exportFormatVersion', EXPORT_FORMAT_VERSION],
+    ['applicationVersion', options.applicationVersion ?? process.env.npm_package_version ?? 'unknown'],
+    ['exportStartedAt', options.exportStartedAt ?? snapshotAt],
+    ['exportStartedAtIso', (options.exportStartedAt ?? snapshotAt).toISOString()],
+    ['exportCompletedAt', exportCompletedAt],
+    ['exportCompletedAtIso', exportCompletedAt.toISOString()],
     ['snapshotAt', snapshotAt],
+    ['snapshotAtIso', snapshotAt.toISOString()],
     ['timezone', 'Asia/Shanghai'],
     ['filter', JSON.stringify(filter)],
     ['articleCount', articleTotal],
     ['discardedItemCount', discardedTotal],
-    ['countSummary', JSON.stringify(counts)],
-  ]);
+  ];
+  const counts = Object.fromEntries(Object.entries(sheets).map(([name, builder]) => [name, builder.count]));
+  const exportMetaCount = metadataRows.length + 3;
+  const errorSummary = Object.fromEntries([...Object.keys(counts), 'ExportMeta'].map((name) => [name, 0]));
+  metadataRows.push(
+    ['errorCount', 0],
+    ['errorSummary', JSON.stringify(errorSummary)],
+    ['countSummary', JSON.stringify({ ...counts, ExportMeta: exportMetaCount })],
+  );
+  sheets.ExportMeta.append(metadataRows);
 
   const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer', cellDates: true, compression: true }) as Buffer;
   return { buffer, counts: { ...counts, ExportMeta: sheets.ExportMeta.count }, mainRecordTotal };

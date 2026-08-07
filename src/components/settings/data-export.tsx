@@ -129,7 +129,7 @@ export default function DataExportPanel() {
   useEffect(() => {
     let active = true
     void Promise.all([loadJobs(), fetchSources().then((items) => {
-      if (active) setSources(items.filter((item) => !item.id || item.name).map((item) => ({ id: item.id, name: item.name })))
+      if (active) setSources(items.filter((item) => item.id && item.name).map((item) => ({ id: item.id, name: item.name })))
     }).catch(() => undefined)])
     return () => { active = false }
   }, [loadJobs])
@@ -203,7 +203,7 @@ export default function DataExportPanel() {
             <Input type="datetime-local" value={fromIso(filter.from)} onChange={(event) => updateFilter('from', toShanghaiIso(event.target.value))} className="h-9 text-xs" />
           </label>
           <label className="space-y-1 text-xs">
-            <span className="text-muted-foreground">结束时间（上海）</span>
+            <span className="text-muted-foreground">结束时间（上海，不含）</span>
             <Input type="datetime-local" value={fromIso(filter.to)} onChange={(event) => updateFilter('to', toShanghaiIso(event.target.value))} className="h-9 text-xs" />
           </label>
           <label className="space-y-1 text-xs">
