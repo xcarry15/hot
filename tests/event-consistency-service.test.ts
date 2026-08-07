@@ -20,7 +20,10 @@ describe('Event 脏标记', () => {
 
   it('脏 Event 修复过程中取消会立即向上抛出', async () => {
     const controller = new AbortController();
-    db.eventDirty.findMany.mockImplementationOnce(async () => {
+    const eventDirtyFindMany = db.eventDirty.findMany as unknown as {
+      mockImplementationOnce: (implementation: () => Promise<Array<{ eventId: string }>>) => void;
+    };
+    eventDirtyFindMany.mockImplementationOnce(async () => {
       controller.abort();
       return [{ eventId: 'event-1' }];
     });
