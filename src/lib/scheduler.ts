@@ -19,6 +19,7 @@ import { cleanupExpiredSendingDeliveries } from './push/delivery';
 import { hasDueTechnicalRecovery } from './technical-work-queue-service';
 import { hasDirtyEvents } from './event/event-consistency-service';
 import { hasPendingSettingsRebuild } from './settings-rebuild-service';
+import { cleanupExpiredExportJobs, startExportWorker } from './export/export-service';
 import {
   DEFAULT_QUIET_END,
   DEFAULT_QUIET_START,
@@ -323,6 +324,8 @@ async function runSchedulerTickInternal(): Promise<void> {
   await resumeQueuedJob();
   // sending 租约到期后结果无法确定，必须及时转为人工确认，不能只等进程重启。
   await cleanupExpiredSendingDeliveries();
+  await cleanupExpiredExportJobs();
+  startExportWorker();
   const settings = await readAllSettings();
   await maybeEnqueueSettingsRebuild();
   await maybeEnqueueCrawl(settings);
@@ -373,6 +376,10 @@ export function startScheduler(): void {
   void cleanupExpiredSendingDeliveries().catch((error) => {
     console.error('[scheduler] initial delivery cleanup failed:', error);
   });
+  void cleanupExpiredExportJobs().catch((error) => {
+    console.error('[scheduler] initial export cleanup failed:', error);
+  });
+  startExportWorker();
 
   // Crawl: 1-minute tick with interval check
   nodeCron.schedule('* * * * *', async () => {

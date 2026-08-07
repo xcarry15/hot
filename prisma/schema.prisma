@@ -477,3 +477,40 @@ model Job {
   @@index([idempotencyKey])
   @@map("jobs")
 }
+
+enum ExportJobStatus {
+  queued
+  running
+  succeeded
+  failed
+  cancelled
+  expired
+}
+
+/// 管理后台文章全量导出任务；与抓取流水线 Job 分离，避免互相占用阶段状态。
+model ExportJob {
+  id                String          @id @default(cuid())
+  status            ExportJobStatus @default(queued)
+  filterSnapshot    String          @default("{}")
+  snapshotAt        DateTime
+  progressTotal     Int             @default(0)
+  progressDone      Int             @default(0)
+  progressErrors    Int             @default(0)
+  currentSheet      String          @default("")
+  currentItemLabel  String          @default("")
+  fileName          String          @default("")
+  storageKey        String          @default("")
+  fileSizeBytes     Int?
+  error             String          @default("")
+  attempt           Int             @default(0)
+  cancelRequestedAt DateTime?
+  expiresAt         DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  startedAt         DateTime?
+  completedAt       DateTime?
+
+  @@index([status, createdAt])
+  @@index([expiresAt, status])
+  @@map("export_jobs")
+}

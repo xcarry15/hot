@@ -31,6 +31,7 @@ import {
   type MaintenanceAction,
 } from '@/features/maintenance-api.client'
 import { exportSettings, saveSettings } from '@/features/settings-api.client'
+import DataExportPanel from '@/components/settings/data-export'
 
 export default function DataTab() {
   const [cleanupStats, setCleanupStats] = useState<Record<string, number> | null>(null)
@@ -240,6 +241,8 @@ export default function DataTab() {
           <p className="text-xs text-muted-foreground">⚠️ 配置备份包含所有可编辑设置、API 密钥和 Webhook，请妥善保管导出的文件。</p>
         </CardContent>
       </Card>
+
+      <DataExportPanel />
 
       {/* 数据 */}
       <Card className="py-0">
