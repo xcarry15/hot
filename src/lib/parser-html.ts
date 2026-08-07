@@ -9,7 +9,7 @@ import { resolveUrl } from './url-utils';
 import { extractDateFromUrl, extractMetaPublishedAt } from './date-utils';
 import type { CrawlResult } from '@/contracts/crawl';
 import { assertNotAborted } from './worker-stop';
-import { readZaiPage } from './zai-page-reader';
+import { readZaiPage } from '@/lib/zai-page-reader';
 
 interface HtmlConfig {
   listItem?: string;

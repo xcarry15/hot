@@ -191,6 +191,7 @@ export async function getRelatedArticles(
 
   const brands = splitBrands(article.brand);
   const cutoff = new Date(Date.now() - RELATED_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const visibility = options.visibility ?? (options.onlyPushed ? 'pushed' : null);
   const eventVisibilityWhere = buildEventVisibilityWhere(options);
   const sameEventBranch: Prisma.ArticleWhereInput | null = article.eventId
     ? {
@@ -216,6 +217,11 @@ export async function getRelatedArticles(
       id: { not: id },
       AND: [
         { OR: relationBranches },
+        ...(visibility === 'public'
+          ? [{ source: { is: { publicEnabled: true, deletedAt: null } } }]
+          : visibility === 'pushed'
+            ? [{ source: { is: { deletedAt: null } } }]
+            : []),
         {
           OR: [
             { publishedAt: { gte: cutoff } },

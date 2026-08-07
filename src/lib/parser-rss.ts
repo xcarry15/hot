@@ -2,7 +2,7 @@ import type { CrawlResult } from '@/contracts/crawl';
 import { assertNotAborted } from './worker-stop';
 import { ensureResponseTextWithinLimit } from './http';
 import { resolveUrl } from './url-utils';
-import { readZaiPage } from './zai-page-reader';
+import { readZaiPage } from '@/lib/zai-page-reader';
 
 interface RssConfig {
   feedUrl?: string;

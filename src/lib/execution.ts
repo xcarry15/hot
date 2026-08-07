@@ -81,14 +81,14 @@ export interface RunJobAccepted {
   jobId: string;
 }
 
-function computeIdempotencyKey(type: JobType, payload: Record<string, unknown>): string {
+export function computeIdempotencyKey(type: JobType, payload: Record<string, unknown>): string {
   if (payload.idempotencyKey && typeof payload.idempotencyKey === 'string') {
     return payload.idempotencyKey;
   }
   const trigger = typeof payload.trigger === 'string' ? payload.trigger : 'manual';
   if (trigger === 'auto_retry') {
     const minute = new Date().toISOString().slice(0, 16);
-    return `technical-retry:${minute}`;
+    return `technical-retry:${type}:${minute}`;
   }
   if (trigger === 'auto') {
     const now = new Date();

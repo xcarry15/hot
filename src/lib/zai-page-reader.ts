@@ -1,7 +1,7 @@
-import { getZAI } from './zai';
-import { withTimeout } from './shared/async';
-import { assertSafeOutboundUrl } from './outbound-url';
-import { assertNotAborted } from './worker-stop';
+import { getZAI } from '@/lib/zai';
+import { withTimeout } from '@/lib/shared/async';
+import { assertSafeOutboundUrl } from '@/lib/outbound-url';
+import { assertNotAborted } from '@/lib/worker-stop';
 
 const PAGE_READER_TIMEOUT_MS = 30_000;
 const PAGE_READER_MAX_IN_FLIGHT = 2;

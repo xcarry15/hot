@@ -13,7 +13,7 @@ import {
 import { extractMetaPublishedAt } from './date-utils';
 import { computeContentFingerprint } from './content-fingerprint';
 import { assertNotAborted } from './worker-stop';
-import { readZaiPage } from './zai-page-reader';
+import { readZaiPage } from '@/lib/zai-page-reader';
 
 const DIRECT_FETCH_TIMEOUT_MS = 20000;
 export const FETCH_MAX_RETRIES = 5;

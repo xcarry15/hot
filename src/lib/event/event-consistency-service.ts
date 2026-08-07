@@ -58,6 +58,7 @@ export async function repairDirtyEvents(limit = EVENT_REPAIR_BATCH_SIZE, signal?
       assertNotAborted(signal);
       if (await refreshDirtyEvent(eventId)) repaired++;
     } catch (error) {
+      if (signal?.aborted) throw error;
       console.error(`[event-consistency] dirty Event repair failed event=${eventId}:`, error);
     }
   }

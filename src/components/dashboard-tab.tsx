@@ -105,6 +105,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
   const intervalRef = useRef<number | null>(null)
   const analyticsRequestRef = useRef<AbortController | null>(null)
   const analyticsRequestVersionRef = useRef(0)
+  const feedbackGenerationAttemptedRef = useRef(false)
 
   const fetchData = useCallback(async () => {
     analyticsRequestRef.current?.abort()
@@ -112,6 +113,11 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
     analyticsRequestRef.current = controller
     const requestVersion = ++analyticsRequestVersionRef.current
     try {
+      const shouldGenerateFeedback = !feedbackGenerationAttemptedRef.current
+      feedbackGenerationAttemptedRef.current = true
+      const feedbackRequest = shouldGenerateFeedback
+        ? generateFeedbackSuggestions(controller.signal).catch(() => fetchFeedbackSuggestions(controller.signal))
+        : fetchFeedbackSuggestions(controller.signal)
       const [analyticsJson, nextSuggestions] = await Promise.all([
         fetchDashboardAnalytics(range, undefined, controller.signal, {
           page: crawlPage,
@@ -120,9 +126,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
           type: crawlType === 'all' ? undefined : crawlType,
           sourceId: crawlSourceId === 'all' ? undefined : crawlSourceId,
         }),
-        generateFeedbackSuggestions(controller.signal)
-          .catch(() => fetchFeedbackSuggestions(controller.signal))
-          .catch(() => []),
+        feedbackRequest.catch(() => []),
       ])
       if (controller.signal.aborted || requestVersion !== analyticsRequestVersionRef.current) return
       setAnalytics(analyticsJson)
