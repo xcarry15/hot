@@ -72,10 +72,10 @@ describe('crawl-log-service', () => {
   });
 
   describe('clampCrawlLogLimit', () => {
-    it('缺省或非法输入 → 250', () => {
-      expect(clampCrawlLogLimit(undefined)).toBe(250);
-      expect(clampCrawlLogLimit(null)).toBe(250);
-      expect(clampCrawlLogLimit(Number.NaN)).toBe(250);
+    it('缺省或非法输入 → 400', () => {
+      expect(clampCrawlLogLimit(undefined)).toBe(400);
+      expect(clampCrawlLogLimit(null)).toBe(400);
+      expect(clampCrawlLogLimit(Number.NaN)).toBe(400);
     });
 
     it('上限 500；超过截断', () => {
