@@ -193,14 +193,14 @@ export async function createExportJob(input: unknown): Promise<ExportJobDto> {
   });
   try {
     await ensureStorageDirectory();
-    // 固定边界紧贴 VACUUM INTO，缩短任务写入与只读副本之间的时间窗。
-    const copyStartedAt = new Date();
+    await createSnapshotFile(storageKey);
+    // VACUUM INTO 完成后再落边界，使快照内已复制记录的 createdAt/publishedAt
+    // 不会被错误地排除；工作簿查询仍全部针对这份不可变副本。
     const boundary = await db.exportJob.updateMany({
       where: { id: job.id, status: 'queued' },
-      data: { snapshotAt: copyStartedAt },
+      data: { snapshotAt: new Date() },
     });
     if (boundary.count !== 1) throw new ExportJobConflictError('导出任务已取消或正在清理');
-    await createSnapshotFile(storageKey);
     const current = await db.exportJob.findUnique({ where: { id: job.id } });
     if (!current) throw new ExportJobConflictError('数据清理进行中，请稍后重试');
     if (current.status !== 'queued') {
