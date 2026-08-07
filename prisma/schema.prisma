@@ -503,6 +503,7 @@ model ExportJob {
   fileSizeBytes     Int?
   error             String          @default("")
   attempt           Int             @default(0)
+  workerToken       String          @default("")
   cancelRequestedAt DateTime?
   expiresAt         DateTime?
   createdAt         DateTime        @default(now())

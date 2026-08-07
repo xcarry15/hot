@@ -57,7 +57,7 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 - AI 先提取 `subjects / action / object`，应用再确定性生成 `eventKey`；聚类不重复调用 AI。
 - 技术失败进入有限自动恢复队列；内容校准、Event 修正、公开决策和人工推送由文章详情抽屉负责。
 - 管理后台只保留 `工作台` 和 `设置`：工作台负责任务监控与技术恢复，设置负责数据源、关键词、AI、评分、推送和调度配置。
-- 设置的数据维护提供受保护的全量 Excel 导出：导出任务独立于抓取 Job，包含 Article、正文分片、Event、处理/推送审计及未入库记录；文件只在服务器公开目录外保留 24 小时。
+- 设置的数据维护提供受保护的全量 Excel 导出：导出任务独立于抓取 Job，包含 Article、正文/超长字段分片、Event、处理/推送审计及未入库记录；任务创建时固化 SQLite 只读快照，文件只在服务器公开目录外保留 24 小时。
 
 流水线实现位于：
 
@@ -99,7 +99,7 @@ bat/                     Windows 初始化、打包和部署说明
 .github/workflows/       CI 与生产部署
 ```
 
-Route Handler 只负责鉴权、参数和响应转换；业务规则集中在 `src/lib/`，前后端数据通过 `src/contracts/` 传递。设置定义集中在 `src/lib/settings-catalog.ts`，公开规则和推送规则不得复制到 React 组件。Excel 导出查询、脱敏、正文分片、工作簿生成和文件保留逻辑集中在 `src/lib/export/`，不得在设置组件中直接访问 Prisma。
+Route Handler 只负责鉴权、参数和响应转换；业务规则集中在 `src/lib/`，前后端数据通过 `src/contracts/` 传递。设置定义集中在 `src/lib/settings-catalog.ts`，公开规则和推送规则不得复制到 React 组件。Excel 导出查询、创建时快照、脱敏、正文/长字段分片、工作簿生成和文件保留逻辑集中在 `src/lib/export/`，不得在设置组件中直接访问 Prisma。
 
 ## 常用命令
 

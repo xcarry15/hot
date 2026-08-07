@@ -11,6 +11,8 @@ const EXPORT_STALE_MS = 30 * 60 * 1000;
 const EXPORT_STORAGE_DIR = path.resolve(process.cwd(), 'db', 'exports');
 
 let exportWorkerPromise: Promise<void> | null = null;
+let exportMaintenanceInProgress = false;
+let exportMaintenancePromise: Promise<number> | null = null;
 
 export class ExportInputError extends Error {
   readonly exposeToClient = true;
@@ -32,6 +34,9 @@ class ExportCancelledError extends Error {}
 function normalizeFilter(input: unknown): ExportFilter {
   const parsed = exportFilterSchema.safeParse(input ?? {});
   if (!parsed.success) throw new ExportInputError('导出筛选条件无效');
+  if (parsed.data.includeDiscarded && parsed.data.dateField === 'updatedAt') {
+    throw new ExportInputError('未入库条目不支持按更新时间筛选，请改用创建时间或发布时间');
+  }
   const { from, to } = parsed.data;
   if (from && !Number.isFinite(new Date(from).getTime())) throw new ExportInputError('开始时间无效');
   if (to && !Number.isFinite(new Date(to).getTime())) throw new ExportInputError('结束时间无效');
@@ -134,7 +139,7 @@ async function removeSnapshotFile(storageKey: string): Promise<void> {
   }
 }
 
-async function createReadSnapshot(storageKey: string): Promise<PrismaClient> {
+async function createSnapshotFile(storageKey: string): Promise<void> {
   const snapshotKey = storageKey.replace(/\.xlsx$/i, '.snapshot');
   await removeSnapshotFile(storageKey);
   const snapshotPath = storagePath(snapshotKey).replace(/\\/g, '/').replace(/'/g, "''");
@@ -142,6 +147,12 @@ async function createReadSnapshot(storageKey: string): Promise<PrismaClient> {
   // the long-running export an immutable database file while progress and
   // cancellation continue writing to the live database.
   await db.$executeRawUnsafe(`VACUUM INTO '${snapshotPath}'`);
+}
+
+async function openReadSnapshot(storageKey: string): Promise<PrismaClient> {
+  const snapshotKey = storageKey.replace(/\.xlsx$/i, '.snapshot');
+  await stat(storagePath(snapshotKey));
+  const snapshotPath = storagePath(snapshotKey).replace(/\\/g, '/');
   return new PrismaClient({ datasourceUrl: `file:${snapshotPath}` });
 }
 
@@ -153,12 +164,39 @@ async function getJobOrThrow(id: string): Promise<ExportJob> {
 
 export async function createExportJob(input: unknown): Promise<ExportJobDto> {
   const filter = normalizeFilter(input);
+  if (exportMaintenanceInProgress) throw new ExportJobConflictError('数据清理进行中，请稍后重试');
+  const snapshotAt = new Date();
+  const storageKey = `${randomUUID()}.xlsx`;
   const job = await db.exportJob.create({
     data: {
       filterSnapshot: JSON.stringify(filter),
-      snapshotAt: new Date(),
+      snapshotAt,
+      storageKey,
     },
   });
+  try {
+    await ensureStorageDirectory();
+    await createSnapshotFile(storageKey);
+    if (exportMaintenanceInProgress) {
+      await removeSnapshotFile(storageKey).catch(() => undefined);
+      await db.exportJob.deleteMany({ where: { id: job.id, status: 'queued' } });
+      throw new ExportJobConflictError('数据清理进行中，请稍后重试');
+    }
+  } catch (error: unknown) {
+    await removeFile(storageKey).catch(() => undefined);
+    await removeTempFile(storageKey).catch(() => undefined);
+    await removeSnapshotFile(storageKey).catch(() => undefined);
+    if (error instanceof ExportJobConflictError) throw error;
+    const failed = await db.exportJob.update({
+      where: { id: job.id },
+      data: {
+        status: 'failed',
+        completedAt: new Date(),
+        error: '导出快照创建失败，请重试',
+      },
+    });
+    return toDto(failed);
+  }
   startExportWorker();
   return toDto(job);
 }
@@ -176,15 +214,26 @@ export async function getExportJob(id: string): Promise<ExportJobDto> {
 export async function cancelExportJob(id: string): Promise<ExportJobDto> {
   const job = await getJobOrThrow(id);
   if (job.status === 'queued') {
-    const cancelled = await db.exportJob.update({
-      where: { id },
+    const cancelled = await db.exportJob.updateMany({
+      where: { id, status: 'queued' },
       data: { status: 'cancelled', completedAt: new Date(), error: '已取消' },
     });
-    return toDto(cancelled);
+    if (cancelled.count === 1) {
+      await removeFile(job.storageKey).catch(() => undefined);
+      await removeTempFile(job.storageKey).catch(() => undefined);
+      await removeSnapshotFile(job.storageKey).catch(() => undefined);
+      return toDto(await getJobOrThrow(id));
+    }
+    const current = await getJobOrThrow(id);
+    if (current.status !== 'running') throw new ExportJobConflictError('当前任务无法取消');
+    const requested = await db.exportJob.updateMany({ where: { id, status: 'running' }, data: { cancelRequestedAt: new Date() } });
+    if (requested.count !== 1) return cancelExportJob(id);
+    return toDto(await getJobOrThrow(id));
   }
   if (job.status !== 'running') throw new ExportJobConflictError('当前任务无法取消');
-  const updated = await db.exportJob.update({ where: { id }, data: { cancelRequestedAt: new Date() } });
-  return toDto(updated);
+  const updated = await db.exportJob.updateMany({ where: { id, status: 'running' }, data: { cancelRequestedAt: new Date() } });
+  if (updated.count !== 1) return cancelExportJob(id);
+  return toDto(await getJobOrThrow(id));
 }
 
 export async function retryExportJob(id: string): Promise<ExportJobDto> {
@@ -192,14 +241,7 @@ export async function retryExportJob(id: string): Promise<ExportJobDto> {
   if (!['failed', 'cancelled', 'expired'].includes(job.status)) {
     throw new ExportJobConflictError('只有失败、已取消或已过期的任务可以重试');
   }
-  const retried = await db.exportJob.create({
-    data: {
-      filterSnapshot: job.filterSnapshot,
-      snapshotAt: new Date(),
-    },
-  });
-  startExportWorker();
-  return toDto(retried);
+  return createExportJob(parseStoredFilter(job.filterSnapshot));
 }
 
 async function claimNextExportJob(): Promise<ExportJob | null> {
@@ -218,6 +260,7 @@ async function claimNextExportJob(): Promise<ExportJob | null> {
         cancelRequestedAt: null,
         error: '',
         attempt: { increment: 1 },
+        workerToken: randomUUID(),
         currentSheet: 'Articles',
         currentItemLabel: '准备生成工作簿',
       },
@@ -231,28 +274,31 @@ async function recoverStaleExportJobs(): Promise<void> {
   const staleBefore = new Date(Date.now() - EXPORT_STALE_MS);
   const stale = await db.exportJob.findMany({
     where: { status: 'running', updatedAt: { lt: staleBefore } },
-    select: { id: true, storageKey: true },
+    select: { id: true, storageKey: true, workerToken: true },
   });
   for (const job of stale) {
-    await removeFile(job.storageKey);
-    await removeTempFile(job.storageKey);
-    await removeSnapshotFile(job.storageKey);
+    await removeFile(job.storageKey).catch((error) => console.error(`[export] failed to delete stale file for ${job.id}:`, error));
+    await removeTempFile(job.storageKey).catch((error) => console.error(`[export] failed to delete stale temp file for ${job.id}:`, error));
+    await removeSnapshotFile(job.storageKey).catch((error) => console.error(`[export] failed to delete stale snapshot for ${job.id}:`, error));
     await db.exportJob.updateMany({
-      where: { id: job.id, status: 'running' },
-      data: { status: 'failed', completedAt: new Date(), error: '导出任务因服务重启或超时中断' },
+      where: { id: job.id, status: 'running', workerToken: job.workerToken },
+      data: { status: 'failed', workerToken: '', completedAt: new Date(), error: '导出任务因服务重启或超时中断' },
     });
   }
 }
 
-async function isCancelRequested(id: string): Promise<boolean> {
-  const job = await db.exportJob.findUnique({ where: { id }, select: { status: true, cancelRequestedAt: true } });
-  return !job || job.status === 'cancelled' || Boolean(job.cancelRequestedAt);
+async function isCancelRequested(id: string, workerToken = ''): Promise<boolean> {
+  const job = await db.exportJob.findUnique({ where: { id }, select: { status: true, workerToken: true, cancelRequestedAt: true } });
+  return !job
+    || job.status !== 'running'
+    || (workerToken.length > 0 && job.workerToken !== workerToken)
+    || Boolean(job.cancelRequestedAt);
 }
 
-async function updateProgress(id: string, progress: ExportProgress): Promise<void> {
-  if (await isCancelRequested(id)) throw new ExportCancelledError('导出已取消');
-  await db.exportJob.updateMany({
-    where: { id, status: 'running' },
+async function updateProgress(id: string, workerToken: string, progress: ExportProgress): Promise<void> {
+  if (await isCancelRequested(id, workerToken)) throw new ExportCancelledError('导出已取消');
+  const updated = await db.exportJob.updateMany({
+    where: { id, status: 'running', workerToken },
     data: {
       progressTotal: progress.total,
       progressDone: progress.done,
@@ -260,62 +306,61 @@ async function updateProgress(id: string, progress: ExportProgress): Promise<voi
       currentItemLabel: progress.label,
     },
   });
+  if (updated.count !== 1) throw new ExportCancelledError('导出已取消');
 }
 
 async function processExportJob(job: ExportJob): Promise<void> {
-  let storageKey = job.storageKey;
+  const storageKey = job.storageKey;
+  let snapshotDb: PrismaClient | null = null;
   try {
-    if (await isCancelRequested(job.id)) throw new ExportCancelledError('导出已取消');
+    if (await isCancelRequested(job.id, job.workerToken)) throw new ExportCancelledError('导出已取消');
     await ensureStorageDirectory();
-    storageKey = storageKey || `${randomUUID()}.xlsx`;
-    await db.exportJob.update({ where: { id: job.id }, data: { storageKey, currentSheet: 'Articles' } });
+    if (!storageKey) throw new Error('导出快照不存在');
+    await db.exportJob.updateMany({ where: { id: job.id, status: 'running', workerToken: job.workerToken }, data: { currentSheet: 'Articles' } });
     const filter = parseStoredFilter(job.filterSnapshot);
-    const snapshotDb = await createReadSnapshot(storageKey);
-    try {
-      const result = await buildExportWorkbook(
-        snapshotDb,
-        filter,
-        job.snapshotAt,
-        (progress) => updateProgress(job.id, progress),
-        {
-          exportJobId: job.id,
-          applicationVersion: process.env.npm_package_version,
-          exportStartedAt: job.startedAt ?? new Date(),
-        },
-      );
-      if (await isCancelRequested(job.id)) throw new ExportCancelledError('导出已取消');
-      const temporaryKey = storageKey.replace(/\.xlsx$/i, '.tmp');
-      await writeFile(storagePath(temporaryKey), result.buffer);
-      await rename(storagePath(temporaryKey), storagePath(storageKey));
-      const completedAt = new Date();
-      const success = await db.exportJob.update({
-        where: { id: job.id },
-        data: {
-          status: 'succeeded',
-          progressTotal: result.mainRecordTotal,
-          progressDone: result.mainRecordTotal,
-          progressErrors: 0,
-          currentSheet: '完成',
-          currentItemLabel: `已生成 ${result.buffer.byteLength} bytes`,
-          fileName: makeFileName(completedAt),
-          fileSizeBytes: result.buffer.byteLength,
-          completedAt,
-          expiresAt: new Date(completedAt.getTime() + EXPORT_RETENTION_MS),
-          error: '',
-        },
-      });
-      void success;
-    } finally {
-      await snapshotDb.$disconnect().catch(() => undefined);
-      await removeSnapshotFile(storageKey).catch(() => undefined);
-    }
+    snapshotDb = await openReadSnapshot(storageKey);
+    const result = await buildExportWorkbook(
+      snapshotDb,
+      filter,
+      job.snapshotAt,
+      (progress) => updateProgress(job.id, job.workerToken, progress),
+      {
+        exportJobId: job.id,
+        applicationVersion: process.env.npm_package_version,
+        exportStartedAt: job.startedAt ?? new Date(),
+      },
+    );
+    if (await isCancelRequested(job.id, job.workerToken)) throw new ExportCancelledError('导出已取消');
+    const temporaryKey = storageKey.replace(/\.xlsx$/i, '.tmp');
+    await writeFile(storagePath(temporaryKey), result.buffer);
+    await rename(storagePath(temporaryKey), storagePath(storageKey));
+    const completedAt = new Date();
+    const success = await db.exportJob.updateMany({
+      where: { id: job.id, status: 'running', workerToken: job.workerToken, cancelRequestedAt: null },
+      data: {
+        status: 'succeeded',
+        progressTotal: result.progressTotal,
+        progressDone: result.progressTotal,
+        progressErrors: 0,
+        currentSheet: '完成',
+        currentItemLabel: `已生成 ${result.buffer.byteLength} bytes`,
+        fileName: makeFileName(completedAt),
+        fileSizeBytes: result.buffer.byteLength,
+        completedAt,
+        expiresAt: new Date(completedAt.getTime() + EXPORT_RETENTION_MS),
+        error: '',
+        workerToken: '',
+      },
+    });
+    if (success.count !== 1) throw new ExportCancelledError('导出已取消');
   } catch (error: unknown) {
+    await snapshotDb?.$disconnect().catch(() => undefined);
     await removeFile(storageKey).catch(() => undefined);
     await removeTempFile(storageKey).catch(() => undefined);
     await removeSnapshotFile(storageKey).catch(() => undefined);
-    const cancelled = error instanceof ExportCancelledError || await isCancelRequested(job.id).catch(() => false);
+    const cancelled = error instanceof ExportCancelledError || await isCancelRequested(job.id, job.workerToken).catch(() => false);
     await db.exportJob.updateMany({
-      where: { id: job.id, status: 'running' },
+      where: { id: job.id, status: 'running', workerToken: job.workerToken },
       data: {
         status: cancelled ? 'cancelled' : 'failed',
         completedAt: new Date(),
@@ -323,9 +368,13 @@ async function processExportJob(job: ExportJob): Promise<void> {
         currentItemLabel: '',
         progressErrors: cancelled ? 0 : { increment: 1 },
         error: cancelled ? '已取消' : 'Excel 文件生成失败，请重试',
+        workerToken: '',
       },
     });
     if (!cancelled) console.error(`[export] job ${job.id} failed:`, error);
+  } finally {
+    if (snapshotDb) await snapshotDb.$disconnect().catch(() => undefined);
+    await removeSnapshotFile(storageKey).catch(() => undefined);
   }
 }
 
@@ -357,20 +406,25 @@ export async function cleanupExpiredExportJobs(now = new Date()): Promise<{ expi
     where: { status: 'succeeded', expiresAt: { lt: now } },
     select: { id: true, storageKey: true },
   });
+  let expiredCount = 0;
   let filesDeleted = 0;
   for (const job of expired) {
     try {
       await removeFile(job.storageKey);
+      await removeTempFile(job.storageKey);
+      await removeSnapshotFile(job.storageKey);
       filesDeleted += 1;
     } catch (error) {
       console.error(`[export] failed to delete expired file for ${job.id}:`, error);
+      continue;
     }
-    await db.exportJob.updateMany({
+    const updated = await db.exportJob.updateMany({
       where: { id: job.id, status: 'succeeded' },
       data: { status: 'expired', storageKey: '', fileName: '', fileSizeBytes: null },
     });
+    expiredCount += updated.count;
   }
-  return { expired: expired.length, filesDeleted };
+  return { expired: expiredCount, filesDeleted };
 }
 
 export async function readExportFile(id: string): Promise<{ buffer: Buffer; fileName: string }> {
@@ -395,7 +449,7 @@ export async function readExportFile(id: string): Promise<{ buffer: Buffer; file
 }
 
 /** 清理危险数据前删除尚未过期的导出文件，避免下载已被清空的业务数据快照。 */
-export async function deleteAllExportJobs(): Promise<number> {
+async function performDeleteAllExportJobs(): Promise<number> {
   const now = new Date();
   await db.exportJob.updateMany({
     where: { status: 'queued' },
@@ -408,14 +462,48 @@ export async function deleteAllExportJobs(): Promise<number> {
   if (exportWorkerPromise) {
     await exportWorkerPromise.catch(() => undefined);
   }
-  const jobs = await db.exportJob.findMany({ select: { storageKey: true } });
+  const jobs = await db.exportJob.findMany({ select: { id: true, storageKey: true } });
+  const deletableIds: string[] = [];
+  const failedCleanupIds: string[] = [];
   for (const job of jobs) {
-    await removeFile(job.storageKey).catch(() => undefined);
-    await removeTempFile(job.storageKey).catch(() => undefined);
-    await removeSnapshotFile(job.storageKey).catch(() => undefined);
+    let cleanupFailed = false;
+    for (const remove of [removeFile, removeTempFile, removeSnapshotFile]) {
+      try {
+        await remove(job.storageKey);
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+    if (cleanupFailed) failedCleanupIds.push(job.id);
+    else deletableIds.push(job.id);
   }
-  const result = await db.exportJob.deleteMany();
+  if (failedCleanupIds.length > 0) {
+    await db.exportJob.updateMany({
+      where: { id: { in: failedCleanupIds } },
+      data: {
+        status: 'failed',
+        cancelRequestedAt: null,
+        workerToken: '',
+        completedAt: new Date(),
+        error: '数据清理后导出文件未能删除，请稍后重试清理',
+      },
+    });
+  }
+  const result = deletableIds.length === 0
+    ? { count: 0 }
+    : await db.exportJob.deleteMany({ where: { id: { in: deletableIds } } });
   return result.count;
+}
+
+export function deleteAllExportJobs(): Promise<number> {
+  if (exportMaintenancePromise) return exportMaintenancePromise;
+  exportMaintenanceInProgress = true;
+  const promise = performDeleteAllExportJobs().finally(() => {
+    exportMaintenanceInProgress = false;
+    exportMaintenancePromise = null;
+  });
+  exportMaintenancePromise = promise;
+  return promise;
 }
 
 export type { ExportJobStatus };

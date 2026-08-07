@@ -74,7 +74,7 @@ describe('Excel 导出工作簿', () => {
       technicalIgnoredAt: null,
       articleBody: '正文内容',
       relevance: 90,
-      summary: '摘要',
+      summary: '摘要'.repeat(20_000),
       brand: '测试品牌',
       category: '品牌',
       keyPoints: '["关键点"]',
@@ -155,6 +155,7 @@ describe('Excel 导出工作簿', () => {
     const relations = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets.ArticleEventRelations, { defval: '' });
     const content = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets.ArticleContent, { defval: '' });
     const sources = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets.Sources, { defval: '' });
+    const longText = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets.LongTextChunks, { defval: '' });
     const meta = XLSX.utils.sheet_to_json(workbook.Sheets.ExportMeta, { header: 1, defval: '' }) as unknown[][];
 
     expect(articles[0]).toMatchObject({
@@ -164,10 +165,13 @@ describe('Excel 导出工作簿', () => {
       fetchStatusLabel: '已抓取',
       aiStatusLabel: '已完成',
       publicStatusLabel: '已公开',
+      eventStatusLabel: '有效',
       url: 'https://example.com/article?id=1',
     });
-    expect(relations[0]).toMatchObject({ isRepresentative: true, representativeManual: true });
+    expect(relations[0]).toMatchObject({ isRepresentative: true, representativeManual: true, eventStatusLabel: '有效' });
     expect(content).toHaveLength(3);
+    expect(String(articles[0].summary)).toContain('LongTextChunks');
+    expect(longText.filter((row) => row.sheetName === 'Articles' && row.field === 'summary')).toHaveLength(2);
     expect(sources[0]).toMatchObject({
       url: 'https://example.com/feed',
       parserConfig: '{"headers":{"Authorization":"[REDACTED]"}}',

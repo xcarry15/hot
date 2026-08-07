@@ -37,7 +37,8 @@
 | --- | --- | --- |
 | `ExportMeta` | 导出版本、生成时间、快照时间、筛选条件、各 Sheet 行数和错误数 | `exportJobId` |
 | `Articles` | Article 全部普通字段、处理状态、AI 结果、人工校准、公开状态、统计字段 | `articleId` |
-| `ArticleContent` | `rawContent`、`cleanContent`、`articleBody` 的完整分片内容 | `articleId`、`contentType`、`chunkNo` |
+| `ArticleContent` | `rawContent`、`cleanContent`、`articleBody` 及超长 Article 字段的完整分片内容 | `articleId`、`contentType`、`chunkNo` |
+| `LongTextChunks` | 其他 Sheet 超过 Excel 单元格限制的完整文本分片 | `sheetName`、`rowKey`、`field`、`chunkNo` |
 | `Events` | Event 全部普通字段、代表文章、公开和推送状态 | `eventId` |
 | `ArticleEventRelations` | 当前 Article/Event 关系、是否代表文章、代表选择方式 | `articleId`、`eventId` |
 | `EventClusterAudits` | 聚类、移动、合并、代表文章变更等审计 | `auditId` |
@@ -76,7 +77,7 @@
 | `chunkTotal` | 当前内容的总分片数 |
 | `contentChunk` | 当前分片文本 |
 
-每个分片控制在 Excel 单元格限制以内，按 `articleId + contentType + chunkNo` 顺序拼接即可还原原文。内容不得静默截断。
+每个分片控制在 Excel 单元格限制以内，按 `articleId + contentType + chunkNo` 顺序拼接即可还原原文；其他长字段按 `sheetName + rowKey + field + chunkNo` 拼接。内容不得静默截断。
 
 ## 5. 数据安全
 
@@ -106,22 +107,23 @@
 - 文件名、存储键、文件大小
 - `error`、`createdAt`、`startedAt`、`completedAt`
 - `expiresAt`、`cancelRequestedAt`、`updatedAt`
+- `attempt`、`workerToken`（防止过期 Worker 覆盖新领取状态）
 
 状态至少包括：`queued`、`running`、`succeeded`、`failed`、`cancelled`、`expired`。
 
 ### 6.2 执行规则
 
 - 同一时间只运行一个导出任务，其余任务排队。
-- 任务创建时保存完整筛选条件和 `snapshotAt`。
+- 任务创建时保存完整筛选条件和 `snapshotAt`，并立即用 SQLite `VACUUM INTO` 固化只读副本，排队任务不会因等待时间丢失创建时数据边界。
 - 采用分批读取和 Keyset 分页，避免单次查询加载全部文章。
-- 生成前使用 SQLite `VACUUM INTO` 创建临时只读副本，工作簿查询全部针对该副本；任务进度和取消请求继续写入线上库，不持有会阻塞 SQLite 写入的长事务。
+- 工作簿查询全部针对已固化副本；任务进度和取消请求继续写入线上库，不持有会阻塞 SQLite 写入的长事务。每次领取任务使用 worker token，旧 Worker 不能覆盖新任务状态。
 - 任务可被管理员取消；取消应在当前批次完成后安全停止。
 - 失败任务可以按原条件重新生成，不复用损坏文件。
 - 前端通过受保护 API 轮询任务状态，不引入 Redis、消息队列或浏览器内存队列。
 
 ## 7. 一致性快照
 
-导出使用任务创建时的 `snapshotAt` 作为数据边界，并在同一份 SQLite 只读副本中读取各 Sheet，确保文章、Event、关系和日志之间可对应。各主记录按 `createdAt <= snapshotAt` 限定；按发布时间筛选时同样不纳入快照之后才产生的发布时间。临时副本在成功、失败、取消和服务重启恢复时清理。
+导出使用任务创建时的 `snapshotAt` 作为数据边界，并在任务创建时固化、随后只读的 SQLite 副本中读取各 Sheet，确保文章、Event、关系和日志之间可对应。各主记录按 `createdAt <= snapshotAt` 限定；按发布时间筛选时同样不纳入快照之后才产生的发布时间。临时副本在成功、失败、取消和服务重启恢复时清理。
 
 导出结果必须在 `ExportMeta` 记录：
 
@@ -138,7 +140,7 @@
 
 默认提供“全部导出”，并支持：
 
-- 日期范围：默认按 `Article.createdAt`，可切换 `publishedAt`、`updatedAt`
+- 日期范围：默认按 `Article.createdAt`，可切换 `publishedAt`、`updatedAt`；`DiscardedItem` 没有 `updatedAt`，选择更新时间时必须关闭未入库条目或改用其他日期字段
 - 来源
 - `fetchStatus`、`aiStatus`、`clusterStatus`
 - `publicStatus`、是否代表文章、是否已推送
@@ -154,7 +156,7 @@
 - 下载接口必须经过现有后台 Token 鉴权。
 - 成功文件保留 24 小时；过期后删除文件，仅保留任务记录。
 - 取消或失败任务产生的临时文件立即清理。
-- 清理逻辑接入现有调度/维护机制，不清理数据库原始文章数据。
+- 清理逻辑接入现有调度/维护机制，不清理数据库原始文章数据；文件删除失败的任务保留为不可下载的失败记录，等待下一次清理重试，避免留下无追踪文件。
 - 执行“删除全部文章”或“清空全部数据”等危险维护操作时，会主动取消并删除现有导出任务/文件，避免下载已经失效的业务数据快照；这不影响数据库原始记录的清理流程。
 
 ## 10. 管理后台交互
