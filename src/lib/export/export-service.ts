@@ -177,6 +177,12 @@ export async function createExportJob(input: unknown): Promise<ExportJobDto> {
   try {
     await ensureStorageDirectory();
     await createSnapshotFile(storageKey);
+    const current = await db.exportJob.findUnique({ where: { id: job.id } });
+    if (!current) throw new ExportJobConflictError('数据清理进行中，请稍后重试');
+    if (current.status !== 'queued') {
+      await removeSnapshotFile(storageKey).catch(() => undefined);
+      return toDto(current);
+    }
     if (exportMaintenanceInProgress) {
       await removeSnapshotFile(storageKey).catch(() => undefined);
       await db.exportJob.deleteMany({ where: { id: job.id, status: 'queued' } });
@@ -198,7 +204,7 @@ export async function createExportJob(input: unknown): Promise<ExportJobDto> {
     return toDto(failed);
   }
   startExportWorker();
-  return toDto(job);
+  return toDto(await getJobOrThrow(job.id));
 }
 
 export async function listExportJobs(): Promise<ExportJobDto[]> {

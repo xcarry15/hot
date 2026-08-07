@@ -573,6 +573,7 @@ export async function buildExportWorkbook(
 
   const articleIds = new Set<string>();
   const eventIds = new Set<string>();
+  const exportedEventIds = new Set<string>();
   const sourceIds = new Set<string>();
   const discardedIds = new Set<string>();
   const targetIds = new Set<string>();
@@ -672,7 +673,10 @@ export async function buildExportWorkbook(
     await appendIdPages(
       (cursor) => tx.event.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
       async (rows) => {
-        rows.forEach((event) => eventIds.add(event.id));
+        rows.forEach((event) => {
+          eventIds.add(event.id);
+          exportedEventIds.add(event.id);
+        });
         sheets.Events.append(rows.map((event) => makeEventRow(event, dirtyMap.get(event.id) ?? '')));
         await checkpoint('Events', `已写入 ${sheets.Events.count} 个 Event`);
       },
@@ -704,10 +708,15 @@ export async function buildExportWorkbook(
       (rows) => rows.forEach((row) => dirtyMap.set(row.eventId, row.reason)),
     );
     sheets.Events.append(selectedEventRows.map((event) => makeEventRow(event, dirtyMap.get(event.id) ?? '')));
+    selectedEventRows.forEach((event) => exportedEventIds.add(event.id));
     await checkpoint('Events', `已写入 ${sheets.Events.count} 个 Event`);
   }
 
   const appendClusterAudits = async (rows: Prisma.EventClusterAuditGetPayload<object>[]) => {
+    rows.forEach((row) => {
+      eventIds.add(row.assignedEventId);
+      if (row.candidateEventId) eventIds.add(row.candidateEventId);
+    });
     sheets.EventClusterAudits.append(rows.map((row) => [
       row.id,
       row.articleId,
@@ -733,6 +742,37 @@ export async function buildExportWorkbook(
       (chunk, cursor) => tx.eventClusterAudit.findMany({ where: { articleId: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
       appendClusterAudits,
     );
+  }
+
+  if (!fullScope) {
+    const pendingEventIds = new Set([...eventIds].filter((id) => !exportedEventIds.has(id)));
+    const loadedAdditionalEventIds = new Set<string>();
+    const additionalEventRows: Prisma.EventGetPayload<object>[] = [];
+    while (pendingEventIds.size > 0) {
+      const batch = new Set(pendingEventIds);
+      pendingEventIds.clear();
+      await appendByIdChunksPaged(
+        batch,
+        (chunk, cursor) => tx.event.findMany({ where: { id: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
+        (rows) => {
+          for (const event of rows) {
+            if (loadedAdditionalEventIds.has(event.id) || exportedEventIds.has(event.id)) continue;
+            loadedAdditionalEventIds.add(event.id);
+            eventIds.add(event.id);
+            additionalEventRows.push(event);
+            if (event.mergedIntoId && !exportedEventIds.has(event.mergedIntoId)) pendingEventIds.add(event.mergedIntoId);
+          }
+        },
+      );
+    }
+    await appendByIdChunksPaged(
+      new Set(additionalEventRows.map((event) => event.id)),
+      (chunk, cursor) => tx.eventDirty.findMany({ where: { eventId: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
+      (rows) => rows.forEach((row) => dirtyMap.set(row.eventId, row.reason)),
+    );
+    sheets.Events.append(additionalEventRows.map((event) => makeEventRow(event, dirtyMap.get(event.id) ?? '')));
+    additionalEventRows.forEach((event) => exportedEventIds.add(event.id));
+    if (additionalEventRows.length > 0) await checkpoint('Events', `已补充 ${additionalEventRows.length} 个关联 Event`);
   }
 
   const appendSourceRows = async (rows: Prisma.SourceGetPayload<object>[]) => {
