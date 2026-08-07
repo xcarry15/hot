@@ -36,9 +36,11 @@ interface LongTextSink {
 interface SheetBuilder {
   append(rows: SheetRow[]): void;
   count: number;
+  sheetNames: string[];
 }
 
 const MAX_EXCEL_CELL_TEXT_LENGTH = 32_767;
+const MAX_EXCEL_DATA_ROWS_PER_SHEET = 1_048_575;
 const SENSITIVE_KEY_PATTERN = /(?:api[-_]?key|access[-_]?token|client[-_]?secret|authorization|proxy[-_]?authorization|cookie|credential|password|secret|signature|webhook|(?:^|[_-])token$|(?:^|[_-])key$)/i;
 const SENSITIVE_QUERY_KEY_PATTERN = /(?:api[-_]?key|access[-_]?token|client[-_]?secret|authorization|auth|cookie|credential|password|secret|signature|sig|token|webhook|key)/i;
 const STATUS_LABELS: Record<string, string> = {
@@ -214,14 +216,26 @@ function createSheetBuilder(
   widths: number[] = [],
   longTextSink?: LongTextSink,
 ): SheetBuilder {
-  const sheet = XLSX.utils.aoa_to_sheet([[...headers]]);
-  if (widths.length > 0) sheet['!cols'] = widths.map((wch) => ({ wch }));
-  XLSX.utils.book_append_sheet(workbook, sheet, name);
+  const sheetNames: string[] = [];
+  let sheet = XLSX.utils.aoa_to_sheet([[...headers]]);
+  let sheetRowCount = 0;
+  const createSheet = (part: number) => {
+    const sheetName = part === 1 ? name : `${name}_${part}`;
+    sheet = XLSX.utils.aoa_to_sheet([[...headers]]);
+    if (widths.length > 0) sheet['!cols'] = widths.map((wch) => ({ wch }));
+    XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
+    sheetNames.push(sheetName);
+    sheetRowCount = 0;
+  };
+  createSheet(1);
   let count = 0;
 
   return {
     get count() {
       return count;
+    },
+    get sheetNames() {
+      return sheetNames;
     },
     append(rows: SheetRow[]) {
       if (rows.length === 0) return;
@@ -238,26 +252,33 @@ function createSheetBuilder(
         ]));
         return `[已分片至 LongTextChunks：${headers[columnIndex] ?? `column_${columnIndex + 1}`}]`;
       }));
-      const startRow = count + 1;
-      XLSX.utils.sheet_add_aoa(sheet, normalizedRows, { origin: { r: startRow, c: 0 } });
-      normalizedRows.forEach((row, rowIndex) => {
-        row.forEach((value, columnIndex) => {
-          const address = XLSX.utils.encode_cell({ r: startRow + rowIndex, c: columnIndex });
-          const cell = (sheet[address] ?? {}) as { t?: string; v?: unknown; f?: string; z?: string };
-          if (typeof value === 'string' || value === null || value === undefined) {
-            cell.t = 's';
-            cell.v = value ?? '';
-            delete cell.f;
-          } else if (value instanceof Date) {
-            cell.t = 'd';
-            cell.v = value;
-            cell.z = 'yyyy-mm-dd hh:mm:ss';
-            delete cell.f;
-          }
-          sheet[address] = cell as XLSX.CellObject;
+      for (let offset = 0; offset < normalizedRows.length;) {
+        if (sheetRowCount >= MAX_EXCEL_DATA_ROWS_PER_SHEET) createSheet(sheetNames.length + 1);
+        const capacity = MAX_EXCEL_DATA_ROWS_PER_SHEET - sheetRowCount;
+        const page = normalizedRows.slice(offset, offset + capacity);
+        const startRow = sheetRowCount + 1;
+        XLSX.utils.sheet_add_aoa(sheet, page, { origin: { r: startRow, c: 0 } });
+        page.forEach((row, rowIndex) => {
+          row.forEach((value, columnIndex) => {
+            const address = XLSX.utils.encode_cell({ r: startRow + rowIndex, c: columnIndex });
+            const cell = (sheet[address] ?? {}) as { t?: string; v?: unknown; f?: string; z?: string };
+            if (typeof value === 'string' || value === null || value === undefined) {
+              cell.t = 's';
+              cell.v = value ?? '';
+              delete cell.f;
+            } else if (value instanceof Date) {
+              cell.t = 'd';
+              cell.v = value;
+              cell.z = 'yyyy-mm-dd hh:mm:ss';
+              delete cell.f;
+            }
+            sheet[address] = cell as XLSX.CellObject;
+          });
         });
-      });
-      count += rows.length;
+        sheetRowCount += page.length;
+        count += page.length;
+        offset += page.length;
+      }
     },
   };
 }
@@ -343,7 +364,14 @@ async function appendInteractionPages<T extends { eventId: string; sourceId: str
 
 function parseDate(value: string): Date | undefined {
   if (!value) return undefined;
-  const date = new Date(value);
+  const text = value.trim();
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+  const candidate = hasTimezone
+    ? text
+    : /^\d{4}-\d{2}-\d{2}$/.test(text)
+      ? `${text}T00:00:00+08:00`
+      : `${text}+08:00`;
+  const date = new Date(candidate);
   return Number.isFinite(date.getTime()) ? date : undefined;
 }
 
@@ -361,7 +389,52 @@ function isUnboundedFilter(filter: ExportFilter): boolean {
     && !filter.eventId;
 }
 
-function buildArticleWhere(filter: ExportFilter, snapshotAt: Date): Prisma.ArticleWhereInput {
+async function getLatestPushedEventIds(tx: ExportDb, snapshotAt: Date): Promise<Set<string>> {
+  const deliveryWhere: Prisma.PushDeliveryWhereInput = {
+    createdAt: { lte: snapshotAt },
+    updatedAt: { lte: snapshotAt },
+    target: { is: { enabled: true } },
+  };
+  if (typeof tx.pushDelivery.groupBy !== 'function') {
+    const rows = await tx.pushDelivery.findMany({
+      where: deliveryWhere,
+      orderBy: [{ eventId: 'asc' }, { targetId: 'asc' }, { updatedAt: 'desc' }],
+      select: { eventId: true, targetId: true, status: true },
+    });
+    const latest = new Map<string, string>();
+    for (const row of rows) {
+      const key = `${row.eventId}:${row.targetId}`;
+      if (!latest.has(key)) latest.set(key, row.status);
+    }
+    return new Set([...latest.entries()].filter(([, status]) => status === 'succeeded').map(([key]) => key.split(':')[0]));
+  }
+  const latestKeys = await tx.pushDelivery.groupBy({
+    by: ['eventId', 'targetId'],
+    where: deliveryWhere,
+    _max: { updatedAt: true },
+  });
+  const latestRows: Array<{ eventId: string; status: string }> = [];
+  for (let index = 0; index < latestKeys.length; index += 500) {
+    const chunk = latestKeys.slice(index, index + 500);
+    if (chunk.length === 0) continue;
+    const rows = await tx.pushDelivery.findMany({
+      where: {
+        OR: chunk.flatMap((key) => key._max.updatedAt
+          ? [{ eventId: key.eventId, targetId: key.targetId, updatedAt: key._max.updatedAt }]
+          : []),
+      },
+      select: { eventId: true, targetId: true, status: true, updatedAt: true },
+    });
+    latestRows.push(...rows);
+  }
+  return new Set(latestRows.filter((row) => row.status === 'succeeded').map((row) => row.eventId));
+}
+
+function buildArticleWhere(
+  filter: ExportFilter,
+  snapshotAt: Date,
+  pushedEventIds?: Set<string>,
+): Prisma.ArticleWhereInput {
   const conditions: Prisma.ArticleWhereInput[] = [{ createdAt: { lte: snapshotAt } }];
   if (filter.sourceIds.length > 0) conditions.push({ sourceId: { in: filter.sourceIds } });
   if (filter.fetchStatuses.length > 0) conditions.push({ fetchStatus: { in: filter.fetchStatuses } });
@@ -371,9 +444,13 @@ function buildArticleWhere(filter: ExportFilter, snapshotAt: Date): Prisma.Artic
   if (filter.eventId) conditions.push({ eventId: filter.eventId });
   if (filter.representative === 'yes') conditions.push({ representedEvent: { isNot: null } });
   if (filter.representative === 'no') conditions.push({ representedEvent: { is: null } });
-  if (filter.pushed === 'yes') conditions.push({ event: { is: { pushedAt: { not: null } } } });
+  if (filter.pushed === 'yes') {
+    conditions.push(pushedEventIds ? { eventId: { in: [...pushedEventIds] } } : { event: { is: { pushedAt: { not: null } } } });
+  }
   if (filter.pushed === 'no') {
-    conditions.push({ OR: [{ event: { is: null } }, { event: { is: { pushedAt: null } } }] });
+    conditions.push(pushedEventIds
+      ? { OR: [{ eventId: null }, { eventId: { notIn: [...pushedEventIds] } }] }
+      : { OR: [{ event: { is: null } }, { event: { is: { pushedAt: null } } }] });
   }
 
   const from = parseDate(filter.from);
@@ -577,7 +654,8 @@ export async function buildExportWorkbook(
   const sourceIds = new Set<string>();
   const discardedIds = new Set<string>();
   const targetIds = new Set<string>();
-  const articleWhere = buildArticleWhere(filter, snapshotAt);
+  const pushedEventIds = filter.pushed === 'all' ? undefined : await getLatestPushedEventIds(tx, snapshotAt);
+  const articleWhere = buildArticleWhere(filter, snapshotAt, pushedEventIds);
   const discardedWhere = buildDiscardedWhere(filter, snapshotAt);
   const fullScope = isUnboundedFilter(filter);
   const articleTotal = await tx.article.count({ where: articleWhere });

@@ -37,13 +37,30 @@ function normalizeFilter(input: unknown): ExportFilter {
   if (parsed.data.includeDiscarded && parsed.data.dateField === 'updatedAt') {
     throw new ExportInputError('未入库条目不支持按更新时间筛选，请改用创建时间或发布时间');
   }
-  const { from, to } = parsed.data;
-  if (from && !Number.isFinite(new Date(from).getTime())) throw new ExportInputError('开始时间无效');
-  if (to && !Number.isFinite(new Date(to).getTime())) throw new ExportInputError('结束时间无效');
-  if (from && to && new Date(from).getTime() >= new Date(to).getTime()) {
+  const from = parseShanghaiDate(parsed.data.from, '开始时间');
+  const to = parseShanghaiDate(parsed.data.to, '结束时间');
+  if (from && to && from.getTime() >= to.getTime()) {
     throw new ExportInputError('开始时间必须早于结束时间');
   }
-  return parsed.data;
+  return {
+    ...parsed.data,
+    from: from?.toISOString() ?? '',
+    to: to?.toISOString() ?? '',
+  };
+}
+
+function parseShanghaiDate(value: string, label: string): Date | undefined {
+  if (!value) return undefined;
+  const text = value.trim();
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+  const candidate = hasTimezone
+    ? text
+    : /^\d{4}-\d{2}-\d{2}$/.test(text)
+      ? `${text}T00:00:00+08:00`
+      : `${text}+08:00`;
+  const date = new Date(candidate);
+  if (!Number.isFinite(date.getTime())) throw new ExportInputError(`${label}无效`);
+  return date;
 }
 
 function parseStoredFilter(value: string): ExportFilter {
@@ -176,6 +193,13 @@ export async function createExportJob(input: unknown): Promise<ExportJobDto> {
   });
   try {
     await ensureStorageDirectory();
+    // 固定边界紧贴 VACUUM INTO，缩短任务写入与只读副本之间的时间窗。
+    const copyStartedAt = new Date();
+    const boundary = await db.exportJob.updateMany({
+      where: { id: job.id, status: 'queued' },
+      data: { snapshotAt: copyStartedAt },
+    });
+    if (boundary.count !== 1) throw new ExportJobConflictError('导出任务已取消或正在清理');
     await createSnapshotFile(storageKey);
     const current = await db.exportJob.findUnique({ where: { id: job.id } });
     if (!current) throw new ExportJobConflictError('数据清理进行中，请稍后重试');
@@ -410,7 +434,7 @@ export async function cleanupExpiredExportJobs(now = new Date()): Promise<{ expi
   await recoverStaleExportJobs();
   const expired = await db.exportJob.findMany({
     where: { status: 'succeeded', expiresAt: { lt: now } },
-    select: { id: true, storageKey: true },
+    select: { id: true, storageKey: true, updatedAt: true },
   });
   let expiredCount = 0;
   let filesDeleted = 0;
@@ -422,10 +446,14 @@ export async function cleanupExpiredExportJobs(now = new Date()): Promise<{ expi
       filesDeleted += 1;
     } catch (error) {
       console.error(`[export] failed to delete expired file for ${job.id}:`, error);
+      await db.exportJob.updateMany({
+        where: { id: job.id, status: 'succeeded', updatedAt: job.updatedAt },
+        data: { status: 'failed', error: '导出文件过期后未能删除，请稍后重试清理', completedAt: new Date() },
+      });
       continue;
     }
     const updated = await db.exportJob.updateMany({
-      where: { id: job.id, status: 'succeeded' },
+      where: { id: job.id, status: 'succeeded', updatedAt: job.updatedAt },
       data: { status: 'expired', storageKey: '', fileName: '', fileSizeBytes: null },
     });
     expiredCount += updated.count;
