@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,7 @@ import {
 interface ArticleWorkspaceHeaderProps {
   detail: ArticleDetailDto;
   brands: string[];
+  contentLength: number;
   manualOverrides: ManualOverrideField[];
   clickRate: number;
   isRepresentative: boolean;
@@ -31,9 +33,10 @@ interface ArticleWorkspaceHeaderProps {
   onToggleEditing: () => void;
 }
 
-export function ArticleWorkspaceHeader({
+export const ArticleWorkspaceHeader = memo(function ArticleWorkspaceHeader({
   detail,
   brands,
+  contentLength,
   manualOverrides,
   clickRate,
   isRepresentative,
@@ -124,8 +127,9 @@ export function ArticleWorkspaceHeader({
       </div>
 
       <div className="space-y-1.5 border-t border-border/60 bg-muted/10 px-2.5 py-2 text-xs sm:px-3">
-        <div className="grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
           <MetaRow label="品牌" value={brands.join('、') || '—'} />
+          <MetaRow label="正文文字数" value={`${contentLength.toLocaleString('zh-CN')} 字`} mono />
           <MetaRow label="公开浏览" value={detail.viewCount.toLocaleString('zh-CN')} mono />
           <MetaRow
             label="原文点击"
@@ -137,21 +141,21 @@ export function ArticleWorkspaceHeader({
           )}
           <MetaRow label="来源类型" value={detail.source.type} />
           <MetaRow label="人工修正" value={detail.manualCorrectedAt ? fullTimeLabel(detail.manualCorrectedAt) : '无'} />
-          <div className="min-w-0 sm:col-span-2">
+          <div className="col-span-2 min-w-0 sm:col-span-2">
             <MetaRow label="事件键" value={detail.eventKey || '—'} mono />
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground sm:gap-x-3">
-          <span>创建 {fullTimeLabel(detail.createdAt)}</span>
-          <span>更新 {fullTimeLabel(detail.updatedAt)}</span>
-          <span>聚类 {fullTimeLabel(detail.clusteredAt)}</span>
+        <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground sm:flex sm:items-center sm:gap-x-3">
+          <span className="min-w-0 truncate" title={fullTimeLabel(detail.createdAt)}>创建 {fullTimeLabel(detail.createdAt)}</span>
+          <span className="min-w-0 truncate" title={fullTimeLabel(detail.updatedAt)}>更新 {fullTimeLabel(detail.updatedAt)}</span>
+          <span className="min-w-0 truncate" title={fullTimeLabel(detail.clusteredAt)}>聚类 {fullTimeLabel(detail.clusteredAt)}</span>
         </div>
 
-        <div className="grid min-w-0 gap-x-3 gap-y-1 text-[11px] text-muted-foreground sm:grid-cols-[auto_minmax(0,1fr)]">
-          <span className="min-w-0 break-all font-mono">ID {detail.id}</span>
+        <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-muted-foreground sm:grid-cols-[auto_minmax(0,1fr)]">
+          <span className="min-w-0 truncate font-mono" title={`ID ${detail.id}`}>ID {detail.id}</span>
           <a
-            className="min-w-0 cursor-pointer break-all hover:text-foreground"
+            className="min-w-0 cursor-pointer truncate hover:text-foreground"
             href={detail.url}
             target="_blank"
             rel="noreferrer"
@@ -180,4 +184,4 @@ export function ArticleWorkspaceHeader({
       </div>
     </header>
   );
-}
+});

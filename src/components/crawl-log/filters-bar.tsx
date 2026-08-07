@@ -89,11 +89,6 @@ export function CrawlLogFilters({
           })}
         </div>
       )}
-
-      <div className="flex items-center justify-end gap-2 px-1 text-[10px] text-muted-foreground sm:text-[11px]">
-        <span>已公开 <b className="font-medium tabular-nums text-sky-700">{filterCounts['normal-public'] ?? 0}</b></span>
-        <span>已推送 <b className="font-medium tabular-nums text-emerald-700">{filterCounts['normal-pushed'] ?? 0}</b></span>
-      </div>
     </div>
   )
 }

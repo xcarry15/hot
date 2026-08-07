@@ -1,4 +1,5 @@
 import { memo, useCallback, useMemo } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import { cancelArticleDetailPrefetch, prefetchArticleDetail } from '@/features/articles-api.client'
 import { formatLastTime, formatPubDate, formatShortTime } from './helpers'
@@ -15,6 +16,19 @@ const ARTICLE_ROW_CLASS = `group box-border flex w-full max-w-full min-w-0 flex-
 const ARTICLE_BADGE_CLASS = 'shrink-0 px-1 text-[11px] font-medium leading-5 text-white'
 const ARTICLE_ACTION_CLASS = 'inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted'
 const ARTICLE_STEP_LIST_CLASS = 'flex shrink-0 flex-nowrap items-center gap-0.5 overflow-hidden whitespace-nowrap pb-0.5 group-hover:ring-1 group-hover:ring-blue-300 group-hover:ring-offset-1 [&>*]:shrink-0 sm:flex-none sm:overflow-visible sm:pb-0'
+
+function EventArticleCountBadge({ count }: { count: number }) {
+  return (
+    <Badge
+      variant="secondary"
+      className="h-4 min-w-4 border border-sky-200 bg-sky-50 px-1 text-[10px] font-bold leading-none tabular-nums text-sky-700"
+      title={`事件成员 ${count} 篇`}
+      aria-label={`事件成员 ${count} 篇`}
+    >
+      {count}
+    </Badge>
+  )
+}
 
 export const ArticleRow = memo(function ArticleRow({
   article,
@@ -127,7 +141,7 @@ export const ArticleRow = memo(function ArticleRow({
         )}
         {article.clusterStatus === 'needs_review' && (
           <>
-            <span className={`${ARTICLE_BADGE_CLASS} bg-orange-500`}>待复核</span>
+            <span className={`${ARTICLE_BADGE_CLASS} bg-red-600`}>待复核</span>
             <button type="button" onClick={() => onOpenArticlePanel?.(article.id, 'cluster')} className={ARTICLE_ACTION_CLASS}>去聚类复核</button>
           </>
         )}
@@ -169,6 +183,11 @@ export const ArticleRow = memo(function ArticleRow({
         {article.technicalState === 'waiting' && (
           <span className={`${ARTICLE_BADGE_CLASS} bg-slate-600`} title={article.aiRetryAt ? `将在 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 自动继续 AI 分析` : '等待 AI 服务恢复'}>AI 等待</span>
         )}
+        {article.eventArticleCount != null && (
+          <span className="hidden sm:inline-flex">
+            <EventArticleCountBadge count={article.eventArticleCount} />
+          </span>
+        )}
         </div>
         <span className="order-3 flex h-5 w-[42px] min-w-0 shrink-0 items-center justify-end truncate border-l border-border/40 pl-1 text-right font-mono text-[10px] tabular-nums text-muted-foreground sm:hidden" title={article.lastTime ? new Date(article.lastTime).toLocaleString('zh-CN') : ''}>
           {shortLastTimeLabel}
@@ -193,8 +212,8 @@ export const ArticleRow = memo(function ArticleRow({
                 ? 'AI 分析已完成，但内容不具备保留价值'
                 : article.technicalErrorReasons.ai || (article.ai === 'failed' ? '点击重试 AI 分析' : article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined)}
             />
-            <StepIndicator
-              label="聚类"
+          <StepIndicator
+            label="聚类"
               status={clusterLoading ? 'running' : article.cluster}
               onClick={actionFor('cluster')}
               forceLabel={nextAction?.step === 'cluster' ? (retryWaiting ? '等待' : '重试') : undefined}
@@ -207,6 +226,11 @@ export const ArticleRow = memo(function ArticleRow({
                     : undefined)}
             />
           </span>
+          {article.eventArticleCount != null && (
+            <span className="sm:hidden">
+              <EventArticleCountBadge count={article.eventArticleCount} />
+            </span>
+          )}
           <StepIndicator
             label="公开"
             status={article.isPublic ? 'done' : 'not_applicable'}

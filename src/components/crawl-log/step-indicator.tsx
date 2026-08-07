@@ -132,9 +132,10 @@ function shortSkipLabel(reason: string): string {
 }
 
 export function SkipBadge({ reason }: { reason: string }) {
+  const isNoValue = reason === '无价值'
   return (
     <span
-      className="max-w-[120px] shrink-0 truncate bg-red-600 px-1.5 py-0.5 text-xs font-medium text-white"
+      className={`max-w-[120px] shrink-0 truncate px-1.5 py-0.5 text-xs font-medium text-white ${isNoValue ? 'bg-slate-600' : 'bg-red-600'}`}
       title={reason}
     >
       {shortSkipLabel(reason)}

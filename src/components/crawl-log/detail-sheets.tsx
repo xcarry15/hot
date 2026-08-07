@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import type { ArticleWorkspacePanel } from '@/components/article-workspace'
 import DiscardedDetailSheet from '../article-detail-sheet'
 import ArticleLibrarySheet from '../article-library-sheet'
@@ -22,7 +23,7 @@ interface CrawlLogDetailSheetsProps {
   onChanged: () => void
 }
 
-export function CrawlLogDetailSheets({
+export const CrawlLogDetailSheets = memo(function CrawlLogDetailSheets({
   discardedDetailId,
   detailOpen,
   onDetailOpenChange,
@@ -62,4 +63,4 @@ export function CrawlLogDetailSheets({
       />
     </>
   )
-}
+})

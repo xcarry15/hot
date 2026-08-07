@@ -18,6 +18,7 @@ import {
   triggerArticleWorkflow,
   updateArticleEditorial,
 } from "@/features/articles-api.client";
+import { fetchEventDetail } from "@/features/events-api.client";
 import { isRequestAborted, isRequestJsonError } from "@/lib/request-json.client";
 import {
   parseJsonArray,
@@ -173,6 +174,8 @@ export default function IntelligenceInbox({
     // 面板入口只控制展开状态，不改变抽屉当前滚动位置；所有文章详情统一从顶部开始。
   }, [detail, requestedPanel, selectedId]);
 
+  const detailIdForEvent = detail?.id;
+  const currentDetailEventId = detail?.eventId;
   const loadEventDetail = useCallback(
     async (eventId: string | null | undefined, signal?: AbortSignal) => {
       const requestId = ++eventDetailRequestRef.current;
@@ -181,14 +184,7 @@ export default function IntelligenceInbox({
         return;
       }
       try {
-        const query = new URLSearchParams();
-        if (detail?.id) query.set("articleId", detail.id);
-        const response = await fetch(
-          `/api/events/${encodeURIComponent(eventId)}${query.size > 0 ? `?${query.toString()}` : ""}`,
-          { signal },
-        );
-        if (!response.ok) throw new Error("事件详情加载失败");
-        const result = (await response.json()) as EventDetail;
+        const result = await fetchEventDetail(eventId, detailIdForEvent, signal);
         if (signal?.aborted || requestId !== eventDetailRequestRef.current) return;
         setEventDetail(result);
       } catch (error) {
@@ -202,7 +198,7 @@ export default function IntelligenceInbox({
         toast.error(errorMessage(error, "事件详情加载失败"));
       }
     },
-    [detail],
+    [detailIdForEvent],
   );
 
   const refreshArticleDetail = useCallback(async (articleId: string) => {
@@ -213,10 +209,9 @@ export default function IntelligenceInbox({
   }, []);
 
   const refreshSelectedEvent = useCallback(async (updated: ArticleDetailDto) => {
-    if (selectedIdRef.current === updated.id) {
-      await loadEventDetail(updated.eventId);
-    }
-  }, [loadEventDetail]);
+    if (selectedIdRef.current !== updated.id || updated.eventId !== currentDetailEventId) return;
+    await loadEventDetail(updated.eventId);
+  }, [currentDetailEventId, loadEventDetail]);
 
   const refreshAfterMutation = useCallback(() => {
     onChanged?.();
@@ -319,7 +314,7 @@ export default function IntelligenceInbox({
     [patchRow, refreshAfterMutation, refreshSelectedEvent],
   );
 
-  const changePublicOverride = (next: "auto" | "public" | "hidden") => {
+  const changePublicOverride = useCallback((next: "auto" | "public" | "hidden") => {
     if (!detail || rowSavingId === detail.id || next === detail.publicOverride) return;
     if (
       next === "hidden" &&
@@ -330,9 +325,9 @@ export default function IntelligenceInbox({
       { publicOverride: next },
       next === "hidden" ? "文章已隐藏" : next === "public" ? "已设为强制公开" : "已恢复自动公开策略",
     );
-  };
+  }, [detail, queueRowUpdate, rowSavingId]);
 
-  const saveEditorial = async () => {
+  const saveEditorial = useCallback(async () => {
     if (!selectedId || detail?.id !== selectedId) return;
     const nextSubjects = draft.eventSubjects
       .split(/[,，、+\n]/)
@@ -371,9 +366,9 @@ export default function IntelligenceInbox({
     } finally {
       setDetailAction(null);
     }
-  };
+  }, [detail, draft, patchRow, refreshAfterMutation, refreshSelectedEvent, selectedId]);
 
-  const startWorkflow = async (startAt: "process" | "ai" | "cluster") => {
+  const startWorkflow = useCallback(async (startAt: "process" | "ai" | "cluster") => {
     if (!detail || detailAction) return;
     const label = startAt === "process"
       ? "重新获取全文并重跑"
@@ -405,19 +400,99 @@ export default function IntelligenceInbox({
     } finally {
       setDetailAction(null);
     }
-  };
+  }, [detail, detailAction, refreshAfterMutation]);
+
+  const handleReviewWorkflow = useCallback((startAt: "process" | "ai") => {
+    void startWorkflow(startAt);
+  }, [startWorkflow]);
+
+  const handleClusterWorkflow = useCallback(() => {
+    void startWorkflow("cluster");
+  }, [startWorkflow]);
+
+  const handleConfirmIndependent = useCallback(() => {
+    void confirmIndependent();
+  }, [confirmIndependent]);
+
+  const handleSplitArticles = useCallback((articleIds: string[]) => {
+    void splitArticles(articleIds);
+  }, [splitArticles]);
+
+  const handleSearchEvents = useCallback((query?: string) => {
+    void searchEvents(query);
+  }, [searchEvents]);
+
+  const handleMoveCurrentArticle = useCallback((eventId: string) => {
+    void moveCurrentArticle(eventId);
+  }, [moveCurrentArticle]);
+
+  const handleMergeCurrentEvent = useCallback(() => {
+    void mergeCurrentEvent();
+  }, [mergeCurrentEvent]);
+
+  const toggleEditing = useCallback(() => {
+    setEditing((value) => !value);
+  }, []);
+
+  const handleSaveEditorial = useCallback(() => {
+    void saveEditorial();
+  }, [saveEditorial]);
+
+  const toggleFullContent = useCallback(() => {
+    setShowFullContent((value) => !value);
+    setRequestedPanel("content");
+    if (detail) updateDetailUrl(detail.id, "content");
+  }, [detail, updateDetailUrl]);
 
   const workspace = useMemo(
     () => detail ? createArticleWorkspaceViewModel(detail, eventDetail) : null,
     [detail, eventDetail],
   );
-  const brandCandidates = workspace?.brandCandidates ?? [];
-  const { brandCandidateModels, eventMemberModels, recommendedEventModels } = createEventArticleModels({
-    detail, eventDetail, eventMembers: workspace?.eventMembers ?? [], brandCandidates, selectedSplitIds, eventAction,
-    recommendedEventId, recommendedEvent, recommendedAudit,
-    setComparisonTarget, setRepresentative, splitArticle, toggleSplitSelection,
-    moveCurrentArticleToEvent, moveBrandCandidate, moveCurrentArticleToBrandEvent, selectArticle,
-  });
+  const brandCandidates = useMemo(
+    () => workspace?.brandCandidates ?? [],
+    [workspace?.brandCandidates],
+  );
+  const eventArticleModels = useMemo(
+    () => createEventArticleModels({
+      detail,
+      eventDetail,
+      eventMembers: workspace?.eventMembers ?? [],
+      brandCandidates,
+      selectedSplitIds,
+      eventAction,
+      recommendedEventId,
+      recommendedEvent,
+      recommendedAudit,
+      setComparisonTarget,
+      setRepresentative,
+      splitArticle,
+      toggleSplitSelection,
+      moveCurrentArticleToEvent,
+      moveBrandCandidate,
+      moveCurrentArticleToBrandEvent,
+      selectArticle,
+    }),
+    [
+      brandCandidates,
+      detail,
+      eventAction,
+      eventDetail,
+      moveBrandCandidate,
+      moveCurrentArticleToBrandEvent,
+      moveCurrentArticleToEvent,
+      recommendedAudit,
+      recommendedEvent,
+      recommendedEventId,
+      selectArticle,
+      selectedSplitIds,
+      setComparisonTarget,
+      setRepresentative,
+      splitArticle,
+      toggleSplitSelection,
+      workspace?.eventMembers,
+    ],
+  );
+  const { brandCandidateModels, eventMemberModels, recommendedEventModels } = eventArticleModels;
   const detailWorkspace = detailLoading ? (
     <div className="space-y-2 p-3 lg:p-4">
       <Skeleton className="h-28 w-full rounded-none" />
@@ -432,17 +507,18 @@ export default function IntelligenceInbox({
         <ArticleWorkspaceHeader
           detail={detail}
           brands={workspace.brands}
+          contentLength={workspace.cleanContentText.length}
           manualOverrides={workspace.manualOverrides}
           clickRate={workspace.clickRate}
           isRepresentative={workspace.isRepresentative}
           currentConclusion={workspace.currentConclusion}
           detailActionPending={detailAction !== null}
           editing={editing}
-          onToggleEditing={() => setEditing((value) => !value)}
+          onToggleEditing={toggleEditing}
         />
 
-        <div className="min-w-0 space-y-2">
-          <main className="min-w-0 space-y-2">
+        <div className="min-w-0 space-y-3">
+          <main className="min-w-0 space-y-3">
             <ArticleReviewPanel
               detail={detail}
               keyPoints={workspace.keyPoints}
@@ -458,14 +534,14 @@ export default function IntelligenceInbox({
               editing={editing}
               draft={draft}
               onChangePublicOverride={changePublicOverride}
-              onPushEvent={(mode) => void pushCurrentEvent(mode)}
-              onStartWorkflow={(startAt) => void startWorkflow(startAt)}
+              onPushEvent={pushCurrentEvent}
+              onStartWorkflow={handleReviewWorkflow}
               onDraftChange={updateDraft}
-              onSaveEditorial={() => void saveEditorial()}
+              onSaveEditorial={handleSaveEditorial}
             />
           </main>
 
-          <aside className="min-w-0 space-y-2">
+          <aside className="min-w-0 space-y-3">
             <EventCalibrationPanel
               detail={detail}
               eventDetail={eventDetail}
@@ -480,14 +556,14 @@ export default function IntelligenceInbox({
               eventSearch={eventSearch}
               eventOptions={eventOptions}
               mergeTargetId={mergeTargetId}
-              onConfirmIndependent={() => void confirmIndependent()}
-              onAutoCluster={() => void startWorkflow("cluster")}
-              onSplitArticles={(articleIds) => void splitArticles(articleIds)}
-              onEventSearchChange={(value) => setEventSearch(value)}
-              onSearchEvents={(query) => void searchEvents(query)}
-              onMoveCurrentArticle={(eventId) => void moveCurrentArticle(eventId)}
-              onMergeTargetChange={(eventId) => setMergeTargetId(eventId)}
-              onMergeCurrentEvent={() => void mergeCurrentEvent()}
+              onConfirmIndependent={handleConfirmIndependent}
+              onAutoCluster={handleClusterWorkflow}
+              onSplitArticles={handleSplitArticles}
+              onEventSearchChange={setEventSearch}
+              onSearchEvents={handleSearchEvents}
+              onMoveCurrentArticle={handleMoveCurrentArticle}
+              onMergeTargetChange={setMergeTargetId}
+              onMergeCurrentEvent={handleMergeCurrentEvent}
             />
           </aside>
 
@@ -496,11 +572,7 @@ export default function IntelligenceInbox({
             cleanContentText={workspace.cleanContentText}
             latestPushLogs={workspace.latestPushLogs}
             showFullContent={showFullContent}
-            onToggleFullContent={() => {
-              setShowFullContent((value) => !value);
-              setRequestedPanel("content");
-              updateDetailUrl(detail.id, "content");
-            }}
+            onToggleFullContent={toggleFullContent}
           />
         </div>
       </div>

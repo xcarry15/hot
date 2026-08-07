@@ -1,6 +1,7 @@
 'use client';
 
-import { Loader2, RefreshCw, Save } from 'lucide-react';
+import { memo } from 'react';
+import { Loader2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -25,7 +26,7 @@ const PUBLIC_OVERRIDE_OPTIONS: ReadonlyArray<{
   label: string;
   selectedClass: string;
 }> = [
-  { value: 'auto', label: '自动公开', selectedClass: 'bg-sky-50 text-sky-800 hover:bg-sky-50' },
+  { value: 'auto', label: '自动公开', selectedClass: 'bg-sky-50 hover:bg-sky-50' },
   { value: 'public', label: '强制公开', selectedClass: 'bg-emerald-50 text-emerald-800 hover:bg-emerald-50' },
   { value: 'hidden', label: '隐藏文章', selectedClass: 'bg-red-50 text-red-700 hover:bg-red-50' },
 ];
@@ -66,7 +67,7 @@ interface ArticleReviewPanelProps {
   onSaveEditorial: () => void;
 }
 
-export function ArticleReviewPanel({
+export const ArticleReviewPanel = memo(function ArticleReviewPanel({
   detail,
   keyPoints,
   releaseStatus,
@@ -86,9 +87,11 @@ export function ArticleReviewPanel({
   onDraftChange,
   onSaveEditorial,
 }: ArticleReviewPanelProps) {
+  const compactReleaseGateMessage = releaseGateMessage === '已通过公开门禁' ? '通过' : releaseGateMessage;
+
   return (
     <>
-      <section className={WORKSPACE_SURFACE_CLASS}>
+      <section className={`${WORKSPACE_SURFACE_CLASS} space-y-2`}>
         <div className="grid min-w-0 md:grid-cols-2 md:items-stretch">
           <div className="min-w-0 px-3 py-2.5 md:max-h-[220px] md:overflow-y-auto">
             <h2 className="mb-1.5 text-xs font-semibold">核心要点</h2>
@@ -121,7 +124,7 @@ export function ArticleReviewPanel({
                 disabled={detailAction !== null}
                 onClick={() => onStartWorkflow('ai')}
               >
-                <RefreshCw className="h-3 w-3" />重新生成
+                重新生成
               </Button>
             </div>
             <p className="break-words whitespace-pre-line text-[13px] leading-5 text-foreground/85">
@@ -138,7 +141,7 @@ export function ArticleReviewPanel({
             </StatusPill>
             <StatusPill tone={pushSummary.tone}>推送：{pushSummary.label}</StatusPill>
             <span className="min-w-0 basis-full break-words text-[11px] text-muted-foreground sm:basis-auto">
-              文章覆盖：{detail.publicOverride === 'auto' ? '自动公开' : detail.publicOverride === 'public' ? '强制公开' : '人工隐藏'} · 公开门禁：{releaseGateMessage}
+              覆盖：{detail.publicOverride === 'auto' ? '自动公开' : detail.publicOverride === 'public' ? '强制公开' : '人工隐藏'} · 门禁：{compactReleaseGateMessage}
             </span>
           </div>
 
@@ -212,7 +215,7 @@ export function ArticleReviewPanel({
       )}
     </>
   );
-}
+});
 
 function EditorialField({
   field,

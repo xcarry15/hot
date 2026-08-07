@@ -1,10 +1,13 @@
 'use client';
 
+import { memo } from 'react';
 import { Merge, RefreshCw, Search, Split } from 'lucide-react';
 import { EventArticleList, type EventArticleRowModel } from '@/components/article-workspace/event-article-list';
+import { ScoreBadge } from '@/components/ui/score-badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { ArticleDetailDto } from '@/contracts/articles';
+import { splitBrands } from '@/lib/shared/article-codecs';
 import type { EventAudit, EventDetail, EventOption } from './types';
 import {
   EmptyEventTab,
@@ -25,6 +28,7 @@ import {
 import {
   WORKSPACE_BUTTON_CLASS,
   WORKSPACE_INPUT_CLASS,
+  WORKSPACE_KEYWORD_CLASS,
   WORKSPACE_SECTION_CLASS,
   WORKSPACE_SURFACE_CLASS,
 } from './styles';
@@ -53,7 +57,7 @@ interface EventCalibrationPanelProps {
   onMergeCurrentEvent: () => void;
 }
 
-export function EventCalibrationPanel({
+export const EventCalibrationPanel = memo(function EventCalibrationPanel({
   detail,
   eventDetail,
   eventSourceCount,
@@ -99,11 +103,21 @@ export function EventCalibrationPanel({
   }
 
   const currentEventAudits = eventDetail.audits;
+  const eventBrands = Array.from(new Set(eventDetail.articles.flatMap((article) => splitBrands(article.brand))));
+  const eventKey = detail.eventKey.trim() || eventDetail.articles.find((article) => article.eventKey.trim())?.eventKey.trim() || '';
+  const eventKeyKeywords = Array.from(new Set(eventKey.split(/[+/]/u).map((keyword) => keyword.trim()).filter(Boolean)));
+
+  const searchEventKeyword = (keyword: string) => {
+    const query = keyword.trim();
+    if (!query) return;
+    onEventSearchChange(query);
+    onSearchEvents(query);
+  };
 
   return (
     <section className={WORKSPACE_SURFACE_CLASS}>
       <SectionHeader title="事件校准" meta={`${eventDetail.articleCount} 篇 · ${eventSourceCount} 个来源`} />
-      <div className="space-y-1 px-3 py-2">
+      <div className="space-y-3 px-3 py-2">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
           <StatusPill tone={eventDetail.status === 'active' ? 'success' : 'neutral'}>
             事件：{eventStatusLabel(eventDetail.status)}
@@ -140,7 +154,6 @@ export function EventCalibrationPanel({
         <EventCalibrationGroup
           title="当前成员"
           count={eventMemberModels.length}
-          topBorder={false}
           context={(
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               {selectedSplitIds.size > 0 && (
@@ -179,30 +192,7 @@ export function EventCalibrationPanel({
           {brandCandidateModels.length > 0 ? <EventArticleList rows={brandCandidateModels} /> : <EmptyEventTab>近 30 天没有找到属于其他事件的同品牌文章。</EmptyEventTab>}
         </EventCalibrationGroup>
 
-        <section className={WORKSPACE_SECTION_CLASS}>
-          <div className="flex min-h-7 items-center justify-between gap-2">
-            <h3 className="text-xs font-semibold">操作记录</h3>
-            <span className="text-[11px] text-muted-foreground">
-              最近 {Math.min(currentEventAudits.length, 8)} / {currentEventAudits.length} 条
-            </span>
-          </div>
-          <div className="max-h-[320px] overflow-y-auto divide-y divide-border/60">
-            {currentEventAudits.slice(0, 8).map((audit) => {
-              const articleTitle = eventArticleTitles.get(audit.articleId)
-                || (audit.articleId === detail.id ? detail.title : `文章 ${audit.articleId.slice(-8)}`);
-              return (
-                <EventAuditRow
-                  key={audit.id}
-                  audit={audit}
-                  articleTitle={articleTitle}
-                />
-              );
-            })}
-            {currentEventAudits.length === 0 && <p className="py-3 text-xs text-muted-foreground">暂无操作记录</p>}
-          </div>
-        </section>
-
-        <section className={WORKSPACE_SECTION_CLASS}>
+        <section className="min-w-0 pb-3 pt-3">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
             <h3 className="text-xs font-semibold">更改所属事件</h3>
             <span className="text-[11px] text-muted-foreground">移动本篇，或将当前整个事件并入目标事件</span>
@@ -221,20 +211,43 @@ export function EventCalibrationPanel({
             </Button>
           </div>
 
-          <button
-            type="button"
-            className="mt-1 text-[11px] text-sky-700 hover:underline"
-            onClick={() => {
-              const query = detail.title.slice(0, 30);
-              onEventSearchChange(query);
-              onSearchEvents(query);
-            }}
-          >
-            用当前标题快速搜索
-          </button>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+            <span className="shrink-0 text-muted-foreground">本事件关键词：</span>
+            {eventBrands.length > 0 && (
+              <>
+                <span className="shrink-0 text-muted-foreground">品牌</span>
+                {eventBrands.map((brand) => (
+                  <button
+                    key={`brand-${brand}`}
+                    type="button"
+                    className={`${WORKSPACE_KEYWORD_CLASS} text-sky-700 hover:bg-sky-50 hover:text-sky-800`}
+                    onClick={() => searchEventKeyword(brand)}
+                  >
+                    {brand}
+                  </button>
+                ))}
+              </>
+            )}
+            {eventKeyKeywords.length > 0 && (
+              <>
+                <span className="shrink-0 text-muted-foreground">事件键</span>
+                {eventKeyKeywords.map((keyword) => (
+                  <button
+                    key={`event-key-${keyword}`}
+                    type="button"
+                    className={`${WORKSPACE_KEYWORD_CLASS} truncate text-sky-700 hover:bg-sky-50 hover:text-sky-800`}
+                    title={keyword}
+                    onClick={() => searchEventKeyword(keyword)}
+                  >
+                    {keyword}
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
 
           {eventOptions.length > 0 ? (
-            <div className="mt-1 max-h-56 divide-y divide-border/60 overflow-y-auto border-t border-border/60">
+            <div className="mt-1 max-h-56 overflow-y-auto">
               {eventOptions.map((event) => (
                 <EventSearchResult
                   key={event.id}
@@ -280,17 +293,43 @@ export function EventCalibrationPanel({
             </div>
           )}
         </section>
+
+        <section className={WORKSPACE_SECTION_CLASS}>
+          <div className="flex min-h-7 items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold">操作记录</h3>
+            <span className="text-[11px] text-muted-foreground">
+              最近 {Math.min(currentEventAudits.length, 8)} / {currentEventAudits.length} 条
+            </span>
+          </div>
+          <div className="max-h-[320px] overflow-y-auto divide-y divide-border/60">
+            {currentEventAudits.slice(0, 8).map((audit) => {
+              const articleTitle = eventArticleTitles.get(audit.articleId)
+                || (audit.articleId === detail.id ? detail.title : `文章 ${audit.articleId.slice(-8)}`);
+              return (
+                <EventAuditRow
+                  key={audit.id}
+                  audit={audit}
+                  articleTitle={articleTitle}
+                  isCurrentArticle={audit.articleId === detail.id}
+                />
+              );
+            })}
+            {currentEventAudits.length === 0 && <p className="py-3 text-xs text-muted-foreground">暂无操作记录</p>}
+          </div>
+        </section>
       </div>
     </section>
   );
-}
+});
 
 function EventAuditRow({
   audit,
   articleTitle,
+  isCurrentArticle,
 }: {
   audit: EventAudit;
   articleTitle: string;
+  isCurrentArticle: boolean;
 }) {
   const evidenceLabels = clusterAuditEvidenceLabels(audit);
 
@@ -305,7 +344,9 @@ function EventAuditRow({
           {audit.decisionSource === 'ai' && audit.confidence != null && <span>AI 归类判断置信度 {audit.confidence}%</span>}
           <time className="font-mono tabular-nums sm:ml-auto">{fullTimeLabel(audit.createdAt)}</time>
         </div>
-        <p className="mt-1 break-words font-medium leading-5">{clusterAuditOutcome(audit, articleTitle)}</p>
+        <p className="mt-1 break-words font-normal leading-5">
+          {renderAuditOutcome(clusterAuditOutcome(audit, articleTitle), articleTitle, isCurrentArticle)}
+        </p>
         {evidenceLabels.length > 0 && (
           <p className="mt-0.5 break-words text-[11px] leading-4 text-muted-foreground">
             <span className="font-medium text-foreground/70">判断依据：</span>{evidenceLabels.join(' · ')}
@@ -314,6 +355,19 @@ function EventAuditRow({
       </div>
     </article>
   );
+}
+
+function renderAuditOutcome(outcome: string, articleTitle: string, highlightArticleTitle: boolean) {
+  const titleToken = `《${articleTitle}》`;
+  const parts = outcome.split(titleToken);
+  if (!highlightArticleTitle || parts.length === 1) return outcome;
+
+  return parts.map((part, index) => (
+    <span key={`${part}-${index}`}>
+      {index > 0 && <span className="bg-sky-50 px-1 font-semibold text-foreground">{titleToken}</span>}
+      {part}
+    </span>
+  ));
 }
 
 function EventSearchResult({
@@ -332,7 +386,15 @@ function EventSearchResult({
   return (
     <div className={`grid min-w-0 gap-1 py-1.5 text-xs sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${selected ? 'bg-sky-50 px-1.5' : ''}`}>
       <div className="min-w-0">
-        <p className="line-clamp-2 font-medium">{event.representativeArticle?.title || `事件 ${event.id.slice(-8)}`}</p>
+        <div className="flex min-w-0 items-start gap-1">
+          {event.representativeArticle && <ScoreBadge score={event.representativeArticle.score} variant="compact-square" />}
+          <p className="min-w-0 line-clamp-2 font-medium">{event.representativeArticle?.title || `事件 ${event.id.slice(-8)}`}</p>
+        </div>
+        {event.representativeArticle?.eventKey && (
+          <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={event.representativeArticle.eventKey}>
+            事件键：{event.representativeArticle.eventKey}
+          </p>
+        )}
         <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
           <span>{event.articleCount} 篇</span>
           <span>{event.representativeArticle?.source.name || '未知来源'}</span>

@@ -12,7 +12,7 @@
  *   - activeJob 只取 status='running' 最新一条（多条时记服务端告警）。
  *   - Job.payload/result 安全解析；非法 JSON 返回 null，不让整个 snapshot 500。
  *   - 最近 Articles / DiscardedItems / Job 用一次 Prisma $transaction，技术待办 Article 按 id 额外补齐。
- *   - 普通窗口默认 250、上限 500，按 createdAt desc → id desc 排序，并返回 hasMore 标记。
+ *   - 普通窗口默认 400、上限 500，按 createdAt desc → id desc 排序，并返回 hasMore 标记。
  *   - 响应禁缓存：Next.js / 代理不得返回旧任务状态。
  */
 import { NextResponse } from 'next/server';

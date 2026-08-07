@@ -14,7 +14,7 @@ export type StepStatus =
   | 'running';
 
 /** 工作台只展示最近采集窗口，历史文章通过文章库服务端分页查询。 */
-export const CRAWL_LOG_DEFAULT_LIMIT = 250;
+export const CRAWL_LOG_DEFAULT_LIMIT = 400;
 export const CRAWL_LOG_MAX_LIMIT = 500;
 
 export interface ArticleProgress {
@@ -48,6 +48,8 @@ export interface ArticleProgress {
   technicalIgnoredAt?: string | null;
   /** 当前技术失败的可展示原因，按步骤键保存。 */
   technicalErrorReasons: Partial<Record<'process' | 'ai' | 'cluster' | 'push', string>>;
+  /** 当前 Event 的成员文章总数；未进入 Event 时为空。 */
+  eventArticleCount?: number | null;
   isEventRepresentative: boolean;
   /** 当前 Event 的代表文章已处于公开状态。 */
   isPublic: boolean;

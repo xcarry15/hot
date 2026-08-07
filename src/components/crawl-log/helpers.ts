@@ -1,4 +1,14 @@
+import { getPublicDateKey } from '@/lib/shared/public-date'
+
 // ========== Helpers ==========
+
+export function getTodayPublicDateKey(now = new Date()): string {
+  return getPublicDateKey(now)
+}
+
+export function isPublicDate(input: string | null | undefined, dateKey: string): boolean {
+  return Boolean(input && getPublicDateKey(input) === dateKey)
+}
 
 export function formatPubDate(input?: string | null): string {
   if (!input) return ''

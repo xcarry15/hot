@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { ChevronDown, FileText } from 'lucide-react';
 import type { ArticleDetailDto } from '@/contracts/articles';
 import { SectionHeader } from './workspace-primitives';
@@ -14,7 +15,7 @@ interface ArticleWorkspaceSupportPanelsProps {
   onToggleFullContent: () => void;
 }
 
-export function ArticleWorkspaceSupportPanels({
+export const ArticleWorkspaceSupportPanels = memo(function ArticleWorkspaceSupportPanels({
   detail,
   cleanContentText,
   latestPushLogs,
@@ -35,9 +36,6 @@ export function ArticleWorkspaceSupportPanels({
           <span className="flex items-center gap-1.5">
             <FileText className="h-3.5 w-3.5" aria-hidden="true" />
             正文核验
-            <span className="font-normal text-muted-foreground">
-              {cleanContentText.length.toLocaleString('zh-CN')} 字
-            </span>
           </span>
           <ChevronDown
             className={`h-3.5 w-3.5 transition-transform ${showFullContent ? 'rotate-180' : ''}`}
@@ -66,7 +64,7 @@ export function ArticleWorkspaceSupportPanels({
       </section>
     </>
   );
-}
+});
 
 function PushLogRow({
   detailId,

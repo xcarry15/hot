@@ -500,6 +500,7 @@ export async function getCrawlLogSnapshot(
             : `推送失败：${pushFailureReason.webhookRemark || '投递目标'}${pushFailureReason.latestError ? `：${pushFailureReason.latestError}` : ''}`,
         } : {}),
       },
+      eventArticleCount: a.event?.articleCount ?? null,
       isEventRepresentative: isRepresentative,
       isPublic: isRepresentative && a.event?.publicStatus === 'published',
     };

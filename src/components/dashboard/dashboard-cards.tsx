@@ -31,6 +31,16 @@ function getChartAxisMax(value: number): number {
   const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
   return step * magnitude
 }
+function getChartAxisTicks(axisMax: number, plotBottom: number, plotHeight: number): Array<{ y: number; value: number }> {
+  const tickCount = Math.min(5, axisMax + 1)
+  return Array.from({ length: tickCount }, (_, index) => {
+    const ratio = index / (tickCount - 1)
+    return {
+      y: plotBottom - ratio * plotHeight,
+      value: Math.round(axisMax * ratio),
+    }
+  })
+}
 function formatPublishedAt(value: string | null): string {
   if (!value) return '—'
   const date = new Date(value)
@@ -122,93 +132,65 @@ export function DailyNewArticlesCard({
 }: {
   articles: DashboardAnalytics['dailyNewArticles']
 }) {
-  const totals = articles.reduce((result, item) => ({
-    newCount: result.newCount + item.count,
-    publicCount: result.publicCount + item.publicCount,
-    pushedCount: result.pushedCount + item.pushedCount,
-  }), { newCount: 0, publicCount: 0, pushedCount: 0 })
-  const newAxisMax = getChartAxisMax(Math.max(0, ...articles.map((item) => item.count)))
-  const activityAxisMax = getChartAxisMax(Math.max(0, ...articles.flatMap((item) => [item.publicCount, item.pushedCount])))
+  const total = articles.reduce((sum, item) => sum + item.count, 0)
+  const chartAxisMax = getChartAxisMax(Math.max(0, ...articles.map((item) => item.count)))
   const labelStep = Math.max(1, Math.ceil(articles.length / 6))
-  const chartHeight = 300
-  const plotTop = 14
-  const plotBottom = chartHeight - 30
+  const chartHeight = 160
+  const plotTop = 12
+  const plotBottom = chartHeight - 26
   const plotHeight = plotBottom - plotTop
-  const axisLeft = 38
-  const axisRight = 38
-  const slotWidth = Math.max(56, 560 / Math.max(1, articles.length))
-  const plotWidth = Math.max(560, articles.length * slotWidth)
+  const axisLeft = 34
+  const axisRight = 12
+  const slotWidth = Math.max(52, 500 / Math.max(1, articles.length))
+  const plotWidth = Math.max(500, articles.length * slotWidth)
   const chartWidth = axisLeft + plotWidth + axisRight
   const getX = (index: number) => axisLeft + slotWidth * (index + 0.5)
-  const getRightY = (value: number) => plotBottom - (value / activityAxisMax) * plotHeight
-  const axisTicks = Array.from({ length: 5 }, (_, index) => {
-    const ratio = index / 4
-    return {
-      y: plotBottom - ratio * plotHeight,
-      left: Math.round(newAxisMax * ratio),
-      right: Math.round(activityAxisMax * ratio),
-    }
-  })
-  const publicLine = articles.map((item, index) => `${getX(index)},${getRightY(item.publicCount)}`).join(' ')
-  const pushedLine = articles.map((item, index) => `${getX(index)},${getRightY(item.pushedCount)}`).join(' ')
+  const getY = (value: number) => plotBottom - (value / chartAxisMax) * plotHeight
+  const barWidth = Math.min(28, slotWidth * 0.42)
+  const axisTicks = getChartAxisTicks(chartAxisMax, plotBottom, plotHeight)
+  const points = articles.map((item, index) => `${getX(index)},${getY(item.count)}`).join(' ')
 
   return (
-    <Card className="min-h-[420px] rounded-none py-0 shadow-none">
+    <Card className="rounded-none py-0 shadow-none">
       <CardContent className="p-2">
         <div className="mb-1 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">每日文章动态</h3>
-          <span className="text-[10px] text-muted-foreground">新增 {formatNumber(totals.newCount)} · 公开 {formatNumber(totals.publicCount)} · 推送 {formatNumber(totals.pushedCount)}</span>
+          <h3 className="text-sm font-medium">每日新增</h3>
+          <span className="text-[10px] text-muted-foreground">期间合计 {formatNumber(total)} 篇</span>
         </div>
-        <div className="mb-1 flex items-center gap-3 text-[10px] text-muted-foreground">
-          <span className="inline-flex items-center gap-1"><i className="h-1.5 w-1.5 rounded-sm bg-primary/75" />新增</span>
-          <span className="inline-flex items-center gap-1"><i className="h-px w-3 bg-emerald-500" />公开</span>
-          <span className="inline-flex items-center gap-1"><i className="h-px w-3 bg-violet-500" />推送</span>
+        <div className="mb-1 flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1"><i className="h-1.5 w-1.5 rounded-sm bg-primary/75" />新增文章</span>
+          <span className="text-muted-foreground/75">按入库时间统计 · 单位：篇</span>
         </div>
         {articles.length > 0 ? (
-          <div className="mt-2 h-[335px] overflow-x-auto border-b border-l px-1 pb-1 pt-2">
+          <div className="mt-1 h-[180px] overflow-x-auto border-b border-l px-1 pb-1 pt-2">
             <svg
               className="block"
               width={chartWidth}
               height={chartHeight}
               role="img"
-              aria-label="每日新增文章、公开文章和推送文章趋势"
+              aria-label="每日新增文章数量和趋势"
             >
-              {axisTicks.map((tick) => (
-                <g key={tick.y}>
+              {axisTicks.map((tick, index) => (
+                <g key={index}>
                   <line x1={axisLeft} x2={axisLeft + plotWidth} y1={tick.y} y2={tick.y} stroke="hsl(var(--border))" strokeDasharray="2 3" />
-                  <text x={axisLeft - 6} y={tick.y + 3} textAnchor="end" fill="hsl(var(--muted-foreground))" className="text-[10px]">{formatNumber(tick.left)}</text>
-                  <text x={axisLeft + plotWidth + 6} y={tick.y + 3} fill="hsl(var(--muted-foreground))" className="text-[10px]">{formatNumber(tick.right)}</text>
+                  <text x={axisLeft - 6} y={tick.y + 3} textAnchor="end" fill="hsl(var(--muted-foreground))" className="text-[10px]">{formatNumber(tick.value)}</text>
                 </g>
               ))}
               <line x1={axisLeft} x2={axisLeft} y1={plotTop} y2={plotBottom} stroke="hsl(var(--border))" />
-              <line x1={axisLeft + plotWidth} x2={axisLeft + plotWidth} y1={plotTop} y2={plotBottom} stroke="hsl(var(--border))" />
               <line x1={axisLeft} x2={axisLeft + plotWidth} y1={plotBottom} y2={plotBottom} stroke="hsl(var(--border))" />
+              <polyline points={points} fill="none" stroke="hsl(var(--primary))" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
 
               {articles.map((item, index) => {
                 const x = getX(index)
                 const [, month, day] = item.date.split('-')
                 const showLabel = articles.length <= 7 || index === 0 || index === articles.length - 1 || index % labelStep === 0
-                const barHeight = (item.count / newAxisMax) * plotHeight
-                const barLabelY = Math.max(10, plotBottom - barHeight - 5)
+                const barHeight = (item.count / chartAxisMax) * plotHeight
                 return (
                   <g key={item.date}>
-                    <title>{`新增 ${item.count} · 公开 ${item.publicCount} · 推送 ${item.pushedCount}`}</title>
-                    <rect x={x - Math.min(12, slotWidth * 0.2)} y={plotBottom - barHeight} width={Math.min(24, slotWidth * 0.4)} height={barHeight} rx={3} fill="hsl(var(--primary))" opacity={0.75} />
-                    <text x={x} y={barLabelY} textAnchor="middle" fill="hsl(var(--foreground))" className="text-[9px] tabular-nums">{formatNumber(item.count)}</text>
+                    <title>{`${item.date} · 新增文章 ${item.count}`}</title>
+                    <rect x={x - barWidth / 2} y={plotBottom - barHeight} width={barWidth} height={barHeight} rx={3} fill="hsl(var(--primary))" opacity={0.3} />
+                    {showLabel && item.count > 0 && <text x={x} y={Math.max(plotTop + 10, plotBottom - barHeight - 5)} textAnchor="middle" fill="hsl(var(--foreground))" className="text-[9px] tabular-nums">{formatNumber(item.count)}</text>}
                     <text x={x} y={chartHeight - 8} textAnchor="middle" fill="hsl(var(--muted-foreground))" className="text-[9px] tabular-nums">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</text>
-                  </g>
-                )
-              })}
-
-              <polyline points={publicLine} fill="none" stroke="hsl(160 84% 39%)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-              <polyline points={pushedLine} fill="none" stroke="hsl(262 83% 58%)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-              {articles.map((item, index) => {
-                const x = getX(index)
-                return (
-                  <g key={`${item.date}-points`}>
-                    <title>{`公开 ${item.publicCount} · 推送 ${item.pushedCount}`}</title>
-                    <circle cx={x} cy={getRightY(item.publicCount)} r={3} fill="hsl(160 84% 39%)" />
-                    <circle cx={x} cy={getRightY(item.pushedCount)} r={3} fill="hsl(262 83% 58%)" />
                   </g>
                 )
               })}
@@ -220,6 +202,107 @@ export function DailyNewArticlesCard({
       </CardContent>
     </Card>
   )
+}
+
+type DailyMetric = 'publicCount' | 'pushedCount'
+
+function DailyActivityCard({
+  articles,
+  metric,
+  title,
+  label,
+  color,
+  emptyText,
+}: {
+  articles: DashboardAnalytics['dailyNewArticles']
+  metric: DailyMetric
+  title: string
+  label: string
+  color: string
+  emptyText: string
+}) {
+  const chartAxisMax = getChartAxisMax(Math.max(0, ...articles.map((item) => item[metric])))
+  const labelStep = Math.max(1, Math.ceil(articles.length / 6))
+  const chartHeight = 160
+  const plotTop = 12
+  const plotBottom = chartHeight - 26
+  const plotHeight = plotBottom - plotTop
+  const axisLeft = 34
+  const axisRight = 12
+  const slotWidth = Math.max(52, 500 / Math.max(1, articles.length))
+  const plotWidth = Math.max(500, articles.length * slotWidth)
+  const chartWidth = axisLeft + plotWidth + axisRight
+  const getX = (index: number) => axisLeft + slotWidth * (index + 0.5)
+  const barWidth = Math.min(28, slotWidth * 0.42)
+  const axisTicks = getChartAxisTicks(chartAxisMax, plotBottom, plotHeight)
+
+  return (
+    <Card className="rounded-none py-0 shadow-none">
+      <CardContent className="p-2">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">{title}</h3>
+        </div>
+        <div className="mb-1 flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1"><i className="h-1.5 w-1.5 rounded-sm" style={{ backgroundColor: color }} />{label}</span>
+          <span className="text-muted-foreground/75">按动作发生日 · 单位：次</span>
+        </div>
+        {articles.length > 0 ? (
+          <div className="mt-1 h-[180px] overflow-x-auto border-b border-l px-1 pb-1 pt-2">
+            <svg
+              className="block"
+              width={chartWidth}
+              height={chartHeight}
+              role="img"
+              aria-label={`${title}数量`}
+            >
+              {axisTicks.map((tick, index) => (
+                <g key={index}>
+                  <line x1={axisLeft} x2={axisLeft + plotWidth} y1={tick.y} y2={tick.y} stroke="hsl(var(--border))" strokeDasharray="2 3" />
+                  <text x={axisLeft - 6} y={tick.y + 3} textAnchor="end" fill="hsl(var(--muted-foreground))" className="text-[10px]">{formatNumber(tick.value)}</text>
+                </g>
+              ))}
+              <line x1={axisLeft} x2={axisLeft} y1={plotTop} y2={plotBottom} stroke="hsl(var(--border))" />
+              <line x1={axisLeft} x2={axisLeft + plotWidth} y1={plotBottom} y2={plotBottom} stroke="hsl(var(--border))" />
+
+              {articles.map((item, index) => {
+                const x = getX(index)
+                const [, month, day] = item.date.split('-')
+                const showLabel = articles.length <= 7 || index === 0 || index === articles.length - 1 || index % labelStep === 0
+                const value = item[metric]
+                const barHeight = (value / chartAxisMax) * plotHeight
+                return (
+                  <g key={item.date}>
+                    <title>{`${item.date} · ${label} ${value}`}</title>
+                    <rect x={x - barWidth / 2} y={plotBottom - barHeight} width={barWidth} height={barHeight} rx={3} fill={color} opacity={0.75} />
+                    {showLabel && value > 0 && <text x={x} y={Math.max(plotTop + 10, plotBottom - barHeight - 5)} textAnchor="middle" fill="hsl(var(--foreground))" className="text-[9px] tabular-nums">{formatNumber(value)}</text>}
+                    <text x={x} y={chartHeight - 8} textAnchor="middle" fill="hsl(var(--muted-foreground))" className="text-[9px] tabular-nums">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</text>
+                  </g>
+                )
+              })}
+            </svg>
+          </div>
+        ) : (
+          <div className="py-8 text-center text-xs text-muted-foreground">{emptyText}</div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function DailyPublicArticlesCard({
+  articles,
+}: {
+  articles: DashboardAnalytics['dailyNewArticles']
+}) {
+  return <DailyActivityCard articles={articles} metric="publicCount" title="每日公开" label="公开事件" color="hsl(160 84% 39%)" emptyText="暂无公开数据" />
+}
+
+export function DailyPushedArticlesCard({
+  articles,
+}: {
+  articles: DashboardAnalytics['dailyNewArticles']
+}) {
+  return <DailyActivityCard articles={articles} metric="pushedCount" title="每日推送" label="推送事件" color="hsl(262 83% 58%)" emptyText="暂无推送数据" />
 }
 
 export function CrawlTimeCard({

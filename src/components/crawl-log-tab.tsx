@@ -41,6 +41,7 @@ import { CrawlLogFilters } from './crawl-log/filters-bar'
 import { TaskStatusPanels } from './crawl-log/task-status-panels'
 import { CrawlLogDetailSheets } from './crawl-log/detail-sheets'
 import { RuntimeStatusBar } from './crawl-log/runtime-status-bar'
+import { getTodayPublicDateKey, isPublicDate } from './crawl-log/helpers'
 import { EmptyState } from '@/components/ui/empty-state'
 import { fetchSettings, saveSettings, subscribeToSettingsChanged } from '@/features/settings-api.client'
 import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
@@ -52,7 +53,6 @@ import {
 import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
 import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
 import { retrySource, retrySources } from '@/features/sources-api.client'
-import { getPublicDateKey } from '@/lib/shared/public-date'
 
 type WorkflowStage = 'collect' | 'process' | 'ai' | 'cluster' | 'push'
 type WorkflowAction = WorkflowStage | 'all'
@@ -202,22 +202,26 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     writeArticleDetailUrl(articleId, panel)
   }, [writeArticleDetailUrl])
 
-  // 未入库详情状态同步到 URL。
-  const handleDetailOpenChange = useCallback((open: boolean) => {
-    setDetailOpen(open)
+  const writeDiscardedDetailUrl = useCallback((discardedId: string | null) => {
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
-    if (open && discardedDetailId) {
-      url.searchParams.delete('articleId')
-      url.searchParams.delete('panel')
-      url.searchParams.set(URL_PARAM_DETAIL, discardedDetailId)
+    url.searchParams.delete('articleId')
+    url.searchParams.delete('panel')
+    if (discardedId) {
+      url.searchParams.set(URL_PARAM_DETAIL, discardedId)
       url.searchParams.set(URL_PARAM_DETAIL_KIND, 'discarded')
     } else {
       url.searchParams.delete(URL_PARAM_DETAIL)
       url.searchParams.delete(URL_PARAM_DETAIL_KIND)
     }
     window.history.replaceState(null, '', url.toString())
-  }, [discardedDetailId])
+  }, [])
+
+  // 未入库详情状态同步到 URL。
+  const handleDetailOpenChange = useCallback((open: boolean) => {
+    setDetailOpen(open)
+    writeDiscardedDetailUrl(open ? discardedDetailId : null)
+  }, [discardedDetailId, writeDiscardedDetailUrl])
 
   // 局部请求级 loading：仅用于按钮点击瞬间——成功入队 / 失败都不持久化。
   const [stageRequestLoading, setStageRequestLoading] = useState<Partial<Record<WorkflowAction, boolean>>>({})
@@ -231,10 +235,10 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   const filterCounts = useMemo(() => {
     const counts: Partial<Record<FilterChipKey, number>> = {}
-    const today = getPublicDateKey(new Date())
+     const today = getTodayPublicDateKey()
     for (const src of sources) {
       const articles = filterState.publishedToday
-        ? src.articles.filter(article => article.publishedAt && getPublicDateKey(article.publishedAt) === today)
+         ? src.articles.filter(article => isPublicDate(article.publishedAt, today))
         : src.articles
       // “全部”展示当前工作台窗口文章总数；已忽略虽默认不展开，仍属于窗口总量。
       counts.all = (counts.all ?? 0) + articles.length
@@ -255,10 +259,12 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   // 展开/折叠偏好是纯 UI 状态：从 snapshot 派生的 expanded 字段是默认值，
   // 本地 overrides 覆盖之。
   const [expandedOverrides, setExpandedOverrides] = useState<Record<string, boolean>>({})
-  const sourcesWithExpansion = useMemo(() => sources.map(s => ({
-    ...s,
-    expanded: expandedOverrides[s.id] ?? s.expanded,
-  })), [sources, expandedOverrides])
+  const sourcesWithExpansion = useMemo(() => sources.map((source) => {
+    const expanded = expandedOverrides[source.id]
+    return expanded === undefined || expanded === source.expanded
+      ? source
+      : { ...source, expanded }
+  }), [sources, expandedOverrides])
   const sourceSummaryById = useMemo(
     () => new Map(sourcesWithExpansion.map(source => [source.id, source])),
     [sourcesWithExpansion],
@@ -288,6 +294,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   // Fetch initial auto-crawl state
   useEffect(() => {
+    if (!active) return
     let cancelled = false
     fetchSettings()
       .then((data: Record<string, string>) => {
@@ -298,17 +305,20 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       })
       .catch(() => { /* keep null = unknown */ })
     return () => { cancelled = true }
-  }, [])
+  }, [active])
 
-  useEffect(() => subscribeToSettingsChanged((changes) => {
-    if (typeof changes.auto_crawl_enabled === 'string') {
-      const enabled = changes.auto_crawl_enabled === 'true'
-      autoCrawlPersistedRef.current = enabled
-      if (!autoCrawlSavingRef.current) {
-        setAutoCrawl(enabled)
+  useEffect(() => {
+    if (!active) return
+    return subscribeToSettingsChanged((changes) => {
+      if (typeof changes.auto_crawl_enabled === 'string') {
+        const enabled = changes.auto_crawl_enabled === 'true'
+        autoCrawlPersistedRef.current = enabled
+        if (!autoCrawlSavingRef.current) {
+          setAutoCrawl(enabled)
+        }
       }
-    }
-  }), [])
+    })
+  }, [active])
 
   // ── 派生状态 ────────────────────────────────────────────
   // isAnyRunning 仅依赖 snapshot.activeJob——DB 是唯一事实源。
@@ -413,7 +423,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
   // ── Button Handlers ──
 
-  const handleToggleAutoCrawl = (next: boolean) => {
+  const handleToggleAutoCrawl = useCallback((next: boolean) => {
     if (autoCrawlSavingRef.current) return
     if (autoCrawlPersistedRef.current === next) return
     const previous = autoCrawlPersistedRef.current
@@ -433,9 +443,13 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
         autoCrawlSavingRef.current = false
         setAutoCrawlSaving(false)
       })
-  }
+  }, [])
 
-  const handleRetrySource = async (sourceId: string) => {
+  const runSourceRetry = useCallback(async (
+    request: () => Promise<unknown>,
+    successMessage: string,
+    failureMessage: string,
+  ) => {
     if (isOperationBusy || operationRequestLockRef.current) {
       toast.warning('当前已有任务运行，请等待完成后再重试数据源')
       return
@@ -443,36 +457,38 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     operationRequestLockRef.current = true
     setSourceRetryLoading(true)
     try {
-      const result = await retrySource(sourceId) as { queued?: boolean; error?: string }
-      if (!result.queued) throw new Error(result.error || '数据源重试未能启动')
-      toast.info('已触发该数据源重试')
+      const result = await request() as { queued?: boolean; error?: string }
+      if (!result.queued) throw new Error(result.error || failureMessage)
+      toast.info(successMessage)
       await refreshSnapshot()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '数据源重试触发失败')
+      toast.error(error instanceof Error ? error.message : failureMessage)
     } finally {
       operationRequestLockRef.current = false
       setSourceRetryLoading(false)
     }
-  }
+  }, [isOperationBusy, refreshSnapshot])
 
-  const handleRetryFailedSources = async () => {
-    if (isOperationBusy || operationRequestLockRef.current || failedSources.length === 0) return
-    operationRequestLockRef.current = true
-    setSourceRetryLoading(true)
-    try {
-      const result = await retrySources(failedSources.map(source => source.id)) as { queued?: boolean; error?: string }
-      if (!result.queued) throw new Error(result.error || '批量重试未能启动')
-      toast.info(`已将 ${failedSources.length} 个异常源加入重试任务`)
-      await refreshSnapshot()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '批量重试失败')
-    } finally {
-      operationRequestLockRef.current = false
-      setSourceRetryLoading(false)
-    }
-  }
+  const handleRetrySource = useCallback((sourceId: string) => runSourceRetry(
+    () => retrySource(sourceId),
+    '已触发该数据源重试',
+    '数据源重试触发失败',
+  ), [runSourceRetry])
 
-  const runStage = async (stage: WorkflowAction) => {
+  const handleRetryFailedSources = useCallback(() => {
+    if (failedSources.length === 0) return
+    return runSourceRetry(
+      () => retrySources(failedSources.map(source => source.id)),
+      `已将 ${failedSources.length} 个异常源加入重试任务`,
+      '批量重试失败',
+    )
+  }, [failedSources, runSourceRetry])
+
+  const handleRetryFailedSourcesClick = useCallback(() => {
+    void handleRetryFailedSources()
+  }, [handleRetryFailedSources])
+
+  const runStage = useCallback(async (stage: WorkflowAction) => {
     if (isOperationBusy || operationRequestLockRef.current) return
     if (stage === 'all' && typeof window !== 'undefined' && !window.confirm('运行全量抓取将依次执行采集、处理、AI 分析、事件聚类，并可能推送文章。确认继续吗？')) {
       return
@@ -499,9 +515,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       operationRequestLockRef.current = false
       setStageRequestLoading(prev => ({ ...prev, [stage]: false }))
     }
-  }
+  }, [isOperationBusy, refreshSnapshot])
 
-  const handleStopWorker = async () => {
+  const handleStopWorker = useCallback(async () => {
     if (!isAnyRunning) return
     setStopLoading(true)
     try {
@@ -513,7 +529,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     } finally {
       setStopLoading(false)
     }
-  }
+  }, [isAnyRunning, refreshSnapshot])
 
   // ── Per-article step actions（局部 loading，不持久化） ──
 
@@ -574,14 +590,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   }, [])
 
   const openArticleFromLibrary = useCallback((articleId: string) => {
-    setDetailOpen(false)
-    setDiscardedDetailId(null)
-    setArticleDetailId(articleId)
-    setArticleDetailPanel(null)
-    writeArticleDetailUrl(articleId, null)
-    setArticleDetailOpen(true)
+    openArticleWorkspace(articleId, null)
     setLibraryOpen(false)
-  }, [writeArticleDetailUrl])
+  }, [openArticleWorkspace])
 
   const handleLibraryChanged = useCallback(() => {
     void refreshSnapshot()
@@ -594,18 +605,10 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     setArticleDetailPanel(null)
     setDiscardedDetailId(id)
     setDetailOpen(true)
-    // 更新未入库详情深链。
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href)
-      url.searchParams.delete('articleId')
-      url.searchParams.delete('panel')
-      url.searchParams.set(URL_PARAM_DETAIL, id)
-      url.searchParams.set(URL_PARAM_DETAIL_KIND, 'discarded')
-      window.history.replaceState(null, '', url.toString())
-    }
-  }, [])
+    writeDiscardedDetailUrl(id)
+  }, [writeDiscardedDetailUrl])
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
       const refreshed = await refreshSnapshot()
@@ -616,7 +619,11 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     } finally {
       setRefreshing(false)
     }
-  }
+  }, [refreshSnapshot, sources.length])
+
+  const handleDiscardedRetried = useCallback(() => {
+    void refreshSnapshot()
+  }, [refreshSnapshot])
 
   // ── Render Helpers ──
 
@@ -658,6 +665,11 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
 
           <div className="hidden min-w-0 flex-1 sm:order-3 sm:block">
             <RuntimeStatusBar runtime={snapshot?.runtime} />
+          </div>
+
+          <div className="hidden shrink-0 items-center gap-2 px-1 text-[11px] text-muted-foreground sm:order-4 sm:flex">
+            <span>已公开 <b className="font-medium tabular-nums text-sky-700">{filterCounts['normal-public'] ?? 0}</b></span>
+            <span>已推送 <b className="font-medium tabular-nums text-emerald-700">{filterCounts['normal-pushed'] ?? 0}</b></span>
           </div>
 
           <div className="order-2 grid w-full grid-cols-3 gap-1 sm:order-4 sm:flex sm:w-auto sm:items-center sm:gap-2">
@@ -742,6 +754,14 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           </div>
         </div>
 
+        <div className="flex min-w-0 items-center justify-between gap-2 border-t border-border/70 pt-1 sm:hidden">
+          <RuntimeStatusBar runtime={snapshot?.runtime} />
+          <div className="flex shrink-0 items-center gap-2 px-1 text-[10px] text-muted-foreground">
+            <span>已公开 <b className="font-medium tabular-nums text-sky-700">{filterCounts['normal-public'] ?? 0}</b></span>
+            <span>已推送 <b className="font-medium tabular-nums text-emerald-700">{filterCounts['normal-pushed'] ?? 0}</b></span>
+          </div>
+        </div>
+
         {/* 顶部流水线状态筛选；选择正常/异常后显示具体状态。 */}
         <CrawlLogFilters
           filterState={filterState}
@@ -765,7 +785,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           failedArticles={failedArticles}
           autoRetryArticles={autoRetryArticles}
           isOperationBusy={isOperationBusy}
-          onRetryFailedSources={() => void handleRetryFailedSources()}
+          onRetryFailedSources={handleRetryFailedSourcesClick}
         />
       </div>
 
@@ -781,14 +801,15 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
               key={source.id}
               source={source}
               summarySource={sourceSummaryById.get(source.id)}
-              onToggle={() => handleToggleSource(source.id)}
+              publishedToday={filterState.publishedToday}
+              onToggle={handleToggleSource}
               onStepAction={handleStepAction}
               onStepActionLoading={isStepActionLoading}
               onTechnicalStatus={handleTechnicalStatus}
               onOpenArticle={handleOpenArticle}
               onOpenArticlePanel={handleOpenArticlePanel}
               onOpenDiscarded={handleOpenDiscarded}
-              onDiscardedRetried={() => { void refreshSnapshot() }}
+              onDiscardedRetried={handleDiscardedRetried}
               keywordCategories={keywordCategories}
               onKeywordAdded={handleKeywordCategoryAdded}
               onRetrySource={handleRetrySource}

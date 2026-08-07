@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Check, Loader2, XCircle } from 'lucide-react'
@@ -36,7 +37,7 @@ interface TaskStatusPanelsProps {
 
 const TASK_STAGE_CLASS = 'inline-flex h-6 items-center gap-1 border px-2 text-[11px]'
 
-export function TaskStatusPanels({
+export const TaskStatusPanels = memo(function TaskStatusPanels({
   activeTaskView,
   progressView,
   latestJobFailure,
@@ -153,4 +154,4 @@ export function TaskStatusPanels({
       )}
     </>
   )
-}
+})

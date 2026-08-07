@@ -241,21 +241,19 @@ export function EventCalibrationGroup({
   title,
   count,
   context,
-  topBorder = true,
   children,
 }: {
   title: string;
   count: number;
   context?: ReactNode;
-  topBorder?: boolean;
   children: ReactNode;
 }) {
   return (
-    <section className={topBorder ? WORKSPACE_SECTION_CLASS : 'min-w-0 pt-1.5'}>
+    <section className={WORKSPACE_SECTION_CLASS}>
       <div className="flex min-h-7 min-w-0 flex-wrap items-center gap-2">
         <h3 className="text-xs font-semibold">{title}</h3>
         <span className="bg-muted px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">{count}</span>
-        {context && <div className="min-w-0 flex-1 basis-full sm:basis-auto">{context}</div>}
+        {context && <div className="min-w-0 flex-1 basis-auto">{context}</div>}
       </div>
       <div className="min-w-0 bg-muted/10">{children}</div>
     </section>
@@ -284,7 +282,7 @@ export function MetaRow({
   return (
     <div className="grid min-w-0 grid-cols-[74px_minmax(0,1fr)] gap-2">
       <span className="text-muted-foreground">{label}</span>
-      <span className={`min-w-0 break-words ${mono ? 'font-mono text-xs tabular-nums' : ''}`} title={title}>
+      <span className={`min-w-0 truncate ${mono ? 'font-mono text-xs tabular-nums' : ''}`} title={title}>
         {value}
       </span>
     </div>

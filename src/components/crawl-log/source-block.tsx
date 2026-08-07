@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { CheckCircle2, XCircle, Loader2, Clock3, type LucideIcon } from 'lucide-react'
 import { ArticleRow } from './article-row'
 import { DiscardedRow } from './discarded-row'
-import { DISCARD_REASON_LABELS } from './helpers'
+import { DISCARD_REASON_LABELS, getTodayPublicDateKey, isPublicDate } from './helpers'
 import { hasArticleAnomaly } from './filter'
 import type { SourceProgress, DiscardedRow as DiscardedRowType } from './types'
 import type { ArticleWorkspacePanel } from '@/components/article-workspace'
@@ -31,6 +31,7 @@ const SOURCE_STATUS_CONFIG: Record<SourceProgress['status'], { icon: LucideIcon;
 export const SourceBlock = memo(function SourceBlock({
   source,
   summarySource,
+  publishedToday,
   onToggle,
   onStepAction,
   onStepActionLoading,
@@ -45,9 +46,10 @@ export const SourceBlock = memo(function SourceBlock({
   isJobRunning,
 }: {
   source: SourceProgress
-  /** 筛选只影响列表；标题统计始终读取该数据源的当前窗口快照。 */
+  /** 状态筛选只影响列表；标题统计读取当前窗口，并同步“今日”日期筛选。 */
   summarySource?: SourceProgress
-  onToggle: () => void
+  publishedToday?: boolean
+  onToggle: (sourceId: string) => void
   onStepAction?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => void
   onStepActionLoading?: (articleId: string, step: 'process' | 'cluster' | 'ai' | 'push') => boolean
   onTechnicalStatus?: (articleId: string, action: 'ignore' | 'restore') => void
@@ -64,17 +66,14 @@ export const SourceBlock = memo(function SourceBlock({
   const statusConfig = SOURCE_STATUS_CONFIG[source.status]
   const StatusIcon = statusConfig.icon
 
-  const lastRunLabel = source.lastRunStatus === 'success'
-    ? `新增 ${source.lastRunNewArticles ?? 0}`
-    : source.lastRunStatus === 'failed'
-      ? '本次失败'
-      : source.lastRunStatus === 'warning'
-        ? '本次有警告'
-        : '未运行'
-
   // 保持缺失文章列表的空数组引用稳定，避免破坏下游 useMemo 的依赖判断。
   const articles = useMemo(() => source.articles ?? [], [source.articles])
-  const summaryArticles = summarySource?.articles ?? articles
+  const today = getTodayPublicDateKey()
+  const summaryArticles = useMemo(() => {
+    const allArticles = summarySource?.articles ?? articles
+    if (!publishedToday) return allArticles
+    return allArticles.filter(article => isPublicDate(article.publishedAt, today))
+  }, [articles, publishedToday, summarySource?.articles, today])
   const totalCount = summaryArticles.length
   const articleMetrics = useMemo(() => {
     let manualCount = 0
@@ -95,6 +94,16 @@ export const SourceBlock = memo(function SourceBlock({
   }, [summaryArticles])
   const { manualCount, autoRetryCount, publicCount, pushedCount, anomalyCount } = articleMetrics
   const visibleDiscardedCount = source.discarded?.length ?? 0
+  const newArticleCount = publishedToday
+    ? summaryArticles.filter(article => isPublicDate(article.createdAt, today)).length
+    : source.lastRunNewArticles ?? 0
+  const lastRunLabel = source.lastRunStatus === 'success'
+    ? `新增 ${newArticleCount}`
+    : source.lastRunStatus === 'failed'
+      ? '本次失败'
+      : source.lastRunStatus === 'warning'
+        ? '本次有警告'
+        : '未运行'
 
   const [collapsedArticleGroups, setCollapsedArticleGroups] = useState<Set<string>>(() => new Set())
   // 按 reason 分组，组内按 publishedAt desc 排序
@@ -185,7 +194,7 @@ export const SourceBlock = memo(function SourceBlock({
   return (
     <div className="w-full min-w-0 max-w-full overflow-hidden rounded-none border border-border bg-card">
       <button
-        onClick={onToggle}
+        onClick={() => onToggle(source.id)}
         className={`w-full grid grid-cols-[6.25rem_minmax(0,1fr)] items-center gap-x-1 border-b px-2 py-1.5 text-left text-sm sm:grid-cols-[7.5rem_minmax(0,1fr)] ${statusConfig.panelClass} transition-opacity hover:opacity-80`}
       >
         <div className="flex min-w-0 items-center gap-1.5">

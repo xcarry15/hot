@@ -19,7 +19,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { CrawlTimeCard, DailyNewArticlesCard, TopViewedArticlesCard } from './dashboard/dashboard-cards'
+import { CrawlTimeCard, DailyNewArticlesCard, DailyPublicArticlesCard, DailyPushedArticlesCard, TopViewedArticlesCard } from './dashboard/dashboard-cards'
 import { isRequestAborted } from '@/lib/request-json.client'
 
 type SourceSort = 'found' | 'totalArticles' | 'avgScore' | 'ingested' | 'processed' | 'analyzed' | 'pushed' | 'unmatched' | 'duplicates' | 'ads'
@@ -484,7 +484,11 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
               onArticleClick={openPopularArticle}
             />
 
-            <DailyNewArticlesCard articles={analytics.dailyNewArticles} />
+            <div className="grid min-w-0 gap-1">
+              <DailyNewArticlesCard articles={analytics.dailyNewArticles} />
+              <DailyPublicArticlesCard articles={analytics.dailyNewArticles} />
+              <DailyPushedArticlesCard articles={analytics.dailyNewArticles} />
+            </div>
 
           </div>
 

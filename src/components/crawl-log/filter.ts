@@ -9,7 +9,7 @@ import {
 } from './types'
 import { URL_PARAM_CHIPS, URL_PARAM_SRC, URL_PARAM_DISC, URL_PARAM_TODAY } from './constants'
 import { isTechnicalSkipReason } from '@/lib/article-pipeline-status'
-import { getPublicDateKey } from '@/lib/shared/public-date'
+import { getTodayPublicDateKey, isPublicDate } from './helpers'
 
 export type ArticleFilterBucket =
   | 'normal-processing'
@@ -166,18 +166,21 @@ export function applyFilterState(
   state: FilterState,
 ): SourceProgress[] {
   const selectedChip = state.chips.values().next().value as StepFilterKey | undefined
-  const today = getPublicDateKey(new Date())
+  const today = getTodayPublicDateKey()
   return sources
     .filter(s => state.sourceId === 'all' || s.id === state.sourceId)
     .map(s => {
       // 已忽略项默认隐藏，只在用户主动选择“已忽略”筛选时展示，避免长期挂在任务列表。
-      let articles = !selectedChip
-        ? s.articles.filter(a => a.technicalState !== 'ignored')
-        : s.articles.filter(a => matchStepChip(a, selectedChip))
+      let articles = s.articles
+      if (selectedChip) {
+        articles = s.articles.filter(a => matchStepChip(a, selectedChip))
+      } else if (s.articles.some(a => a.technicalState === 'ignored')) {
+        articles = s.articles.filter(a => a.technicalState !== 'ignored')
+      }
       if (state.publishedToday) {
         articles = articles.filter(a => {
           if (!a.publishedAt) return false
-          return getPublicDateKey(a.publishedAt) === today
+          return isPublicDate(a.publishedAt, today)
         })
       }
       // P0-5: 状态筛选激活时，未入库条目也受约束。
@@ -191,14 +194,15 @@ export function applyFilterState(
         if (state.publishedToday) {
           discarded = discarded.filter(d => {
             const dateStr = d.publishedAt || d.createdAt
-            if (!dateStr) return false
-            return getPublicDateKey(dateStr) === today
+            return isPublicDate(dateStr, today)
           })
         }
       } else {
         discarded = []
       }
-      return { ...s, articles, discarded }
+      return articles === s.articles && discarded === s.discarded
+        ? s
+        : { ...s, articles, discarded }
     })
     .filter(s => {
       if (s.articles.length > 0 || s.discarded.length > 0) return true

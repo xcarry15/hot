@@ -422,7 +422,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     // 关键:min-h-0 让 flex 子项可以收缩到 0,否则 Tabs 会被超长内容
     // (如提示词的 9 个 Textarea = 1600+px)撑爆,把底部保存按钮挤出视口。
     <div className="settings-surface flex h-full min-h-0 flex-col text-sm">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col overflow-hidden [&_[data-slot=button]]:rounded-none [&_[data-slot=button]]:shadow-none [&_[data-slot=input]]:rounded-none [&_[data-slot=input]]:shadow-none [&_[data-slot=textarea]]:rounded-none [&_[data-slot=textarea]]:shadow-none [&_[data-slot=select-trigger]]:rounded-none [&_[data-slot=select-trigger]]:shadow-none [&_[data-slot=badge]]:rounded-none [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:shadow-none">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/20 [&_[data-slot=button]]:rounded-none [&_[data-slot=button]]:shadow-none [&_[data-slot=input]]:rounded-none [&_[data-slot=input]]:shadow-none [&_[data-slot=textarea]]:rounded-none [&_[data-slot=textarea]]:shadow-none [&_[data-slot=select-trigger]]:rounded-none [&_[data-slot=select-trigger]]:shadow-none [&_[data-slot=badge]]:rounded-none [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:bg-background [&_[data-slot=card]]:shadow-none">
         {/* 移动端横向滚动；桌面端自然展示全部 tab */}
         <div className="shrink-0 overflow-x-auto border-b bg-background px-2 pt-1 [&::-webkit-scrollbar]:hidden">
           <TabsList

@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { ScoreBadge } from '@/components/ui/score-badge';
 
 export type EventArticleRowTone = 'member' | 'recommended' | 'brand';
@@ -24,7 +24,6 @@ export interface EventArticleRowModel {
   brandDisplay?: ReactNode;
   eventKeyDisplay?: ReactNode;
   recommendationInterval?: string;
-  sourceStatus: string;
   publicStatus: string;
   pushStatus: string;
   selection?: ReactNode;
@@ -34,22 +33,22 @@ export interface EventArticleRowModel {
   onTitleClick?: () => void;
 }
 
-const CARD_CLASS = 'min-w-0 border-b border-border/60 px-2 py-1.5 text-xs last:border-b-0';
-const META_ROW_CLASS = 'mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] leading-4 text-muted-foreground';
+const CARD_CLASS = 'min-w-0 px-2 py-1.5 text-xs';
+const META_ROW_CLASS = 'mt-0.5 grid min-w-0 gap-y-0.5 text-[11px] leading-4 text-muted-foreground sm:flex sm:flex-wrap sm:items-center sm:gap-x-2';
 const ACTIONS_CLASS = 'flex min-w-0 flex-wrap items-center gap-0.5 [&>*]:flex-none';
 
-export function EventArticleList({ rows }: { rows: EventArticleRowModel[] }) {
+export const EventArticleList = memo(function EventArticleList({ rows }: { rows: EventArticleRowModel[] }) {
   return (
     <div className="grid min-w-0 gap-1.5">
       {rows.map((row) => <EventArticleCard key={row.id} row={row} />)}
     </div>
   );
-}
+});
 
 function EventArticleCard({ row }: { row: EventArticleRowModel }) {
   const titleSizeClass = row.tone === 'member' ? 'text-[13px]' : 'text-sm';
   const titleClassName = row.titleClassName ?? (row.tone === 'member' ? '' : 'text-foreground');
-  const titleLayoutClass = `mt-0.5 break-words ${titleSizeClass} font-medium leading-5 ${titleClassName}`;
+  const titleLayoutClass = `truncate ${titleSizeClass} font-medium leading-5 sm:overflow-visible sm:whitespace-normal sm:text-clip sm:break-words ${titleClassName}`;
 
   return (
     <article className={`${CARD_CLASS} ${cardToneClass(row.tone, row.highlight)}`}>
@@ -59,9 +58,8 @@ function EventArticleCard({ row }: { row: EventArticleRowModel }) {
           <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] leading-4 text-muted-foreground sm:gap-x-2">
             <span className="font-mono tabular-nums">{row.time}</span>
             <span className="min-w-0 max-w-[42%] truncate sm:max-w-none">{row.source}</span>
-            <span className="inline-flex items-center gap-1">
-              总分 <ScoreBadge score={row.score} variant="compact-square" />
-            </span>
+            <StatusText value={row.publicStatus} />
+            <StatusText value={row.pushStatus} />
             {row.recommendationInterval && <span className="whitespace-nowrap">间隔 {row.recommendationInterval}</span>}
             <div className="flex min-w-0 basis-full flex-wrap items-center gap-x-1 gap-y-0.5 sm:ml-auto sm:basis-auto sm:justify-end">
               <span className="shrink-0">{row.representative}</span>
@@ -69,25 +67,29 @@ function EventArticleCard({ row }: { row: EventArticleRowModel }) {
             </div>
           </div>
 
-          {row.onTitleClick ? (
-            <button
-              type="button"
-              onClick={row.onTitleClick}
-              className={`block w-full text-left hover:underline ${titleLayoutClass}`}
-              title={row.title}
-            >
-              {row.title}
-            </button>
-          ) : (
-            <p className={titleLayoutClass} title={row.title}>{row.title}</p>
-          )}
+          <div className="mt-0.5 flex min-w-0 items-start gap-1">
+            <ScoreBadge score={row.score} variant="compact-square" />
+            {row.onTitleClick ? (
+              <button
+                type="button"
+                onClick={row.onTitleClick}
+                className={`min-w-0 flex-1 text-left hover:underline ${titleLayoutClass}`}
+                title={row.title}
+              >
+                {row.title}
+              </button>
+            ) : (
+              <p className={`min-w-0 flex-1 ${titleLayoutClass}`} title={row.title}>{row.title}</p>
+            )}
+          </div>
 
           <div className={META_ROW_CLASS}>
-            <ComparisonText label="品牌" value={row.brand} displayValue={row.brandDisplay} />
-            <ComparisonText label="事件键" value={row.eventKey} displayValue={row.eventKeyDisplay} mono />
-            <span>{row.sourceStatus}</span>
-            <StatusText value={row.publicStatus} />
-            <StatusText value={row.pushStatus} />
+            <div className="min-w-0 sm:contents">
+              <ComparisonText label="品牌" value={row.brand} displayValue={row.brandDisplay} />
+            </div>
+            <div className="min-w-0 sm:contents">
+              <ComparisonText label="事件键" value={row.eventKey} displayValue={row.eventKeyDisplay} mono />
+            </div>
           </div>
         </div>
       </div>
@@ -107,7 +109,7 @@ function ComparisonText({
   mono?: boolean;
 }) {
   return (
-    <span className={mono ? 'min-w-0 break-all font-mono' : 'min-w-0 break-words'}>
+    <span className={mono ? 'block min-w-0 truncate font-mono' : 'block min-w-0 truncate'} title={value}>
       {label}：{displayValue ?? value}
     </span>
   );
@@ -115,8 +117,8 @@ function ComparisonText({
 
 function StatusText({ value }: { value: string }) {
   const className = value.includes('失败')
-    ? 'bg-red-50 px-1.5 py-0.5 text-red-700'
-    : value.includes('部分')
+      ? 'bg-red-50 px-1.5 py-0.5 text-red-700'
+      : value.includes('部分')
       ? 'bg-amber-50 px-1.5 py-0.5 text-amber-800'
       : value.includes('已公开') || value.includes('已推送')
         ? 'bg-emerald-50 px-1.5 py-0.5 text-emerald-700'

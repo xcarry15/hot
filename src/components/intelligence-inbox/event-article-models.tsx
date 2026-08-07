@@ -26,24 +26,20 @@ function normalizedIdentityToken(value: string): string {
 
 function matchedText(value: string, matched: boolean): ReactNode {
   return (
-    <span className={matched ? 'border border-emerald-300 bg-emerald-100 px-1 py-0.5 font-semibold text-emerald-800' : undefined}>
+    <span className={matched ? 'bg-emerald-100 px-1 py-0.5 font-semibold text-emerald-800' : undefined}>
       {value}
     </span>
   );
 }
 
-function brandDisplay(value: string, representative: string | null): ReactNode {
+function brandDisplay(value: string): ReactNode {
   const brands = splitBrands(value);
   if (brands.length === 0) return '—';
-  // 待复核事件暂时没有代表文章，仍按已解析身份展示统一的标签样式，不能回退到 JSON 原文。
-  const representativeBrands = representative
-    ? new Set(splitBrands(representative).map(normalizedIdentityToken))
-    : null;
 
   return brands.map((brand, index) => (
     <Fragment key={`${brand}-${index}`}>
       {index > 0 && ' / '}
-      {matchedText(brand, representativeBrands === null || representativeBrands.has(normalizedIdentityToken(brand)))}
+      <span className="bg-black px-1 py-0.5 font-semibold text-white">{brand}</span>
     </Fragment>
   ));
 }
@@ -96,8 +92,16 @@ function brandLabel(brand: string): string {
   return brand ? splitBrands(brand).join(' / ') : '—';
 }
 
-function sourceStatus(source: { deleted: boolean; publicEnabled: boolean }): string {
-  return source.deleted ? '来源已删除' : source.publicEnabled ? '来源可公开' : '来源未开放公开';
+function articleIdentityDisplay(
+  article: { brand: string; eventKey: string },
+  representativeEventKey: string | null,
+) {
+  return {
+    brand: brandLabel(article.brand),
+    eventKey: article.eventKey || '—',
+    brandDisplay: brandDisplay(article.brand),
+    eventKeyDisplay: eventKeyDisplay(article.eventKey, representativeEventKey),
+  };
 }
 
 function publicStatus(status: string): string {
@@ -161,11 +165,7 @@ export function createEventArticleModels({
         : article.id === detail?.id
           ? <span className="bg-sky-50 px-1.5 py-0.5 text-sky-800">当前文章</span>
           : <span className="text-muted-foreground">普通成员</span>,
-      brand: brandLabel(article.brand),
-      eventKey: article.eventKey || '—',
-      brandDisplay: brandDisplay(article.brand, representativeArticle?.brand ?? null),
-      eventKeyDisplay: eventKeyDisplay(article.eventKey, representativeArticle?.eventKey ?? null),
-      sourceStatus: sourceStatus(article.source),
+      ...articleIdentityDisplay(article, representativeArticle?.eventKey ?? null),
       publicStatus: publicStatus(article.publicStatus),
       pushStatus: articlePushStatusLabel(article.pushStatus),
       selection: (
@@ -233,12 +233,8 @@ export function createEventArticleModels({
           source: article.source.name,
           title: article.title,
           representative: <StatusPill tone="accent">推荐事件代表</StatusPill>,
-          brand: brandLabel(article.brand),
-          eventKey: article.eventKey || '—',
-          brandDisplay: brandDisplay(article.brand, representativeArticle?.brand ?? null),
-          eventKeyDisplay: eventKeyDisplay(article.eventKey, representativeArticle?.eventKey ?? null),
+          ...articleIdentityDisplay(article, representativeArticle?.eventKey ?? null),
           recommendationInterval: timeDistanceLabel(detail?.publishedAt, article.publishedAt),
-          sourceStatus: sourceStatus(article.source),
           publicStatus: publicStatus(recommendedEvent.publicStatus),
           pushStatus: recommendedEvent.pushedAt ? '已推送' : '未推送',
           actions: (
@@ -287,12 +283,8 @@ export function createEventArticleModels({
       representative: candidate.isEventRepresentative
         ? <StatusPill tone="accent">其他事件代表文章</StatusPill>
         : <span className="text-muted-foreground">其他事件成员</span>,
-      brand: brandLabel(candidate.brand),
-      eventKey: candidate.eventKey || '—',
-      brandDisplay: brandDisplay(candidate.brand, representativeArticle?.brand ?? null),
-      eventKeyDisplay: eventKeyDisplay(candidate.eventKey, representativeArticle?.eventKey ?? null),
+      ...articleIdentityDisplay(candidate, representativeArticle?.eventKey ?? null),
       recommendationInterval: timeDistanceLabel(detail?.publishedAt, candidate.publishedAt),
-      sourceStatus: sourceStatus(candidate.source),
       publicStatus: publicStatus(candidate.publicStatus),
       pushStatus: candidate.eventPushedAt ? '已推送' : '未推送',
       actions: (
@@ -334,11 +326,11 @@ function MemberActions({
         <Button
           size="sm"
           variant="ghost"
-          className={WORKSPACE_BUTTON_CLASS}
+          className={`${WORKSPACE_BUTTON_CLASS} text-violet-800 hover:bg-violet-50 hover:text-violet-800`}
           disabled={eventActionPending || article.clusterStatus !== 'clustered' || article.aiStatus !== 'done' || article.source.deleted}
           onClick={() => void onSetRepresentative(article.id)}
         >
-          设为代表文章
+          设为代表
         </Button>
       )}
       {!representative && articleCount > 1 && (
@@ -349,7 +341,7 @@ function MemberActions({
           disabled={eventActionPending}
           onClick={() => void onSplitArticle(article.id)}
         >
-          移出为独立事件
+          移为独立
         </Button>
       )}
     </>

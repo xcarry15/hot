@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { ScoreBadge } from '@/components/ui/score-badge'
 import {
   AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD,
   isLowAnalysisConfidence,
@@ -213,7 +214,7 @@ export default function ArticleLibrarySheet({
                   onClick={() => onOpenArticle(item.id)}
                   className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-muted/60"
                 >
-                  <span className="w-9 shrink-0 text-sm font-semibold tabular-nums">{item.score}</span>
+                  <ScoreBadge score={item.score} variant="compact-square" />
                   <span className="min-w-0 flex-1">
                     <span className="line-clamp-1 text-xs font-medium leading-5">{item.title}</span>
                     <span className="mt-1 block text-[11px] text-muted-foreground">{item.source.name} · {timeLabel(item.publishedAt ?? item.createdAt)}</span>

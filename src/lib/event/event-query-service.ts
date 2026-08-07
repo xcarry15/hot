@@ -375,6 +375,7 @@ export async function searchActiveEvents(query: string, excludeEventId?: string)
       representativeArticle: {
         select: {
           title: true,
+          eventKey: true,
           score: true,
           relevance: true,
           publishedAt: true,
