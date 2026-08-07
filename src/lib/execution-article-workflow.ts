@@ -84,9 +84,23 @@ export async function executeSingleArticleWorkflow(
   const intent = payload.intent as SingleWorkflowIntent;
   const valid: readonly SingleWorkflowStart[] = ['process', 'cluster', 'ai', 'push'];
   if (!valid.includes(startAt)) throw new Error('Invalid single article workflow start stage');
-  const article = await db.article.findUnique({ where: { id: articleId }, select: { id: true, title: true, eventId: true } });
-  if (!article) throw new Error('Article not found');
   if (intent !== 'retry' && intent !== 'regenerate') throw new Error('Invalid single article workflow intent');
+  // API 入队和真正执行之间可能已经有批处理或人工操作改变状态。
+  // 执行端再次校验，过期的 retry 直接变成可审计的 skipped 结果，不能误清空
+  // 新状态，也不能让一个已失效的任务进入自动重试循环。
+  const currentValidation = await validateSingleArticleWorkflow(articleId, startAt, intent);
+  if (!currentValidation.ok) {
+    return {
+      articleId,
+      startAt,
+      intent,
+      skipped: true,
+      reason: currentValidation.reason,
+      validationStatus: currentValidation.status,
+    };
+  }
+  const article = await db.article.findUnique({ where: { id: articleId }, select: { id: true, title: true, eventId: true } });
+  if (!article) return { articleId, startAt, intent, skipped: true, reason: '文章不存在', validationStatus: 404 };
   await db.article.update({ where: { id: articleId }, data: { technicalIgnoredAt: null } });
   let aiResult: Awaited<ReturnType<typeof reprocessWithAI>> | undefined;
   const stageResults = await runStages([

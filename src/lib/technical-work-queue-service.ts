@@ -31,6 +31,19 @@ export function invalidateTechnicalWorkQueueCache(): void {
   technicalQueueCache = null;
 }
 
+export async function updateTechnicalIgnoreState(
+  articleId: string,
+  action: 'ignore' | 'restore',
+): Promise<boolean> {
+  const result = await db.article.updateMany({
+    where: { id: articleId },
+    data: { technicalIgnoredAt: action === 'ignore' ? new Date() : null },
+  });
+  if (result.count === 0) return false;
+  invalidateTechnicalWorkQueueCache();
+  return true;
+}
+
 /**
  * 判断是否存在已经到达重试时间的技术失败文章。
  *

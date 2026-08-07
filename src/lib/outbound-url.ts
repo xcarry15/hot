@@ -21,10 +21,61 @@ function isPrivateIpv4(value: string): boolean {
 
 function isPrivateIpv6(value: string): boolean {
   const normalized = value.toLowerCase();
-  if (normalized === '::' || normalized === '::1') return true;
-  if (normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe80:')) return true;
-  const mappedV4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  return Boolean(mappedV4 && isPrivateIpv4(mappedV4[1]));
+  const groups = expandIpv6(normalized);
+  if (!groups) return true;
+
+  const isUnspecified = groups.every((group) => group === 0);
+  const isLoopback = groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1;
+  const first = groups[0];
+  const isUniqueLocal = (first & 0xfe00) === 0xfc00;
+  // fe80::/10 is fe80-febf, not only the single fe80::/16 prefix.
+  const isLinkLocal = (first & 0xffc0) === 0xfe80;
+  const isMulticast = (first & 0xff00) === 0xff00;
+  if (isUnspecified || isLoopback || isUniqueLocal || isLinkLocal || isMulticast) return true;
+
+  // IPv4-mapped IPv6 addresses must use the IPv4 policy as well, including
+  // hexadecimal forms such as ::ffff:7f00:1.
+  const isMappedIpv4 = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
+  if (isMappedIpv4) {
+    const high = groups[6];
+    const low = groups[7];
+    const mapped = `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`;
+    return isPrivateIpv4(mapped);
+  }
+  return false;
+}
+
+function expandIpv6(value: string): number[] | null {
+  const withoutZone = value.split('%', 1)[0];
+  const parts = withoutZone.split('::');
+  if (parts.length > 2) return null;
+
+  const expandPart = (part: string): number[] | null => {
+    if (!part) return [];
+    const tokens = part.split(':');
+    const groups: number[] = [];
+    for (let index = 0; index < tokens.length; index++) {
+      const token = tokens[index];
+      if (token.includes('.')) {
+        if (index !== tokens.length - 1) return null;
+        const octets = token.split('.').map(Number);
+        if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return null;
+        groups.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
+        continue;
+      }
+      if (!/^[0-9a-f]{1,4}$/.test(token)) return null;
+      groups.push(Number.parseInt(token, 16));
+    }
+    return groups;
+  };
+
+  const left = expandPart(parts[0]);
+  const right = expandPart(parts[1] ?? '');
+  if (!left || !right) return null;
+  if (parts.length === 1) return left.length === 8 ? left : null;
+  const missing = 8 - left.length - right.length;
+  if (missing < 1) return null;
+  return [...left, ...Array.from({ length: missing }, () => 0), ...right];
 }
 
 export function isBlockedOutboundHostname(hostname: string): boolean {

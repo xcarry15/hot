@@ -16,6 +16,10 @@ export async function fetchFeedbackSuggestions(signal?: AbortSignal): Promise<Fe
   return requestJson<FeedbackSuggestion[]>('GET', '/api/feedback', { signal });
 }
 
+export async function generateFeedbackSuggestions(signal?: AbortSignal): Promise<FeedbackSuggestion[]> {
+  return requestJson<FeedbackSuggestion[]>('POST', '/api/feedback', { body: { action: 'generate' }, signal });
+}
+
 export async function updateFeedbackSuggestion(id: string, action: 'apply' | 'dismiss'): Promise<unknown> {
   return requestJson('POST', '/api/feedback', { body: { id, action } });
 }

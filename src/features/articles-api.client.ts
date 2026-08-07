@@ -21,6 +21,7 @@ const DETAIL_CACHE_TTL_MS = 15_000;
 const MAX_DETAIL_CACHE_ENTRIES = 100;
 const PREFETCH_DELAY_MS = 120;
 const articleDetailPrefetchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const articleDetailPrefetchControllers = new Map<string, AbortController>();
 const articleDetailCache = new Map<string, {
   expiresAt: number;
   value: Promise<ArticleDetailDto>;
@@ -123,7 +124,7 @@ export async function fetchArticleDetail(
   if (cached && cached.expiresAt > Date.now()) return withAbort(cached.value, signal);
   if (cached) articleDetailCache.delete(articleId);
 
-  const value = requestJson<ArticleDetailDto>('GET', `/api/articles/${articleId}`);
+  const value = requestJson<ArticleDetailDto>('GET', `/api/articles/${articleId}`, { signal });
   articleDetailCache.set(articleId, {
     expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
     value,
@@ -139,7 +140,15 @@ export function prefetchArticleDetail(articleId: string): void {
   if (articleDetailPrefetchTimers.has(articleId)) return;
   const timer = setTimeout(() => {
     articleDetailPrefetchTimers.delete(articleId);
-    void fetchArticleDetail(articleId).catch(() => undefined);
+    const controller = new AbortController();
+    articleDetailPrefetchControllers.set(articleId, controller);
+    void fetchArticleDetail(articleId, controller.signal)
+      .catch(() => undefined)
+      .finally(() => {
+        if (articleDetailPrefetchControllers.get(articleId) === controller) {
+          articleDetailPrefetchControllers.delete(articleId);
+        }
+      });
   }, PREFETCH_DELAY_MS);
   articleDetailPrefetchTimers.set(articleId, timer);
 }
@@ -149,6 +158,8 @@ export function cancelArticleDetailPrefetch(articleId: string): void {
   if (!timer) return;
   clearTimeout(timer);
   articleDetailPrefetchTimers.delete(articleId);
+  articleDetailPrefetchControllers.get(articleId)?.abort();
+  articleDetailPrefetchControllers.delete(articleId);
 }
 export async function triggerArticleWorkflow(
   articleId: string,

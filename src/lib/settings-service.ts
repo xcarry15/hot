@@ -13,6 +13,9 @@ import { DEFAULT_PROMPT_SETTINGS, SCORE_WEIGHT_META } from '@/lib/prompts';
 import { mergeSettingsRebuildPlan, SETTINGS_REBUILD_KEY } from '@/lib/settings-rebuild-service';
 
 const settingsUpdateSchema = z.record(z.string(), z.string());
+const MAX_SETTING_KEYS_PER_REQUEST = 100;
+const MAX_SETTING_VALUE_LENGTH = 100_000;
+const MAX_SETTINGS_PAYLOAD_LENGTH = 500_000;
 
 export async function getSettings() {
   const settings = await db.setting.findMany();
@@ -64,6 +67,18 @@ export async function updateSettings(input: unknown): Promise<
 > {
   const parsed = settingsUpdateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: '无效的请求格式', details: parsed.error.issues };
+  const entries = Object.entries(parsed.data);
+  const oversizedKey = entries.find(([, value]) => value.length > MAX_SETTING_VALUE_LENGTH)?.[0];
+  const payloadLength = entries.reduce((total, [key, value]) => total + key.length + value.length, 0);
+  if (entries.length > MAX_SETTING_KEYS_PER_REQUEST) {
+    return { ok: false, error: '设置值校验失败', details: [`单次最多更新 ${MAX_SETTING_KEYS_PER_REQUEST} 个配置`] };
+  }
+  if (oversizedKey) {
+    return { ok: false, error: '设置值校验失败', details: [`配置 ${oversizedKey} 内容过长`] };
+  }
+  if (payloadLength > MAX_SETTINGS_PAYLOAD_LENGTH) {
+    return { ok: false, error: '设置值校验失败', details: ['设置内容总长度超过限制'] };
+  }
   const normalizedData = Object.fromEntries(Object.entries(parsed.data).map(([key, value]) => (
     key === SETTING_KEYS.PUSH_TIME && value.startsWith('cron:')
       ? [key, '08:30']

@@ -12,7 +12,6 @@ export interface ConsistencyViolation {
   issue: string;
   severity: 'error' | 'warning';
 }
-
 /**
  * 事件归属的基础事实必须在同一事务内提交；此表只记录事务后公开快照刷新失败、
  * 或旧版本留下的待修复状态，供受控的后台恢复使用。
@@ -456,26 +455,4 @@ export async function scanEventConsistency(): Promise<ConsistencyViolation[]> {
   }
 
   return violations;
-}
-
-/**
- * 自动修复已知的不一致。批处理，不中断。
- */
-export async function autoRepairEventConsistency(): Promise<number> {
-  let repairs = await repairAttachedClusterFailures();
-
-  // 优先消费显式脏记录；正常运行不再做全表重算。
-  repairs += await repairDirtyEvents();
-
-  // 管理员手动触发的全量一致性校验仍保留，用于诊断历史残留。
-  const events = await db.event.findMany({
-    where: { status: 'active' },
-    select: { id: true },
-  });
-  for (const { id } of events) {
-    await recalculateEventById(id);
-    repairs++;
-  }
-
-  return repairs;
 }

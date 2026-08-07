@@ -88,6 +88,18 @@ function requestHeadersWithCookies(target: URL, headers: HeadersInit | undefined
   return requestHeaders;
 }
 
+/**
+ * 认证头只允许留在原始请求及同源重定向链中。
+ * 即使出站 URL 已通过 SSRF 校验，也不能把调用方的密钥交给另一个合法公网主机。
+ */
+function stripSensitiveRedirectHeaders(headers: HeadersInit | undefined): Headers {
+  const requestHeaders = new Headers(headers);
+  for (const name of ['authorization', 'cookie', 'proxy-authorization', 'x-api-key', 'x-auth-token']) {
+    requestHeaders.delete(name);
+  }
+  return requestHeaders;
+}
+
 /** HTTP 200 也可能是要求浏览器写 Cookie 后刷新的验证壳，不能视为有效页面。 */
 function isLikelyJavaScriptVerificationPage(html: string): boolean {
   return html.length <= 4 * 1024
@@ -113,10 +125,11 @@ async function fetchSafeWithCookieJar(
   cookieJar: RequestCookieJar,
 ): Promise<Response> {
   let target = await assertSafeOutboundUrl(rawUrl);
+  let requestHeaders: HeadersInit | undefined = options.headers;
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
     const response = await fetch(target, {
       ...options,
-      headers: requestHeadersWithCookies(target, options.headers, cookieJar),
+      headers: requestHeadersWithCookies(target, requestHeaders, cookieJar),
       redirect: 'manual',
     });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
@@ -126,7 +139,11 @@ async function fetchSafeWithCookieJar(
     const location = response.headers.get('location');
     if (!location) throw new Error(`重定向缺少 Location: ${target}`);
     await response.body?.cancel();
-    target = await assertSafeOutboundUrl(new URL(location, target).toString());
+    const nextTarget = await assertSafeOutboundUrl(new URL(location, target).toString());
+    if (nextTarget.origin !== target.origin) {
+      requestHeaders = stripSensitiveRedirectHeaders(requestHeaders);
+    }
+    target = nextTarget;
   }
   throw new Error(`重定向次数超过 ${MAX_REDIRECTS}`);
 }

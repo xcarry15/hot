@@ -6,8 +6,8 @@ import {
 } from '@/contracts/crawl-log'
 import { requestJson } from '@/lib/request-json.client'
 
-export async function fetchCrawlLogSnapshot(limit = CRAWL_LOG_DEFAULT_LIMIT): Promise<CrawlLogSnapshot> {
-  const data = await requestJson<Partial<CrawlLogSnapshot>>('GET', `/api/crawl-log/status?limit=${limit}`)
+export async function fetchCrawlLogSnapshot(limit = CRAWL_LOG_DEFAULT_LIMIT, signal?: AbortSignal): Promise<CrawlLogSnapshot> {
+  const data = await requestJson<Partial<CrawlLogSnapshot>>('GET', `/api/crawl-log/status?limit=${limit}`, { signal })
   return {
     activeJob: data.activeJob ?? null,
     latestJob: data.latestJob ?? null,
@@ -21,6 +21,6 @@ export async function fetchCrawlLogSnapshot(limit = CRAWL_LOG_DEFAULT_LIMIT): Pr
   }
 }
 
-export function fetchCrawlLogJobStatus(): Promise<CrawlLogJobStatusSnapshot> {
-  return requestJson<CrawlLogJobStatusSnapshot>('GET', '/api/crawl-log/status?mode=job')
+export function fetchCrawlLogJobStatus(signal?: AbortSignal): Promise<CrawlLogJobStatusSnapshot> {
+  return requestJson<CrawlLogJobStatusSnapshot>('GET', '/api/crawl-log/status?mode=job', { signal })
 }

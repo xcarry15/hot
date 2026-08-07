@@ -37,6 +37,7 @@ const LAST_PUSH_DATE_KEY = SETTING_KEYS.SCHEDULER_LAST_PUSH_DATE;
 const PUSH_JOB_MARKER_KEY = SETTING_KEYS.SCHEDULER_PUSH_JOB || 'scheduler_push_job';
 let pushTask: ReturnType<typeof nodeCron.schedule> | null = null;
 let pushTaskKey = '';
+let schedulerTickPromise: Promise<void> | null = null;
 
 interface ZonedClock {
   date: string;
@@ -305,7 +306,18 @@ async function maybeEnqueueSettingsRebuild(): Promise<void> {
 export { maybeEnqueueCrawl, maybeEnqueueTechnicalRetry, maybeEnqueueSettingsRebuild };
 
 /** 每分钟的持久化恢复与调度检查；独立导出便于回归测试。 */
-export async function runSchedulerTick(): Promise<void> {
+export function runSchedulerTick(): Promise<void> {
+  if (schedulerTickPromise) return schedulerTickPromise;
+  const promise = runSchedulerTickInternal();
+  schedulerTickPromise = promise;
+  void promise.then(
+    () => { if (schedulerTickPromise === promise) schedulerTickPromise = null; },
+    () => { if (schedulerTickPromise === promise) schedulerTickPromise = null; },
+  );
+  return promise;
+}
+
+async function runSchedulerTickInternal(): Promise<void> {
   // 先恢复持久化队列，再决定是否创建新的自动任务；避免失败 Job 被新任务长期挤压。
   await resetOrphanedJobs();
   await resumeQueuedJob();

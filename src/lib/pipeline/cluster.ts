@@ -33,7 +33,12 @@ export function buildClusterPendingWhere(now = new Date(), forceRetry = false): 
   };
 }
 
-export async function clusterAllPending(signal?: AbortSignal, jobId?: string, forceRetry = false): Promise<{ total: number; processed: number; errors: number }> {
+export async function clusterAllPending(
+  signal?: AbortSignal,
+  jobId?: string,
+  forceRetry = false,
+  repairOnly = false,
+): Promise<{ total: number; processed: number; errors: number }> {
   const repairedDuplicateEventKeys = await repairDuplicateEventKeyCandidates();
   if (repairedDuplicateEventKeys > 0) {
     console.warn(`[clusterAllPending] moved ${repairedDuplicateEventKeys} duplicate eventKey Event(s) to review`);
@@ -58,6 +63,7 @@ export async function clusterAllPending(signal?: AbortSignal, jobId?: string, fo
   if (repairedRepresentatives > 0) {
     console.warn(`[clusterAllPending] repaired ${repairedRepresentatives} stale Event representative pointer(s)`);
   }
+  if (repairOnly) return { total: 0, processed: 0, errors: 0 };
   const total = await db.article.count({ where: buildClusterPendingWhere(new Date(), forceRetry) });
   if (jobId) await startJobStage(jobId, { stage: 'cluster', total });
   let processed = 0;

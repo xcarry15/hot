@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   fetchDashboardAnalytics,
   fetchFeedbackSuggestions,
+  generateFeedbackSuggestions,
   updateFeedbackSuggestion,
   type FeedbackSuggestion,
   type DashboardAnalytics,
@@ -87,7 +88,9 @@ function rateColor(rate: number, inverse = false): string {
 
 export default function DashboardTab({ active = true }: { active?: boolean }) {
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
-  const [range, setRange] = useState<DashboardAnalyticsRange>('all')
+  // 默认只读取近期窗口；“全部”仍保留为显式筛选，避免概览首次打开就
+  // 把全量 Article/DiscardedItem/FetchLog 载入内存并参与 30 秒轮询。
+  const [range, setRange] = useState<DashboardAnalyticsRange>('30d')
   const [sourceSort, setSourceSort] = useState<SourceSort>('analyzed')
   const [loading, setLoading] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -117,7 +120,9 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
           type: crawlType === 'all' ? undefined : crawlType,
           sourceId: crawlSourceId === 'all' ? undefined : crawlSourceId,
         }),
-        fetchFeedbackSuggestions(controller.signal).catch(() => []),
+        generateFeedbackSuggestions(controller.signal)
+          .catch(() => fetchFeedbackSuggestions(controller.signal))
+          .catch(() => []),
       ])
       if (controller.signal.aborted || requestVersion !== analyticsRequestVersionRef.current) return
       setAnalytics(analyticsJson)

@@ -33,7 +33,7 @@ Install dependencies and copy `.env.example` to `.env` for local setup. Use:
 - `npm run db:migrate:status` — verify migration state before delivery.
 - `npm run db:optimize` — enable/verify SQLite WAL runtime settings and run `PRAGMA optimize` after migrations.
 
-Use `npm run db:migrate:deploy` for routine production migrations. The only migration is `20260731120000_current_schema_baseline`; production databases with any other migration history must be backed up and fully reinitialized. Do not use `db:push` or `db:reset` in production.
+Use `npm run db:migrate:deploy` for routine production migrations. The current migration chain starts at `20260731120000_current_schema_baseline` and includes the ordered `push_delivery_updated_at` and `event_interaction_metrics` migrations; production databases with any other migration history must be backed up and fully reinitialized. Do not use `db:push` or `db:reset` in production.
 
 ## Coding Style & Naming Conventions
 

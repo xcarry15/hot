@@ -95,12 +95,8 @@ export async function getEventArticles(eventId: string, articleId?: string) {
   if (!event) return null;
   const { pushLogs, ...eventData } = event;
   const articlePushStatuses = getLatestArticlePushStatuses(pushLogs);
-  const currentDeliveries = await db.pushDelivery.findMany({
-    where: { eventId },
-    orderBy: { createdAt: 'desc' },
-    select: { targetId: true, status: true },
-  });
-  const currentRepresentativeStatus = getPushStatusFromDeliveries(currentDeliveries);
+  const pushTargetStates = await getPushTargetStates(eventId);
+  const currentRepresentativeStatus = getPushStatusFromTargetStates(pushTargetStates);
   if (event.representativeArticleId && currentRepresentativeStatus !== 'none') {
     articlePushStatuses.set(event.representativeArticleId, currentRepresentativeStatus);
   }
@@ -141,7 +137,6 @@ export async function getEventArticles(eventId: string, articleId?: string) {
     select: { id: true, representativeArticle: { select: { title: true } } },
   });
   const candidateTitles = new Map(candidateEvents.map((candidate) => [candidate.id, candidate.representativeArticle?.title ?? '']));
-  const pushTargetStates = await getPushTargetStates(eventId);
   return {
     ...eventData,
     pushedAt: event.pushedAt?.toISOString() ?? null,
@@ -241,16 +236,10 @@ function getLatestArticlePushStatuses(logs: Array<{
   ]));
 }
 
-function getPushStatusFromDeliveries(deliveries: Array<{ targetId: string; status: string }>): ArticlePushStatus {
-  const latestByTarget = new Map<string, (typeof deliveries)[number]>();
-  for (const delivery of deliveries) {
-    if (!latestByTarget.has(delivery.targetId)) latestByTarget.set(delivery.targetId, delivery);
-  }
-  const latest = [...latestByTarget.values()];
+function getPushStatusFromTargetStates(targets: Array<{ latestStatus: string }>): ArticlePushStatus {
+  const latest = targets.filter((target) => target.latestStatus !== 'never_attempted');
   if (latest.length === 0) return 'none';
-  const successCount = latest.filter((delivery) => delivery.status === 'succeeded').length;
-  const attemptedCount = latest.filter((delivery) => delivery.status !== 'pending').length;
-  if (attemptedCount === 0) return 'none';
+  const successCount = latest.filter((target) => target.latestStatus === 'success').length;
   if (successCount === latest.length) return 'success';
   if (successCount > 0) return 'partial';
   return 'failure';

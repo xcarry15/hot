@@ -20,6 +20,9 @@ describe('outbound URL boundary', () => {
     '169.254.169.254',
     '::1',
     'fc00::1',
+    'fe90::1',
+    'fe90:0:0:0:0:0:0:1',
+    '::ffff:7f00:1',
   ])('blocks private or local hostname %s', (hostname) => {
     expect(isBlockedOutboundHostname(hostname)).toBe(true);
   });
@@ -95,6 +98,30 @@ describe('safe redirect cookies', () => {
 
     await fetchSafe('https://example.com/information/');
     expect(requests[1]).toEqual({ url: 'https://other.example.com/information/', cookie: null });
+  });
+
+  it('does not forward authentication headers to a different host', async () => {
+    const requests: Array<{ url: string; authorization: string | null; apiKey: string | null }> = [];
+    vi.mocked(global.fetch).mockImplementation(async (input, init) => {
+      const headers = new Headers(init?.headers);
+      requests.push({
+        url: String(input),
+        authorization: headers.get('authorization'),
+        apiKey: headers.get('x-api-key'),
+      });
+      if (requests.length === 1) {
+        return new Response(null, { status: 302, headers: { location: 'https://other.example.com/information/' } });
+      }
+      return new Response('<html>ok</html>', { status: 200 });
+    });
+
+    await fetchSafe('https://example.com/information/', {
+      headers: { authorization: 'Bearer secret', 'x-api-key': 'secret' },
+    });
+    expect(requests).toEqual([
+      { url: 'https://example.com/information/', authorization: 'Bearer secret', apiKey: 'secret' },
+      { url: 'https://other.example.com/information/', authorization: null, apiKey: null },
+    ]);
   });
 });
 
