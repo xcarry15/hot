@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { reprocessWithAI } from './ai';
 import { refetchArticle } from './article-refetch-service';
 import { db } from './db';
@@ -14,15 +15,15 @@ export async function validateSingleArticleWorkflow(
   articleId: string,
   startAt: SingleWorkflowStart,
   intent: SingleWorkflowIntent,
-): Promise<{ ok: true } | { ok: false; status: 404 | 409; reason: string }> {
+): Promise<{ ok: true; version: Date } | { ok: false; status: 404 | 409; reason: string }> {
   const article = await db.article.findUnique({
     where: { id: articleId },
-    select: { fetchStatus: true, clusterStatus: true, aiStatus: true, skipReason: true, eventId: true, event: { select: { nextPushRetryAt: true, pushRetryCount: true } } },
+    select: { updatedAt: true, fetchStatus: true, clusterStatus: true, aiStatus: true, skipReason: true, eventId: true, event: { select: { nextPushRetryAt: true, pushRetryCount: true } } },
   });
   if (!article) return { ok: false, status: 404, reason: '文章不存在' };
   if (intent === 'regenerate') {
     if (startAt === 'push') return { ok: false, status: 409, reason: '完整重新推送请使用 Event 人工推送' };
-    return { ok: true };
+    return { ok: true, version: article.updatedAt };
   }
   if (startAt === 'process' && article.fetchStatus !== 'failed') {
     return { ok: false, status: 409, reason: '正文处理未失败，不能执行技术重试' };
@@ -42,7 +43,7 @@ export async function validateSingleArticleWorkflow(
       return { ok: false, status: 409, reason: `推送重试等待中，可重试时间: ${article.event.nextPushRetryAt.toISOString()}` };
     }
   }
-  return { ok: true };
+  return { ok: true, version: article.updatedAt };
 }
 
 /**
@@ -74,6 +75,35 @@ export function isSingleWorkflow(payload: Record<string, unknown>): boolean {
   return payload.scope === 'single' && payload.workflow === true && typeof payload.articleId === 'string';
 }
 
+/**
+ * 在执行前按 retry 的失败状态原子认领文章，避免校验完成后被其它批处理
+ * 改写，仍然清除技术忽略标记并进入错误的恢复阶段。
+ */
+async function claimSingleArticleWorkflow(
+  articleId: string,
+  startAt: SingleWorkflowStart,
+  intent: SingleWorkflowIntent,
+  expectedVersion: Date,
+): Promise<boolean> {
+  const where: Prisma.ArticleWhereInput = { id: articleId, updatedAt: expectedVersion };
+  if (intent === 'retry') {
+    if (startAt === 'process') where.fetchStatus = 'failed';
+    if (startAt === 'cluster') where.clusterStatus = 'failed';
+    if (startAt === 'ai') {
+      where.OR = [
+        { aiStatus: 'failed' },
+        { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
+      ];
+    }
+    if (startAt === 'push') where.eventId = { not: null };
+  }
+  const claimed = await db.article.updateMany({
+    where,
+    data: { technicalIgnoredAt: null },
+  });
+  return claimed.count === 1;
+}
+
 export async function executeSingleArticleWorkflow(
   payload: Record<string, unknown>,
   signal?: AbortSignal,
@@ -99,9 +129,19 @@ export async function executeSingleArticleWorkflow(
       validationStatus: currentValidation.status,
     };
   }
+  const claimed = await claimSingleArticleWorkflow(articleId, startAt, intent, currentValidation.version);
+  if (!claimed) {
+    return {
+      articleId,
+      startAt,
+      intent,
+      skipped: true,
+      reason: '文章状态已变化，请刷新后重试',
+      validationStatus: 409,
+    };
+  }
   const article = await db.article.findUnique({ where: { id: articleId }, select: { id: true, title: true, eventId: true } });
   if (!article) return { articleId, startAt, intent, skipped: true, reason: '文章不存在', validationStatus: 404 };
-  await db.article.update({ where: { id: articleId }, data: { technicalIgnoredAt: null } });
   let aiResult: Awaited<ReturnType<typeof reprocessWithAI>> | undefined;
   const stageResults = await runStages([
     {
@@ -154,9 +194,8 @@ export async function executeSingleArticleWorkflow(
       shouldRun: () => startAt === 'push',
       run: async () => {
         if (jobId) await startJobStage(jobId, { stage: 'push', total: 1, currentItemLabel: article.title });
-        if (article.eventId) {
-          await db.event.update({ where: { id: article.eventId }, data: { pushRetryCount: 0, nextPushRetryAt: null } });
-        }
+        // 由 pushEventToFeishu 按实际投递结果统一更新重试计数；这里不预先
+        // 清空等待状态，避免并发失败任务把新写入的退避时间覆盖掉。
         const pushResult = await pushArticleToFeishu(articleId, 'retry_failed', signal);
         if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
         return pushResult;

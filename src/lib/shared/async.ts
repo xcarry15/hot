@@ -29,6 +29,9 @@ export async function withTimeout<T>(
   else parentSignal?.addEventListener('abort', onParentAbort, { once: true })
   const timer = setTimeout(() => controller.abort(new Error(`${label} (${timeoutMs / 1000}s)`)), timeoutMs)
   const task = Promise.resolve().then(() => operation(controller.signal))
+  // 超时后底层 provider 可能仍会晚到；主动消费迟到的 reject，避免
+  // 本地 Promise race 已结束后产生 unhandled rejection。
+  void task.catch(() => undefined)
   const aborted = new Promise<never>((_resolve, reject) => {
     if (controller.signal.aborted) {
       reject(abortError(controller.signal))
@@ -43,4 +46,3 @@ export async function withTimeout<T>(
     parentSignal?.removeEventListener('abort', onParentAbort)
   }
 }
-

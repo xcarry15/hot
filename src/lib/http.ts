@@ -17,7 +17,7 @@
 
 import iconv from 'iconv-lite';
 import { abortableDelay, withTimeout } from './shared/async';
-import { assertSafeOutboundUrl } from './outbound-url';
+import { assertSafeOutboundUrl, getSafeOutboundDispatcher } from './outbound-url';
 
 const CHARSET_RE = /charset\s*=\s*([^"'\s;>]+)/i;
 const META_CHARSET_RE = /<meta[^>]+charset\s*=\s*["']?([^"'\s;>]+)/i;
@@ -93,11 +93,20 @@ function requestHeadersWithCookies(target: URL, headers: HeadersInit | undefined
  * 即使出站 URL 已通过 SSRF 校验，也不能把调用方的密钥交给另一个合法公网主机。
  */
 function stripSensitiveRedirectHeaders(headers: HeadersInit | undefined): Headers {
-  const requestHeaders = new Headers(headers);
-  for (const name of ['authorization', 'cookie', 'proxy-authorization', 'x-api-key', 'x-auth-token']) {
-    requestHeaders.delete(name);
+  // 跨源重定向只保留标准、非凭据请求头。使用 allowlist，避免遗漏新的
+  // 自定义认证头（例如 api-key、x-access-token）导致凭据泄露。
+  const safeHeaderNames = new Set([
+    'accept',
+    'accept-language',
+    'cache-control',
+    'pragma',
+    'user-agent',
+  ]);
+  const safeHeaders = new Headers();
+  for (const [name, value] of new Headers(headers)) {
+    if (safeHeaderNames.has(name)) safeHeaders.set(name, value);
   }
-  return requestHeaders;
+  return safeHeaders;
 }
 
 /** HTTP 200 也可能是要求浏览器写 Cookie 后刷新的验证壳，不能视为有效页面。 */
@@ -131,7 +140,8 @@ async function fetchSafeWithCookieJar(
       ...options,
       headers: requestHeadersWithCookies(target, requestHeaders, cookieJar),
       redirect: 'manual',
-    });
+      dispatcher: getSafeOutboundDispatcher(),
+    } as RequestInit);
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     // 部分站点会在同域 302 中下发一次性验证 Cookie。Node fetch 不自带
     // Cookie jar，这里只在当前请求的同域重定向链里暂存，避免长期保存或跨域泄露。

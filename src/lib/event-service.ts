@@ -199,10 +199,25 @@ export async function setEventRepresentative(eventId: string, articleId: string)
     ]);
     if (event?.status !== 'active' || event.clusterReviewStatus !== 'confirmed' || !member || !isReleaseRepresentativeEligible(member)) return false;
     await releaseRepresentativeOwnership(tx, eventId, articleId);
-    await tx.event.update({
-      where: { id: eventId },
+    // 用关系条件把“仍属于该 Event”绑定到指针写入本身；若文章在读取后
+    // 被移动，updateMany 不会更新代表指针，整个事务也会回滚。
+    const pointerUpdate = await tx.event.updateMany({
+      where: {
+        id: eventId,
+        status: 'active',
+        clusterReviewStatus: 'confirmed',
+        articles: {
+          some: {
+            id: articleId,
+            clusterStatus: 'clustered',
+            aiStatus: 'done',
+            source: { is: { deletedAt: null } },
+          },
+        },
+      },
       data: { representativeArticleId: articleId, representativeManual: true },
     });
+    if (pointerUpdate.count !== 1) return false;
     await tx.eventClusterAudit.create({
       data: {
         articleId,

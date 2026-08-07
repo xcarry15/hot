@@ -4,6 +4,7 @@ import { recalculateEvent } from '@/lib/event/event-recalculation-service';
 import { refreshEventPublicPublication } from '@/lib/public-publication-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import type { Prisma } from '@prisma/client';
+import { assertNotAborted } from '@/lib/worker-stop';
 
 const EVENT_REPAIR_BATCH_SIZE = 100;
 
@@ -44,7 +45,8 @@ async function refreshDirtyEvent(eventId: string): Promise<boolean> {
 }
 
 /** 只修复被明确标记的 Event，避免每分钟扫描整张 Event 表。 */
-export async function repairDirtyEvents(limit = EVENT_REPAIR_BATCH_SIZE): Promise<number> {
+export async function repairDirtyEvents(limit = EVENT_REPAIR_BATCH_SIZE, signal?: AbortSignal): Promise<number> {
+  assertNotAborted(signal);
   const rows = await db.eventDirty.findMany({
     take: Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)),
     select: { eventId: true },
@@ -53,6 +55,7 @@ export async function repairDirtyEvents(limit = EVENT_REPAIR_BATCH_SIZE): Promis
   let repaired = 0;
   for (const eventId of eventIds) {
     try {
+      assertNotAborted(signal);
       if (await refreshDirtyEvent(eventId)) repaired++;
     } catch (error) {
       console.error(`[event-consistency] dirty Event repair failed event=${eventId}:`, error);
