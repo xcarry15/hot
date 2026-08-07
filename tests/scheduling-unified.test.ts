@@ -90,6 +90,9 @@ beforeEach(() => {
   mockRunJob.mockResolvedValue({ queued: true, jobId: 'j-test' });
   mockHasDueTechnicalRecovery.mockResolvedValue(false);
   Object.keys(mockSettingStore).forEach(k => delete mockSettingStore[k]);
+  // 调度器默认免打扰时段跨越午夜；测试固定关闭，避免在 22:00–08:00 执行时误拦截。
+  mockSettingStore['crawl_quiet_start'] = '00:00';
+  mockSettingStore['crawl_quiet_end'] = '00:00';
 });
 
 afterAll(() => { vi.restoreAllMocks(); });
