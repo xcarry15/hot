@@ -32,6 +32,10 @@ export async function retryDataExportJob(id: string, signal?: AbortSignal): Prom
   return result.job;
 }
 
+export async function deleteDataExportJob(id: string, signal?: AbortSignal): Promise<void> {
+  await requestJson<{ ok: true }>('DELETE', `/api/data-export/${encodeURIComponent(id)}`, { signal });
+}
+
 export async function downloadDataExportFile(id: string, signal?: AbortSignal): Promise<void> {
   const headers = new Headers();
   const token = getApiToken();

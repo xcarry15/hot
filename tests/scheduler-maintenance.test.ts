@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   cleanupExpiredSendingDeliveries: vi.fn(),
+  exportJobFindMany: vi.fn(),
   resetOrphanedJobs: vi.fn(),
   resumeQueuedJob: vi.fn(),
   runJob: vi.fn(),
@@ -49,6 +50,7 @@ vi.mock('@/lib/db', () => ({
   db: {
     job: { findUnique: mocks.jobFindUnique, findFirst: mocks.jobFindFirst },
     event: { findFirst: mocks.eventFindFirst },
+    exportJob: { findMany: mocks.exportJobFindMany },
   },
 }));
 
@@ -83,6 +85,7 @@ describe('scheduler maintenance', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.cleanupExpiredSendingDeliveries.mockResolvedValue(0);
+    mocks.exportJobFindMany.mockResolvedValue([]);
     mocks.resetOrphanedJobs.mockResolvedValue(0);
     mocks.resumeQueuedJob.mockResolvedValue(null);
     mocks.readAllSettings.mockResolvedValue({

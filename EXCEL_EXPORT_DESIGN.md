@@ -31,55 +31,52 @@
 
 ## 3. 工作簿结构
 
+工作簿面向管理员的展示层已全面中文化：工作表名称、列标题、状态说明、导出元数据和进度说明均使用中文。括号中的 `Event ID` 等通用技术词仅用于保持系统关联语义；数据库枚举原值、ID、原始 JSON、链接和文章长度信息仍保留，便于程序核对和追溯。
+
 ### 3.1 Sheet 清单
 
-| Sheet | 内容 | 主键/关联字段 |
+| 工作表名称（内部标识） | 内容 | 主键/关联字段 |
 | --- | --- | --- |
-| `ExportMeta` | 导出版本、生成时间、快照时间、筛选条件、各 Sheet 行数和错误数 | `exportJobId` |
-| `Articles` | Article 全部普通字段、处理状态、AI 结果、人工校准、公开状态、统计字段 | `articleId` |
-| `ArticleContent` | `rawContent`、`cleanContent`、`articleBody` 及超长 Article 字段的完整分片内容 | `articleId`、`contentType`、`chunkNo` |
-| `LongTextChunks` | 其他 Sheet 超过 Excel 单元格限制的完整文本分片 | `sheetName`、`rowKey`、`field`、`chunkNo` |
-| `Events` | Event 全部普通字段、代表文章、公开和推送状态 | `eventId` |
-| `ArticleEventRelations` | 当前 Article/Event 关系、是否代表文章、代表选择方式 | `articleId`、`eventId` |
-| `EventClusterAudits` | 聚类、移动、合并、代表文章变更等审计 | `auditId` |
-| `Sources` | 数据源配置和生命周期信息 | `sourceId` |
-| `FetchLogs` | 数据源抓取结果、条数和错误 | `fetchLogId` |
-| `Jobs` | 抓取流水线 Job 及进度、状态、错误 | `jobId` |
-| `PushTargets` | 推送目标的安全字段 | `targetId` |
-| `PushDeliveries` | 当前有效的目标投递状态 | `deliveryId` |
-| `PushLogs` | 历史推送审计 | `pushLogId` |
-| `EventInteractionDaily` | Event 按日期和来源的互动统计 | `eventId`、`sourceId`、`dateKey` |
-| `KeywordHits` | 文章命中的关键词关系 | `articleId`、`keywordId` |
-| `Keywords` | 关键词及分类 | `keywordId` |
-| `KeywordCandidates` | 候选关键词及处理状态 | `candidateId` |
-| `TuningSuggestions` | 人工校准产生的调优建议 | `suggestionId` |
-| `DiscardedItems` | 未入库条目及拦截/去重原因 | `discardedId` |
-| `DiscardedRetryAudits` | 未入库条目人工重试审计 | `auditId` |
+| `导出元数据`（`ExportMeta`） | 导出版本、生成时间、快照时间、筛选条件、各工作表行数和错误数 | `exportJobId` |
+| `数据源`（`Sources`） | 数据源配置和生命周期信息 | `sourceId` |
+| `文章数据`（`Articles`） | Article 字段、来源上下文、Event 投影、处理状态、AI 结果、人工校准、公开状态、统计字段和长度信息 | `articleId` |
+| `未入库条目`（`DiscardedItems`） | 未入库条目及拦截/去重原因 | `discardedId` |
+| `关键词`（`Keywords`） | 关键词及分类 | `keywordId` |
+| `候选关键词`（`KeywordCandidates`） | 候选关键词及处理状态 | `candidateId` |
+| `抓取日志 ID`（`FetchLogs`） | 数据源抓取结果、条数和错误 | `fetchLogId` |
+| `推送日志`（`PushLogs`） | 历史推送审计 | `pushLogId` |
 
 ### 3.2 普通字段与 JSON 字段
 
-- `Articles`、`Events` 等主表 Sheet 保留数据库中的普通字段，不用展示层 DTO 替代数据库字段。
+- `文章数据` 保留 Article 的普通字段和必要的 Event 投影，不用展示层 DTO 替代数据库字段；列标题在工作簿中显示为中文。
 - `eventSubjects`、`keyPoints`、`aiSnapshot`、`manualOverrides`、`scorePolicySnapshot`、`detail` 等 JSON 字段保留原始 JSON 字符串。
 - 对常用 JSON 字段可增加可读列，例如主体文本、关键点文本；可读列不能替代原始 JSON。
-- 状态字段保留原始枚举值，并增加中文说明列，便于程序处理和人工阅读。
-- 日期字段保留可识别的 Excel 日期值，并在 `ExportMeta` 记录 `Asia/Shanghai` 和 ISO 时间信息。
-- `Jobs`、`Keywords`、`KeywordCandidates`、`TuningSuggestions` 等系统级 Sheet 按快照导出；`Events`、日志、推送、互动和关键词关系等关联 Sheet 按筛选后的 Article/Event/DiscardedItem 关联范围导出。
+- 状态字段保留原始枚举值，并使用“原值”列标题，同时增加中文说明列，便于程序处理和人工阅读。
+- `文章数据` 不再把全文搜索索引压缩到一个“搜索文本”列；按索引构成顺序相邻放置并复用现有字段：标题、摘要、品牌/主体、事件标识。清洗后正文在本次精简白名单中不另建正文 Sheet，保留清洗后保留文本长度和全文搜索索引更新时间。
+- 内容长度字段含义固定为：原始抓取内容长度（含 HTML）、提取正文 HTML 长度（含标签）、清洗后保留文本长度；它们分别对应 `rawContent`、`articleBody`、`cleanContent`，不表示清洗删除量。
+- 评分字段中，`原始评分` 紧邻放在 `综合评分` 前面，便于比较评分策略处理前后的数值。
+- 所有时间字段写成 Excel 可识别的数值日期，并统一使用 `yyyy-mm-dd hh:mm:ss` 显示；时间一律按 `Asia/Shanghai`（中国标准时间）表达，不再额外导出 ISO 时间字段。
+- `数据源`、`关键词`、`候选关键词` 按快照导出；`抓取日志 ID` 按数据源关联范围导出；`推送日志` 按文章关联的 Event 范围导出。其余导出范围由 `文章数据` 和 `未入库条目` 的筛选条件决定。
 
-## 4. 原文和长文本
+### 3.3 `文章数据` Sheet 的 P0 运营字段
 
-`ArticleContent` 使用以下结构保存完整内容：
+`文章数据` 除 Article 自身字段外，还补充一组用于回答“这篇文章现在处于什么状态、为什么没有继续流转”的 P0 字段：
 
-| 字段 | 说明 |
-| --- | --- |
-| `articleId` | Article ID |
-| `contentType` | `rawContent`、`cleanContent` 或 `articleBody` |
-| `chunkNo` | 从 1 开始的分片序号 |
-| `chunkTotal` | 当前内容的总分片数 |
-| `contentChunk` | 当前分片文本 |
+- 来源上下文：来源类型、来源是否启用、来源是否公开启用、来源健康状态及中文说明。
+- Event 权威上下文：事件聚类复核状态、事件公开状态、事件代表文章 ID、代表文章选择方式、事件文章数量、事件合并目标 ID。这里的公开状态以 Event 为准，Article 自身的公开字段仍作为当前文章投影保留。
+- 实际关键词：命中关键词 ID 和关键词文本；`keywordMatched` 仍保留作为快速布尔判断。
+- 全文搜索索引组成：标题、摘要、品牌/主体、事件标识、清洗后正文；其中前四项直接复用 `文章数据` 的相邻字段，清洗后正文以长度信息和索引更新时间表达，避免增加白名单外的正文工作表。
+- 处理结论：当前处理结论、是否需要人工处理、处理阻断原因。处理结论复用 `projectArticleSteps()` 的抓取/AI/聚类阶段投影，并叠加 Event 复核、Event 关联和技术忽略状态；它是快照时的可读摘要，不替代工作台实时推送门禁。
 
-每个分片控制在 Excel 单元格限制以内，按 `articleId + contentType + chunkNo` 顺序拼接即可还原原文；其他长字段按 `sheetName + rowKey + field + chunkNo` 拼接。内容不得静默截断。
+“是否需要人工处理”只在终止技术失败、人工忽略、事件待复核或已聚类但未关联 Event 等明确状态下标记为“是”，不会把所有尚未公开或尚未推送的文章误报为异常。阻断原因允许多个原因以“；”拼接，空值表示当前没有导出侧识别出的阻断。
 
-单个 Sheet 达到 Excel 的 1,048,576 行上限时自动创建带 `_2`、`_3` 后缀的续表，续表重复表头，避免大批量导出生成不可打开的工作簿。
+## 4. 正文长度和 Excel 单元格限制
+
+本次导出按固定白名单只生成 8 个工作表，不再生成 `文章正文` 或 `长文本分片`。因此，`文章数据` 保留三类正文长度字段用于核对：原始抓取内容长度（含 HTML）、提取正文 HTML 长度（含标签）、清洗后保留文本长度；它们分别对应 `rawContent`、`articleBody`、`cleanContent`，不表示清洗删除量。
+
+保留工作表中的文本字段若超过 Excel 单元格上限，会在单元格末尾追加 `...[超过 Excel 单元格上限，已截断]`。这是可识别的主动截断，不会伪装成完整正文；如需逐字还原正文，必须另行允许正文/分片工作表或专用归档格式。
+
+单个工作表达到 Excel 的 1,048,576 行上限时自动创建带 `_2`、`_3` 后缀的中文续表，续表重复中文表头，避免大批量导出生成不可打开的工作簿。
 
 ## 5. 数据安全
 
@@ -91,7 +88,7 @@
 - `PushLog.webhookUrl`
 - `Source.parserConfig` 中可能出现的认证 Header 或密钥
 
-`PushTargets` 只导出名称、URL Hash、启用状态和时间字段。来源配置中的敏感键需要递归脱敏；错误信息也要避免原样泄露密钥。
+来源配置中的敏感键需要递归脱敏；错误信息也要避免原样泄露密钥。
 
 所有文本字段必须按纯文本写入，尤其处理以 `=`, `+`, `-`, `@` 开头的标题、URL、正文和错误信息，防止 Excel 公式注入。
 
@@ -125,7 +122,7 @@
 
 ## 7. 一致性快照
 
-导出使用 `snapshotAt` 作为副本完成边界，并在任务创建时固化、随后只读的 SQLite 副本中读取各 Sheet，确保文章、Event、关系和日志之间可对应。各主记录按 `createdAt <= snapshotAt` 限定；按发布时间筛选时同样不纳入快照之后才产生的发布时间。临时副本在成功、失败、取消和服务重启恢复时清理。
+导出使用 `snapshotAt` 作为副本完成边界，并在任务创建时固化、随后只读的 SQLite 副本中读取各 Sheet，确保文章、数据源和日志之间可对应。各主记录按 `createdAt <= snapshotAt` 限定；按发布时间筛选时同样不纳入快照之后才产生的发布时间。临时副本在成功、失败、取消和服务重启恢复时清理。
 
 导出结果必须在 `ExportMeta` 记录：
 
@@ -133,7 +130,7 @@
 - `snapshotAt`
 - 筛选条件
 - 应用版本和 `exportFormatVersion`
-- 导出开始/完成时间、ISO 时间值和时区
+- 导出开始/完成时间和时区；时间字段使用中国标准时间的 Excel 日期值
 - 每个 Sheet 的行数和错误数（成功文件的错误数为 0；生成失败的任务不产生可下载文件）
 
 数据库没有历史版本表，因此只能导出快照时已有的当前字段值，不能还原过去某次 AI 运行的完整输入输出。
@@ -148,6 +145,8 @@
 - `publicStatus`、是否代表文章、是否已推送
 - Event ID
 - 是否包含未入库条目
+
+来源、正文状态、AI 状态、聚类状态和公开状态使用复选项进行多选，不依赖 Ctrl/Shift 操作；每个字段显示已选数量，并提供“全选”和“清空”操作。未勾选任何选项表示不限制该字段（全部）。
 
 日期输入固定按 `Asia/Shanghai` 解析，结束时间使用半开区间，避免边界重复；需要按自然日筛选时输入当天 `00:00` 到次日 `00:00`。
 “已推送”按快照内启用推送目标的最新 `PushDelivery` 状态判断，不使用历史 `PushLog` 作为当前状态来源。
@@ -172,7 +171,7 @@
 2. 创建导出任务
 3. 最近 20 条导出任务
 4. 排队、生成中、成功、失败、已取消、已过期状态
-5. 进度、错误提示、取消、重试和下载按钮
+5. 进度、错误提示、取消、重试、下载和删除任务按钮
 6. 文件过期倒计时或过期时间
 
 文章数据导出服务应保持独立，后续工作台文章库可以复用同一服务增加筛选导出入口。
@@ -203,12 +202,15 @@
 - `src/components/settings/data-export.tsx`
 - `src/app/api/data-export/`
 
+当前导出格式版本为 `4`：工作簿严格只包含 8 个白名单工作表，工作表名称、列标题、元数据键和状态说明均已中文化；`文章数据` 的长度字段已明确含义，全文搜索索引按组成字段拆分，原始评分紧邻综合评分前；原始枚举值、ID 和 JSON 保持原样，超长文本按 Excel 单元格上限显式截断。
+
 验收标准：
 
 - 全部 `Article` 均可导出，处理失败和人工忽略记录不丢失。
-- 未入库条目及其原因、重试审计可追溯。
-- Article、Event、代表关系和历史聚类审计可通过 ID 关联。
-- 三类正文均可从 `ArticleContent` 完整还原。
+- 未入库条目及其拦截/去重原因可追溯。
+- `文章数据` 中的 Article 与 Event 投影、`抓取日志 ID`、`推送日志` 可通过 ID 关联。
+- 工作簿只生成 `导出元数据`、`数据源`、`文章数据`、`未入库条目`、`关键词`、`候选关键词`、`抓取日志 ID`、`推送日志` 8 个工作表，不生成额外 Sheet。
+- 正文长度字段定义稳定；超长文本带有明确截断标记，不声称可从当前工作簿逐字还原正文。
 - 无敏感配置泄露，文本不会被 Excel 当作公式执行。
 - 导出期间数据变更不会造成 Sheet 之间的快照混杂。
 - 任务可排队、取消、失败重试、过期清理和受保护下载。

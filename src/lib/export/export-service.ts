@@ -241,6 +241,22 @@ export async function getExportJob(id: string): Promise<ExportJobDto> {
   return toDto(await getJobOrThrow(id));
 }
 
+export async function deleteExportJob(id: string): Promise<void> {
+  if (exportMaintenanceInProgress) throw new ExportJobConflictError('数据清理进行中，请稍后重试');
+  const job = await getJobOrThrow(id);
+  if (job.status === 'running') {
+    await db.exportJob.updateMany({
+      where: { id, status: 'running' },
+      data: { cancelRequestedAt: new Date() },
+    });
+  }
+  await removeFile(job.storageKey);
+  await removeTempFile(job.storageKey);
+  await removeSnapshotFile(job.storageKey);
+  const deleted = await db.exportJob.deleteMany({ where: { id } });
+  if (deleted.count !== 1) throw new ExportJobNotFoundError('导出任务不存在');
+}
+
 export async function cancelExportJob(id: string): Promise<ExportJobDto> {
   const job = await getJobOrThrow(id);
   if (job.status === 'queued') {

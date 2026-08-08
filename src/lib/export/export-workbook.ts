@@ -1,9 +1,9 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import { EXPORT_FORMAT_VERSION, type ExportFilter } from '@/contracts/data-export';
+import { projectArticleSteps, type ArticleStepInput } from '@/lib/article-pipeline-status';
 
 export const EXPORT_BATCH_SIZE = 250;
-export const EXPORT_CONTENT_CHUNK_SIZE = 30_000;
 
 type ExportDb = PrismaClient | Prisma.TransactionClient;
 type CellValue = string | number | boolean | Date | null | undefined;
@@ -29,10 +29,6 @@ export interface ExportWorkbookOptions {
   exportStartedAt?: Date;
 }
 
-interface LongTextSink {
-  append(rows: SheetRow[]): void;
-}
-
 interface SheetBuilder {
   append(rows: SheetRow[]): void;
   count: number;
@@ -40,6 +36,10 @@ interface SheetBuilder {
 }
 
 const MAX_EXCEL_CELL_TEXT_LENGTH = 32_767;
+const EXCEL_TEXT_TRUNCATION_SUFFIX = '...[超过 Excel 单元格上限，已截断]';
+const EXCEL_DATE_FORMAT = 'yyyy-mm-dd hh:mm:ss';
+const CHINA_STANDARD_TIME_OFFSET_HOURS = 8;
+const EXCEL_EPOCH_UTC = Date.UTC(1899, 11, 30);
 const MAX_EXCEL_DATA_ROWS_PER_SHEET = 1_048_575;
 const SENSITIVE_KEY_PATTERN = /(?:api[-_]?key|access[-_]?token|client[-_]?secret|authorization|proxy[-_]?authorization|cookie|credential|password|secret|signature|webhook|(?:^|[_-])token$|(?:^|[_-])key$)/i;
 const SENSITIVE_QUERY_KEY_PATTERN = /(?:api[-_]?key|access[-_]?token|client[-_]?secret|authorization|auth|cookie|credential|password|secret|signature|sig|token|webhook|key)/i;
@@ -78,14 +78,195 @@ const STATUS_LABELS: Record<string, string> = {
   unknown: '未知',
 };
 
+const SHEET_DISPLAY_NAMES: Record<string, string> = {
+  ExportMeta: '导出元数据',
+  Sources: '数据源',
+  Articles: '文章数据',
+  DiscardedItems: '未入库条目',
+  Keywords: '关键词',
+  KeywordCandidates: '候选关键词',
+  FetchLogs: '抓取日志 ID',
+  PushLogs: '推送日志',
+};
+
+const HEADER_LABELS: Record<string, string> = {
+  key: '字段',
+  value: '值',
+  articleId: '文章 ID',
+  sourceId: '来源 ID',
+  sourceName: '来源名称',
+  sourceType: '来源类型',
+  sourceEnabled: '来源是否启用',
+  sourcePublicEnabled: '来源是否公开启用',
+  sourceStatus: '来源健康状态（原值）',
+  sourceStatusLabel: '来源健康状态说明',
+  url: '链接',
+  title: '标题',
+  originalSource: '原始来源',
+  contentHash: '内容哈希',
+  rawContentLength: '原始抓取内容长度（含 HTML）',
+  cleanContentLength: '清洗后保留文本长度',
+  articleBodyLength: '提取正文 HTML 长度（含标签）',
+  searchIndexUpdatedAt: '全文搜索索引更新时间',
+  eventId: '事件 ID（Event ID）',
+  eventClusterReviewStatus: '事件聚类复核状态（原值）',
+  eventClusterReviewStatusLabel: '事件聚类复核状态说明',
+  eventPublicStatus: '事件公开状态（原值）',
+  eventPublicStatusLabel: '事件公开状态说明',
+  eventRepresentativeArticleId: '事件代表文章 ID',
+  eventRepresentativeManual: '事件代表文章选择方式',
+  eventArticleCount: '事件文章数量',
+  eventMergedIntoId: '事件合并目标 ID',
+  clusterStatus: '聚类状态（原值）',
+  clusterStatusLabel: '聚类状态说明',
+  clusteredAt: '聚类时间',
+  clusterError: '聚类错误',
+  clusterRetryCount: '聚类重试次数',
+  nextClusterRetryAt: '下次聚类重试时间',
+  eventSubjects: '事件主体',
+  eventAction: '事件动作',
+  eventObject: '事件对象',
+  eventKey: '事件标识',
+  eventKeyConfidence: '事件标识置信度',
+  fetchStatus: '抓取状态（原值）',
+  fetchStatusLabel: '抓取状态说明',
+  fetchError: '抓取错误',
+  fetchRetryCount: '抓取重试次数',
+  nextFetchRetryAt: '下次抓取重试时间',
+  technicalIgnoredAt: '技术忽略时间',
+  processingConclusion: '当前处理结论',
+  needsManualAction: '是否需要人工处理',
+  processingBlockingReason: '处理阻断原因',
+  relevance: '相关度',
+  summary: '摘要',
+  brand: '品牌/主体',
+  category: '内容类别',
+  keyPoints: '关键要点',
+  score: '综合评分',
+  keywordMatched: '是否命中关键词',
+  keywordHitIds: '命中关键词 ID',
+  matchedKeywords: '实际命中关键词',
+  eventScore: '事件评分',
+  contentScore: '内容评分',
+  rawScore: '原始评分',
+  adProbability: '软文概率',
+  aiConfidence: 'AI 置信度',
+  scorePolicyVersion: '评分策略版本',
+  aiModel: 'AI 模型',
+  aiProvider: 'AI 服务商',
+  promptHash: '提示词哈希',
+  scorePolicySnapshot: '评分策略快照（原始 JSON）',
+  promptVersion: '提示词版本',
+  aiStatus: 'AI 状态（原值）',
+  aiStatusLabel: 'AI 状态说明',
+  aiError: 'AI 错误',
+  aiSnapshot: 'AI 分析快照（原始 JSON）',
+  manualOverrides: '人工修正（原始 JSON）',
+  manualCorrectedAt: '人工修正时间',
+  skipReason: '跳过原因',
+  aiRetryCount: 'AI 重试次数',
+  nextAiRetryAt: '下次 AI 重试时间',
+  isAd: '是否软文',
+  publicOverride: '公开状态覆盖方式',
+  publicStatus: '公开状态（原值）',
+  publicStatusLabel: '公开状态说明',
+  publicPublishedAt: '公开时间',
+  publicRevokedAt: '撤回时间',
+  publicPublicationReason: '公开判定原因',
+  publicPublicationEvaluatedAt: '公开判定时间',
+  publicContentUpdatedAt: '公开内容更新时间',
+  viewCount: '浏览次数',
+  originalClickCount: '原文点击次数',
+  publishedAt: '发布时间',
+  createdAt: '创建时间',
+  updatedAt: '更新时间',
+  isRepresentative: '是否代表文章',
+  representativeEventId: '代表事件 ID',
+  eventStatus: '事件状态（原值）',
+  eventStatusLabel: '事件状态说明',
+  eventPushedAt: '事件推送时间',
+  status: '状态（原值）',
+  statusLabel: '状态说明',
+  name: '名称',
+  type: '类型',
+  parserConfig: '解析配置（已脱敏 JSON）',
+  enabled: '是否启用',
+  publicEnabled: '是否公开启用',
+  consecutiveFailures: '连续失败次数',
+  circuitBreakerUntil: '熔断截止时间',
+  lastFetchedAt: '最近抓取时间',
+  deletedAt: '删除时间',
+  fetchLogId: '抓取日志 ID',
+  errorMessage: '错误信息',
+  itemsFound: '发现条数',
+  representativeArticleId: '代表文章 ID',
+  targetId: '推送目标 ID',
+  pushLogId: '推送日志 ID',
+  retryCount: '重试次数',
+  webhookRemark: '推送备注',
+  keywordId: '关键词 ID',
+  word: '关键词',
+  candidateId: '候选词 ID',
+  phrase: '候选短语',
+  occurrences: '出现次数',
+  sampleTitles: '示例标题',
+  detail: '详情/说明',
+  discardedId: '未入库条目 ID',
+  reason: '拦截/去重原因',
+  winnerArticleId: '命中文章 ID',
+};
+
+const DATE_FIELD_LABELS: Record<ExportFilter['dateField'], string> = {
+  createdAt: '创建时间',
+  publishedAt: '发布时间',
+  updatedAt: '更新时间',
+};
+
+function displaySheetName(name: string): string {
+  return SHEET_DISPLAY_NAMES[name] ?? name;
+}
+
+function localizedHeaders(headers: readonly string[]): string[] {
+  return headers.map((header) => HEADER_LABELS[header] ?? `字段（${header}）`);
+}
+
+function displayFilterValue(value: string): string {
+  return STATUS_LABELS[value] ? `${STATUS_LABELS[value]}（${value}）` : value;
+}
+
+function formatExportFilter(filter: ExportFilter): string {
+  return JSON.stringify({
+    日期字段: DATE_FIELD_LABELS[filter.dateField],
+    开始时间: filter.from || '不限',
+    结束时间: filter.to ? `${filter.to}（不含）` : '不限',
+    '来源 ID': filter.sourceIds.length > 0 ? filter.sourceIds : '全部',
+    抓取状态: filter.fetchStatuses.length > 0 ? filter.fetchStatuses.map(displayFilterValue) : '全部',
+    'AI 状态': filter.aiStatuses.length > 0 ? filter.aiStatuses.map(displayFilterValue) : '全部',
+    聚类状态: filter.clusterStatuses.length > 0 ? filter.clusterStatuses.map(displayFilterValue) : '全部',
+    公开状态: filter.publicStatuses.length > 0 ? filter.publicStatuses.map(displayFilterValue) : '全部',
+    是否代表文章: filter.representative === 'all' ? '全部' : filter.representative === 'yes' ? '是' : '否',
+    是否已推送: filter.pushed === 'all' ? '全部' : filter.pushed === 'yes' ? '是' : '否',
+    '事件 ID': filter.eventId || '全部',
+    是否包含未入库条目: filter.includeDiscarded ? '是' : '否',
+  });
+}
+
 const ARTICLE_HEADERS = [
-  'articleId', 'sourceId', 'sourceName', 'url', 'title', 'originalSource', 'contentHash',
-  'rawContentLength', 'cleanContentLength', 'articleBodyLength', 'searchText', 'searchIndexUpdatedAt',
-  'eventId', 'clusterStatus', 'clusterStatusLabel', 'clusteredAt', 'clusterError', 'clusterRetryCount', 'nextClusterRetryAt',
-  'eventSubjects', 'eventAction', 'eventObject', 'eventKey', 'eventKeyConfidence',
+  'articleId', 'sourceId', 'sourceName', 'sourceType', 'sourceEnabled', 'sourcePublicEnabled', 'sourceStatus', 'sourceStatusLabel',
+  'url',
+  // 全文搜索索引的组成顺序：标题、摘要、品牌/主体、事件标识、清洗后正文。
+  // 前四项直接复用 Article 已有业务字段；当前精简白名单保留清洗后正文长度和索引更新时间。
+  'title', 'summary', 'brand', 'eventKey', 'searchIndexUpdatedAt',
+  'originalSource', 'contentHash',
+  'rawContentLength', 'articleBodyLength', 'cleanContentLength',
+  'eventId', 'eventClusterReviewStatus', 'eventClusterReviewStatusLabel', 'eventPublicStatus', 'eventPublicStatusLabel',
+  'eventRepresentativeArticleId', 'eventRepresentativeManual', 'eventArticleCount', 'eventMergedIntoId',
+  'clusterStatus', 'clusterStatusLabel', 'clusteredAt', 'clusterError', 'clusterRetryCount', 'nextClusterRetryAt',
+  'eventSubjects', 'eventAction', 'eventObject', 'eventKeyConfidence',
   'fetchStatus', 'fetchStatusLabel', 'fetchError', 'fetchRetryCount', 'nextFetchRetryAt', 'technicalIgnoredAt',
-  'relevance', 'summary', 'brand', 'category', 'keyPoints', 'score', 'keywordMatched',
-  'eventScore', 'contentScore', 'rawScore', 'adProbability', 'aiConfidence',
+  'processingConclusion', 'needsManualAction', 'processingBlockingReason',
+  'relevance', 'category', 'keyPoints', 'rawScore', 'score', 'keywordMatched', 'keywordHitIds', 'matchedKeywords',
+  'eventScore', 'contentScore', 'adProbability', 'aiConfidence',
   'scorePolicyVersion', 'aiModel', 'aiProvider', 'promptHash', 'scorePolicySnapshot',
   'promptVersion', 'aiStatus', 'aiStatusLabel', 'aiError', 'aiSnapshot', 'manualOverrides', 'manualCorrectedAt',
   'skipReason', 'aiRetryCount', 'nextAiRetryAt', 'isAd',
@@ -95,60 +276,28 @@ const ARTICLE_HEADERS = [
   'isRepresentative', 'representativeEventId', 'eventStatus', 'eventStatusLabel', 'eventPushedAt',
 ] as const;
 
-const ARTICLE_CONTENT_HEADERS = ['articleId', 'contentType', 'chunkNo', 'chunkTotal', 'contentChunk'] as const;
-const EVENT_HEADERS = [
-  'eventId', 'status', 'statusLabel', 'clusterReviewStatus', 'clusterReviewStatusLabel', 'mergedIntoId', 'representativeArticleId',
-  'representativeManual', 'firstSeenAt', 'lastSeenAt', 'articleCount', 'publicStatus',
-  'publicStatusLabel', 'publicPublishedAt', 'publicRevokedAt', 'publicDateKey', 'publicSortAt', 'pushedAt',
-  'viewCount', 'originalClickCount', 'nextPushRetryAt', 'pushRetryCount', 'createdAt', 'updatedAt',
-  'dirtyReason',
-] as const;
-const ARTICLE_EVENT_HEADERS = [
-  'articleId', 'eventId', 'isRepresentative', 'representativeManual', 'eventStatus', 'eventStatusLabel', 'eventKey',
-] as const;
-const EVENT_AUDIT_HEADERS = [
-  'auditId', 'articleId', 'assignedEventId', 'candidateEventId', 'actor', 'action',
-  'decisionSource', 'confidence', 'evidence', 'createdAt',
-] as const;
 const SOURCE_HEADERS = [
   'sourceId', 'name', 'type', 'url', 'parserConfig', 'enabled', 'publicEnabled', 'status', 'statusLabel',
   'consecutiveFailures', 'circuitBreakerUntil', 'lastFetchedAt', 'createdAt', 'updatedAt', 'deletedAt',
 ] as const;
 const FETCH_LOG_HEADERS = ['fetchLogId', 'sourceId', 'status', 'statusLabel', 'errorMessage', 'itemsFound', 'createdAt'] as const;
-const JOB_HEADERS = [
-  'jobId', 'type', 'status', 'statusLabel', 'payload', 'result', 'error', 'currentStage', 'progressTotal',
-  'progressDone', 'progressErrors', 'currentItemLabel', 'heartbeatAt', 'leaseOwner',
-  'leaseExpiresAt', 'attempt', 'maxAttempts', 'idempotencyKey', 'availableAt', 'cancelRequestedAt',
-  'createdAt', 'updatedAt', 'startedAt', 'completedAt',
-] as const;
-const PUSH_TARGET_HEADERS = ['targetId', 'name', 'urlHash', 'enabled', 'createdAt', 'updatedAt'] as const;
-const PUSH_DELIVERY_HEADERS = [
-  'deliveryId', 'eventId', 'targetId', 'representativeArticleId', 'contentVersion', 'mode',
-  'status', 'statusLabel', 'idempotencyKey', 'attempt', 'lastError', 'leaseOwner', 'leaseExpiresAt',
-  'createdAt', 'updatedAt', 'sentAt', 'completedAt',
-] as const;
 const PUSH_LOG_HEADERS = [
   'pushLogId', 'eventId', 'representativeArticleId', 'targetId', 'status', 'statusLabel', 'errorMessage',
   'retryCount', 'webhookRemark', 'createdAt',
 ] as const;
-const INTERACTION_HEADERS = [
-  'eventId', 'sourceId', 'dateKey', 'viewCount', 'originalClickCount', 'createdAt', 'updatedAt',
-] as const;
-const KEYWORD_HIT_HEADERS = ['articleId', 'keywordId', 'createdAt'] as const;
 const KEYWORD_HEADERS = ['keywordId', 'category', 'word', 'createdAt'] as const;
 const KEYWORD_CANDIDATE_HEADERS = ['candidateId', 'phrase', 'occurrences', 'sampleTitles', 'status', 'statusLabel', 'createdAt', 'updatedAt'] as const;
-const TUNING_HEADERS = ['suggestionId', 'kind', 'title', 'detail', 'payload', 'status', 'statusLabel', 'createdAt', 'appliedAt'] as const;
 const DISCARDED_HEADERS = [
   'discardedId', 'sourceId', 'title', 'url', 'reason', 'detail', 'winnerArticleId', 'publishedAt', 'createdAt',
 ] as const;
-const DISCARDED_AUDIT_HEADERS = [
-  'auditId', 'discardedId', 'sourceId', 'title', 'url', 'reason', 'detail', 'winnerArticleId',
-  'publishedAt', 'action', 'articleId', 'createdAt',
-] as const;
-const LONG_TEXT_HEADERS = ['sheetName', 'rowKey', 'field', 'chunkNo', 'chunkTotal', 'valueChunk'] as const;
 
 function dateCell(value: Date | null | undefined): Date | '' {
   return value instanceof Date ? value : '';
+}
+
+function excelDateSerial(value: Date): number {
+  const chinaStandardTime = value.getTime() + CHINA_STANDARD_TIME_OFFSET_HOURS * 60 * 60 * 1000;
+  return (chinaStandardTime - EXCEL_EPOCH_UTC) / (24 * 60 * 60 * 1000);
 }
 
 function jsonText(value: string | null | undefined): string {
@@ -209,12 +358,16 @@ function safeUrl(value: string | null | undefined): string {
   }
 }
 
+function fitExcelCellText(value: string): string {
+  if (value.length <= MAX_EXCEL_CELL_TEXT_LENGTH) return value;
+  return `${value.slice(0, MAX_EXCEL_CELL_TEXT_LENGTH - EXCEL_TEXT_TRUNCATION_SUFFIX.length)}${EXCEL_TEXT_TRUNCATION_SUFFIX}`;
+}
+
 function createSheetBuilder(
   workbook: XLSX.WorkBook,
   name: string,
   headers: readonly string[],
   widths: number[] = [],
-  longTextSink?: LongTextSink,
 ): SheetBuilder {
   const sheetNames: string[] = [];
   let sheet = XLSX.utils.aoa_to_sheet([[...headers]]);
@@ -239,19 +392,9 @@ function createSheetBuilder(
     },
     append(rows: SheetRow[]) {
       if (rows.length === 0) return;
-      const normalizedRows = rows.map((row) => row.map((value, columnIndex) => {
-        if (!longTextSink || typeof value !== 'string' || value.length <= MAX_EXCEL_CELL_TEXT_LENGTH) return value;
-        const chunks = Math.ceil(value.length / EXPORT_CONTENT_CHUNK_SIZE);
-        longTextSink.append(Array.from({ length: chunks }, (_, chunkIndex) => [
-          name,
-          String(row[0] ?? ''),
-          headers[columnIndex] ?? `column_${columnIndex + 1}`,
-          chunkIndex + 1,
-          chunks,
-          value.slice(chunkIndex * EXPORT_CONTENT_CHUNK_SIZE, (chunkIndex + 1) * EXPORT_CONTENT_CHUNK_SIZE),
-        ]));
-        return `[已分片至 LongTextChunks：${headers[columnIndex] ?? `column_${columnIndex + 1}`}]`;
-      }));
+      const normalizedRows = rows.map((row) => row.map((value) =>
+        typeof value === 'string' ? fitExcelCellText(value) : value,
+      ));
       for (let offset = 0; offset < normalizedRows.length;) {
         if (sheetRowCount >= MAX_EXCEL_DATA_ROWS_PER_SHEET) createSheet(sheetNames.length + 1);
         const capacity = MAX_EXCEL_DATA_ROWS_PER_SHEET - sheetRowCount;
@@ -267,9 +410,9 @@ function createSheetBuilder(
               cell.v = value ?? '';
               delete cell.f;
             } else if (value instanceof Date) {
-              cell.t = 'd';
-              cell.v = value;
-              cell.z = 'yyyy-mm-dd hh:mm:ss';
+              cell.t = 'n';
+              cell.v = excelDateSerial(value);
+              cell.z = EXCEL_DATE_FORMAT;
               delete cell.f;
             }
             sheet[address] = cell as XLSX.CellObject;
@@ -318,47 +461,6 @@ async function appendIdPages<T extends { id: string }>(
     await append(page);
     if (page.length < EXPORT_BATCH_SIZE) break;
     cursor = page[page.length - 1].id;
-  }
-}
-
-interface KeywordHitCursor {
-  articleId: string;
-  keywordId: string;
-}
-
-async function appendKeywordHitPages<T extends { articleId: string; keywordId: string }>(
-  load: (cursor?: KeywordHitCursor) => Promise<T[]>,
-  append: (rows: T[]) => void | Promise<void>,
-): Promise<void> {
-  let cursor: KeywordHitCursor | undefined;
-  while (true) {
-    const page = await load(cursor);
-    if (page.length === 0) break;
-    await append(page);
-    if (page.length < EXPORT_BATCH_SIZE) break;
-    const last = page[page.length - 1];
-    cursor = { articleId: last.articleId, keywordId: last.keywordId };
-  }
-}
-
-interface InteractionCursor {
-  eventId: string;
-  sourceId: string;
-  dateKey: string;
-}
-
-async function appendInteractionPages<T extends { eventId: string; sourceId: string; dateKey: string }>(
-  load: (cursor?: InteractionCursor) => Promise<T[]>,
-  append: (rows: T[]) => void | Promise<void>,
-): Promise<void> {
-  let cursor: InteractionCursor | undefined;
-  while (true) {
-    const page = await load(cursor);
-    if (page.length === 0) break;
-    await append(page);
-    if (page.length < EXPORT_BATCH_SIZE) break;
-    const last = page[page.length - 1];
-    cursor = { eventId: last.eventId, sourceId: last.sourceId, dateKey: last.dateKey };
   }
 }
 
@@ -478,43 +580,180 @@ function buildDiscardedWhere(filter: ExportFilter, snapshotAt: Date): Prisma.Dis
   return where;
 }
 
-function contentRows(articleId: string, contentType: string, content: string): SheetRow[] {
-  const total = Math.max(1, Math.ceil(content.length / EXPORT_CONTENT_CHUNK_SIZE));
-  const rows: SheetRow[] = [];
-  for (let index = 0; index < total; index += 1) {
-    rows.push([
-      articleId,
-      contentType,
-      index + 1,
-      total,
-      content.slice(index * EXPORT_CONTENT_CHUNK_SIZE, (index + 1) * EXPORT_CONTENT_CHUNK_SIZE),
-    ]);
+interface ArticleExportDecisionInput extends Pick<ArticleStepInput, 'fetchStatus' | 'clusterStatus' | 'aiStatus' | 'score' | 'relevance'> {
+  nextFetchRetryAt: Date | null;
+  nextAiRetryAt: Date | null;
+  nextClusterRetryAt: Date | null;
+  technicalIgnoredAt: Date | null;
+  event: {
+    clusterReviewStatus: string;
+    publicStatus: string;
+    pushedAt: Date | null;
+  } | null;
+}
+
+interface ArticleExportDecision {
+  conclusion: string;
+  needsManualAction: boolean;
+  blockingReason: string;
+}
+
+function deriveArticleExportDecision(article: ArticleExportDecisionInput): ArticleExportDecision {
+  const projection = projectArticleSteps({
+    fetchStatus: article.fetchStatus,
+    clusterStatus: article.clusterStatus,
+    aiStatus: article.aiStatus,
+    score: article.score,
+    relevance: article.relevance,
+    eventPushedAt: article.event?.pushedAt ?? null,
+    eventNextRetryAt: null,
+    pushApplicable: false,
+  }, {
+    pushMode: 'off',
+    minScore: 0,
+    minRelevance: 0,
+    now: new Date(0),
+  });
+  const reasons: string[] = [];
+  let needsManualAction = false;
+
+  if (article.technicalIgnoredAt) {
+    reasons.push('已人工忽略技术异常');
+    needsManualAction = true;
   }
-  return rows;
+  if (projection.process === 'pending') {
+    reasons.push('等待正文抓取');
+  } else if (projection.process === 'failed') {
+    reasons.push(article.nextFetchRetryAt ? '正文抓取失败，等待自动重试' : '正文抓取失败，需要人工处理');
+    needsManualAction ||= !article.nextFetchRetryAt;
+  }
+  if (projection.ai === 'pending') {
+    reasons.push('等待 AI 分析');
+  } else if (projection.ai === 'failed') {
+    reasons.push(article.nextAiRetryAt ? 'AI 分析失败，等待自动重试' : 'AI 分析失败，需要人工处理');
+    needsManualAction ||= !article.nextAiRetryAt;
+  }
+  if (projection.cluster === 'pending') {
+    reasons.push('等待事件聚类');
+  } else if (projection.cluster === 'failed') {
+    reasons.push(article.nextClusterRetryAt ? '事件聚类失败，等待自动重试' : '事件聚类失败，需要人工处理');
+    needsManualAction ||= !article.nextClusterRetryAt;
+  }
+
+  const needsEventReview = article.clusterStatus === 'needs_review'
+    || article.event?.clusterReviewStatus === 'pending';
+  if (needsEventReview) {
+    reasons.push('事件聚类待人工复核');
+    needsManualAction = true;
+  }
+
+  const missingEvent = projection.cluster === 'done'
+    && article.clusterStatus === 'clustered'
+    && !article.event;
+  if (missingEvent) {
+    reasons.push('已聚类但尚未关联事件');
+    needsManualAction = true;
+  }
+
+  let conclusion = '处理完成，待公开/推送';
+  if (article.technicalIgnoredAt) {
+    conclusion = '已忽略技术异常';
+  } else if (projection.process === 'pending') {
+    conclusion = '待抓取正文';
+  } else if (projection.process === 'failed') {
+    conclusion = article.nextFetchRetryAt ? '正文抓取失败，等待自动重试' : '正文抓取失败，需要人工处理';
+  } else if (projection.ai === 'pending') {
+    conclusion = '待 AI 分析';
+  } else if (projection.ai === 'failed') {
+    conclusion = article.nextAiRetryAt ? 'AI 分析失败，等待自动重试' : 'AI 分析失败，需要人工处理';
+  } else if (projection.ai === 'skipped') {
+    conclusion = 'AI 已跳过';
+  } else if (projection.cluster === 'pending') {
+    conclusion = '待事件聚类';
+  } else if (projection.cluster === 'failed') {
+    conclusion = article.nextClusterRetryAt ? '事件聚类失败，等待自动重试' : '事件聚类失败，需要人工处理';
+  } else if (needsEventReview) {
+    conclusion = '待事件复核';
+  } else if (missingEvent) {
+    conclusion = '待关联事件';
+  } else if (article.event?.publicStatus === 'published' && article.event.pushedAt) {
+    conclusion = '已公开并已推送';
+  } else if (article.event?.publicStatus === 'published') {
+    conclusion = '已公开';
+  } else if (article.event?.pushedAt) {
+    conclusion = '已推送';
+  }
+
+  return {
+    conclusion,
+    needsManualAction,
+    blockingReason: reasons.join('；'),
+  };
 }
 
 function makeArticleRow(article: Prisma.ArticleGetPayload<{
   include: {
     source: true;
     searchIndex: true;
-    event: { select: { id: true; status: true; pushedAt: true } };
+    event: { select: {
+      id: true;
+      status: true;
+      clusterReviewStatus: true;
+      publicStatus: true;
+      representativeArticleId: true;
+      representativeManual: true;
+      articleCount: true;
+      mergedIntoId: true;
+      pushedAt: true;
+    } };
     representedEvent: { select: { id: true; representativeManual: true } };
+    keywordHits: { include: { keyword: true } };
   };
 }>): SheetRow {
+  const decision = deriveArticleExportDecision({
+    fetchStatus: article.fetchStatus,
+    clusterStatus: article.clusterStatus,
+    aiStatus: article.aiStatus,
+    score: article.score,
+    relevance: article.relevance,
+    nextFetchRetryAt: article.nextFetchRetryAt,
+    nextAiRetryAt: article.nextAiRetryAt,
+    nextClusterRetryAt: article.nextClusterRetryAt,
+    technicalIgnoredAt: article.technicalIgnoredAt,
+    event: article.event,
+  });
+  const keywordHitIds = article.keywordHits.map((hit) => hit.keywordId);
+  const matchedKeywords = article.keywordHits.map((hit) => hit.keyword.word);
+
   return [
     article.id,
     article.sourceId,
     article.source.name,
+    article.source.type,
+    article.source.enabled,
+    article.source.publicEnabled,
+    article.source.status,
+    STATUS_LABELS[article.source.status] ?? article.source.status,
     safeUrl(article.url),
     article.title,
+    article.summary,
+    article.brand,
+    article.eventKey,
+    dateCell(article.searchIndex?.updatedAt),
     article.originalSource ?? '',
     article.contentHash,
     article.rawContent.length,
-    article.cleanContent.length,
     article.articleBody.length,
-    article.searchIndex?.searchText ?? '',
-    dateCell(article.searchIndex?.updatedAt),
+    article.cleanContent.length,
     article.eventId ?? '',
+    article.event?.clusterReviewStatus ?? '',
+    STATUS_LABELS[article.event?.clusterReviewStatus ?? ''] ?? article.event?.clusterReviewStatus ?? '',
+    article.event?.publicStatus ?? '',
+    STATUS_LABELS[article.event?.publicStatus ?? ''] ?? article.event?.publicStatus ?? '',
+    article.event?.representativeArticleId ?? '',
+    article.event ? (article.event.representativeManual ? '人工选择' : '自动选择') : '',
+    article.event?.articleCount ?? '',
+    article.event?.mergedIntoId ?? '',
     article.clusterStatus,
     STATUS_LABELS[article.clusterStatus] ?? article.clusterStatus,
     dateCell(article.clusteredAt),
@@ -524,7 +763,6 @@ function makeArticleRow(article: Prisma.ArticleGetPayload<{
     jsonText(article.eventSubjects),
     article.eventAction,
     article.eventObject,
-    article.eventKey,
     article.eventKeyConfidence,
     article.fetchStatus,
     STATUS_LABELS[article.fetchStatus] ?? article.fetchStatus,
@@ -532,16 +770,19 @@ function makeArticleRow(article: Prisma.ArticleGetPayload<{
     article.fetchRetryCount,
     dateCell(article.nextFetchRetryAt),
     dateCell(article.technicalIgnoredAt),
+    decision.conclusion,
+    decision.needsManualAction,
+    decision.blockingReason,
     article.relevance,
-    article.summary,
-    article.brand,
     article.category,
     jsonText(article.keyPoints),
+    article.rawScore,
     article.score,
     article.keywordMatched,
+    JSON.stringify(keywordHitIds),
+    matchedKeywords.join('、'),
     article.eventScore,
     article.contentScore,
-    article.rawScore,
     article.adProbability,
     article.aiConfidence,
     article.scorePolicyVersion,
@@ -581,39 +822,6 @@ function makeArticleRow(article: Prisma.ArticleGetPayload<{
   ];
 }
 
-function makeEventRow(
-  event: Prisma.EventGetPayload<object>,
-  dirtyReason: string,
-): SheetRow {
-  return [
-    event.id,
-    event.status,
-    STATUS_LABELS[event.status] ?? event.status,
-    event.clusterReviewStatus,
-    STATUS_LABELS[event.clusterReviewStatus] ?? event.clusterReviewStatus,
-    event.mergedIntoId ?? '',
-    event.representativeArticleId ?? '',
-    event.representativeManual,
-    dateCell(event.firstSeenAt),
-    dateCell(event.lastSeenAt),
-    event.articleCount,
-    event.publicStatus,
-    STATUS_LABELS[event.publicStatus] ?? event.publicStatus,
-    dateCell(event.publicPublishedAt),
-    dateCell(event.publicRevokedAt),
-    event.publicDateKey,
-    dateCell(event.publicSortAt),
-    dateCell(event.pushedAt),
-    event.viewCount,
-    event.originalClickCount,
-    dateCell(event.nextPushRetryAt),
-    event.pushRetryCount,
-    dateCell(event.createdAt),
-    dateCell(event.updatedAt),
-    dirtyReason,
-  ];
-}
-
 export async function buildExportWorkbook(
   tx: ExportDb,
   filter: ExportFilter,
@@ -624,36 +832,25 @@ export async function buildExportWorkbook(
   const workbook = XLSX.utils.book_new();
   const sheets: Record<string, SheetBuilder> = {};
   const add = (name: string, headers: readonly string[], widths: number[] = []) => {
-    sheets[name] = createSheetBuilder(workbook, name, headers, widths, name === 'LongTextChunks' ? undefined : sheets.LongTextChunks);
+    sheets[name] = createSheetBuilder(
+      workbook,
+      displaySheetName(name),
+      localizedHeaders(headers),
+      widths,
+    );
   };
 
-  add('LongTextChunks', LONG_TEXT_HEADERS, [24, 24, 32, 12, 12, 100]);
   add('ExportMeta', ['key', 'value'], [30, 80]);
-  add('Articles', ARTICLE_HEADERS, [24, 18, 24, 48, 48, 24, 24, 16, 16, 16, 48]);
-  add('ArticleContent', ARTICLE_CONTENT_HEADERS, [24, 18, 12, 12, 100]);
-  add('Events', EVENT_HEADERS, [24, 16, 18, 24, 24, 16, 24, 24, 12, 18, 24, 24, 16, 24, 24, 12, 16, 24, 16, 24, 24, 24]);
-  add('ArticleEventRelations', ARTICLE_EVENT_HEADERS, [24, 24, 16, 18, 16, 18, 48]);
-  add('EventClusterAudits', EVENT_AUDIT_HEADERS, [24, 24, 24, 24, 16, 24, 18, 12, 80, 24]);
   add('Sources', SOURCE_HEADERS, [24, 28, 16, 48, 80, 12, 14, 18, 16, 24, 24, 24, 24, 24]);
-  add('FetchLogs', FETCH_LOG_HEADERS, [24, 24, 16, 80, 12, 24]);
-  add('Jobs', JOB_HEADERS, [24, 16, 18, 48, 80, 80, 16, 16, 16, 16, 32, 24, 24, 24, 12, 12, 32, 24, 24, 24, 24, 24, 24]);
-  add('PushTargets', PUSH_TARGET_HEADERS, [24, 28, 48, 12, 24, 24]);
-  add('PushDeliveries', PUSH_DELIVERY_HEADERS, [24, 24, 24, 24, 24, 16, 18, 48, 12, 80, 24, 24, 24, 24, 24, 24]);
-  add('PushLogs', PUSH_LOG_HEADERS, [24, 24, 24, 24, 16, 80, 12, 32, 24]);
-  add('EventInteractionDaily', INTERACTION_HEADERS, [24, 24, 16, 16, 20, 24, 24]);
-  add('KeywordHits', KEYWORD_HIT_HEADERS, [24, 24, 24]);
+  add('Articles', ARTICLE_HEADERS, [24, 18, 24, 16, 14, 18, 18, 18, 48, 48, 24, 24, 16, 16, 16, 48, 24]);
+  add('DiscardedItems', DISCARDED_HEADERS, [24, 24, 48, 48, 24, 80, 24, 24, 24]);
   add('Keywords', KEYWORD_HEADERS, [24, 16, 48, 24]);
   add('KeywordCandidates', KEYWORD_CANDIDATE_HEADERS, [24, 48, 16, 80, 16, 24, 24]);
-  add('TuningSuggestions', TUNING_HEADERS, [24, 28, 48, 80, 80, 16, 24, 24]);
-  add('DiscardedItems', DISCARDED_HEADERS, [24, 24, 48, 48, 24, 80, 24, 24, 24]);
-  add('DiscardedRetryAudits', DISCARDED_AUDIT_HEADERS, [24, 24, 24, 48, 48, 24, 80, 24, 24, 16, 24, 24]);
+  add('FetchLogs', FETCH_LOG_HEADERS, [24, 24, 16, 80, 12, 24]);
+  add('PushLogs', PUSH_LOG_HEADERS, [24, 24, 24, 24, 16, 80, 12, 32, 24]);
 
-  const articleIds = new Set<string>();
   const eventIds = new Set<string>();
-  const exportedEventIds = new Set<string>();
   const sourceIds = new Set<string>();
-  const discardedIds = new Set<string>();
-  const targetIds = new Set<string>();
   const pushedEventIds = filter.pushed === 'all' ? undefined : await getLatestPushedEventIds(tx, snapshotAt);
   const articleWhere = buildArticleWhere(filter, snapshotAt, pushedEventIds);
   const discardedWhere = buildDiscardedWhere(filter, snapshotAt);
@@ -663,7 +860,12 @@ export async function buildExportWorkbook(
   const mainRecordTotal = articleTotal + discardedTotal;
   const progressTotal = Math.max(1, mainRecordTotal + 1);
   let mainDone = 0;
-  const checkpoint = (sheet: string, label: string) => onProgress?.({ total: progressTotal, done: mainDone, sheet, label });
+  const checkpoint = (sheet: string, label: string) => onProgress?.({
+    total: progressTotal,
+    done: mainDone,
+    sheet: displaySheetName(sheet),
+    label: label.replace(/\bEvent\b/g, '事件').replace(/\bJob\b/g, '任务'),
+  });
   await checkpoint('Articles', `准备导出 ${articleTotal} 篇文章`);
 
   let articleCursor: string | undefined;
@@ -673,8 +875,22 @@ export async function buildExportWorkbook(
       include: {
         source: true,
         searchIndex: true,
-        event: { select: { id: true, status: true, pushedAt: true } },
+        event: { select: {
+          id: true,
+          status: true,
+          clusterReviewStatus: true,
+          publicStatus: true,
+          representativeArticleId: true,
+          representativeManual: true,
+          articleCount: true,
+          mergedIntoId: true,
+          pushedAt: true,
+        } },
         representedEvent: { select: { id: true, representativeManual: true } },
+        keywordHits: {
+          include: { keyword: true },
+          orderBy: { keywordId: 'asc' },
+        },
       },
       orderBy: { id: 'asc' },
       take: EXPORT_BATCH_SIZE,
@@ -682,24 +898,9 @@ export async function buildExportWorkbook(
     });
     if (page.length === 0) break;
     sheets.Articles.append(page.map(makeArticleRow));
-    sheets.ArticleEventRelations.append(page.map((article) => [
-      article.id,
-      article.eventId ?? '',
-      Boolean(article.representedEvent),
-      Boolean(article.representedEvent?.representativeManual),
-      article.event?.status ?? '',
-      STATUS_LABELS[article.event?.status ?? ''] ?? article.event?.status ?? '',
-      article.eventKey,
-    ]));
     for (const article of page) {
-      articleIds.add(article.id);
       sourceIds.add(article.sourceId);
       if (article.eventId) eventIds.add(article.eventId);
-      sheets.ArticleContent.append([
-        ...contentRows(article.id, 'rawContent', article.rawContent),
-        ...contentRows(article.id, 'cleanContent', article.cleanContent),
-        ...contentRows(article.id, 'articleBody', article.articleBody),
-      ]);
     }
     mainDone += page.length;
     await checkpoint('Articles', `已读取 ${mainDone}/${mainRecordTotal} 条主记录`);
@@ -729,128 +930,12 @@ export async function buildExportWorkbook(
         dateCell(item.createdAt),
       ]));
       for (const item of page) {
-        discardedIds.add(item.id);
         sourceIds.add(item.sourceId);
       }
       mainDone += page.length;
       await checkpoint('DiscardedItems', `已读取 ${mainDone}/${mainRecordTotal} 条主记录`);
       discardedCursor = page[page.length - 1].id;
     }
-  }
-
-  const dirtyMap = new Map<string, string>();
-  const selectedEventRows: Prisma.EventGetPayload<object>[] = [];
-  if (fullScope) {
-    await appendIdPages(
-      (cursor) => tx.eventDirty.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-      async (rows) => {
-        rows.forEach((row) => dirtyMap.set(row.eventId, row.reason));
-        await checkpoint('Events', `已读取 ${rows.length} 条 Event 标记`);
-      },
-    );
-    await appendIdPages(
-      (cursor) => tx.event.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-      async (rows) => {
-        rows.forEach((event) => {
-          eventIds.add(event.id);
-          exportedEventIds.add(event.id);
-        });
-        sheets.Events.append(rows.map((event) => makeEventRow(event, dirtyMap.get(event.id) ?? '')));
-        await checkpoint('Events', `已写入 ${sheets.Events.count} 个 Event`);
-      },
-    );
-  } else {
-    const pendingEventIds = new Set(eventIds);
-    const loadedEventIds = new Set<string>();
-    while (pendingEventIds.size > 0) {
-      const batch = new Set(pendingEventIds);
-      pendingEventIds.clear();
-      await appendByIdChunksPaged(
-        batch,
-        (chunk, cursor) => tx.event.findMany({ where: { id: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-        async (rows) => {
-          for (const event of rows) {
-            if (loadedEventIds.has(event.id)) continue;
-            loadedEventIds.add(event.id);
-            eventIds.add(event.id);
-            selectedEventRows.push(event);
-            if (event.mergedIntoId && !loadedEventIds.has(event.mergedIntoId)) pendingEventIds.add(event.mergedIntoId);
-          }
-          await checkpoint('Events', `已读取 ${selectedEventRows.length} 个 Event`);
-        },
-      );
-    }
-    await appendByIdChunksPaged(
-      eventIds,
-      (chunk, cursor) => tx.eventDirty.findMany({ where: { eventId: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-      (rows) => rows.forEach((row) => dirtyMap.set(row.eventId, row.reason)),
-    );
-    sheets.Events.append(selectedEventRows.map((event) => makeEventRow(event, dirtyMap.get(event.id) ?? '')));
-    selectedEventRows.forEach((event) => exportedEventIds.add(event.id));
-    await checkpoint('Events', `已写入 ${sheets.Events.count} 个 Event`);
-  }
-
-  const appendClusterAudits = async (rows: Prisma.EventClusterAuditGetPayload<object>[]) => {
-    rows.forEach((row) => {
-      eventIds.add(row.assignedEventId);
-      if (row.candidateEventId) eventIds.add(row.candidateEventId);
-    });
-    sheets.EventClusterAudits.append(rows.map((row) => [
-      row.id,
-      row.articleId,
-      row.assignedEventId,
-      row.candidateEventId ?? '',
-      row.actor,
-      row.action,
-      row.decisionSource,
-      row.confidence,
-      redactJson(row.evidence),
-      dateCell(row.createdAt),
-    ]));
-    await checkpoint('EventClusterAudits', `已写入 ${sheets.EventClusterAudits.count} 条聚类审计`);
-  };
-  if (fullScope) {
-    await appendIdPages(
-      (cursor) => tx.eventClusterAudit.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-      appendClusterAudits,
-    );
-  } else {
-    await appendByIdChunksPaged(
-      articleIds,
-      (chunk, cursor) => tx.eventClusterAudit.findMany({ where: { articleId: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-      appendClusterAudits,
-    );
-  }
-
-  if (!fullScope) {
-    const pendingEventIds = new Set([...eventIds].filter((id) => !exportedEventIds.has(id)));
-    const loadedAdditionalEventIds = new Set<string>();
-    const additionalEventRows: Prisma.EventGetPayload<object>[] = [];
-    while (pendingEventIds.size > 0) {
-      const batch = new Set(pendingEventIds);
-      pendingEventIds.clear();
-      await appendByIdChunksPaged(
-        batch,
-        (chunk, cursor) => tx.event.findMany({ where: { id: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-        (rows) => {
-          for (const event of rows) {
-            if (loadedAdditionalEventIds.has(event.id) || exportedEventIds.has(event.id)) continue;
-            loadedAdditionalEventIds.add(event.id);
-            eventIds.add(event.id);
-            additionalEventRows.push(event);
-            if (event.mergedIntoId && !exportedEventIds.has(event.mergedIntoId)) pendingEventIds.add(event.mergedIntoId);
-          }
-        },
-      );
-    }
-    await appendByIdChunksPaged(
-      new Set(additionalEventRows.map((event) => event.id)),
-      (chunk, cursor) => tx.eventDirty.findMany({ where: { eventId: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-      (rows) => rows.forEach((row) => dirtyMap.set(row.eventId, row.reason)),
-    );
-    sheets.Events.append(additionalEventRows.map((event) => makeEventRow(event, dirtyMap.get(event.id) ?? '')));
-    additionalEventRows.forEach((event) => exportedEventIds.add(event.id));
-    if (additionalEventRows.length > 0) await checkpoint('Events', `已补充 ${additionalEventRows.length} 个关联 Event`);
   }
 
   const appendSourceRows = async (rows: Prisma.SourceGetPayload<object>[]) => {
@@ -911,60 +996,6 @@ export async function buildExportWorkbook(
     );
   }
 
-  const appendJobs = async (rows: Prisma.JobGetPayload<object>[]) => {
-    sheets.Jobs.append(rows.map((job) => [
-      job.id,
-      job.type,
-      job.status,
-      STATUS_LABELS[job.status] ?? job.status,
-      redactJson(job.payload),
-      redactJson(job.result),
-      redactSensitiveText(job.error),
-      job.currentStage ?? '',
-      job.progressTotal,
-      job.progressDone,
-      job.progressErrors,
-      job.currentItemLabel,
-      dateCell(job.heartbeatAt),
-      job.leaseOwner,
-      dateCell(job.leaseExpiresAt),
-      job.attempt,
-      job.maxAttempts,
-      job.idempotencyKey,
-      dateCell(job.availableAt),
-      dateCell(job.cancelRequestedAt),
-      dateCell(job.createdAt),
-      dateCell(job.updatedAt),
-      dateCell(job.startedAt),
-      dateCell(job.completedAt),
-    ]));
-    await checkpoint('Jobs', `已写入 ${sheets.Jobs.count} 个流水线 Job`);
-  };
-  await appendIdPages(
-    (cursor) => tx.job.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-    appendJobs,
-  );
-
-  const appendKeywordHits = async (rows: Prisma.KeywordHitGetPayload<object>[]) => {
-    sheets.KeywordHits.append(rows.map((row) => [row.articleId, row.keywordId, dateCell(row.createdAt)]));
-    await checkpoint('KeywordHits', `已写入 ${sheets.KeywordHits.count} 条关键词命中关系`);
-  };
-  const keywordHitPage = (baseWhere: Prisma.KeywordHitWhereInput) => (cursor?: KeywordHitCursor) => tx.keywordHit.findMany({
-    where: cursor ? { AND: [baseWhere, { OR: [
-      { articleId: { gt: cursor.articleId } },
-      { articleId: cursor.articleId, keywordId: { gt: cursor.keywordId } },
-    ] }] } : baseWhere,
-    orderBy: [{ articleId: 'asc' }, { keywordId: 'asc' }],
-    take: EXPORT_BATCH_SIZE,
-  });
-  if (fullScope) {
-    await appendKeywordHitPages(keywordHitPage({ createdAt: { lte: snapshotAt } }), appendKeywordHits);
-  } else {
-    for (const chunk of splitIds(articleIds)) {
-      await appendKeywordHitPages(keywordHitPage({ articleId: { in: chunk }, createdAt: { lte: snapshotAt } }), appendKeywordHits);
-    }
-  }
-
   const appendKeywords = async (rows: Prisma.KeywordGetPayload<object>[]) => {
     sheets.Keywords.append(rows.map((row) => [row.id, row.category, row.word, dateCell(row.createdAt)]));
     await checkpoint('Keywords', `已写入 ${sheets.Keywords.count} 个关键词`);
@@ -992,93 +1023,6 @@ export async function buildExportWorkbook(
     appendCandidates,
   );
 
-  const appendSuggestions = async (rows: Prisma.TuningSuggestionGetPayload<object>[]) => {
-    sheets.TuningSuggestions.append(rows.map((row) => [
-      row.id,
-      row.kind,
-      row.title,
-      row.detail,
-      redactJson(row.payload),
-      row.status,
-      STATUS_LABELS[row.status] ?? row.status,
-      dateCell(row.createdAt),
-      dateCell(row.appliedAt),
-    ]));
-    await checkpoint('TuningSuggestions', `已写入 ${sheets.TuningSuggestions.count} 条调优建议`);
-  };
-  await appendIdPages(
-    (cursor) => tx.tuningSuggestion.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-    appendSuggestions,
-  );
-
-  const appendRetryAudits = async (rows: Prisma.DiscardedRetryAuditGetPayload<object>[]) => {
-    sheets.DiscardedRetryAudits.append(rows.map((row) => [
-      row.id,
-      row.discardedId,
-      row.sourceId,
-      row.title,
-      safeUrl(row.url),
-      row.reason,
-      redactJson(row.detail),
-      row.winnerArticleId ?? '',
-      dateCell(row.publishedAt),
-      row.action,
-      row.articleId ?? '',
-      dateCell(row.createdAt),
-    ]));
-    await checkpoint('DiscardedRetryAudits', `已写入 ${sheets.DiscardedRetryAudits.count} 条重试审计`);
-  };
-  if (filter.includeDiscarded) {
-    if (fullScope) {
-      await appendIdPages(
-        (cursor) => tx.discardedRetryAudit.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-        appendRetryAudits,
-      );
-    } else {
-      await appendByIdChunksPaged(
-        discardedIds,
-        (chunk, cursor) => tx.discardedRetryAudit.findMany({ where: { discardedId: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-        appendRetryAudits,
-      );
-    }
-  }
-
-  const appendDeliveries = async (rows: Prisma.PushDeliveryGetPayload<object>[]) => {
-    sheets.PushDeliveries.append(rows.map((row) => [
-      row.id,
-      row.eventId,
-      row.targetId,
-      row.representativeArticleId ?? '',
-      row.contentVersion,
-      row.mode,
-      row.status,
-      STATUS_LABELS[row.status] ?? row.status,
-      row.idempotencyKey,
-      row.attempt,
-      redactSensitiveText(row.lastError),
-      row.leaseOwner,
-      dateCell(row.leaseExpiresAt),
-      dateCell(row.createdAt),
-      dateCell(row.updatedAt),
-      dateCell(row.sentAt),
-      dateCell(row.completedAt),
-    ]));
-    rows.forEach((row) => targetIds.add(row.targetId));
-    await checkpoint('PushDeliveries', `已写入 ${sheets.PushDeliveries.count} 条推送投递`);
-  };
-  if (fullScope) {
-    await appendIdPages(
-      (cursor) => tx.pushDelivery.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-      appendDeliveries,
-    );
-  } else {
-    await appendByIdChunksPaged(
-      eventIds,
-      (chunk, cursor) => tx.pushDelivery.findMany({ where: { eventId: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-      appendDeliveries,
-    );
-  }
-
   const appendPushLogs = async (rows: Prisma.PushLogGetPayload<object>[]) => {
     sheets.PushLogs.append(rows.map((row) => [
       row.id,
@@ -1092,7 +1036,6 @@ export async function buildExportWorkbook(
       redactSensitiveText(row.webhookRemark),
       dateCell(row.createdAt),
     ]));
-    rows.forEach((row) => { if (row.targetId) targetIds.add(row.targetId); });
     await checkpoint('PushLogs', `已写入 ${sheets.PushLogs.count} 条推送日志`);
   };
   if (fullScope) {
@@ -1108,79 +1051,40 @@ export async function buildExportWorkbook(
     );
   }
 
-  const appendTargets = async (rows: Prisma.PushTargetGetPayload<object>[]) => {
-    sheets.PushTargets.append(rows.map((row) => [row.id, row.name, row.urlHash, row.enabled, dateCell(row.createdAt), dateCell(row.updatedAt)]));
-    await checkpoint('PushTargets', `已写入 ${sheets.PushTargets.count} 个推送目标`);
-  };
-  if (fullScope) {
-    await appendIdPages(
-      (cursor) => tx.pushTarget.findMany({ where: { createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-      appendTargets,
-    );
-  } else {
-    await appendByIdChunksPaged(
-      targetIds,
-      (chunk, cursor) => tx.pushTarget.findMany({ where: { id: { in: chunk }, createdAt: { lte: snapshotAt } }, orderBy: { id: 'asc' }, take: EXPORT_BATCH_SIZE, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}) }),
-      appendTargets,
-    );
-  }
-
-  const appendInteractions = async (rows: Prisma.EventInteractionDailyGetPayload<object>[]) => {
-    sheets.EventInteractionDaily.append(rows.map((row) => [
-      row.eventId,
-      row.sourceId,
-      row.dateKey,
-      row.viewCount,
-      row.originalClickCount,
-      dateCell(row.createdAt),
-      dateCell(row.updatedAt),
-    ]));
-    await checkpoint('EventInteractionDaily', `已写入 ${sheets.EventInteractionDaily.count} 条互动统计`);
-  };
-  const interactionPage = (baseWhere: Prisma.EventInteractionDailyWhereInput) => (cursor?: InteractionCursor) => tx.eventInteractionDaily.findMany({
-    where: cursor ? { AND: [baseWhere, { OR: [
-      { eventId: { gt: cursor.eventId } },
-      { eventId: cursor.eventId, sourceId: { gt: cursor.sourceId } },
-      { eventId: cursor.eventId, sourceId: cursor.sourceId, dateKey: { gt: cursor.dateKey } },
-    ] }] } : baseWhere,
-    orderBy: [{ eventId: 'asc' }, { sourceId: 'asc' }, { dateKey: 'asc' }],
-    take: EXPORT_BATCH_SIZE,
-  });
-  if (fullScope) {
-    await appendInteractionPages(interactionPage({ createdAt: { lte: snapshotAt } }), appendInteractions);
-  } else {
-    for (const chunk of splitIds(eventIds)) {
-      await appendInteractionPages(interactionPage({ eventId: { in: chunk }, createdAt: { lte: snapshotAt } }), appendInteractions);
-    }
-  }
-
   const exportCompletedAt = new Date();
   const metadataRows: SheetRow[] = [
-    ['exportJobId', options.exportJobId],
-    ['exportFormatVersion', EXPORT_FORMAT_VERSION],
-    ['applicationVersion', options.applicationVersion ?? process.env.npm_package_version ?? 'unknown'],
-    ['exportStartedAt', options.exportStartedAt ?? snapshotAt],
-    ['exportStartedAtIso', (options.exportStartedAt ?? snapshotAt).toISOString()],
-    ['exportCompletedAt', exportCompletedAt],
-    ['exportCompletedAtIso', exportCompletedAt.toISOString()],
-    ['snapshotAt', snapshotAt],
-    ['snapshotAtIso', snapshotAt.toISOString()],
-    ['timezone', 'Asia/Shanghai'],
-    ['filter', JSON.stringify(filter)],
-    ['articleCount', articleTotal],
-    ['discardedItemCount', discardedTotal],
+    ['导出任务 ID', options.exportJobId],
+    ['导出格式版本', EXPORT_FORMAT_VERSION],
+    ['应用版本', options.applicationVersion ?? process.env.npm_package_version ?? 'unknown'],
+    ['导出开始时间', options.exportStartedAt ?? snapshotAt],
+    ['导出完成时间', exportCompletedAt],
+    ['快照时间', snapshotAt],
+    ['时区', 'Asia/Shanghai（中国标准时间）'],
+    ['筛选条件', formatExportFilter(filter)],
+    ['文章数量', articleTotal],
+    ['未入库条目数量', discardedTotal],
   ];
-  const counts = Object.fromEntries(Object.entries(sheets).map(([name, builder]) => [name, builder.count]));
+  const counts = Object.fromEntries(Object.entries(sheets).map(([name, builder]) => [displaySheetName(name), builder.count]));
   const exportMetaCount = metadataRows.length + 3;
-  const errorSummary = Object.fromEntries([...Object.keys(counts), 'ExportMeta'].map((name) => [name, 0]));
+  const errorSummary = Object.fromEntries(Object.keys(counts).map((name) => [name, 0]));
   metadataRows.push(
-    ['errorCount', 0],
-    ['errorSummary', JSON.stringify(errorSummary)],
-    ['countSummary', JSON.stringify({ ...counts, ExportMeta: exportMetaCount })],
+    ['错误数量', 0],
+    ['错误汇总', JSON.stringify(errorSummary)],
+    ['行数汇总', JSON.stringify({ ...counts, [displaySheetName('ExportMeta')]: exportMetaCount })],
   );
   sheets.ExportMeta.append(metadataRows);
-  await onProgress?.({ total: progressTotal, done: progressTotal, sheet: 'ExportMeta', label: '导出元数据已写入，正在生成 Excel 文件' });
+  await onProgress?.({
+    total: progressTotal,
+    done: progressTotal,
+    sheet: displaySheetName('ExportMeta'),
+    label: '导出元数据已写入，正在生成 Excel 文件',
+  });
 
-  const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer', cellDates: true, compression: true }) as Buffer;
-  return { buffer, counts: { ...counts, ExportMeta: sheets.ExportMeta.count }, mainRecordTotal, progressTotal };
+  const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer', cellDates: false, compression: true }) as Buffer;
+  return {
+    buffer,
+    counts: { ...counts, [displaySheetName('ExportMeta')]: sheets.ExportMeta.count },
+    mainRecordTotal,
+    progressTotal,
+  };
 }

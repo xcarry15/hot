@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const EXPORT_FORMAT_VERSION = 1;
+export const EXPORT_FORMAT_VERSION = 4;
 export const EXPORT_DATE_FIELDS = ['createdAt', 'publishedAt', 'updatedAt'] as const;
 export const EXPORT_REPRESENTATIVE_FILTERS = ['all', 'yes', 'no'] as const;
 export const EXPORT_PUSH_FILTERS = ['all', 'yes', 'no'] as const;
