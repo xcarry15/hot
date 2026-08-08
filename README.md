@@ -58,7 +58,7 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 - AI 先提取 `subjects / action / object`，应用再确定性生成 `eventKey`；聚类不重复调用 AI。
 - 技术失败进入有限自动恢复队列；内容校准、Event 修正、公开决策和人工推送由文章详情抽屉负责。
 - 管理后台只保留 `工作台` 和 `设置`：工作台负责任务监控与技术恢复，设置负责数据源、关键词、AI、评分、推送和调度配置。
-- 工具中心 `/tools` 是独立的公开工具目录，当前使用本地静态目录展示 5 个分类、19 个外部工具入口；卡片状态、名称、简介和链接集中在 `src/components/public-tools/tool-catalog.ts`，后续可以替换目录数据源而不重写卡片展示。
+- 工具中心 `/tools` 是独立的公开工具目录，使用 `ToolDirectoryItem` 数据表展示 5 个分类的外部工具入口；首次初始化由 `prisma/seed.ts` 从 `src/components/public-tools/tool-catalog.ts` 的迁移快照写入 19 张卡片，运行时由 `src/lib/tool-directory-service.ts` 读取。后台设置中的“工具中心”标签提供受保护的新增、编辑、排序、停用、下架和恢复，保存后通过公开目录缓存失效立即生效。
 - 设置的数据维护提供受保护的全量 Excel 导出：导出任务独立于抓取 Job，工作簿严格只包含 `导出元数据`、`数据源`、`文章数据`、`未入库条目`、`关键词`、`候选关键词`、`抓取日志 ID`、`推送日志` 8 个 Sheet；“文章数据”额外汇总来源开关、Event 权威公开/复核状态、代表文章、实际命中关键词和当前处理阻断原因，全文搜索索引按标题、摘要、品牌/主体、事件标识顺序拆分并复用现有列，原始评分紧邻综合评分前。所有时间列统一写成中国标准时间的 Excel 可识别日期值，显示格式为 `yyyy-mm-dd hh:mm:ss`，不再额外导出 ISO 时间字段。当前白名单不再生成正文/超长字段分片 Sheet，保留字段超过 Excel 单元格上限时追加明确截断标记；任务创建时固化 SQLite 只读快照，文件只在服务器公开目录外保留 24 小时。
 
 流水线实现位于：
@@ -94,7 +94,7 @@ src/app/                 页面、Route Handler、robots 和 sitemap
 src/components/          公开端与管理后台 UI（`public-tools/` 为工具目录模块）
 src/features/            浏览器端 API 客户端
 src/contracts/           前后端共享 DTO 和状态契约
-src/lib/                 服务、流水线、调度、公开和推送逻辑
+src/lib/                 服务、流水线、调度、公开和推送逻辑（含工具目录服务）
 prisma/                  Schema、seed 和当前 baseline migration
 tests/                   Vitest 测试
 scripts/                 生产初始化、部署和数据库维护脚本

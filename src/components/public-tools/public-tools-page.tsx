@@ -1,11 +1,16 @@
 import PublicFooter from '@/components/public-footer';
 import PublicHeader from '@/components/public-header';
-import { PUBLIC_TOOL_CATEGORIES } from './tool-catalog';
 import PublicToolSection from './tool-section';
+import type { PublicToolCategory } from './types';
 
-const toolCount = PUBLIC_TOOL_CATEGORIES.reduce((total, category) => total + category.tools.length, 0);
-
-export default function PublicToolsPage() {
+export default function PublicToolsPage({
+  categories,
+  error = false,
+}: {
+  categories: readonly PublicToolCategory[];
+  error?: boolean;
+}) {
+  const toolCount = categories.reduce((total, category) => total + category.tools.length, 0);
   return (
     <div className="public-site flex min-h-[100dvh] flex-col bg-background text-foreground">
       <PublicHeader active="tools" />
@@ -22,11 +27,18 @@ export default function PublicToolsPage() {
           </div>
         </header>
 
-        <div className="mt-8 space-y-10 sm:mt-10 sm:space-y-12">
-          {PUBLIC_TOOL_CATEGORIES.map((category, index) => (
-            <PublicToolSection key={category.id} category={category} sectionIndex={index} />
-          ))}
-        </div>
+        {error ? (
+          <div className="mt-8 border border-[var(--public-hairline)] bg-[var(--public-surface-soft)] px-5 py-12 text-center sm:mt-10">
+            <p className="text-sm font-medium text-[var(--public-ink)]">工具目录暂时无法加载</p>
+            <p className="mt-2 text-xs leading-6 text-[var(--public-muted)]">请稍后刷新页面重试。</p>
+          </div>
+        ) : (
+          <div className="mt-8 space-y-10 sm:mt-10 sm:space-y-12">
+            {categories.map((category, index) => (
+              <PublicToolSection key={category.id} category={category} sectionIndex={index} />
+            ))}
+          </div>
+        )}
       </main>
 
       <PublicFooter />

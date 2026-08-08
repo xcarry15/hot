@@ -1,11 +1,28 @@
-import type { PublicToolCategory } from './types';
+import type { PublicToolIconName } from './types';
+
+type StaticToolStatus = 'hot' | 'new' | 'beta' | 'disabled';
+
+interface StaticTool {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly href: string | null;
+  readonly icon: PublicToolIconName;
+  readonly kind: 'open' | 'download';
+  readonly status?: StaticToolStatus;
+}
+
+interface StaticToolCategory {
+  readonly id: string;
+  readonly label: string;
+  readonly tools: readonly StaticTool[];
+}
 
 /**
- * Static public snapshot of the tstwg.cn tool directory.
+ * One-time seed snapshot of the tstwg.cn tool directory.
  *
- * Keep the page dependent on this catalog rather than the source site's API.
- * A future maintenance API can replace this module without changing the
- * category and card rendering components.
+ * Runtime pages read the database. This file remains only as the source for
+ * the first database initialization and must not be used as a public fallback.
  */
 export const PUBLIC_TOOL_CATEGORIES = [
   {
@@ -195,4 +212,4 @@ export const PUBLIC_TOOL_CATEGORIES = [
       },
     ],
   },
-] as const satisfies readonly PublicToolCategory[];
+] as const satisfies readonly StaticToolCategory[];
