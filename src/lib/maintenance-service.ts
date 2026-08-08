@@ -20,6 +20,7 @@ import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
 import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
 import { recalculateEventsInTransaction } from '@/lib/event-service';
+import { deleteAllExportJobs } from '@/lib/export/export-service';
 import type { Prisma } from '@prisma/client';
 
 type MaintenanceTransaction = Prisma.TransactionClient;
@@ -248,6 +249,7 @@ export async function deletePushedArticles() {
 
 export async function deleteAllArticles() {
   // Guard: temporarily disable auto-crawl so scheduler doesn't immediately re-fill deleted articles
+  const exportJobsDeleted = await deleteAllExportJobs();
   const { prevWasEnabled } = await pauseAutoCrawlForWindow();
   invalidatePublicArticleCache();
   try {
@@ -260,7 +262,7 @@ export async function deleteAllArticles() {
       db.eventDirty.deleteMany(),
       ...pauseAndResetOps(),
     ]);
-    return { deleted: articleResult.count, pushLogsDeleted: pushResult.count };
+    return { deleted: articleResult.count, pushLogsDeleted: pushResult.count, exportJobsDeleted };
   } finally {
     await restoreAutoCrawl(prevWasEnabled);
     invalidatePublicArticleCache();
@@ -278,12 +280,14 @@ export interface PurgeAllDeleted {
   discardedRetryAudits: number;
   fetchLogs: number;
   jobs: number;
+  exportJobs: number;
 }
 
 export async function purgeAllData(): Promise<{ deleted: PurgeAllDeleted }> {
   // 清空期间临时关闭自动采集；先 abort 当前 worker 避免并行写入；
   // $transaction 保证原子性。
   abortCurrentJob();
+  const exportJobs = await deleteAllExportJobs();
   const { prevWasEnabled } = await pauseAutoCrawlForWindow();
   invalidatePublicArticleCache();
   try {
@@ -311,6 +315,7 @@ export async function purgeAllData(): Promise<{ deleted: PurgeAllDeleted }> {
         discardedRetryAudits: discardedRetryAuditResult.count,
         fetchLogs: fetchResult.count,
         jobs: jobResult.count,
+        exportJobs,
       },
     };
   } finally {
