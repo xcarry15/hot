@@ -31,6 +31,7 @@ const loadKeywords = () => import('@/components/keywords-tab')
 const loadDashboard = () => import('@/components/dashboard-tab')
 const loadSources = () => import('@/components/sources-tab')
 const loadPublic = () => import('@/components/settings/public')
+const loadToolDirectory = () => import('@/components/settings/tool-directory')
 const AiModelTab = dynamic(loadAiModel, { loading: sectionLoading })
 const PromptsTab = dynamic(loadPrompts, { loading: sectionLoading })
 const PushTab = dynamic(loadPush, { loading: sectionLoading })
@@ -43,6 +44,7 @@ const SourcesManagement = dynamic(
   { loading: sectionLoading },
 )
 const PublicTab = dynamic(loadPublic, { loading: sectionLoading })
+const ToolDirectoryManagement = dynamic(loadToolDirectory, { loading: sectionLoading })
 
 const sectionLoaders: Record<string, () => Promise<unknown>> = {
   dashboard: loadDashboard,
@@ -54,6 +56,7 @@ const sectionLoaders: Record<string, () => Promise<unknown>> = {
   push: loadPush,
   account: loadAccount,
   data: loadData,
+  tools: loadToolDirectory,
 }
 
 type SensitiveTab = 'ai-model' | 'push'
@@ -445,6 +448,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
             <TabsTrigger value="push" data-value="push" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">推送</TabsTrigger>
             <TabsTrigger value="account" data-value="account" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">账户</TabsTrigger>
             <TabsTrigger value="data" data-value="data" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">数据</TabsTrigger>
+            <TabsTrigger value="tools" data-value="tools" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">工具中心</TabsTrigger>
           </TabsList>
         </div>
 
@@ -494,6 +498,10 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
 
         <TabsContent value="keywords" className="m-0 min-h-0 flex-1 overflow-auto">
           <KeywordsTab />
+        </TabsContent>
+
+        <TabsContent value="tools" className="m-0 min-h-0 flex-1 overflow-auto">
+          <ToolDirectoryManagement />
         </TabsContent>
       </Tabs>
 

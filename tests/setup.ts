@@ -64,6 +64,15 @@ vi.mock('@/lib/db', () => ({
       findMany: vi.fn(),
       upsert: vi.fn(),
     },
+    toolDirectoryItem: {
+      findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
+      aggregate: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
     keyword: {
       findMany: vi.fn(),
       create: vi.fn(),

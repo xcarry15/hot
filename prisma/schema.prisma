@@ -373,6 +373,25 @@ model Setting {
   @@map("settings")
 }
 
+model ToolDirectoryItem {
+  id          String    @id @default(cuid())
+  name        String
+  description String
+  category    String
+  href        String?
+  icon        String
+  kind        String    @default("open")
+  status      String    @default("active")
+  tags        String    @default("[]")
+  sortOrder   Int       @default(0)
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([category, archivedAt, sortOrder])
+  @@map("tool_directory_items")
+}
+
 model DiscardedItem {
   id              String    @id @default(cuid())
   sourceId        String

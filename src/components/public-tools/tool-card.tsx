@@ -1,34 +1,54 @@
 import type { CSSProperties } from 'react';
+import { TOOL_DIRECTORY_TAG_DEFINITIONS } from '@/contracts/tool-directory';
 import PublicToolIcon from './tool-icons';
 import type { PublicTool, PublicToolStatus } from './types';
 
 const STATUS_META: Record<PublicToolStatus, { label: string; className: string }> = {
-  hot: {
-    label: 'Hot',
-    className: 'text-[var(--public-primary-active)]',
-  },
-  new: {
-    label: 'New',
-    className: 'text-emerald-800',
+  active: {
+    label: '',
+    className: '',
   },
   beta: {
-    label: '内测',
+    label: '内测中',
     className: 'text-amber-800',
   },
   disabled: {
-    label: '停用',
+    label: '暂不可用',
     className: 'text-[var(--public-muted)]',
   },
 };
 
-function StatusBadge({ status }: { status?: PublicToolStatus }) {
-  if (!status) return null;
+const TAG_LABELS = Object.fromEntries(
+  TOOL_DIRECTORY_TAG_DEFINITIONS.map(({ id, label }) => [id, label]),
+) as Record<(typeof TOOL_DIRECTORY_TAG_DEFINITIONS)[number]['id'], string>;
+
+function StatusBadge({ status }: { status: PublicToolStatus }) {
   const meta = STATUS_META[status];
+  if (!meta.label) return null;
   return (
     <span className={`inline-flex items-center gap-1.5 px-0.5 text-[10px] font-semibold tracking-[0.04em] ${meta.className}`}>
       <span aria-hidden="true" className="h-1 w-1 shrink-0 bg-current opacity-60" />
       {meta.label}
     </span>
+  );
+}
+
+function TagBadges({ tags }: { tags: readonly (keyof typeof TAG_LABELS)[] }) {
+  const visibleTags = tags.slice(0, 2);
+  const hiddenCount = Math.max(tags.length - visibleTags.length, 0);
+  if (visibleTags.length === 0 && hiddenCount === 0) return null;
+  return (
+    <>
+      {visibleTags.map((tag) => (
+        <span key={tag} className="inline-flex items-center gap-1.5 px-0.5 text-[10px] font-medium tracking-[0.04em] text-[var(--public-muted)]">
+          <span aria-hidden="true" className="h-1 w-1 shrink-0 bg-current opacity-45" />
+          {TAG_LABELS[tag]}
+        </span>
+      ))}
+      {hiddenCount > 0 && (
+        <span className="inline-flex items-center px-0.5 text-[10px] font-medium text-[var(--public-muted)]">+{hiddenCount}</span>
+      )}
+    </>
   );
 }
 
@@ -43,7 +63,8 @@ function ToolCardBody({ tool, disabled }: { tool: PublicTool; disabled: boolean 
           <h3 className="min-w-0 flex-1 line-clamp-2 text-sm font-semibold leading-5 text-[var(--public-ink)] sm:text-base sm:leading-6">{tool.name}</h3>
           <div className="flex shrink-0 flex-wrap justify-end gap-1">
             <StatusBadge status={tool.status} />
-            {!disabled && tool.kind === 'download' && (
+            <TagBadges tags={tool.tags} />
+            {!disabled && tool.kind === 'download' && !tool.tags.includes('download') && (
               <span className="inline-flex items-center gap-1.5 px-0.5 text-[10px] font-medium tracking-[0.04em] text-[var(--public-muted)]">
                 <span aria-hidden="true" className="h-1 w-1 shrink-0 bg-current opacity-45" />
                 下载

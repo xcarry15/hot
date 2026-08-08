@@ -1,27 +1,15 @@
-export type PublicToolIconName =
-  | 'store'
-  | 'map-pin'
-  | 'sprout'
-  | 'bar-chart'
-  | 'chart-area'
-  | 'database'
-  | 'hexagon'
-  | 'map'
-  | 'trash'
-  | 'ruler'
-  | 'zap'
-  | 'globe-2'
-  | 'globe'
-  | 'line-chart'
-  | 'target'
-  | 'users'
-  | 'pie-chart'
-  | 'file-spreadsheet'
-  | 'files';
+import type {
+  ToolDirectoryCategoryId,
+  ToolDirectoryIconName,
+  ToolDirectoryKind,
+  ToolDirectoryStatus,
+  ToolDirectoryTag,
+} from '@/contracts/tool-directory';
 
-export type PublicToolStatus = 'hot' | 'new' | 'beta' | 'disabled';
-
-export type PublicToolKind = 'open' | 'download';
+export type PublicToolIconName = ToolDirectoryIconName;
+export type PublicToolStatus = ToolDirectoryStatus;
+export type PublicToolKind = ToolDirectoryKind;
+export type PublicToolTag = ToolDirectoryTag;
 
 export interface PublicTool {
   readonly id: string;
@@ -30,11 +18,12 @@ export interface PublicTool {
   readonly href: string | null;
   readonly icon: PublicToolIconName;
   readonly kind: PublicToolKind;
-  readonly status?: PublicToolStatus;
+  readonly status: PublicToolStatus;
+  readonly tags: readonly PublicToolTag[];
 }
 
 export interface PublicToolCategory {
-  readonly id: string;
+  readonly id: ToolDirectoryCategoryId;
   readonly label: string;
   readonly tools: readonly PublicTool[];
 }
