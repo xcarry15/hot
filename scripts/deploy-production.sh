@@ -189,8 +189,11 @@ EXPECTED_MIGRATION_SQL="${EXPECTED_MIGRATION_SQL%,}"
 
 link_release_state "$RELEASE_STAGING_DIR" "$STATE_ENV" "$STATE_DB_DIR"
 cd "$RELEASE_STAGING_DIR"
+echo "[deploy] installing release dependencies: $RELEASE_ID"
 npm ci
+echo "[deploy] generating Prisma Client"
 npm run db:generate
+echo "[deploy] building release: $RELEASE_ID"
 npm run build
 
 mv -- "$RELEASE_STAGING_DIR" "$RELEASE_DIR"
@@ -214,6 +217,7 @@ if [[ "$RESET_PRODUCTION" == "NO" ]]; then
 fi
 
 SERVICE_WAS_STOPPED=1
+echo "[deploy] stopping PM2: $APP_NAME"
 pm2 stop "$APP_NAME"
 
 if [[ ! -f "$SHARED_DIR/.env" || ! -f "$SHARED_DIR/db/custom.db" ]]; then
@@ -226,6 +230,7 @@ if [[ "$RESET_PRODUCTION" == "YES" ]]; then
   echo "RESET_PRODUCTION=YES: existing production SQLite will be deleted without backup."
   rm -f -- "$DATABASE_FILE" "$DATABASE_FILE-journal" "$DATABASE_FILE-wal" "$DATABASE_FILE-shm"
 else
+  echo "[deploy] backing up production SQLite"
   BACKUP_DIR="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)"
   mkdir -p -- "$BACKUP_DIR"
   sqlite3 "$DATABASE_FILE" ".timeout 5000" ".backup '$BACKUP_DIR/custom.db'"
@@ -234,13 +239,16 @@ else
 fi
 
 cd "$RELEASE_DIR"
+echo "[deploy] applying database migrations"
 npm run db:migrate:deploy
+echo "[deploy] optimizing SQLite"
 npm run db:optimize
 if [[ "$RESET_PRODUCTION" == "YES" ]]; then
   npm run db:seed
 fi
 
 CURRENT_LINK_TEMP="$APP_DIR/.current-$RELEASE_ID.$$"
+echo "[deploy] switching current release atomically"
 rm -f -- "$CURRENT_LINK_TEMP"
 ln -s -- "$RELEASE_DIR" "$CURRENT_LINK_TEMP"
 mv -Tf -- "$CURRENT_LINK_TEMP" "$CURRENT_LINK"
@@ -248,6 +256,7 @@ CURRENT_LINK_CHANGED=1
 
 restart_service
 
+echo "[deploy] restarting PM2 and checking health"
 curl --fail --silent --show-error --retry 10 --retry-delay 3 "$SITE_URL/api/health" >/dev/null
 PUBLIC_HTML="$(curl --fail --silent --show-error --retry 10 --retry-delay 3 "${SITE_URL%/}/")"
 PUBLIC_CSS_PATH="$(printf '%s' "$PUBLIC_HTML" | sed -n 's/.*href="\([^\"]*\.css\)".*/\1/p' | head -n 1)"
