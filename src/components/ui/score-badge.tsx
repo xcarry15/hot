@@ -47,8 +47,8 @@ function ScoreTooltip({ score, details }: { score: number; details: ScoreDetails
 
 interface ScoreBadgeProps {
   score: number
-  /** 展示风格：pill=带背景圆角徽章(列表) badge=shadcn Badge(详情) text=纯文本色(推送日志) compact=紧凑圆角(文章行) compact-square=紧凑方角评分 compact-square-wide=紧凑方角评分(兼容名称) */
-  variant?: 'pill' | 'badge' | 'text' | 'compact' | 'compact-square' | 'compact-square-wide'
+  /** 展示风格：pill=带背景圆角徽章(列表) badge=shadcn Badge(详情) text=纯文本色(推送日志) compact=紧凑圆角(文章行) compact-square=紧凑方角评分 compact-square-wide=紧凑方角评分(兼容名称) meta=与文章元数据同字号 title=与文章标题同字号的评分 */
+  variant?: 'pill' | 'badge' | 'text' | 'compact' | 'compact-square' | 'compact-square-wide' | 'meta' | 'title'
   /** 评分明细（hover 展开 tooltip） */
   details?: ScoreDetails
 }
@@ -82,6 +82,14 @@ export function ScoreBadge({ score, variant = 'pill', details }: ScoreBadgeProps
     <Badge className={`${s.bg} ${s.text} text-xs rounded-full ${hasDetails ? 'cursor-help' : ''}`}>
       {score}
     </Badge>
+  ) : variant === 'title' ? (
+    <span className={`inline-flex shrink-0 items-center justify-center rounded-none px-1.5 text-base font-semibold leading-7 tabular-nums sm:px-2 sm:text-xl sm:leading-snug ${s.bg} ${s.text} ${hasDetails ? 'cursor-help' : ''}`}>
+      {score}
+    </span>
+  ) : variant === 'meta' ? (
+    <span className={`inline-flex h-5 shrink-0 items-center justify-center rounded-none px-1 py-0.5 text-xs font-bold leading-4 tabular-nums sm:px-1.5 ${s.bg} ${s.text} ${hasDetails ? 'cursor-help' : ''}`}>
+      {score}
+    </span>
   ) : variant === 'compact-square' || variant === 'compact-square-wide' ? (
       <span className={`${COMPACT_SCORE_CLASS} ${s.bg} ${s.text} ${hasDetails ? 'cursor-help' : ''}`}>
         {score}

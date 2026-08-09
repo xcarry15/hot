@@ -4,12 +4,12 @@ import { redirect } from 'next/navigation'
 import { cache } from 'react'
 import { Badge } from '@/components/ui/badge'
 import PublicErrorState from '@/components/public-error-state'
-import PublicFooter from '@/components/public-footer'
-import PublicHeader from '@/components/public-header'
 import PublicOriginalLink, { PublicShareButton } from '@/components/public-original-link'
+import PublicPageShell from '@/components/public-page-shell'
 import PublicViewTracker from '@/components/public-view-tracker'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import { getPublicArticleDetail } from '@/lib/public-article-service'
+import { PUBLIC_SITE_NAME } from '@/lib/public-brand'
 import { getPublicSiteUrl } from '@/lib/public-site'
 import { splitBrands } from '@/lib/shared/article-codecs'
 import { formatDaysAgo } from '@/lib/shared/date'
@@ -37,13 +37,13 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   try {
     article = await getCachedPublicArticleDetail(id)
   } catch {
-    return { title: '文章暂时不可用 · 行业新闻聚合', robots: { index: false, follow: false } }
+    return { title: `文章暂时不可用 · ${PUBLIC_SITE_NAME}`, robots: { index: false, follow: false } }
   }
-  if (!article) return { title: '文章不存在 · 行业新闻聚合', robots: { index: false, follow: false } }
+  if (!article) return { title: `文章不存在 · ${PUBLIC_SITE_NAME}`, robots: { index: false, follow: false } }
   const description = article.summary || article.excerpt
   const canonical = `/news/${article.id}`
   return {
-    title: `${article.title} · 行业新闻聚合`,
+    title: `${article.title} · ${PUBLIC_SITE_NAME}`,
     description: description.slice(0, 160),
     alternates: { canonical },
     robots: { index: true, follow: true },
@@ -52,7 +52,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
       url: new URL(canonical, getPublicSiteUrl()).toString(),
       title: article.title,
       description: description.slice(0, 160),
-      siteName: '行业新闻聚合',
+      siteName: PUBLIC_SITE_NAME,
       publishedTime: article.publishedAt ?? article.createdAt,
       authors: [article.source.name],
     },
@@ -76,17 +76,15 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
   const hasKeyPoints = article.keyPoints.length > 0
 
   return (
-    <div className="public-site flex min-h-[100dvh] flex-col bg-background text-foreground">
-      <PublicHeader active="articles" readingProgress />
+    <PublicPageShell active="articles" readingProgress mainClassName="px-4 py-6 sm:px-6 sm:py-8">
       <PublicViewTracker articleId={article.id} />
 
-      <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mx-auto max-w-[840px]">
+      <div className="mx-auto max-w-[840px]">
           <Link href="/" className="public-back-link inline-flex items-center text-sm text-[var(--public-muted)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">
             ← 返回文章列表
           </Link>
 
-          <article className="mt-3 bg-[var(--public-canvas)] px-0 pt-3 pb-5 sm:mt-3 sm:px-8 sm:pt-4 sm:pb-7">
+          <article className="mt-3 break-words pb-5 pt-3 sm:px-8 sm:pb-7 sm:pt-4">
             <div className="public-detail-intro flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--public-muted)]">
               <time dateTime={effectiveDate}>{formatPublicDateTime(effectiveDate)}</time>
               <span className="text-[var(--public-hairline-strong)]">|</span>
@@ -97,7 +95,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
               {originalUrl && <div className="ml-auto"><PublicOriginalLink href={originalUrl} articleId={article.id} /></div>}
             </div>
 
-            <h1 className="public-detail-block public-detail-delay-1 public-display mt-2 text-3xl leading-[1.25] text-[var(--public-ink)] sm:mt-2 sm:text-4xl [text-wrap:wrap]" style={{ wordBreak: 'break-word' }}>{article.title}</h1>
+            <h1 className="public-detail-block public-detail-delay-1 public-display mt-2 text-3xl leading-[1.25] text-[var(--public-ink)] sm:text-4xl">{article.title}</h1>
 
             <div className="public-detail-block public-detail-delay-2 mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
               <span aria-label={`评分 ${article.score} 分`} className="inline-flex shrink-0 items-center"><ScoreBadge score={article.score} variant="compact-square-wide" /></span>
@@ -182,12 +180,8 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
                 )}
               </div>
             </nav>
-          </article>
-
-        </div>
-      </main>
-
-      <PublicFooter />
-    </div>
+        </article>
+      </div>
+    </PublicPageShell>
   )
 }

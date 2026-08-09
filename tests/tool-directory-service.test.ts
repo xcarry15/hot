@@ -24,9 +24,8 @@ function storedTool(overrides: Record<string, unknown> = {}) {
     category: 'business-support',
     href: 'https://example.com/tool',
     icon: 'store',
-    kind: 'open',
     status: 'active',
-    tags: '["recommended"]',
+    tags: '["updated"]',
     sortOrder: 0,
     archivedAt: null,
     createdAt: new Date('2026-08-08T00:00:00.000Z'),
@@ -51,7 +50,7 @@ describe('tool-directory-service', () => {
     const categories = await getPublicToolCategories();
 
     expect(categories[0].label).toBe('业务支持');
-    expect(categories[0].tools[0]).toMatchObject({ id: 'tool-1', tags: ['recommended'] });
+    expect(categories[0].tools[0]).toMatchObject({ id: 'tool-1', tags: ['updated'] });
     expect(categories[1].tools[0]).toMatchObject({ id: 'tool-2' });
     expect(categories).toHaveLength(5);
   });

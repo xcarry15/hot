@@ -88,9 +88,9 @@ function rateColor(rate: number, inverse = false): string {
 
 export default function DashboardTab({ active = true }: { active?: boolean }) {
   const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
-  // 默认只读取近期窗口；“全部”仍保留为显式筛选，避免概览首次打开就
-  // 把全量 Article/DiscardedItem/FetchLog 载入内存并参与 30 秒轮询。
-  const [range, setRange] = useState<DashboardAnalyticsRange>('30d')
+  // 默认展示一周：保证日趋势图有可读的时间密度；“全部”仍保留为显式筛选，
+  // 避免概览首次打开就把全量 Article/DiscardedItem/FetchLog 载入内存并参与轮询。
+  const [range, setRange] = useState<DashboardAnalyticsRange>('7d')
   const [sourceSort, setSourceSort] = useState<SourceSort>('analyzed')
   const [loading, setLoading] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)

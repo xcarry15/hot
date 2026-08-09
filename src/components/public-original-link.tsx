@@ -14,7 +14,7 @@ interface Props {
 
 export function PublicShareButton({ shareUrl, title, summary, publishedAt, className }: { shareUrl: string; title: string; summary: string; publishedAt: string; className?: string }) {
   const [open, setOpen] = useState(false)
-  return <><button type="button" onClick={() => setOpen(true)} className={`public-pressable inline-flex h-11 items-center justify-center gap-2 bg-[var(--public-primary)] px-7 text-sm font-semibold text-white shadow-[0_8px_22px_rgb(204_120_92_/_0.24)] transition-[background-color,box-shadow] hover:bg-[var(--public-primary-active)] hover:shadow-[0_10px_26px_rgb(204_120_92_/_0.32)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--public-canvas)] ${className ?? ''}`} aria-label="生成分享海报"><Share2 className="h-4 w-4" />分享文章</button>{open && <PublicSharePoster open onOpenChange={setOpen} shareUrl={shareUrl} title={title} summary={summary} publishedAt={publishedAt} />}</>
+  return <><button type="button" onClick={() => setOpen(true)} className={`public-pressable inline-flex h-11 items-center justify-center gap-2 bg-[var(--public-primary)] px-7 text-sm font-semibold text-white transition-colors hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--public-canvas)] ${className ?? ''}`} aria-label="生成分享海报"><Share2 className="h-4 w-4" />分享文章</button>{open && <PublicSharePoster open onOpenChange={setOpen} shareUrl={shareUrl} title={title} summary={summary} publishedAt={publishedAt} />}</>
 }
 
 export default function PublicOriginalLink({ href, articleId, className }: Props) {

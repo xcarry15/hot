@@ -5,6 +5,8 @@ import {
   Archive,
   ArrowDown,
   ArrowUp,
+  ChevronDown,
+  ChevronUp,
   ExternalLink,
   Eye,
   EyeOff,
@@ -17,9 +19,9 @@ import { toast } from 'sonner';
 import {
   TOOL_CATEGORY_DEFINITIONS,
   TOOL_DIRECTORY_ICON_NAMES,
-  TOOL_DIRECTORY_KINDS,
   TOOL_DIRECTORY_STATUSES,
   TOOL_DIRECTORY_TAG_DEFINITIONS,
+  isToolDirectoryLinkableStatus,
   type ToolDirectoryItemDto,
   type ToolDirectoryTag,
 } from '@/contracts/tool-directory';
@@ -32,6 +34,7 @@ import {
   updateToolDirectoryItem,
   type ToolDirectoryInput,
 } from '@/features/tool-directory-api.client';
+import { isRequestAborted } from '@/lib/request-json.client';
 import PublicToolIcon from '@/components/public-tools/tool-icons';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
@@ -50,7 +53,6 @@ const EMPTY_FORM: ToolFormState = {
   category: TOOL_CATEGORY_DEFINITIONS[0].id,
   href: '',
   icon: TOOL_DIRECTORY_ICON_NAMES[0],
-  kind: 'open',
   status: 'active',
   tags: [],
 };
@@ -58,12 +60,9 @@ const EMPTY_FORM: ToolFormState = {
 const STATUS_LABELS: Record<(typeof TOOL_DIRECTORY_STATUSES)[number], string> = {
   active: '正常',
   beta: '内测中',
+  maintenance: '维护中',
+  coming_soon: '即将上线',
   disabled: '停用',
-};
-
-const KIND_LABELS: Record<(typeof TOOL_DIRECTORY_KINDS)[number], string> = {
-  open: '打开工具',
-  download: '下载文件',
 };
 
 function toFormState(tool: ToolDirectoryItemDto): ToolFormState {
@@ -73,7 +72,6 @@ function toFormState(tool: ToolDirectoryItemDto): ToolFormState {
     category: tool.category,
     href: tool.href ?? '',
     icon: tool.icon,
-    kind: tool.kind,
     status: tool.status,
     tags: [...tool.tags],
   };
@@ -81,6 +79,8 @@ function toFormState(tool: ToolDirectoryItemDto): ToolFormState {
 
 function statusClass(status: ToolDirectoryItemDto['status']): string {
   if (status === 'beta') return 'text-amber-700';
+  if (status === 'maintenance') return 'text-orange-700';
+  if (status === 'coming_soon') return 'text-sky-700';
   if (status === 'disabled') return 'text-muted-foreground';
   return 'text-emerald-700';
 }
@@ -93,6 +93,7 @@ export default function ToolDirectoryManagement() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ToolFormState>(EMPTY_FORM);
   const [archiveTarget, setArchiveTarget] = useState<ToolDirectoryItemDto | null>(null);
@@ -103,7 +104,8 @@ export default function ToolDirectoryManagement() {
     try {
       setTools(await fetchToolDirectory(true, signal));
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') return;
+      // StrictMode 首次挂载会取消第一轮请求；取消不应覆盖随后成功的重读结果。
+      if (isRequestAborted(error)) return;
       setLoadError(true);
       toast.error('获取工具目录失败');
     } finally {
@@ -125,12 +127,14 @@ export default function ToolDirectoryManagement() {
   const openCreate = () => {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, tags: [] });
+    setIconPickerOpen(false);
     setDialogOpen(true);
   };
 
   const openEdit = (tool: ToolDirectoryItemDto) => {
     setEditingId(tool.id);
     setForm(toFormState(tool));
+    setIconPickerOpen(false);
     setDialogOpen(true);
   };
 
@@ -152,7 +156,7 @@ export default function ToolDirectoryManagement() {
       toast.error('名称和简介为必填项');
       return;
     }
-    if (form.status !== 'disabled' && !form.href.trim()) {
+    if (isToolDirectoryLinkableStatus(form.status) && !form.href.trim()) {
       toast.error('正常或内测工具必须填写 HTTPS 链接');
       return;
     }
@@ -268,11 +272,16 @@ export default function ToolDirectoryManagement() {
                       <div className="flex min-w-0 items-center gap-1.5">
                         <span className="truncate font-medium">{tool.name}</span>
                         <span className={`shrink-0 ${statusClass(tool.status)}`}>{STATUS_LABELS[tool.status]}</span>
+                        {tool.href && (
+                          <a href={tool.href} target="_blank" rel="noopener noreferrer" className="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-[10px] text-muted-foreground hover:text-foreground" title={tool.href}>
+                            <ExternalLink className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{tool.href}</span>
+                          </a>
+                        )}
                       </div>
                       <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{tool.description}</p>
                     </div>
                     <div className="flex max-w-full flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
-                      <Badge variant="outline" className="h-5 rounded-none px-1.5 text-[10px]">{KIND_LABELS[tool.kind]}</Badge>
                       {tool.tags.map((tag) => (
                         <Badge key={tag} variant="outline" className="h-5 rounded-none px-1.5 text-[10px]">
                           {TOOL_DIRECTORY_TAG_DEFINITIONS.find((definition) => definition.id === tag)?.label ?? tag}
@@ -303,12 +312,6 @@ export default function ToolDirectoryManagement() {
                         </Button>
                       )}
                     </div>
-                    {tool.href && (
-                      <a href={tool.href} target="_blank" rel="noopener noreferrer" className="flex max-w-full basis-full items-center gap-1 truncate pl-9 text-[10px] text-muted-foreground hover:text-foreground">
-                        <ExternalLink className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{tool.href}</span>
-                      </a>
-                    )}
                   </div>
                   );
                 })}
@@ -319,7 +322,7 @@ export default function ToolDirectoryManagement() {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto rounded-none sm:max-w-2xl [&_[data-slot=dialog-close]]:rounded-none">
           <DialogHeader>
             <DialogTitle className="text-base">{editingId ? '编辑工具' : '新增工具'}</DialogTitle>
             <DialogDescription className="text-xs">保存后会立即更新公开工具中心。</DialogDescription>
@@ -328,54 +331,35 @@ export default function ToolDirectoryManagement() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="tool-name" className="text-xs">名称 *</Label>
-                <Input id="tool-name" value={form.name} onChange={(event) => setFormValue('name', event.target.value)} className="h-8 text-xs" placeholder="工具名称" />
+                <Input id="tool-name" value={form.name} onChange={(event) => setFormValue('name', event.target.value)} className="h-8 rounded-none text-xs" placeholder="工具名称" />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">分类 *</Label>
                 <Select value={form.category} onValueChange={(value) => setFormValue('category', value as ToolFormState['category'])}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-8 rounded-none text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent className="rounded-none shadow-sm">
-                    {TOOL_CATEGORY_DEFINITIONS.map((category) => <SelectItem key={category.id} value={category.id}>{category.label}</SelectItem>)}
+                    {TOOL_CATEGORY_DEFINITIONS.map((category) => <SelectItem key={category.id} value={category.id} className="rounded-none">{category.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="tool-description" className="text-xs">简介 *</Label>
-              <Textarea id="tool-description" value={form.description} onChange={(event) => setFormValue('description', event.target.value)} className="min-h-20 text-xs" placeholder="简要说明工具用途" />
+              <Textarea id="tool-description" value={form.description} onChange={(event) => setFormValue('description', event.target.value)} className="min-h-20 rounded-none text-xs" placeholder="简要说明工具用途" />
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
               <div className="space-y-1.5">
                 <Label className="text-xs">状态 *</Label>
                 <Select value={form.status} onValueChange={(value) => setFormValue('status', value as ToolFormState['status'])}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-8 w-full rounded-none text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent className="rounded-none shadow-sm">
-                    {TOOL_DIRECTORY_STATUSES.map((status) => <SelectItem key={status} value={status}>{STATUS_LABELS[status]}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">类型 *</Label>
-                <Select value={form.kind} onValueChange={(value) => setFormValue('kind', value as ToolFormState['kind'])}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent className="rounded-none shadow-sm">
-                    {TOOL_DIRECTORY_KINDS.map((kind) => <SelectItem key={kind} value={kind}>{KIND_LABELS[kind]}</SelectItem>)}
+                    {TOOL_DIRECTORY_STATUSES.map((status) => <SelectItem key={status} value={status} className="rounded-none">{STATUS_LABELS[status]}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">HTTPS 链接</Label>
-                <Input value={form.href} onChange={(event) => setFormValue('href', event.target.value)} className="h-8 text-xs" placeholder="https://..." />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">图标</Label>
-              <div className="grid grid-cols-7 gap-1.5 sm:grid-cols-10">
-                {TOOL_DIRECTORY_ICON_NAMES.map((icon) => (
-                  <Button key={icon} type="button" variant={form.icon === icon ? 'default' : 'outline'} className="h-8 w-full p-0" title={icon} onClick={() => setFormValue('icon', icon)}>
-                    <PublicToolIcon name={icon} />
-                  </Button>
-                ))}
+                <Input value={form.href} onChange={(event) => setFormValue('href', event.target.value)} className="h-8 rounded-none text-xs" placeholder="https://..." />
               </div>
             </div>
             <div className="space-y-1.5">
@@ -387,10 +371,36 @@ export default function ToolDirectoryManagement() {
                 })}
               </div>
             </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">图标</Label>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8 w-full justify-between rounded-none px-2 text-xs font-normal"
+                aria-controls="tool-icon-picker"
+                aria-expanded={iconPickerOpen}
+                onClick={() => setIconPickerOpen((value) => !value)}
+              >
+                <span className="flex items-center gap-2">
+                  <PublicToolIcon name={form.icon} />
+                  <span>{form.icon}</span>
+                </span>
+                {iconPickerOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </Button>
+              {iconPickerOpen && (
+                <div id="tool-icon-picker" className="grid grid-cols-7 gap-1.5 border p-2 sm:grid-cols-10">
+                  {TOOL_DIRECTORY_ICON_NAMES.map((icon) => (
+                    <Button key={icon} type="button" variant={form.icon === icon ? 'default' : 'outline'} className="h-8 w-full rounded-none p-0" title={icon} onClick={() => setFormValue('icon', icon)}>
+                      <PublicToolIcon name={icon} />
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" size="sm" onClick={() => setDialogOpen(false)}>取消</Button>
-            <Button type="button" size="sm" disabled={saving} onClick={() => void handleSave()}>
+            <Button type="button" variant="outline" size="sm" className="rounded-none" onClick={() => setDialogOpen(false)}>取消</Button>
+            <Button type="button" size="sm" className="rounded-none" disabled={saving} onClick={() => void handleSave()}>
               {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
               {saving ? '保存中...' : '保存'}
             </Button>
@@ -399,14 +409,14 @@ export default function ToolDirectoryManagement() {
       </Dialog>
 
       <AlertDialog open={archiveTarget !== null} onOpenChange={(open) => { if (!open) setArchiveTarget(null); }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="rounded-none">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-base">确认下架工具</AlertDialogTitle>
             <AlertDialogDescription className="text-sm">下架后工具会从公开工具中心隐藏，但可以在“已下架”列表中恢复。</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="text-xs">取消</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-xs hover:bg-destructive/90" onClick={() => void handleArchive()}>确认下架</AlertDialogAction>
+            <AlertDialogCancel className="rounded-none text-xs">取消</AlertDialogCancel>
+            <AlertDialogAction className="rounded-none bg-destructive text-xs hover:bg-destructive/90" onClick={() => void handleArchive()}>确认下架</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

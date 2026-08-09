@@ -40,7 +40,6 @@ async function seed() {
           category: tool.category,
           href: tool.href,
           icon: tool.icon,
-          kind: tool.kind,
           status: tool.status,
           tags: JSON.stringify(tool.tags),
           sortOrder: tool.sortOrder,

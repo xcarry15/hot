@@ -1,6 +1,5 @@
 import type { PublicToolIconName } from './types';
-
-type StaticToolStatus = 'hot' | 'new' | 'beta' | 'disabled';
+import type { ToolDirectoryStatus, ToolDirectoryTag } from '@/contracts/tool-directory';
 
 interface StaticTool {
   readonly id: string;
@@ -8,8 +7,8 @@ interface StaticTool {
   readonly description: string;
   readonly href: string | null;
   readonly icon: PublicToolIconName;
-  readonly kind: 'open' | 'download';
-  readonly status?: StaticToolStatus;
+  readonly status?: ToolDirectoryStatus;
+  readonly tags?: readonly ToolDirectoryTag[];
 }
 
 interface StaticToolCategory {
@@ -35,7 +34,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '快速评估新店选址的各项利润指标，有效评估点位商业价值。',
         href: null,
         icon: 'store',
-        kind: 'open',
         status: 'disabled',
       },
       {
@@ -44,8 +42,7 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '适用任意点位的业态评估工具，让选址决策更快更准。',
         href: 'https://lat2.tstwg.cn',
         icon: 'map-pin',
-        kind: 'open',
-        status: 'hot',
+        tags: ['popular'],
       },
       {
         id: 'bs-5',
@@ -53,7 +50,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '便捷查询乡镇数据，具备可视化图表和AI分析推荐功能。',
         href: 'https://xz.tstwg.cn',
         icon: 'sprout',
-        kind: 'open',
       },
       {
         id: 'bs-2',
@@ -61,7 +57,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '精准测算对标友商门店实际业绩表现！',
         href: 'https://ls.tstwg.cn',
         icon: 'bar-chart',
-        kind: 'open',
       },
       {
         id: 'bs-6',
@@ -69,7 +64,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '将时间序列转化为热力图的可视化分析工具。',
         href: 'https://vda.tstwg.cn',
         icon: 'chart-area',
-        kind: 'open',
       },
       {
         id: 'bs-7',
@@ -77,7 +71,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '快速处理BI数据，聚合门店信息，计算盈利趋势。',
         href: 'https://bi-data.streamlit.app/#bi',
         icon: 'database',
-        kind: 'open',
       },
       {
         id: 'bs-8',
@@ -85,7 +78,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '内测中',
         href: 'https://6.tstwg.cn/',
         icon: 'hexagon',
-        kind: 'open',
         status: 'beta',
       },
     ],
@@ -100,8 +92,7 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '轻松、高效的获取全国范围内任意品牌的POI点位数据。',
         href: 'https://poi.tstwg.cn/',
         icon: 'map',
-        kind: 'open',
-        status: 'hot',
+        tags: ['popular'],
       },
       {
         id: 'gl-2',
@@ -109,7 +100,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '一键清理高德POI中的重复和无效点位。',
         href: 'https://gdqx.tstwg.cn/',
         icon: 'trash',
-        kind: 'open',
       },
       {
         id: 'gl-3',
@@ -117,7 +107,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '计算多个点位之间的经纬度距离，支持批量处理。',
         href: 'https://lat.tstwg.cn/',
         icon: 'ruler',
-        kind: 'open',
       },
       {
         id: 'gl-4',
@@ -125,7 +114,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '通过经纬度，逆向解析出对应的行政区划地理位置',
         href: 'https://lat4.tstwg.cn/',
         icon: 'zap',
-        kind: 'open',
       },
       {
         id: 'gl-5',
@@ -133,8 +121,7 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '高性能地图可视化纠偏工具，支持热力图、行政区划等功能。',
         href: 'https://map.tstwg.cn',
         icon: 'globe-2',
-        kind: 'open',
-        status: 'new',
+        tags: ['latest'],
       },
       {
         id: 'gl-6',
@@ -142,7 +129,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '多坐标系转换工具，支持WGS84, GCJ02, BD09等常见坐标系。',
         href: 'https://lat3.tstwg.cn',
         icon: 'globe',
-        kind: 'open',
       },
     ],
   },
@@ -156,7 +142,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '在线回归分析工具，支持多种回归模型和数据可视化。',
         href: 'https://re.tstwg.cn',
         icon: 'line-chart',
-        kind: 'open',
       },
       {
         id: 'da-3',
@@ -164,7 +149,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '将任何月度计划进一步拆分为周计划，并提供可视化结果。',
         href: 'https://week.tstwg.cn/',
         icon: 'target',
-        kind: 'open',
       },
     ],
   },
@@ -178,7 +162,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '基于密度的聚类（DBSCAN）算法工具，识别有效聚客点。',
         href: 'https://dbscan.tstwg.cn',
         icon: 'users',
-        kind: 'open',
       },
       {
         id: 'np-2',
@@ -186,7 +169,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '竞品数据可视化分析工具，用于高价值商圈点位分析。',
         href: 'https://vs.tstwg.cn/',
         icon: 'pie-chart',
-        kind: 'open',
       },
     ],
   },
@@ -200,7 +182,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '从 Excel 表中按列名快速提取所需字段，适合用于清洗与字段重组。',
         href: 'https://xlsx.tstwg.cn/',
         icon: 'file-spreadsheet',
-        kind: 'open',
       },
       {
         id: 'da-5',
@@ -208,7 +189,6 @@ export const PUBLIC_TOOL_CATEGORIES = [
         description: '【EXE格式】一个用于批量合并 Excel 文件的小工具。',
         href: 'https://4275.com/ten4yu',
         icon: 'files',
-        kind: 'download',
       },
     ],
   },

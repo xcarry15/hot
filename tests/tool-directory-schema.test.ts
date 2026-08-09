@@ -7,9 +7,8 @@ const validTool = {
   category: 'business-support' as const,
   href: ' https://example.com/tool ',
   icon: 'store' as const,
-  kind: 'open' as const,
   status: 'active' as const,
-  tags: ['recommended'] as const,
+  tags: ['updated'] as const,
 };
 
 describe('tool directory input schemas', () => {
@@ -21,10 +20,22 @@ describe('tool directory input schemas', () => {
     });
   });
 
-  it('要求正常工具使用公网 HTTPS 链接，停用工具可以没有链接', () => {
+  it('要求可用工具使用公网 HTTPS 链接，非可用状态可以没有链接', () => {
     expect(toolCreateSchema.safeParse({ ...validTool, href: 'http://example.com/tool' }).success).toBe(false);
     expect(toolCreateSchema.safeParse({ ...validTool, href: 'https://127.0.0.1/tool' }).success).toBe(false);
+    expect(toolCreateSchema.safeParse({ ...validTool, status: 'beta', href: null }).success).toBe(false);
+    expect(toolCreateSchema.safeParse({ ...validTool, status: 'maintenance', href: null }).success).toBe(true);
+    expect(toolCreateSchema.safeParse({ ...validTool, status: 'coming_soon', href: null }).success).toBe(true);
     expect(toolCreateSchema.safeParse({ ...validTool, status: 'disabled', href: null }).success).toBe(true);
+  });
+
+  it('只接受当前五种标签并拒绝已经删除的类型字段', () => {
+    expect(toolCreateSchema.safeParse({
+      ...validTool,
+      tags: ['free', 'paid', 'popular', 'updated', 'latest'],
+    }).success).toBe(true);
+    expect(toolCreateSchema.safeParse({ ...validTool, tags: ['recommended'] }).success).toBe(false);
+    expect(toolCreateSchema.safeParse({ ...validTool, kind: 'open' }).success).toBe(false);
   });
 
   it('拒绝重复标签、未知字段和空更新', () => {

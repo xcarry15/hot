@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import PublicArticleTimeline from '@/components/public-article-timeline'
 import type {
   PublicArticleListResponseDto,
@@ -46,7 +46,7 @@ export default function PublicArticleFeed({
   const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const [hasNewArticles, setHasNewArticles] = useState(false)
-  const feedIdentity = useMemo(() => search, [search])
+  const feedIdentity = search
   const previousIdentity = useRef(feedIdentity)
   useEffect(() => {
     if (previousIdentity.current === feedIdentity) return
@@ -121,8 +121,8 @@ export default function PublicArticleFeed({
   return (
     <>
       <div className="public-section-enter mb-4 flex flex-wrap items-center justify-between gap-3 sm:mb-5 sm:gap-4">
-        <h1 className="public-display shrink-0 text-2xl leading-tight text-[var(--public-ink)] sm:text-4xl">文章列表</h1>
-        <form method="get" className="ml-0 flex w-full min-w-0 items-center gap-2 sm:ml-auto sm:w-auto sm:flex-wrap sm:justify-end">
+        <h1 className="public-display hidden shrink-0 text-2xl leading-tight text-[var(--public-ink)] sm:block sm:text-4xl">行业资讯</h1>
+        <form method="get" className="flex w-full min-w-0 items-center gap-2 sm:ml-auto sm:w-auto sm:flex-wrap sm:justify-end">
           <label className="min-w-0 flex-1 sm:w-[280px] sm:flex-none">
             <span className="sr-only">搜索文章</span>
             <input

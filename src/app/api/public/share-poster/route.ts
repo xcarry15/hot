@@ -1,6 +1,7 @@
 import QRCode from 'qrcode'
 import sharp from 'sharp'
 import { z } from 'zod'
+import { PUBLIC_SITE_NAME, PUBLIC_SITE_TAGLINE } from '@/lib/public-brand'
 import { enforcePublicRateLimit } from '@/lib/public-rate-limit'
 
 const requestSchema = z.object({
@@ -72,7 +73,7 @@ export async function POST(request: Request) {
       <rect width="900" height="18" fill="#cc785c"/>
       <rect x="54" y="54" width="792" height="1008" fill="#fffdf9" stroke="#d6cfc4" stroke-width="2" filter="url(#poster-shadow)"/>
       <g font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif">
-        <text x="104" y="125" fill="#141413" font-size="30" font-weight="700">行业新闻聚合</text>
+        <text x="104" y="125" fill="#141413" font-size="30" font-weight="700">${escapeXml(PUBLIC_SITE_NAME)}</text>
         <text x="796" y="124" fill="#8e8b82" font-size="18" font-weight="500" text-anchor="end">${escapeXml(publishedAt)}</text>
         <line x1="104" y1="178" x2="796" y2="178" stroke="#d6cfc4" stroke-width="2"/>
         ${textLines(titleLines, 104, 245, 62, 'fill="#141413" font-size="43" font-weight="700"')}
@@ -81,7 +82,7 @@ export async function POST(request: Request) {
         <rect x="104" y="893" width="150" height="150" fill="#ffffff"/>
         <image href="${qrDataUrl}" x="104" y="893" width="150" height="150"/>
         <text x="290" y="942" fill="#141413" font-size="22" font-weight="700">扫码阅读完整文章</text>
-        <text x="290" y="980" fill="#8e8b82" font-size="18">行业动态 · 品牌资讯 · AI 洞察</text>
+        <text x="290" y="980" fill="#8e8b82" font-size="18">${escapeXml(PUBLIC_SITE_TAGLINE)}</text>
         <text x="290" y="1018" fill="#8e8b82" font-size="18">hot.kfxz.cn</text>
       </g>
     </svg>`

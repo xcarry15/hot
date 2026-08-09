@@ -2,15 +2,14 @@ import { z } from 'zod';
 import {
   TOOL_CATEGORY_DEFINITIONS,
   TOOL_DIRECTORY_ICON_NAMES,
-  TOOL_DIRECTORY_KINDS,
   TOOL_DIRECTORY_STATUSES,
   TOOL_DIRECTORY_TAG_DEFINITIONS,
+  isToolDirectoryLinkableStatus,
 } from '@/contracts/tool-directory';
 import { isBlockedOutboundHostname } from '@/lib/outbound-url';
 
 const categoryIds = TOOL_CATEGORY_DEFINITIONS.map(({ id }) => id) as [string, ...string[]];
 const iconNames = TOOL_DIRECTORY_ICON_NAMES as unknown as [string, ...string[]];
-const kinds = TOOL_DIRECTORY_KINDS as unknown as [string, ...string[]];
 const statuses = TOOL_DIRECTORY_STATUSES as unknown as [string, ...string[]];
 const tagIds = TOOL_DIRECTORY_TAG_DEFINITIONS.map(({ id }) => id) as [string, ...string[]];
 
@@ -20,7 +19,6 @@ const toolFields = {
   category: z.enum(categoryIds as [typeof categoryIds[number], ...typeof categoryIds[number][]]),
   href: z.string().trim().max(2048, '链接不能超过 2048 个字符').nullable().optional(),
   icon: z.enum(iconNames as [typeof iconNames[number], ...typeof iconNames[number][]]),
-  kind: z.enum(kinds as [typeof kinds[number], ...typeof kinds[number][]]),
   status: z.enum(statuses as [typeof statuses[number], ...typeof statuses[number][]]),
   tags: z.array(z.enum(tagIds as [typeof tagIds[number], ...typeof tagIds[number][]])).max(tagIds.length, '标签数量过多'),
 };
@@ -28,7 +26,9 @@ const toolFields = {
 function validateToolLink(value: string | null | undefined, status: string, addIssue: (message: string) => void): void {
   const href = value?.trim() || null;
   if (!href) {
-    if (status !== 'disabled') addIssue('正常或内测工具必须填写 HTTPS 链接');
+    if (isToolDirectoryLinkableStatus(status as (typeof TOOL_DIRECTORY_STATUSES)[number])) {
+      addIssue('正常或内测工具必须填写 HTTPS 链接');
+    }
     return;
   }
 

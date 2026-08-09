@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Check, Copy, Download, LoaderCircle, Share2 } from 'lucide-react'
 import QRCode from 'qrcode'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { PUBLIC_SITE_NAME, PUBLIC_SITE_TAGLINE } from '@/lib/public-brand'
 
 type Props = {
   shareUrl: string
@@ -92,7 +93,7 @@ export default function PublicSharePoster(props: Props) {
           <article className="mx-auto flex aspect-[45/56] max-w-[390px] flex-col border-t-[6px] border-[#cc785c] bg-[#f3eee6] p-6 text-[#141413] shadow-[0_24px_70px_rgb(0_0_0_/_0.38)] sm:p-7">
             <div className="flex items-start justify-between gap-4 border-b border-[#d6cfc4] pb-4">
               <div>
-                <p className="public-display text-base font-bold">行业新闻聚合</p>
+                <p className="public-display text-base font-bold">{PUBLIC_SITE_NAME}</p>
               </div>
               <time className="shrink-0 pt-0.5 text-[10px] font-medium text-[#8e8b82]">{publishedAt}</time>
             </div>
@@ -108,7 +109,7 @@ export default function PublicSharePoster(props: Props) {
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-bold">扫码阅读完整文章</p>
-                <p className="mt-1.5 text-[10px] leading-4 text-[#8e8b82]">行业动态 · 品牌资讯 · AI 洞察</p>
+                <p className="mt-1.5 text-[10px] leading-4 text-[#8e8b82]">{PUBLIC_SITE_TAGLINE}</p>
                 <p className="text-[10px] leading-4 text-[#8e8b82]">hot.kfxz.cn</p>
               </div>
             </div>

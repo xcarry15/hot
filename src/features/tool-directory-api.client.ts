@@ -7,7 +7,6 @@ export interface ToolDirectoryInput {
   category: ToolDirectoryItemDto['category'];
   href: string | null;
   icon: ToolDirectoryItemDto['icon'];
-  kind: ToolDirectoryItemDto['kind'];
   status: ToolDirectoryItemDto['status'];
   tags: ToolDirectoryItemDto['tags'];
 }

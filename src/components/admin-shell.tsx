@@ -9,6 +9,7 @@ import { Activity, ExternalLink, Settings, Sun, Moon } from 'lucide-react'
 import { URL_PARAM_DETAIL, URL_PARAM_TAB } from '@/components/crawl-log/constants'
 import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
 import { APP_VERSION } from '@/contracts/app'
+import logo from '@/pic/Logo/icon-192x192.png'
 
 type TabKey = 'crawl-log' | 'settings'
 
@@ -126,7 +127,7 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
         <aside className="hidden w-[180px] shrink-0 flex-col border-r border-border/70 bg-background sm:flex">
           <div className="flex items-center gap-2 border-b border-border/70 px-3 py-3.5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-[6px] bg-primary shadow-[0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
-              <img src="/icon-192x192.png" alt="logo" className="h-full w-full object-cover" />
+              <img src={logo.src} alt="logo" className="h-full w-full object-cover" />
             </div>
             <div className="min-w-0">
               <h1 className="truncate text-[13px] font-semibold leading-5 tracking-tight">管理后台</h1>

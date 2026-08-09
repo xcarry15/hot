@@ -380,7 +380,6 @@ model ToolDirectoryItem {
   category    String
   href        String?
   icon        String
-  kind        String    @default("open")
   status      String    @default("active")
   tags        String    @default("[]")
   sortOrder   Int       @default(0)

@@ -12,7 +12,6 @@ describe('tool directory API', () => {
         category: 'business-support',
         href: null,
         icon: 'store',
-        kind: 'open',
         status: 'active',
         tags: [],
       }),

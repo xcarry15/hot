@@ -3,13 +3,11 @@ import { db } from '@/lib/db';
 import {
   TOOL_CATEGORY_DEFINITIONS,
   TOOL_DIRECTORY_ICON_NAMES,
-  TOOL_DIRECTORY_KINDS,
   TOOL_DIRECTORY_STATUSES,
   TOOL_DIRECTORY_TAG_DEFINITIONS,
   type ToolDirectoryCategoryId,
   type ToolDirectoryIconName,
   type ToolDirectoryItemDto,
-  type ToolDirectoryKind,
   type ToolDirectoryStatus,
   type ToolDirectoryTag,
 } from '@/contracts/tool-directory';
@@ -45,7 +43,6 @@ const categoryOrder = new Map<string, number>(
   TOOL_CATEGORY_DEFINITIONS.map((category, index) => [category.id, index]),
 );
 const iconNameSet = new Set<string>(TOOL_DIRECTORY_ICON_NAMES);
-const kindSet = new Set<string>(TOOL_DIRECTORY_KINDS);
 const statusSet = new Set<string>(TOOL_DIRECTORY_STATUSES);
 const tagSet = new Set<string>(TOOL_DIRECTORY_TAG_DEFINITIONS.map(({ id }) => id));
 
@@ -70,7 +67,6 @@ function mapStoredTool(item: NonNullable<StoredTool>): ToolDirectoryItemDto {
   if (
     !categoryOrder.has(item.category)
     || !iconNameSet.has(item.icon)
-    || !kindSet.has(item.kind)
     || !statusSet.has(item.status)
   ) {
     throw new Error(`工具数据无效：${item.id}`);
@@ -83,7 +79,6 @@ function mapStoredTool(item: NonNullable<StoredTool>): ToolDirectoryItemDto {
     category: item.category as ToolDirectoryCategoryId,
     href: item.href,
     icon: item.icon as ToolDirectoryIconName,
-    kind: item.kind as ToolDirectoryKind,
     status: item.status as ToolDirectoryStatus,
     tags: parseStoredTags(item.tags),
     sortOrder: item.sortOrder,
@@ -110,7 +105,6 @@ function toPublicTool(item: ToolDirectoryItemDto) {
     description: item.description,
     href: item.href,
     icon: item.icon,
-    kind: item.kind,
     status: item.status,
     tags: item.tags,
   };
@@ -183,7 +177,6 @@ export async function createToolDirectoryItem(input: ToolCreateInput): Promise<T
       category: parsed.category,
       href: parsed.href || null,
       icon: parsed.icon,
-      kind: parsed.kind,
       status: parsed.status,
       tags: JSON.stringify(parsed.tags),
       sortOrder: await nextSortOrder(parsed.category),
@@ -202,7 +195,6 @@ export async function updateToolDirectoryItem(id: string, input: ToolUpdateInput
     category: input.category ?? existingDto.category,
     href: input.href !== undefined ? input.href : existingDto.href,
     icon: input.icon ?? existingDto.icon,
-    kind: input.kind ?? existingDto.kind,
     status: input.status ?? existingDto.status,
     tags: input.tags ?? existingDto.tags,
   });
@@ -215,7 +207,6 @@ export async function updateToolDirectoryItem(id: string, input: ToolUpdateInput
       category: candidate.category,
       href: candidate.href || null,
       icon: candidate.icon,
-      kind: candidate.kind,
       status: candidate.status,
       tags: JSON.stringify(candidate.tags),
       ...(categoryChanged ? { sortOrder: await nextSortOrder(candidate.category) } : {}),

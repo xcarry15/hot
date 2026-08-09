@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import { PUBLIC_SITE_DESCRIPTION, PUBLIC_SITE_NAME } from "@/lib/public-brand";
 import { getPublicSiteUrl } from "@/lib/public-site";
+import appleTouchIcon from "@/pic/Logo/apple-touch-icon.png";
+import logo from "@/pic/Logo/icon-192x192.png";
 
 // 数据看板每次刷新内容都不同，强制动态渲染：
 // 禁止 build 时预渲染并将 HTML 标记 s-maxage=31536000，
@@ -12,18 +15,14 @@ export const revalidate = 0;
 
 export const metadata: Metadata = {
   metadataBase: getPublicSiteUrl(),
-  title: "行业新闻聚合推送器",
-  description: "自动抓取 · AI分析 · 飞书推送",
+  title: PUBLIC_SITE_NAME,
+  description: PUBLIC_SITE_DESCRIPTION,
+  applicationName: PUBLIC_SITE_NAME,
   icons: {
-    icon: [
-      { url: "/favicon.ico" },
-      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
-      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
-      { url: "/favicon-96x96.png", sizes: "96x96", type: "image/png" },
-    ],
-    apple: "/apple-touch-icon.png",
+    icon: [{ url: logo.src, sizes: "192x192", type: "image/png" }],
+    apple: appleTouchIcon.src,
   },
-  manifest: "/manifest.json",
+  manifest: "/manifest.webmanifest",
 };
 
 export default function RootLayout({

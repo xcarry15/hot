@@ -148,14 +148,11 @@
   --public-hairline: #e6dfd8;
   --public-hairline-soft: #ebe6df;
   --public-hairline-strong: #d6cfc4;
-  --public-font-sans: var(--font-yahei);
-  --public-font-serif: var(--font-yahei);
   --public-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --public-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --public-motion-fast: 140ms;
   --public-motion-base: 220ms;
   color-scheme: light;
-  font-family: var(--public-font-sans);
+  font-family: var(--font-yahei);
 }
 
 .public-site ::selection {
@@ -163,8 +160,15 @@
   color: var(--public-ink);
 }
 
+.public-mobile-navigation::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--public-hairline) 14%, var(--public-hairline) 86%, transparent);
+  content: '';
+}
+
 .public-site .public-display {
-  font-family: var(--public-font-serif);
   font-weight: 700;
   letter-spacing: -0.02em;
   text-wrap: wrap;
@@ -180,16 +184,8 @@
 .public-mobile-nav-enter {
   animation-duration: var(--public-motion-base);
   animation-fill-mode: both;
+  animation-name: public-fade-in;
   animation-timing-function: var(--public-ease-out);
-}
-
-.public-section-enter,
-.public-detail-intro {
-  animation-name: public-rise-in;
-}
-
-.public-detail-block {
-  animation-name: public-rise-in;
 }
 
 .public-detail-delay-1 {
@@ -205,7 +201,6 @@
 }
 
 .public-date-heading {
-  animation-name: public-fade-in;
   animation-delay: var(--public-reveal-delay, 0ms);
 }
 
@@ -215,13 +210,12 @@
 }
 
 .public-article-motion {
-  animation-name: public-list-item-in;
   animation-delay: var(--public-reveal-delay, 0ms);
 }
 
 .public-article-surface {
   transition-duration: 180ms;
-  transition-property: background-color, transform;
+  transition-property: background-color;
   transition-timing-function: var(--public-ease-out);
 }
 
@@ -233,41 +227,26 @@
 }
 
 .public-timeline-marker {
-  transform-origin: center;
   transition-duration: 180ms;
-  transition-property: background-color, transform;
+  transition-property: background-color;
   transition-timing-function: var(--public-ease-out);
-}
-
-.public-notice-enter {
-  animation-name: public-notice-in;
 }
 
 .public-popover-enter {
   animation-duration: 170ms;
-  animation-name: public-popover-in;
-  transform-origin: top right;
 }
 
 .public-mobile-nav-enter {
   animation-duration: 180ms;
-  animation-name: public-mobile-nav-in;
 }
 
 .public-pressable {
   touch-action: manipulation;
-  transition-duration: var(--public-motion-fast);
-  transition-property: transform;
-  transition-timing-function: var(--public-ease-out);
-}
-
-.public-pressable:not(:disabled):active {
-  transform: scale(0.98);
 }
 
 .public-back-link {
   transition-duration: var(--public-motion-fast);
-  transition-property: color, transform;
+  transition-property: color;
   transition-timing-function: var(--public-ease-out);
 }
 
@@ -295,7 +274,6 @@
 @media (hover: hover) and (pointer: fine) {
   .public-article-link:hover .public-article-surface {
     background: var(--public-surface-soft);
-    transform: translateX(4px);
   }
 
   .public-article-link:hover .public-article-title,
@@ -305,73 +283,16 @@
 
   .public-article-link:hover .public-timeline-marker {
     background: var(--public-primary-active);
-    transform: scale(1.24);
   }
 
   .public-back-link:hover {
     color: var(--public-primary);
-    transform: translateX(-2px);
-  }
-}
-
-@keyframes public-rise-in {
-  from {
-    opacity: 0;
-    transform: translateY(7px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
 
 @keyframes public-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-@keyframes public-list-item-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes public-notice-in {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes public-popover-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes public-mobile-nav-in {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -388,7 +309,6 @@
 
   .public-article-surface,
   .public-timeline-marker,
-  .public-pressable,
   .public-back-link {
     transition-duration: 1ms;
   }

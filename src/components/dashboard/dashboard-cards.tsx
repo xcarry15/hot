@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { DashboardAnalytics } from "@/features/dashboard-api.client"
 import { ChevronLeft, ChevronRight } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 
 type CrawlTriggerFilter = "all" | DashboardAnalytics["crawlRecords"][number]["trigger"]
 type CrawlStatusFilter = "all" | DashboardAnalytics["crawlRecords"][number]["status"]
@@ -31,26 +32,61 @@ const CHART_PLOT_BOTTOM = CHART_HEIGHT - 26
 const CHART_AXIS_LEFT = 34
 const CHART_AXIS_RIGHT = 12
 const CHART_PLOT_WIDTH = CHART_VIEWBOX_WIDTH - CHART_AXIS_LEFT - CHART_AXIS_RIGHT
-const MAX_DATE_LABELS = 20
-const RECENT_CONTINUOUS_DATE_LABELS = 7
+const DATE_LABEL_MIN_GAP_PX = 36
+const RECENT_CONTINUOUS_DATE_LABELS = 5
 
-function getDateLabelIndexes(length: number): Set<number> {
+function useChartContainerWidth(enabled: boolean) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [width, setWidth] = useState(0)
+
+  useEffect(() => {
+    if (!enabled) return
+    const element = ref.current
+    if (!element) return
+
+    const updateWidth = () => setWidth(element.clientWidth)
+    updateWidth()
+    if (typeof ResizeObserver === 'undefined') return
+
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [enabled])
+
+  return { ref, width }
+}
+
+function getDateLabelIndexes(length: number, containerWidth: number): Set<number> {
   const indexes = new Set<number>()
-  if (length <= MAX_DATE_LABELS) {
+  const recentCount = Math.min(RECENT_CONTINUOUS_DATE_LABELS, length)
+  const plotWidth = containerWidth * CHART_PLOT_WIDTH / CHART_VIEWBOX_WIDTH
+  const maxLabelCount = Math.max(recentCount, Math.floor(plotWidth / DATE_LABEL_MIN_GAP_PX))
+
+  if (length <= maxLabelCount) {
     for (let index = 0; index < length; index += 1) indexes.add(index)
     return indexes
   }
 
-  const recentStart = length - RECENT_CONTINUOUS_DATE_LABELS
+  const recentStart = length - recentCount
   for (let index = recentStart; index < length; index += 1) indexes.add(index)
 
-  const olderLabelCount = MAX_DATE_LABELS - RECENT_CONTINUOUS_DATE_LABELS
+  const olderLabelCount = maxLabelCount - recentCount
   const olderDateCount = recentStart
-  for (let labelIndex = 0; labelIndex < olderLabelCount; labelIndex += 1) {
-    const ratio = labelIndex / (olderLabelCount - 1)
-    indexes.add(Math.round(ratio * (olderDateCount - 1)))
+  if (olderLabelCount <= 0) return indexes
+  if (olderLabelCount === 1) {
+    indexes.add(0)
+    return indexes
+  }
+
+  const olderLabelStep = Math.max(1, Math.ceil(olderDateCount / olderLabelCount))
+  for (let index = 0; index < olderDateCount; index += olderLabelStep) {
+    indexes.add(index)
   }
   return indexes
+}
+
+function getDateLabelTextLength(slotWidth: number): number | undefined {
+  return slotWidth < 28 ? slotWidth * 0.78 : undefined
 }
 
 function getChartAxisMax(value: number): number {
@@ -163,7 +199,8 @@ export function DailyNewArticlesCard({
 }) {
   const total = articles.reduce((sum, item) => sum + item.count, 0)
   const chartAxisMax = getChartAxisMax(Math.max(0, ...articles.map((item) => item.count)))
-  const dateLabelIndexes = getDateLabelIndexes(articles.length)
+  const chartContainer = useChartContainerWidth(articles.length > 0)
+  const dateLabelIndexes = getDateLabelIndexes(articles.length, chartContainer.width)
   const chartHeight = CHART_HEIGHT
   const plotTop = CHART_PLOT_TOP
   const plotBottom = CHART_PLOT_BOTTOM
@@ -175,12 +212,13 @@ export function DailyNewArticlesCard({
   const getX = (index: number) => axisLeft + slotWidth * (index + 0.5)
   const getY = (value: number) => plotBottom - (value / chartAxisMax) * plotHeight
   const barWidth = Math.max(2, Math.min(28, slotWidth * 0.68))
+  const dateLabelTextLength = getDateLabelTextLength(slotWidth)
   const axisTicks = getChartAxisTicks(chartAxisMax, plotBottom, plotHeight)
   const points = articles.map((item, index) => `${getX(index)},${getY(item.count)}`).join(' ')
 
   return (
-      <Card className="min-w-0 max-w-full rounded-none py-0 shadow-none">
-        <CardContent className="min-w-0 p-2">
+    <Card className="min-w-0 max-w-full rounded-none py-0 shadow-none">
+      <CardContent className="min-w-0 p-2">
         <div className="mb-1 flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium">每日新增</h3>
           <span className="text-[10px] text-muted-foreground">期间合计 {formatNumber(total)} 篇</span>
@@ -190,7 +228,7 @@ export function DailyNewArticlesCard({
           <span className="text-muted-foreground/75">按入库时间统计 · 单位：篇</span>
         </div>
         {articles.length > 0 ? (
-          <div className="mt-1 h-[180px] min-w-0 max-w-full overflow-hidden border-b border-l px-1 pb-1 pt-2">
+          <div ref={chartContainer.ref} className="mt-1 h-[180px] min-w-0 max-w-full overflow-hidden border-b border-l px-1 pb-1 pt-2">
             <svg
               className="block h-[160px] w-full"
               viewBox={`0 0 ${chartWidth} ${chartHeight}`}
@@ -218,7 +256,7 @@ export function DailyNewArticlesCard({
                     <title>{`${item.date} · 新增文章 ${item.count}`}</title>
                     <rect x={x - barWidth / 2} y={plotBottom - barHeight} width={barWidth} height={barHeight} rx={3} fill="hsl(var(--primary))" opacity={0.3} />
                     {showLabel && item.count > 0 && <text x={x} y={Math.max(plotTop + 10, plotBottom - barHeight - 5)} textAnchor="middle" fill="hsl(var(--foreground))" className="text-[9px] tabular-nums">{formatNumber(item.count)}</text>}
-                    <text x={x} y={chartHeight - 8} textAnchor="middle" fill="hsl(var(--muted-foreground))" className="text-[9px] tabular-nums">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</text>
+                    <text x={x} y={chartHeight - 8} textAnchor="middle" textLength={showLabel ? dateLabelTextLength : undefined} lengthAdjust="spacingAndGlyphs" fill="hsl(var(--muted-foreground))" className="text-[9px] tabular-nums">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</text>
                   </g>
                 )
               })}
@@ -250,7 +288,8 @@ function DailyActivityCard({
   emptyText: string
 }) {
   const chartAxisMax = getChartAxisMax(Math.max(0, ...articles.map((item) => item[metric])))
-  const dateLabelIndexes = getDateLabelIndexes(articles.length)
+  const chartContainer = useChartContainerWidth(articles.length > 0)
+  const dateLabelIndexes = getDateLabelIndexes(articles.length, chartContainer.width)
   const chartHeight = CHART_HEIGHT
   const plotTop = CHART_PLOT_TOP
   const plotBottom = CHART_PLOT_BOTTOM
@@ -261,6 +300,7 @@ function DailyActivityCard({
   const chartWidth = CHART_VIEWBOX_WIDTH
   const getX = (index: number) => axisLeft + slotWidth * (index + 0.5)
   const barWidth = Math.max(2, Math.min(28, slotWidth * 0.68))
+  const dateLabelTextLength = getDateLabelTextLength(slotWidth)
   const axisTicks = getChartAxisTicks(chartAxisMax, plotBottom, plotHeight)
 
   return (
@@ -274,7 +314,7 @@ function DailyActivityCard({
           <span className="text-muted-foreground/75">按动作发生日 · 单位：次</span>
         </div>
         {articles.length > 0 ? (
-          <div className="mt-1 h-[180px] min-w-0 max-w-full overflow-hidden border-b border-l px-1 pb-1 pt-2">
+          <div ref={chartContainer.ref} className="mt-1 h-[180px] min-w-0 max-w-full overflow-hidden border-b border-l px-1 pb-1 pt-2">
             <svg
               className="block h-[160px] w-full"
               viewBox={`0 0 ${chartWidth} ${chartHeight}`}
@@ -302,7 +342,7 @@ function DailyActivityCard({
                     <title>{`${item.date} · ${label} ${value}`}</title>
                     <rect x={x - barWidth / 2} y={plotBottom - barHeight} width={barWidth} height={barHeight} rx={3} fill={color} opacity={0.75} />
                     {showLabel && value > 0 && <text x={x} y={Math.max(plotTop + 10, plotBottom - barHeight - 5)} textAnchor="middle" fill="hsl(var(--foreground))" className="text-[9px] tabular-nums">{formatNumber(value)}</text>}
-                    <text x={x} y={chartHeight - 8} textAnchor="middle" fill="hsl(var(--muted-foreground))" className="text-[9px] tabular-nums">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</text>
+                    <text x={x} y={chartHeight - 8} textAnchor="middle" textLength={showLabel ? dateLabelTextLength : undefined} lengthAdjust="spacingAndGlyphs" fill="hsl(var(--muted-foreground))" className="text-[9px] tabular-nums">{showLabel ? `${Number(month)}/${Number(day)}` : ''}</text>
                   </g>
                 )
               })}
