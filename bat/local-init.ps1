@@ -40,7 +40,7 @@ function Remove-ProjectDirectory {
 try {
     Write-Host ''
     Write-Host '========================================' -ForegroundColor Cyan
-    Write-Host '  Hot2 Local Initialization' -ForegroundColor Cyan
+    Write-Host '  开发选址助手 - 本地初始化' -ForegroundColor Cyan
     Write-Host '========================================' -ForegroundColor Cyan
     Write-Host ''
     Write-Host 'This will delete the local SQLite database and .next.' -ForegroundColor Yellow

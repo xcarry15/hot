@@ -1,52 +1,80 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Truth Sources
 
-Hot2 is a Next.js 16 App Router application with React 19, TypeScript, Prisma, and SQLite. Keep changes within these boundaries:
+- Treat current code, configuration, Prisma schema, ordered migrations, and workflow files as runtime truth.
+- Use `README.md` for the current product, architecture, commands, and deployment entry points.
+- Use `CONTEXT.md` only for domain language. Use `docs/design/DESIGN.md` only for the public visual profile.
+- Update the relevant document in the same change when behavior, commands, migrations, deployment, or canonical terminology changes. Remove completed implementation plans instead of maintaining duplicate specifications.
 
-- `src/app/`: public pages, the token-protected `/admin` shell, and API route handlers. Public article pages are under `src/app/news/`; `robots.ts` and `sitemap.ts` define indexing boundaries.
-- `src/components/`: UI; `intelligence-inbox.tsx` is the default admin workbench, `public-tools/` is the isolated public tool-directory module, while `src/features/` and `src/contracts/` contain client helpers and shared contracts.
-- `src/lib/`: server services and pipeline code. Collection, processing, analysis, event clustering, push, review, and public visibility rules live here; keep business rules in services rather than components or Route Handlers. AI must extract the structured event identity (`subjects/action/object`) before clustering, and the application deterministically builds `eventKey` from that identity. Article remains the AI/manual-calibration record; Event is the only public/push deduplication gate and `Event.publicStatus` is the public truth. Article publication fields are only the current representative projection; non-representative members stay unpublished. Representative selection must require `clustered`, AI done, and a non-deleted source; source public enablement remains an independent publication gate. Manual representative changes must satisfy the same base eligibility.
-- `prisma/`: schema, seed data, and ordered migrations; `tests/`: Vitest tests.
-- `scripts/`: maintenance/migration utilities; `bat/`: Windows deployment and operations files; `public/`: static assets. Production releases are unpacked outside the application directory and synchronized with deletion so removed code cannot remain on the server; preserve `.env*`, `db/`, and `node_modules/` during this sync. Stop PM2 and create a consistent SQLite `.backup` before migrations. The repository uses one current baseline migration and has no historical database bridge; obsolete migration history must be backed up and rebuilt with `scripts/init-production.sh`. Routine application releases must not clear the server-wide Nginx cache or reload Nginx.
+## Project Boundaries
 
-The admin navigation is intentionally limited to `工作台` and `设置`. `工作台` keeps the existing task-center source/job layout; clicking an Article opens the complete Article/Event calibration workspace in a right-side drawer. Full-library search and human-review queues use server-side pagination and open the same drawer instead of recreating a second article-management page. The public `工具` route (`/tools`) is a mobile-first directory of external tools backed by the `ToolDirectoryItem` table; the initial 19 cards are inserted by `prisma/seed.ts`. Tool entries have no open/download type. Statuses are fixed as active, beta, maintenance, coming soon, and disabled; only active or beta cards with a valid public HTTPS URL are clickable, while other non-archived cards remain visible without a link. Tags are fixed as free, paid, popular, updated, and latest. The `设置 → 工具中心` tab provides protected CRUD, ordering, status, tag, archive, and restore management. `数据` remains a planned future entry.
+开发选址助手 is a Next.js 16 App Router application with React 19, TypeScript, Prisma 6, SQLite, and Vitest.
 
-Keep interaction performance proportional to the project scale: top-level admin pages and heavy settings sections are lazy-loaded, article detail requests may use a short-lived client cache with explicit invalidation after writes, and crawl-log polling is adaptive (fast only while a Job is running, slow while idle, paused while hidden). Crawl-log source groups include only enabled, non-deleted sources; disabled-source history and stale Job source results stay hidden from this operational view. The crawl-log keeps its bounded recent Article window but must additionally merge every current manual/auto-retry technical work item by Article id, so actionable failures never disappear outside the recent window. Technical failures use finite automatic retries, then become manual work or may be ignored without deleting the Article. Do not replace these lightweight measures with Redis, a message queue, or broad compatibility layers without measured need.
+- `src/app/`: public pages, `/admin`, Route Handlers, `robots.ts`, and `sitemap.ts`.
+- `src/components/`: UI. `public-tools/` is the public tool-directory module; `intelligence-inbox.tsx` and the article workspace own the unified admin workbench.
+- `src/features/`: browser API clients. Components must not recreate request logic already available here.
+- `src/contracts/`: shared DTOs and state contracts.
+- `src/lib/`: services, pipeline, scheduling, publication, push, export, and maintenance rules. Keep business rules here rather than in components or Route Handlers.
+- `prisma/`: schema, seed, and the only supported ordered migration chain.
+- `tests/`: Vitest coverage; `scripts/`: production and maintenance scripts; `bat/`: Windows initialization, packaging, and operations.
 
-Admin responsibility boundaries remain fixed inside the unified `工作台`: the task surface owns Job monitoring and technical recovery, while the Article drawer owns content calibration, human review, Event correction, publication decisions, and Event-level manual push. UI consolidation must not merge these service-layer responsibilities. Single-article retries/regeneration must use `POST /api/articles/[id]/workflow`: `retry` is restricted to a recoverable failed stage, while `regenerate` resets and recomputes from the requested stage and cannot be used for full repush. Push delivery modes are fixed as `normal`, `retry_failed`, `manual_force`, and `repush_all`; `manual_force` may bypass score, relevance, and the automatic push switch, but must still require an active Event, its valid representative Article, completed clustering, and completed AI. Latest enabled-target PushDelivery state is the shared truth, PushLog is historical audit only, and push failures belong only to the Event representative Article. Crawl-log DTOs may expose the final effective score after AI completion plus lightweight `ad`/`duplicate` display labels; they must not expose score breakdowns, ad probability, confidence, or content-category fields. Do not recreate browser-memory queues or removed routes. `needs_review` is created only after AI analysis and must never become the representative article, be public, or be pushed. Batch process/AI/cluster stages must drain all currently eligible backlog before a Job is marked completed; fixed query sizes are chunk sizes, not completion boundaries.
+## Domain Invariants
 
-Use the architecture and database sections in `README.md` as the repository reference and keep them synchronized with source code and migrations. `docs/design/DESIGN.md` is visual reference only and must not be treated as product or architecture truth.
+- `Article` is the source-content, AI-result, and manual-calibration record.
+- `Event` is the only public and push deduplication boundary. `Event.publicStatus` is public truth; Article publication fields are the current representative projection.
+- AI extracts `subjects / action / object`; the application deterministically builds `eventKey`. Clustering must not call AI again for identity.
+- Every active Event has at most one representative Article. Non-representatives remain unpublished and are not pushed.
+- Representative eligibility requires `clustered`, AI `done`, and a non-deleted source. Manual representative changes use the same eligibility. Source public enablement remains an independent publication gate.
+- `needs_review` is created only after AI analysis and cannot be representative, public, or pushed until the Event is confirmed.
+- Latest enabled-target `PushDelivery` state is current delivery truth. `PushLog` is historical audit only; push failures belong to the representative Article.
 
-## Build, Test, and Development Commands
+## Admin and Public Surfaces
 
-Install dependencies and copy `.env.example` to `.env` for local setup. Use:
+- Top-level admin navigation stays limited to `工作台` and `设置`.
+- `工作台` owns Job monitoring, operational source/job state, technical recovery, server-side article search, and opening the shared Article/Event drawer.
+- The Article drawer owns content calibration, human review, Event correction, publication decisions, and Event-level manual push. Do not merge these service responsibilities into the task surface.
+- Settings sections are lazy-loaded. Sensitive AI keys and Webhooks are revealed only through their protected path and must not be overwritten by ordinary saves before reveal succeeds.
+- `/tools` reads non-archived `ToolDirectoryItem` rows. The seed snapshot runs only when the table is empty and is not a runtime fallback.
+- Tool statuses are `active`, `beta`, `maintenance`, `coming_soon`, and `disabled`; only `active` or `beta` entries with a valid public HTTPS URL are clickable. Tags are `free`, `paid`, `popular`, `updated`, and `latest`.
+- Public pages share `PublicPageShell`, the public header/footer, and `src/lib/public-brand.ts`. Keep public styling flat, square, low-decoration, and scoped away from admin UI.
 
-- `npm run dev` — start the development server at `http://localhost:3011`.
-- `npm run lint` — run ESLint.
-- `npm run typecheck` — type-check without emitting files.
-- `npm test` — run the default Vitest suite (excluding the migration smoke test).
-- `npm run test:critical` — run the critical business suite; `npm run test:migrations` validates a clean SQLite migration path; `npm run test:all` runs both the normal suite and migration smoke.
-- `npm run verify` — run lint, type-check, all automated tests, and the production build.
-- `npm run build` — create the production build; `npm run start` — serve it.
-- `npm run db:migrate` — create/apply a local development migration; `npm run db:generate` — regenerate Prisma Client.
-- `npm run db:migrate:status` — verify migration state before delivery.
-- `npm run db:optimize` — enable/verify SQLite WAL runtime settings and run `PRAGMA optimize` after migrations.
+## Workflow and Performance Rules
 
-Use `npm run db:migrate:deploy` for routine production migrations. The current migration chain starts at `20260731120000_current_schema_baseline` and includes the ordered `push_delivery_updated_at` and `event_interaction_metrics` migrations; production databases with any other migration history must be backed up and fully reinitialized. Do not use `db:push` or `db:reset` in production.
+- Single-article recovery uses `POST /api/articles/[id]/workflow`: `retry` handles the current recoverable failure; `regenerate` resets and recomputes from the requested stage. Neither is a full repush shortcut.
+- Push delivery modes stay `normal`, `retry_failed`, `manual_force`, and `repush_all`. `manual_force` may bypass score, relevance, and the automatic switch, but still requires an active Event, eligible representative, completed AI, and completed clustering.
+- Batch process, AI, and cluster stages drain all currently eligible backlog before a Job completes. Query limits are chunk sizes, not completion boundaries.
+- Technical failures use finite automatic retries, then become manual work or may be ignored without deleting the Article.
+- Crawl-log source groups include enabled, non-deleted sources only. Merge every current manual/auto-retry technical item by Article ID so actionable failures cannot disappear outside the bounded recent window.
+- Keep crawl polling adaptive: fast while a Job runs, slow while idle, paused while hidden. Keep article-detail cache short-lived and invalidate it after writes.
+- Crawl-log DTOs may expose the final effective score after AI completion plus lightweight ad/duplicate labels. Do not expose score breakdowns, ad probability, confidence, or content-category fields there.
+- Prefer these lightweight database-backed mechanisms. Do not add Redis, a message queue, browser-memory work queues, or compatibility layers without measured need.
 
-## Coding Style & Naming Conventions
+## Database and Deployment
 
-Use strict TypeScript, two-space indentation, single quotes, semicolons, and the `@/*` import alias. Prefer small typed functions and existing service boundaries. Name components and types in PascalCase, functions and variables in camelCase, and tests as `*.test.ts`. Keep public visibility rules in `src/lib/public-article-service.ts`, setting definitions in `src/lib/settings-catalog.ts`, and manual correction feedback in `src/lib/feedback-service.ts`. Run ESLint before submitting.
+- `prisma/migrations/` is the complete supported migration set. Production with an unexpected or incomplete history must be backed up and rebuilt; there is no historical compatibility bridge.
+- Routine production migration uses `npm run db:migrate:deploy`. Never use `db:push` or `db:danger:reset` in production.
+- Deployment archives are unpacked outside the app directory, then synchronized with `rsync --delete` while preserving `.env*`, `db/`, and `node_modules/`.
+- Stop PM2 and create a consistent SQLite `.backup` before normal production migrations. PM2 runs one `h2-hot2` instance.
+- `reset_production=yes` deletes production SQLite without backup. Use it only after explicit approval to lose production data.
+- Routine application releases do not clear the server-wide Nginx cache or reload Nginx.
 
-## Testing Guidelines
+## Commands
 
-Vitest discovers tests under `tests/`. Add or update regression tests for pipeline, deduplication, API, database, cancellation, or push-delivery changes. Run the relevant file first, then `npm test`; run `npm run test:migrations` for schema/migration changes. No historical database bridge is maintained. No coverage threshold is configured.
+- `npm run dev` — development server at `http://localhost:3011`.
+- `npm run lint` — ESLint; `npm run typecheck` — TypeScript without emit.
+- `npm test` — default Vitest suite; `npm run test:critical` — critical business suite.
+- `npm run test:migrations` — clean SQLite migration path; `npm run test:all` — default plus migration smoke.
+- `npm run verify` — lint, typecheck, all tests, and production build.
+- `npm run build` / `npm run start` — production build and port `3011` service.
+- `npm run db:migrate:status`, `npm run db:migrate:deploy`, `npm run db:generate`, and `npm run db:optimize` — routine database operations.
 
-## Commit & Pull Request Guidelines
+## Code and Delivery Style
 
-Follow the existing Conventional Commit style, such as `feat: add source retry` or `fix: preserve partial push results`. PRs should explain the change, list validation commands, link an issue, and include screenshots for UI changes. Call out schema/migration, environment, or deployment impacts.
-
-## Security & Configuration
-
-Never commit `.env`, API keys, Webhook URLs, SQLite data, or deployment archives. Production requires stable `API_TOKEN` and `SETTINGS_ENCRYPTION_KEY`; set `NEXT_PUBLIC_SITE_URL` for canonical URLs and sitemap generation. Back up the database before reinitialization; do not attempt an in-place compatibility upgrade for obsolete migration history.
+- Use strict TypeScript, two-space indentation, single quotes, semicolons, and the `@/*` alias.
+- Prefer small typed functions and existing service boundaries. Components and Route Handlers should orchestrate, not own business policy.
+- Name components and types in PascalCase, functions and variables in camelCase, and tests `*.test.ts`.
+- Keep setting definitions in `src/lib/settings-catalog.ts`, publication policy in the public/event services, feedback in `src/lib/feedback-service.ts`, and Excel export in `src/lib/export/`.
+- Add or update regression tests for pipeline, deduplication, API, database, cancellation, push-delivery, schema, or migration changes. Run the relevant test first, then the proportional suite.
+- Follow Conventional Commits. PRs explain scope, validation, schema/deployment impact, and include screenshots for UI changes.
+- Never commit `.env`, credentials, Webhooks, SQLite data, export files, or deployment archives.
