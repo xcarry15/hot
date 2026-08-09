@@ -493,7 +493,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
               onArticleClick={openPopularArticle}
             />
 
-            <div className="grid min-w-0 gap-1">
+            <div className="grid min-w-0 max-w-full gap-1">
               <DailyNewArticlesCard articles={analytics.dailyNewArticles} />
               <DailyPublicArticlesCard articles={analytics.dailyNewArticles} />
               <DailyPushedArticlesCard articles={analytics.dailyNewArticles} />
