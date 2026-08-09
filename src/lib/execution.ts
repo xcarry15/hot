@@ -42,11 +42,12 @@ import {
   startJobHeartbeat,
   stopJobHeartbeat,
 } from './job-progress';
-import { ACTIVE_JOB_STATUSES, CLAIMABLE_JOB_STATUSES } from './job-status';
+import { ACTIVE_JOB_STATUSES } from './job-status';
 import { assertJobNotCancelled } from './execution-cancellation';
 import { executeCollectJob, summarizeCollectResult } from './execution-collect';
 import { executeAiJob } from './execution-ai';
 import { executeMaintenanceJob } from './execution-maintenance';
+import { claimJob, renewJobLease, startJobCancellationWatcher } from './execution-lease';
 import {
   executeClusterJob,
   executeProcessJob,
@@ -61,9 +62,7 @@ export {
   validateSingleArticleWorkflow,
 } from './execution-article-workflow';
 
-const LEASE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
-const CANCELLATION_POLL_INTERVAL_MS = 1_000; // 1 second
 const JOB_MAX_ATTEMPTS = 3;
 const JOB_RETRY_BASE_DELAY_MS = 60_000;
 const JOB_RETRY_MAX_DELAY_MS = 10 * 60 * 1000;
@@ -103,100 +102,6 @@ export function computeIdempotencyKey(type: JobType, payload: Record<string, unk
     return `workflow:${articleId}:${payload.intent}:${payload.startAt}`;
   }
   return `${type}:${trigger}:${Date.now()}`;
-}
-
-function workerId(): string {
-  const pid = typeof process !== 'undefined' && process.pid ? String(process.pid) : '0';
-  const host = typeof process !== 'undefined' && process.env?.HOSTNAME
-    ? process.env.HOSTNAME : 'local';
-  return `${host}:${pid}`;
-}
-
-/** Attempt to atomically claim and start a queued job. Returns the jobId if claimed. */
-async function claimAndRunJob(jobId: string): Promise<boolean> {
-  const owner = workerId();
-  const now = new Date();
-  const leaseExpires = new Date(now.getTime() + LEASE_DURATION_MS);
-
-  try {
-    const updated = await db.job.updateMany({
-      where: {
-      id: jobId,
-      status: { in: [...CLAIMABLE_JOB_STATUSES] },
-      AND: [
-        {
-          OR: [
-            { leaseExpiresAt: null },
-            { leaseExpiresAt: { lt: now } },
-          ],
-        },
-        {
-          OR: [
-            { availableAt: null },
-            { availableAt: { lte: now } },
-          ],
-        },
-      ],
-      },
-      data: {
-        status: 'running',
-        leaseOwner: owner,
-        leaseExpiresAt: leaseExpires,
-        startedAt: now,
-        availableAt: null,
-        completedAt: null,
-        error: '',
-        attempt: { increment: 1 },
-      },
-    });
-    return updated.count > 0;
-  } catch (error) {
-    console.error('[execution] claimAndRunJob failed:', error);
-    return false;
-  }
-}
-
-async function renewLease(jobId: string): Promise<boolean> {
-  const now = new Date();
-  const updated = await db.job.updateMany({
-    where: { id: jobId, status: 'running', leaseOwner: workerId() },
-    data: { leaseExpiresAt: new Date(now.getTime() + LEASE_DURATION_MS), heartbeatAt: now },
-  });
-  return updated.count === 1;
-}
-
-/**
- * Stop routes can be compiled into a different module instance from the
- * detached executor. Poll the persisted state so a DB-only cancellation also
- * reaches the executor's AbortSignal while a stage is still running.
- */
-function startJobCancellationWatcher(jobId: string, controller: AbortController): { stop(): void } {
-  let stopped = false;
-  let timer: NodeJS.Timeout | null = null;
-
-  const poll = async () => {
-    try {
-      const job = await db.job.findUnique({
-        where: { id: jobId },
-        select: { status: true },
-      });
-      if ((job?.status === 'cancel_requested' || job?.status === 'cancelled') && !controller.signal.aborted) {
-        controller.abort(new Error('Job cancelled'));
-      }
-    } catch (error) {
-      console.error(`[execution] cancellation check failed for ${jobId}:`, error);
-    } finally {
-      if (!stopped) timer = setTimeout(() => { void poll(); }, CANCELLATION_POLL_INTERVAL_MS);
-    }
-  };
-
-  timer = setTimeout(() => { void poll(); }, CANCELLATION_POLL_INTERVAL_MS);
-  return {
-    stop() {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-    },
-  };
 }
 
 /**
@@ -343,7 +248,7 @@ async function runPipeline(
     // Periodic lease renewal — if the process hangs, the lease expires and
     // another worker can claim the job.
     leaseTimer = setInterval(() => {
-      void Promise.all([renewLease(jobId), runnerLease.renew()]).then(([jobLeaseRenewed, runnerLeaseRenewed]) => {
+      void Promise.all([renewJobLease(jobId), runnerLease.renew()]).then(([jobLeaseRenewed, runnerLeaseRenewed]) => {
         if ((!jobLeaseRenewed || !runnerLeaseRenewed) && !activeController.signal.aborted) {
           console.error(`[execution] runner lease lost for ${jobId}; stopping stale worker`);
           activeController.abort(new Error('Job runner lease lost'));
@@ -520,7 +425,7 @@ async function startClaimedJob(
   const runnerLease = existingRunnerLease ?? await acquireJobRunnerLease();
   if (!runnerLease) return null;
 
-  const claimed = await claimAndRunJob(jobId);
+  const claimed = await claimJob(jobId);
   if (!claimed) {
     await runnerLease.release();
     return null;

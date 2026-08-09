@@ -12,6 +12,7 @@
     "test:critical": "vitest run tests/article-pipeline-status.test.ts tests/article-service.test.ts tests/analyze-provider-failure.test.ts tests/technical-work-queue.test.ts tests/collect-url-dedup.test.ts tests/workflow-contract.test.ts tests/stage-runner.test.ts tests/event-clustering.test.ts tests/event-release-policy.test.ts tests/event-service.test.ts tests/event-push-delivery.test.ts tests/public-publication-service.test.ts tests/source-service.test.ts tests/source-actions.test.ts tests/execution-concurrency.test.ts tests/timeout-cancellation.test.ts tests/maintenance-service.test.ts",
     "test:migrations": "vitest run tests/migrations.test.ts --maxWorkers=1 --reporter=verbose",
     "test:all": "npm run test && npm run test:migrations",
+    "test:e2e": "playwright test",
     "verify": "npm run lint && npm run typecheck && npm run test:all && npm run build",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
@@ -57,6 +58,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "25.9.2",
     "@types/node-cron": "^3.0.11",

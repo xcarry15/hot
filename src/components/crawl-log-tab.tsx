@@ -53,31 +53,18 @@ import {
 import { stopWorker, triggerCrawlStage } from '@/features/jobs-api.client'
 import { triggerArticleWorkflow, updateArticleTechnicalStatus } from '@/features/articles-api.client'
 import { retrySource, retrySources } from '@/features/sources-api.client'
-
-type WorkflowStage = 'collect' | 'process' | 'ai' | 'cluster' | 'push'
-type WorkflowAction = WorkflowStage | 'all'
-
-const WORKFLOW_STAGES: readonly WorkflowStage[] = ['collect', 'process', 'ai', 'cluster', 'push']
-const WORKFLOW_STAGE_LABELS: Record<WorkflowStage, string> = {
-  collect: '采集',
-  process: '处理',
-  ai: 'AI',
-  cluster: '聚类',
-  push: '推送',
-}
-const WORKFLOW_SINGLE_STAGES: Record<WorkflowStage, WorkflowStage[]> = {
-  collect: ['collect'],
-  process: ['process', 'ai', 'cluster'],
-  cluster: ['cluster'],
-  ai: ['ai', 'cluster'],
-  push: ['push'],
-}
-
-const WORKBENCH_STEP_BUTTON_CLASS = 'h-6 w-full px-0 text-[11px] sm:h-7 sm:w-[52px] sm:px-2 sm:text-xs'
-const WORKBENCH_TOGGLE_CLASS = 'flex h-6 items-center justify-center gap-0.5 border border-border/70 bg-background/60 px-0.5 text-[10px] text-muted-foreground select-none cursor-pointer sm:h-auto sm:gap-1 sm:border-0 sm:bg-transparent sm:px-0 sm:text-xs'
-const WORKBENCH_SWITCH_CLASS = 'scale-75'
-const WORKBENCH_ACTION_CLASS = 'h-6 w-full gap-0.5 px-1 text-[11px] sm:h-7 sm:w-auto sm:gap-1 sm:px-2 sm:text-xs'
-const WORKBENCH_PRIMARY_ACTION_CLASS = `${WORKBENCH_ACTION_CLASS} whitespace-nowrap sm:px-2.5`
+import {
+  WORKFLOW_STAGES,
+  WORKFLOW_STAGE_LABELS,
+  WORKFLOW_SINGLE_STAGES,
+  WORKBENCH_STEP_BUTTON_CLASS,
+  WORKBENCH_TOGGLE_CLASS,
+  WORKBENCH_SWITCH_CLASS,
+  WORKBENCH_ACTION_CLASS,
+  WORKBENCH_PRIMARY_ACTION_CLASS,
+  type WorkflowStage,
+  type WorkflowAction,
+} from './crawl-log/workflow'
 
 // ========== Main Component ==========
 

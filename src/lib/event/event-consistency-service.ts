@@ -7,6 +7,8 @@ import type { Prisma } from '@prisma/client';
 import { assertNotAborted } from '@/lib/worker-stop';
 
 const EVENT_REPAIR_BATCH_SIZE = 100;
+export const EVENT_CONSISTENCY_REPAIR_PHASES = ['attached', 'duplicate-key', 'candidate-review'] as const;
+export type EventConsistencyRepairPhase = (typeof EVENT_CONSISTENCY_REPAIR_PHASES)[number];
 
 export interface ConsistencyViolation {
   eventId: string;
@@ -136,16 +138,17 @@ export async function repairAttachedClusterArticle(articleId: string): Promise<b
   return result;
 }
 
-export async function repairAttachedClusterFailures(limit = EVENT_REPAIR_BATCH_SIZE): Promise<number> {
+export async function repairAttachedClusterFailures(limit = EVENT_REPAIR_BATCH_SIZE, cursor?: string): Promise<number> {
   const articles = await db.article.findMany({
     where: {
+      ...(cursor ? { id: { gt: cursor } } : {}),
       eventId: { not: null },
       OR: [
         { clusterStatus: 'failed' },
         { aiStatus: { not: 'done' } },
       ],
     },
-    orderBy: { updatedAt: 'asc' },
+    orderBy: { id: 'asc' },
     take: Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)),
     select: { id: true },
   });
@@ -165,9 +168,10 @@ export async function repairAttachedClusterFailures(limit = EVENT_REPAIR_BATCH_S
  * 保留最早 Event 作为待确认的基准，把后续 Event 的同 key 成员降为
  * needs_review；这样旧数据也重新经过公开/推送安全门，而不会继续重复对外释放。
  */
-export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BATCH_SIZE): Promise<number> {
+export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BATCH_SIZE, cursor?: string): Promise<number> {
   const rows = await db.article.findMany({
     where: {
+      ...(cursor ? { id: { gt: cursor } } : {}),
       eventId: { not: null },
       aiStatus: 'done',
       clusterStatus: 'clustered',
@@ -180,15 +184,35 @@ export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BAT
       eventKey: true,
       event: { select: { id: true, createdAt: true } },
     },
-    orderBy: [{ eventKey: 'asc' }, { createdAt: 'asc' }],
+    orderBy: { id: 'asc' },
+    take: Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)),
   });
 
+  const eventKeys = [...new Set(rows.map((row) => row.eventKey).filter(Boolean))];
+  const candidateEvents = eventKeys.length === 0
+    ? []
+    : await db.event.findMany({
+      where: {
+        status: 'active',
+        clusterReviewStatus: 'confirmed',
+        articles: { some: { eventKey: { in: eventKeys }, aiStatus: 'done', clusterStatus: 'clustered' } },
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        articles: {
+          where: { eventKey: { in: eventKeys }, aiStatus: 'done', clusterStatus: 'clustered' },
+          select: { eventKey: true },
+        },
+      },
+    });
   const byKey = new Map<string, Map<string, { eventId: string; eventCreatedAt: Date }>>();
-  for (const row of rows) {
-    if (!row.eventId || !row.event) continue;
-    const events = byKey.get(row.eventKey) ?? new Map();
-    events.set(row.eventId, { eventId: row.eventId, eventCreatedAt: row.event.createdAt });
-    byKey.set(row.eventKey, events);
+  for (const event of candidateEvents) {
+    for (const article of event.articles) {
+      const events = byKey.get(article.eventKey) ?? new Map();
+      events.set(event.id, { eventId: event.id, eventCreatedAt: event.createdAt });
+      byKey.set(article.eventKey, events);
+    }
   }
 
   const targets: Array<{ eventId: string; eventKey: string; candidateEventId: string }> = [];
@@ -287,9 +311,10 @@ export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BAT
  * 将这类仍指向 active 候选 Event 的记录收敛为待复核，避免历史候选继续
  * 绕过公开与推送门禁；已失效候选不再阻断正常数据。
  */
-export async function repairPersistedCandidateReviews(limit = EVENT_REPAIR_BATCH_SIZE): Promise<number> {
+export async function repairPersistedCandidateReviews(limit = EVENT_REPAIR_BATCH_SIZE, cursor?: string): Promise<number> {
   const audits = await db.eventClusterAudit.findMany({
     where: {
+      ...(cursor ? { id: { gt: cursor } } : {}),
       actor: 'system',
       action: { in: ['create', 'fallback_create'] },
       candidateEventId: { not: null },
@@ -298,7 +323,8 @@ export async function repairPersistedCandidateReviews(limit = EVENT_REPAIR_BATCH
       article: { is: { aiStatus: 'done', clusterStatus: 'clustered' } },
     },
     select: { articleId: true, assignedEventId: true, createdAt: true },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { id: 'asc' },
+    take: Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)),
   });
   const targets = [...new Map(audits.map((audit) => [
     `${audit.assignedEventId}:${audit.articleId}`,
@@ -355,6 +381,84 @@ export async function repairPersistedCandidateReviews(limit = EVENT_REPAIR_BATCH
   }
   if (refreshed.size > 0) invalidatePublicArticleCache();
   return repaired;
+}
+
+async function countConsistencyPage(
+  phase: EventConsistencyRepairPhase,
+  cursor: string | undefined,
+  limit: number,
+): Promise<{ ids: string[]; hasMore: boolean }> {
+  const take = Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE));
+  if (phase === 'attached') {
+    const rows = await db.article.findMany({
+      where: {
+        ...(cursor ? { id: { gt: cursor } } : {}),
+        eventId: { not: null },
+        OR: [{ clusterStatus: 'failed' }, { aiStatus: { not: 'done' } }],
+      },
+      orderBy: { id: 'asc' },
+      take,
+      select: { id: true },
+    });
+    return { ids: rows.map((row) => row.id), hasMore: rows.length === take };
+  }
+  if (phase === 'duplicate-key') {
+    const rows = await db.article.findMany({
+      where: {
+        ...(cursor ? { id: { gt: cursor } } : {}),
+        eventId: { not: null },
+        aiStatus: 'done',
+        clusterStatus: 'clustered',
+        eventKey: { not: '' },
+        event: { is: { status: 'active', clusterReviewStatus: 'confirmed' } },
+      },
+      orderBy: { id: 'asc' },
+      take,
+      select: { id: true },
+    });
+    return { ids: rows.map((row) => row.id), hasMore: rows.length === take };
+  }
+  const rows = await db.eventClusterAudit.findMany({
+    where: {
+      ...(cursor ? { id: { gt: cursor } } : {}),
+      actor: 'system',
+      action: { in: ['create', 'fallback_create'] },
+      candidateEventId: { not: null },
+      assignedEvent: { is: { status: 'active', clusterReviewStatus: 'confirmed' } },
+      candidateEvent: { is: { status: 'active' } },
+      article: { is: { aiStatus: 'done', clusterStatus: 'clustered' } },
+    },
+    orderBy: { id: 'asc' },
+    take,
+    select: { id: true },
+  });
+  return { ids: rows.map((row) => row.id), hasMore: rows.length === take };
+}
+
+/**
+ * 历史一致性修复的单页入口。每次只读取一个有序 ID 窗口，调用方把
+ * phase/cursor 写入 Maintenance Job payload，避免恢复时重新全表加载。
+ */
+export async function repairEventConsistencyPage(
+  phase: EventConsistencyRepairPhase,
+  cursor?: string,
+  limit = EVENT_REPAIR_BATCH_SIZE,
+  signal?: AbortSignal,
+): Promise<{ repaired: number; nextCursor: string | null; done: boolean }> {
+  assertNotAborted(signal);
+  const page = await countConsistencyPage(phase, cursor, limit);
+  if (page.ids.length === 0) {
+    return { repaired: 0, nextCursor: null, done: true };
+  }
+  let repaired = 0;
+  if (phase === 'attached') repaired = await repairAttachedClusterFailures(limit, cursor);
+  if (phase === 'duplicate-key') repaired = await repairDuplicateEventKeyCandidates(limit, cursor);
+  if (phase === 'candidate-review') repaired = await repairPersistedCandidateReviews(limit, cursor);
+  return {
+    repaired,
+    nextCursor: page.ids[page.ids.length - 1] ?? null,
+    done: !page.hasMore,
+  };
 }
 
 /**

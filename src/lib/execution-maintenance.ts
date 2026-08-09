@@ -8,10 +8,15 @@ import { rebuildPublicPublicationSnapshotInBatches } from './public-publication-
 import { advanceJobProgress, startJobStage } from './job-progress';
 import { assertJobNotCancelled } from './execution-cancellation';
 import { assertNotAborted } from './worker-stop';
-import { repairDirtyEvents } from './event/event-consistency-service';
+import {
+  EVENT_CONSISTENCY_REPAIR_PHASES,
+  repairDirtyEvents,
+  repairEventConsistencyPage,
+  type EventConsistencyRepairPhase,
+} from './event/event-consistency-service';
 
-type MaintenanceJobAction = AiResetAction | 'repair-events';
-const MAINTENANCE_ACTIONS = new Set<MaintenanceJobAction>(['reset-ai', 'reset-ai-failed', 'repair-events']);
+type MaintenanceJobAction = AiResetAction | 'repair-events' | 'repair-events-history';
+const MAINTENANCE_ACTIONS = new Set<MaintenanceJobAction>(['reset-ai', 'reset-ai-failed', 'repair-events', 'repair-events-history']);
 
 function parseAction(value: unknown): MaintenanceJobAction {
   if (typeof value === 'string' && MAINTENANCE_ACTIONS.has(value as MaintenanceJobAction)) {
@@ -50,6 +55,44 @@ export async function executeMaintenanceJob(
         doneDelta: count,
         currentItemLabel: `已修复 ${repaired}/${total} 个 Event`,
       });
+    }
+    return { action, repaired, total };
+  }
+
+  if (action === 'repair-events-history') {
+    const counts = await Promise.all([
+      db.article.count({ where: { eventId: { not: null }, OR: [{ clusterStatus: 'failed' }, { aiStatus: { not: 'done' } }] } }),
+      db.article.count({ where: { eventId: { not: null }, aiStatus: 'done', clusterStatus: 'clustered', eventKey: { not: '' }, event: { is: { status: 'active', clusterReviewStatus: 'confirmed' } } } }),
+      db.eventClusterAudit.count({ where: { actor: 'system', action: { in: ['create', 'fallback_create'] }, candidateEventId: { not: null }, assignedEvent: { is: { status: 'active', clusterReviewStatus: 'confirmed' } }, candidateEvent: { is: { status: 'active' } }, article: { is: { aiStatus: 'done', clusterStatus: 'clustered' } } } }),
+    ]);
+    const total = counts.reduce((sum, count) => sum + count, 0);
+    await startJobStage(jobId, { stage: 'cluster', total, currentItemLabel: '扫描历史 Event 一致性' });
+    let phase = EVENT_CONSISTENCY_REPAIR_PHASES.includes(payload.phase as EventConsistencyRepairPhase)
+      ? payload.phase as EventConsistencyRepairPhase
+      : EVENT_CONSISTENCY_REPAIR_PHASES[0];
+    let cursor = typeof payload.cursor === 'string' ? payload.cursor : undefined;
+    let repaired = parseNonNegativeInt(payload.repaired);
+    while (phase) {
+      assertNotAborted(signal);
+      await assertJobNotCancelled(jobId);
+      const page = await repairEventConsistencyPage(phase, cursor, undefined, signal);
+      repaired += page.repaired;
+      const nextPhaseIndex = EVENT_CONSISTENCY_REPAIR_PHASES.indexOf(phase) + 1;
+      if (page.done) {
+        phase = EVENT_CONSISTENCY_REPAIR_PHASES[nextPhaseIndex];
+        cursor = undefined;
+      } else {
+        cursor = page.nextCursor ?? undefined;
+      }
+      await db.job.updateMany({
+        where: { id: jobId, status: 'running' },
+        data: {
+          payload: JSON.stringify({ ...payload, action, phase: phase ?? null, cursor: cursor ?? null, repaired, total }),
+          currentItemLabel: `历史一致性修复 ${repaired} 项`,
+        },
+      });
+      if (page.repaired > 0) await advanceJobProgress(jobId, { doneDelta: page.repaired, currentItemLabel: `历史一致性修复 ${repaired} 项` });
+      if (!phase) break;
     }
     return { action, repaired, total };
   }

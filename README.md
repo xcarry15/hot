@@ -83,6 +83,10 @@
 
 `设置 → 数据` 的 AI 重置会进入可恢复的 `maintenance` Job：每批 100 篇文章独立提交事务，并将游标写回 Job payload，进程重启后可继续。概览默认只查询近 1 周；选择“全部”时关闭自动刷新。Event 一致性修复单独消费 `EventDirty` 队列，不在聚类前重复全表扫描。
 
+公开互动统计采用 `confirmed_request_count` 口径：客户端观察确认后的每次浏览请求计数，不等同于去重访客数；Event 累计值与按日趋势事实在同一事务中写入。历史 Event 一致性修复使用独立维护 Job，按 `phase/cursor` 分页续跑。
+
+工作流租约、续租和取消轮询位于 `src/lib/execution-lease.ts`；Excel 导出分页位于 `src/lib/export/export-paging.ts`；工作台阶段常量位于 `src/components/crawl-log/workflow.ts`，编排文件只负责组合业务边界。CI 在生产构建后启动临时服务，执行登录、公开资讯、工具可用性和加密备份四项浏览器冒烟用例。
+
 ## 项目目录
 
 ```text

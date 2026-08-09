@@ -13,7 +13,7 @@
  */
 import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
-import { processWithAI } from '@/lib/ai';
+import { aiProcessSelect, processWithAI, toAiProcessArticle } from '@/lib/ai';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
 import { assertNotAborted } from '@/lib/worker-stop';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
@@ -67,40 +67,6 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   const total = await db.article.count({ where: pendingWhere });
   if (jobId) await startJobStage(jobId, { stage: 'ai', total });
 
-  const articleSelect = {
-      id: true,
-      title: true,
-      cleanContent: true,
-      articleBody: true,
-      fetchStatus: true,
-      publishedAt: true,
-      createdAt: true,
-      aiStatus: true,
-      eventId: true,
-      aiRetryCount: true,
-      relevance: true,
-      summary: true,
-      brand: true,
-      category: true,
-      eventSubjects: true,
-      eventAction: true,
-      eventObject: true,
-      eventKey: true,
-      eventKeyConfidence: true,
-      keyPoints: true,
-      score: true,
-      keywordMatched: true,
-      eventScore: true,
-      contentScore: true,
-      rawScore: true,
-      adProbability: true,
-      aiConfidence: true,
-      isAd: true,
-      manualOverrides: true,
-      aiSnapshot: true,
-      manualCorrectedAt: true,
-  } as const satisfies Prisma.ArticleSelect;
-
   let processed = 0;
   let errors = 0;
   let deferred = 0;
@@ -115,12 +81,13 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   let providerPause: { retryable: boolean; errorKind?: string; message?: string } | null = null;
   let providerUnavailable = false;
   while (!providerPause) {
-    const pending = await db.article.findMany({
+    const pendingRows = await db.article.findMany({
       where: pendingWhere,
-      select: articleSelect,
+      select: aiProcessSelect,
       orderBy: { createdAt: 'asc' },
       take: MAX_BATCH_SIZE,
     });
+    const pending = pendingRows.map(toAiProcessArticle);
     if (pending.length === 0) break;
     for (let i = 0; i < pending.length; i += concurrency) {
       assertNotAborted(signal);

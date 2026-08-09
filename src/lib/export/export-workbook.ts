@@ -2,8 +2,13 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import { EXPORT_FORMAT_VERSION, type ExportFilter } from '@/contracts/data-export';
 import { projectArticleSteps, type ArticleStepInput } from '@/lib/article-pipeline-status';
+import {
+  appendByIdChunksPaged,
+  appendIdPages,
+  EXPORT_BATCH_SIZE,
+} from './export-paging';
 
-export const EXPORT_BATCH_SIZE = 250;
+export { EXPORT_BATCH_SIZE } from './export-paging';
 
 type ExportDb = PrismaClient | Prisma.TransactionClient;
 type CellValue = string | number | boolean | Date | null | undefined;
@@ -424,44 +429,6 @@ function createSheetBuilder(
       }
     },
   };
-}
-
-function splitIds(ids: Set<string>): string[][] {
-  const values = [...ids];
-  const chunks: string[][] = [];
-  for (let index = 0; index < values.length; index += 500) chunks.push(values.slice(index, index + 500));
-  return chunks;
-}
-
-async function appendByIdChunksPaged<T extends { id: string }>(
-  ids: Set<string>,
-  load: (chunk: string[], cursor?: string) => Promise<T[]>,
-  append: (rows: T[]) => void | Promise<void>,
-): Promise<void> {
-  for (const chunk of splitIds(ids)) {
-    let cursor: string | undefined;
-    while (true) {
-      const page = await load(chunk, cursor);
-      if (page.length === 0) break;
-      await append(page);
-      if (page.length < EXPORT_BATCH_SIZE) break;
-      cursor = page[page.length - 1].id;
-    }
-  }
-}
-
-async function appendIdPages<T extends { id: string }>(
-  load: (cursor?: string) => Promise<T[]>,
-  append: (rows: T[]) => void | Promise<void>,
-): Promise<void> {
-  let cursor: string | undefined;
-  while (true) {
-    const page = await load(cursor);
-    if (page.length === 0) break;
-    await append(page);
-    if (page.length < EXPORT_BATCH_SIZE) break;
-    cursor = page[page.length - 1].id;
-  }
 }
 
 function parseDate(value: string): Date | undefined {

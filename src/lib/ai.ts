@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { db } from './db';
 import { AIClientError, createChatCompletion, getAISettings } from './ai-client';
 import type { AISettings } from './ai-client';
@@ -29,6 +30,12 @@ import {
 } from './article-calibration';
 import { parseAiAnalysisOutput } from './ai-output';
 import { refreshArticleSearchIndex } from './article-search-index';
+import {
+  AI_STATUS_CODEC,
+  FETCH_STATUS_CODEC,
+  type AIStatus,
+  type FetchStatusValue,
+} from '@/contracts/state';
 
 // v23：每篇文章只请求一次 AI；提示词压缩后保留事实、身份和可读洞察。
 const PROMPT_VERSION = 'v23';
@@ -58,45 +65,65 @@ export const AI_MAX_RETRIES = 5;
 /**
  * Deep analysis with full article content
  */
-export type AIProcessArticle = {
-  id: string;
-  title: string;
-  aiStatus: string;
+/** AI 批处理唯一查询投影；不要在调用处重新声明或扩展为 Article。 */
+export const aiProcessSelect = {
+  id: true,
+  title: true,
+  cleanContent: true,
+  articleBody: true,
+  fetchStatus: true,
+  publishedAt: true,
+  createdAt: true,
+  aiStatus: true,
+  eventId: true,
+  aiRetryCount: true,
+  relevance: true,
+  summary: true,
+  brand: true,
+  category: true,
+  eventSubjects: true,
+  eventAction: true,
+  eventObject: true,
+  eventKey: true,
+  eventKeyConfidence: true,
+  keyPoints: true,
+  score: true,
+  keywordMatched: true,
+  eventScore: true,
+  contentScore: true,
+  rawScore: true,
+  adProbability: true,
+  aiConfidence: true,
+  isAd: true,
+  manualOverrides: true,
+  aiSnapshot: true,
+  manualCorrectedAt: true,
+} as const satisfies Prisma.ArticleSelect;
+
+type AiProcessRow = Prisma.ArticleGetPayload<{ select: typeof aiProcessSelect }>;
+
+export type AiProcessArticle = Omit<AiProcessRow, 'aiStatus' | 'fetchStatus' | 'cleanContent' | 'articleBody' | 'keywordMatched' | 'summary'> & {
+  aiStatus: AIStatus;
+  fetchStatus: FetchStatusValue;
   cleanContent: string | null;
   articleBody: string | null;
-  fetchStatus: 'pending' | 'fetched' | 'failed';
-  publishedAt: Date | null;
-  createdAt: Date;
-  summary: string | null;
-  relevance: number;
-  brand: string;
-  category: string;
-  eventSubjects: string;
-  eventAction: string;
-  eventObject: string;
-  eventKey: string;
-  eventKeyConfidence: number | null;
-  keyPoints: string;
-  score: number;
   keywordMatched: boolean | null;
-  eventScore: number | null;
-  contentScore: number | null;
-  rawScore: number | null;
-  adProbability: number | null;
-  aiConfidence: number | null;
-  isAd: boolean;
-  manualOverrides: string;
-  aiSnapshot: string;
-  manualCorrectedAt: Date | null;
-  aiRetryCount: number;
-  eventId: string | null;
+  summary: string | null;
 };
 
-type MinimalAIProcessArticle = Pick<AIProcessArticle, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'summary' | 'publishedAt'> & {
+export function toAiProcessArticle(row: AiProcessRow): AiProcessArticle {
+  return {
+    ...row,
+    aiStatus: AI_STATUS_CODEC.parse(row.aiStatus),
+    fetchStatus: FETCH_STATUS_CODEC.parse(row.fetchStatus),
+  };
+}
+
+type MinimalAIProcessArticle = Pick<AiProcessArticle, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'summary' | 'publishedAt'> & {
   aiRetryCount?: number;
 };
 
-function normalizeAIProcessArticle(article: AIProcessArticle | MinimalAIProcessArticle): AIProcessArticle {
+function normalizeAIProcessArticle(article: AiProcessArticle | MinimalAIProcessArticle): AiProcessArticle {
   if ('eventId' in article) return article;
   return {
     ...article,
@@ -128,7 +155,7 @@ function normalizeAIProcessArticle(article: AIProcessArticle | MinimalAIProcessA
   };
 }
 
-async function deepAnalyze(article: AIProcessArticle, settings: AISettings, signal?: AbortSignal): Promise<{
+async function deepAnalyze(article: AiProcessArticle, settings: AISettings, signal?: AbortSignal): Promise<{
   eventScore: number;
   isAd: boolean;
   relevance: number;
@@ -241,10 +268,10 @@ export type AIProcessResult = {
   /** Provider 级暂停的可展示原因；不得包含请求正文或密钥。 */
   globalMessage?: string;
 };
-export function processWithAI(article: AIProcessArticle, signal?: AbortSignal): Promise<AIProcessResult>;
+export function processWithAI(article: AiProcessArticle, signal?: AbortSignal): Promise<AIProcessResult>;
 export function processWithAI(article: MinimalAIProcessArticle, signal?: AbortSignal): Promise<AIProcessResult>;
 export async function processWithAI(
-  input: AIProcessArticle | MinimalAIProcessArticle,
+  input: AiProcessArticle | MinimalAIProcessArticle,
   signal?: AbortSignal,
 ): Promise<AIProcessResult> {
   const article = normalizeAIProcessArticle(input);
@@ -473,40 +500,7 @@ export async function reprocessWithAI(
   // 已成功抓取的文章保留 fetchStatus='fetched'，避免"处理"步骤回退变灰。
   const articleData = await db.article.findUnique({
     where: { id: articleId },
-    select: {
-      id: true,
-      title: true,
-      aiStatus: true,
-      eventId: true,
-      cleanContent: true,
-      articleBody: true,
-      rawContent: true,
-      fetchStatus: true,
-      publishedAt: true,
-      createdAt: true,
-      summary: true,
-      relevance: true,
-      category: true,
-      brand: true,
-      eventSubjects: true,
-      eventAction: true,
-      eventObject: true,
-      eventKey: true,
-      eventKeyConfidence: true,
-      keyPoints: true,
-      score: true,
-      keywordMatched: true,
-      eventScore: true,
-      contentScore: true,
-      rawScore: true,
-      adProbability: true,
-      aiConfidence: true,
-      isAd: true,
-      manualOverrides: true,
-      aiSnapshot: true,
-      manualCorrectedAt: true,
-      aiRetryCount: true,
-    },
+    select: aiProcessSelect,
   });
   if (!articleData) return null;
   if (jobId) {
@@ -521,7 +515,7 @@ export async function reprocessWithAI(
       technicalIgnoredAt: null,
     },
   });
-  const result = await processWithAI({ ...articleData, aiStatus: 'pending', aiRetryCount: 0 }, signal);
+  const result = await processWithAI({ ...toAiProcessArticle(articleData), aiStatus: 'pending', aiRetryCount: 0 }, signal);
   if (jobId) {
     await advanceJobProgress(jobId, {
       doneDelta: 1,

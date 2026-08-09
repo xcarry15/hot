@@ -23,6 +23,7 @@ const KNOWN_ACTIONS = [
   'fetch-logs',
   'reset-ai',
   'reset-ai-failed',
+  'repair-events-history',
   'vacuum',
 ] as const;
 
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
 
-    if (action === 'reset-ai' || action === 'reset-ai-failed') {
+    if (action === 'reset-ai' || action === 'reset-ai-failed' || action === 'repair-events-history') {
       const result = await runJob('maintenance', {
         action,
         trigger: 'manual',

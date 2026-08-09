@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   articleCount: vi.fn(),
   articleUpdateMany: vi.fn(),
   processWithAI: vi.fn(),
+  toAiProcessArticle: vi.fn((article: unknown) => article),
   getSetting: vi.fn(),
   advanceJobProgress: vi.fn(),
   startJobStage: vi.fn(),
@@ -25,7 +26,12 @@ vi.mock('@/lib/db', () => ({
     },
   },
 }));
-vi.mock('@/lib/ai', () => ({ processWithAI: mocks.processWithAI, AI_MAX_RETRIES: 5 }));
+vi.mock('@/lib/ai', () => ({
+  processWithAI: mocks.processWithAI,
+  toAiProcessArticle: mocks.toAiProcessArticle,
+  aiProcessSelect: { id: true },
+  AI_MAX_RETRIES: 5,
+}));
 vi.mock('@/lib/settings', () => ({
   getSetting: mocks.getSetting,
   SETTING_KEYS: { AI_CONCURRENCY: 'ai_concurrency' },

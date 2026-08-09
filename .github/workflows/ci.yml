@@ -58,6 +58,7 @@ jobs:
     env:
       DATABASE_URL: file:../db/ci-build.db
       API_TOKEN: ci-only-token
+      SETTINGS_ENCRYPTION_KEY: ci-only-settings-encryption-key-for-e2e
       NEXT_PUBLIC_SITE_URL: https://hot.kfxz.cn
     steps:
       - uses: actions/checkout@v4
@@ -68,4 +69,7 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
       - run: npm run db:migrate:deploy
+      - run: npm run db:seed
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
