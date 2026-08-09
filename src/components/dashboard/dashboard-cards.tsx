@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { DashboardAnalytics } from "@/features/dashboard-api.client"
 import { ChevronLeft, ChevronRight } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 type CrawlTriggerFilter = "all" | DashboardAnalytics["crawlRecords"][number]["trigger"]
 type CrawlStatusFilter = "all" | DashboardAnalytics["crawlRecords"][number]["status"]
@@ -36,12 +36,14 @@ const DATE_LABEL_MIN_GAP_PX = 36
 const RECENT_CONTINUOUS_DATE_LABELS = 5
 
 function useChartContainerWidth(enabled: boolean) {
-  const ref = useRef<HTMLDivElement | null>(null)
+  const [element, setElement] = useState<HTMLDivElement | null>(null)
   const [width, setWidth] = useState(0)
+  const ref = useCallback((node: HTMLDivElement | null) => {
+    setElement(node)
+  }, [])
 
   useEffect(() => {
     if (!enabled) return
-    const element = ref.current
     if (!element) return
 
     const updateWidth = () => setWidth(element.clientWidth)
@@ -51,9 +53,9 @@ function useChartContainerWidth(enabled: boolean) {
     const observer = new ResizeObserver(updateWidth)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [enabled])
+  }, [enabled, element])
 
-  return { ref, width }
+  return [width, ref] as const
 }
 
 function getDateLabelIndexes(length: number, containerWidth: number): Set<number> {
@@ -199,8 +201,8 @@ export function DailyNewArticlesCard({
 }) {
   const total = articles.reduce((sum, item) => sum + item.count, 0)
   const chartAxisMax = getChartAxisMax(Math.max(0, ...articles.map((item) => item.count)))
-  const chartContainer = useChartContainerWidth(articles.length > 0)
-  const dateLabelIndexes = getDateLabelIndexes(articles.length, chartContainer.width)
+  const [containerWidth, setContainerElement] = useChartContainerWidth(articles.length > 0)
+  const dateLabelIndexes = getDateLabelIndexes(articles.length, containerWidth)
   const chartHeight = CHART_HEIGHT
   const plotTop = CHART_PLOT_TOP
   const plotBottom = CHART_PLOT_BOTTOM
@@ -228,7 +230,7 @@ export function DailyNewArticlesCard({
           <span className="text-muted-foreground/75">按入库时间统计 · 单位：篇</span>
         </div>
         {articles.length > 0 ? (
-          <div ref={chartContainer.ref} className="mt-1 h-[180px] min-w-0 max-w-full overflow-hidden border-b border-l px-1 pb-1 pt-2">
+          <div ref={setContainerElement} className="mt-1 h-[180px] min-w-0 max-w-full overflow-hidden border-b border-l px-1 pb-1 pt-2">
             <svg
               className="block h-[160px] w-full"
               viewBox={`0 0 ${chartWidth} ${chartHeight}`}
@@ -288,8 +290,8 @@ function DailyActivityCard({
   emptyText: string
 }) {
   const chartAxisMax = getChartAxisMax(Math.max(0, ...articles.map((item) => item[metric])))
-  const chartContainer = useChartContainerWidth(articles.length > 0)
-  const dateLabelIndexes = getDateLabelIndexes(articles.length, chartContainer.width)
+  const [containerWidth, setContainerElement] = useChartContainerWidth(articles.length > 0)
+  const dateLabelIndexes = getDateLabelIndexes(articles.length, containerWidth)
   const chartHeight = CHART_HEIGHT
   const plotTop = CHART_PLOT_TOP
   const plotBottom = CHART_PLOT_BOTTOM
@@ -314,7 +316,7 @@ function DailyActivityCard({
           <span className="text-muted-foreground/75">按动作发生日 · 单位：次</span>
         </div>
         {articles.length > 0 ? (
-          <div ref={chartContainer.ref} className="mt-1 h-[180px] min-w-0 max-w-full overflow-hidden border-b border-l px-1 pb-1 pt-2">
+          <div ref={setContainerElement} className="mt-1 h-[180px] min-w-0 max-w-full overflow-hidden border-b border-l px-1 pb-1 pt-2">
             <svg
               className="block h-[160px] w-full"
               viewBox={`0 0 ${chartWidth} ${chartHeight}`}
