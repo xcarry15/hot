@@ -26,6 +26,7 @@ const loadAiModel = () => import('@/components/settings/ai-model')
 const loadPrompts = () => import('@/components/settings/prompts')
 const loadPush = () => import('@/components/settings/push')
 const loadData = () => import('@/components/settings/data')
+const loadBackup = () => import('@/components/settings/backup')
 const loadAccount = () => import('@/components/settings/account')
 const loadKeywords = () => import('@/components/keywords-tab')
 const loadDashboard = () => import('@/components/dashboard-tab')
@@ -36,6 +37,7 @@ const AiModelTab = dynamic(loadAiModel, { loading: sectionLoading })
 const PromptsTab = dynamic(loadPrompts, { loading: sectionLoading })
 const PushTab = dynamic(loadPush, { loading: sectionLoading })
 const DataTab = dynamic(loadData, { loading: sectionLoading })
+const BackupTab = dynamic(loadBackup, { loading: sectionLoading })
 const AccountTab = dynamic(loadAccount, { loading: sectionLoading })
 const KeywordsTab = dynamic(loadKeywords, { loading: sectionLoading })
 const DashboardTab = dynamic(loadDashboard, { loading: sectionLoading })
@@ -56,6 +58,7 @@ const sectionLoaders: Record<string, () => Promise<unknown>> = {
   push: loadPush,
   account: loadAccount,
   data: loadData,
+  backup: loadBackup,
   tools: loadToolDirectory,
 }
 
@@ -301,29 +304,6 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     }
   }, [currentSettingsFingerprint, providerConfigs, settings])
 
-  const saveImportedPrompts = async (patch: Partial<SettingsType>) => {
-    const promptPatch = Object.fromEntries(
-      Object.entries(patch).filter(([, value]) => typeof value === 'string'),
-    ) as Record<string, string>
-    setSaving(true)
-    try {
-      await saveSettings(promptPatch)
-      if (mountedRef.current) {
-        // 使用函数式更新，避免导入请求期间的其它用户输入被旧闭包覆盖。
-        setSettings(current => ({ ...current, ...patch }))
-        const baselineSettings = {
-          ...(settingsBaselineStateRef.current ?? settings),
-          ...patch,
-        } as SettingsType
-        const baselineProviders = providerBaselineRef.current ?? providerConfigs
-        settingsBaselineRef.current = settingsFingerprint(baselineSettings, baselineProviders)
-        settingsBaselineStateRef.current = baselineSettings
-      }
-    } finally {
-      if (mountedRef.current) setSaving(false)
-    }
-  }
-
   const handleSave = async () => {
     const submittedSettings = latestSettingsRef.current
     const submittedProviderConfigs = latestProviderConfigsRef.current
@@ -447,7 +427,8 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
             <TabsTrigger value="prompts" data-value="prompts" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">提示词</TabsTrigger>
             <TabsTrigger value="push" data-value="push" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">推送</TabsTrigger>
             <TabsTrigger value="account" data-value="account" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">账户</TabsTrigger>
-            <TabsTrigger value="data" data-value="data" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">数据</TabsTrigger>
+            <TabsTrigger value="data" data-value="data" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">维护</TabsTrigger>
+            <TabsTrigger value="backup" data-value="backup" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">备份</TabsTrigger>
             <TabsTrigger value="tools" data-value="tools" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">工具中心</TabsTrigger>
           </TabsList>
         </div>
@@ -462,6 +443,10 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
 
         <TabsContent value="data" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
           <DataTab />
+        </TabsContent>
+
+        <TabsContent value="backup" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
+          <BackupTab />
         </TabsContent>
 
         <TabsContent value="sources" className="flex-1 m-0 min-h-0 overflow-hidden">
@@ -480,7 +465,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         </TabsContent>
 
         <TabsContent value="prompts" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
-          <PromptsTab settings={settings} setSettings={setSettings} onImportPrompts={saveImportedPrompts} saving={saving} />
+          <PromptsTab settings={settings} setSettings={setSettings} />
         </TabsContent>
 
         <TabsContent value="push" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">

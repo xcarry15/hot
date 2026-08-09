@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -25,8 +25,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Download,
-  FileUp,
   History,
   MessageSquareText,
   RefreshCcw,
@@ -42,7 +40,6 @@ import {
   PROMPT_VERSION_LIMIT,
   SCORE_WEIGHT_META,
   PromptBlockId,
-  PromptBlockKey,
   type PromptVersionKey,
   type PromptVersionSnapshot,
 } from '@/lib/prompts'
@@ -60,29 +57,9 @@ import {
 interface Props {
   settings: Settings
   setSettings: React.Dispatch<React.SetStateAction<Settings>>
-  onImportPrompts: (patch: Partial<Settings>) => Promise<void>
-  saving: boolean
 }
-
-type PromptBackupKey = 'ai_system_prompt' | PromptBlockKey
 
 const DEFAULT_STEP2_CONTENT_MAX_CHARS = getSettingDefaults()[SETTING_KEYS.AI_STEP2_CONTENT_MAX_CHARS]
-
-interface PromptBackupPayload {
-  type: 'hot2-prompt-backup'
-  version: 1
-  exportedAt: string
-  sourceVersion?: {
-    id: string
-    name: string
-    createdAt: string
-  }
-  prompts: Partial<Record<PromptBackupKey, string>>
-}
-
-function isPromptBackupKey(value: string): value is PromptBackupKey {
-  return value === 'ai_system_prompt' || PROMPT_BLOCK_ORDER.some((blockId) => PROMPT_BLOCK_META[blockId].key === value)
-}
 
 function buildPromptVersionSnapshot(settings: Settings): PromptVersionSnapshot {
   const prompts = {
@@ -106,11 +83,7 @@ function promptVersionLabel(key: PromptVersionKey): string {
   return blockId ? PROMPT_BLOCK_META[blockId].label : key
 }
 
-function safeFileNamePart(value: string): string {
-  return value.trim().replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || '未命名版本'
-}
-
-export default function PromptsTab({ settings, setSettings, onImportPrompts, saving }: Props) {
+export default function PromptsTab({ settings, setSettings }: Props) {
   const [resetDialog, setResetDialog] = useState<{ onConfirm: () => void } | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [preview, setPreview] = useState<{ total: number; changed: number; increased: number; decreased: number; samples: { id: string; title: string; before: number; after: number; delta: number }[] } | null>(null)
@@ -121,7 +94,6 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
   const [versionName, setVersionName] = useState('')
   const [versionToLoad, setVersionToLoad] = useState<PromptVersion | null>(null)
   const [versionToCompare, setVersionToCompare] = useState<PromptVersion | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const updateSetting = (key: keyof Settings, value: string) => {
     setSettings(prev => ({ ...prev, [key]: value }))
@@ -195,82 +167,6 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
     }
   }
 
-  const downloadPromptBackup = (prompts: PromptVersionSnapshot, fileName: string, sourceVersion?: PromptVersion) => {
-    const payload: PromptBackupPayload = {
-      type: 'hot2-prompt-backup',
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      prompts,
-    }
-    if (sourceVersion) {
-      payload.sourceVersion = {
-        id: sourceVersion.id,
-        name: sourceVersion.name,
-        createdAt: sourceVersion.createdAt,
-      }
-    }
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = fileName
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const exportPrompts = () => {
-    const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
-    downloadPromptBackup(buildPromptVersionSnapshot(settings), `hot2-prompts-current-${date}.json`)
-    toast.success('当前提示词已导出')
-  }
-
-  const exportPromptVersion = (version: PromptVersion) => {
-    const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
-    downloadPromptBackup(version.prompts, `hot2-prompts-${safeFileNamePart(version.name)}-${date}.json`, version)
-    toast.success(`已导出提示词版本「${version.name}」`)
-  }
-
-  const importPrompts = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-    if (file.size > 1_000_000) {
-      toast.error('文件过大，请确认是否为提示词备份文件')
-      return
-    }
-
-    try {
-      const parsed: unknown = JSON.parse(await file.text())
-      if (!parsed || typeof parsed !== 'object') throw new Error('文件格式无效')
-      const backup = parsed as Partial<PromptBackupPayload>
-      if (backup.type !== 'hot2-prompt-backup' || backup.version !== 1 || !backup.prompts || typeof backup.prompts !== 'object') {
-        throw new Error('不是有效的提示词备份文件')
-      }
-
-      const imported: Partial<Settings> = {}
-      for (const [key, value] of Object.entries(backup.prompts)) {
-        if (isPromptBackupKey(key) && typeof value === 'string') imported[key] = value
-      }
-      if (Object.keys(imported).length === 0) throw new Error('备份文件中没有可识别的提示词')
-
-      const importedSnapshot = buildPromptVersionSnapshot({ ...settings, ...imported })
-      await onImportPrompts(imported)
-      try {
-        const sourceName = typeof backup.sourceVersion?.name === 'string'
-          ? backup.sourceVersion.name
-          : file.name.replace(/\.json$/i, '')
-        const versionName = `导入 · ${safeFileNamePart(sourceName)}`.slice(0, 40)
-        const version = await createPromptVersion({ name: versionName, prompts: importedSnapshot })
-        setVersions(current => [version, ...current].slice(0, PROMPT_VERSION_LIMIT))
-        toast.success(`已导入 ${Object.keys(imported).length} 项提示词，并保存为版本「${version.name}」`)
-      } catch (error) {
-        toast.warning(error instanceof Error ? `提示词已导入，但版本保存失败：${error.message}` : '提示词已导入，但版本保存失败')
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '导入提示词失败')
-    }
-  }
-
   const resetAllPrompts = () => {
     setSettings(prev => ({
       ...prev,
@@ -326,7 +222,7 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b pb-1.5">
             <MessageSquareText className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-semibold">提示词</span>
-            <span className="text-xs text-muted-foreground">— 手动编辑需点底部「保存设置」；备份导入/导出已归入版本管理</span>
+            <span className="text-xs text-muted-foreground">— 手动编辑需点底部「保存设置」；完整备份统一前往「备份」页</span>
             <div className="ml-auto flex flex-wrap items-center gap-1">
               <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={openVersionDialog}>
                 <History className="h-3 w-3" />
@@ -463,19 +359,8 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
         <DialogContent className="max-h-[min(680px,calc(100vh-2rem))] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>提示词版本</DialogTitle>
-            <DialogDescription>保存 System 与 9 个评判块的命名快照；评分权重和其他设置不随版本切换。导入备份会自动生成一个可回退版本。</DialogDescription>
+            <DialogDescription>保存 System 与 9 个评判块的命名快照；评分权重和其他设置不随版本切换。</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-wrap items-center gap-1 border-y py-2">
-            <Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={exportPrompts}>
-              <Download className="h-3 w-3" />
-              导出当前提示词
-            </Button>
-            <Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => fileInputRef.current?.click()} disabled={saving}>
-              <FileUp className="h-3 w-3" />
-              导入提示词备份
-            </Button>
-            <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={importPrompts} className="hidden" />
-          </div>
           <div className="flex gap-2">
             <Input
               value={versionName}
@@ -512,10 +397,6 @@ export default function PromptsTab({ settings, setSettings, onImportPrompts, sav
                 </div>
                 <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs text-violet-700 hover:text-violet-800" onClick={() => openPromptComparison(version)}>对比</Button>
                 <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setVersionToLoad(version)}>载入</Button>
-                <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => exportPromptVersion(version)} title={`导出「${version.name}」`}>
-                  <Download className="h-3 w-3" />
-                  导出
-                </Button>
                 <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive hover:text-destructive" onClick={() => void removePromptVersion(version.id)}>
                   <Trash2 className="h-3 w-3" />
                   删除

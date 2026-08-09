@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toolCreateSchema, toolDirectoryBackupSchema, toolUpdateSchema } from '@/lib/tool-directory-schema';
+import { toolCreateSchema, toolDirectorySnapshotSchema, toolUpdateSchema } from '@/lib/tool-directory-schema';
 
 const validTool = {
   name: '示例工具',
@@ -23,7 +23,7 @@ describe('tool directory input schemas', () => {
   it('要求可用工具使用公网 HTTPS 链接，非可用状态可以没有链接', () => {
     expect(toolCreateSchema.safeParse({ ...validTool, href: 'http://example.com/tool' }).success).toBe(false);
     expect(toolCreateSchema.safeParse({ ...validTool, href: 'https://127.0.0.1/tool' }).success).toBe(false);
-    expect(toolCreateSchema.safeParse({ ...validTool, status: 'beta', href: null }).success).toBe(false);
+    expect(toolCreateSchema.safeParse({ ...validTool, status: 'beta', href: 'https://example.com/tool' }).success).toBe(false);
     expect(toolCreateSchema.safeParse({ ...validTool, status: 'maintenance', href: null }).success).toBe(true);
     expect(toolCreateSchema.safeParse({ ...validTool, status: 'coming_soon', href: null }).success).toBe(true);
     expect(toolCreateSchema.safeParse({ ...validTool, status: 'disabled', href: null }).success).toBe(true);
@@ -44,11 +44,8 @@ describe('tool directory input schemas', () => {
     expect(toolUpdateSchema.safeParse({}).success).toBe(false);
   });
 
-  it('只接受完整且可恢复的工具中心备份', () => {
-    const backup = {
-      type: 'hot2-tool-directory-backup',
-      version: 1,
-      exportedAt: '2026-08-09T00:00:00.000Z',
+  it('只接受完整且可恢复的工具目录快照', () => {
+    const snapshot = {
       categories: [
         { id: 'business-support', name: '业务支持', sortOrder: 0 },
         { id: 'geo-location', name: '地理位置', sortOrder: 1 },
@@ -65,8 +62,8 @@ describe('tool directory input schemas', () => {
         archivedAt: null,
       }],
     };
-    expect(toolDirectoryBackupSchema.safeParse(backup).success).toBe(true);
-    expect(toolDirectoryBackupSchema.safeParse({ ...backup, categories: backup.categories.slice(1) }).success).toBe(false);
-    expect(toolDirectoryBackupSchema.safeParse({ ...backup, tools: [{ ...backup.tools[0], status: 'active', href: null }] }).success).toBe(false);
+    expect(toolDirectorySnapshotSchema.safeParse(snapshot).success).toBe(true);
+    expect(toolDirectorySnapshotSchema.safeParse({ ...snapshot, categories: snapshot.categories.slice(1) }).success).toBe(false);
+    expect(toolDirectorySnapshotSchema.safeParse({ ...snapshot, tools: [{ ...snapshot.tools[0], status: 'active', href: null }] }).success).toBe(false);
   });
 });

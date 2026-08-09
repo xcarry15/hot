@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -20,18 +20,13 @@ import {
   Database,
   RefreshCcw,
   Shrink,
-  Download,
-  FileUp,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { parseSettingsImport } from '@/lib/settings-import'
 import {
   executeMaintenanceAction,
   fetchCleanupStats as loadCleanupStats,
   type MaintenanceAction,
 } from '@/features/maintenance-api.client'
-import { exportSettings, saveSettings } from '@/features/settings-api.client'
-import DataExportPanel from '@/components/settings/data-export'
 
 export default function DataTab() {
   const [cleanupStats, setCleanupStats] = useState<Record<string, number> | null>(null)
@@ -43,78 +38,6 @@ export default function DataTab() {
   const [purgeAllLoading, setPurgeAllLoading] = useState(false)
   const [dbSize, setDbSize] = useState<number | null>(null)
   const [vacuuming, setVacuuming] = useState(false)
-
-  // 配置导入/导出
-  const [exporting, setExporting] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const [importOpen, setImportOpen] = useState(false)
-  const [pendingImport, setPendingImport] = useState<Record<string, string> | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  const handleExport = async () => {
-    setExporting(true)
-    try {
-      const data = await exportSettings()
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const now = new Date()
-      const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `hot2-settings-${stamp}.json`
-      a.click()
-      URL.revokeObjectURL(url)
-      toast.success('配置已导出')
-    } catch (err) {
-      if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 401) {
-        toast.warning('当前会话无权导出配置，请重新登录后重试')
-      } else {
-        toast.error('导出失败')
-      }
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  const handleFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = '' // 允许再次选同一文件
-    if (!file) return
-    // 防 DoS:配置导出文件 < 10KB,1MB 已是极宽松上限。
-    if (file.size > 1_000_000) {
-      toast.error('文件过大(>1MB),请确认是否为合法配置导出')
-      return
-    }
-    const text = await file.text()
-    const parsed = parseSettingsImport(text)
-    if (!parsed.ok) {
-      toast.error(parsed.error)
-      return
-    }
-    // 文件合法但没有任何匹配的可写键(版本/类型/字段名漂移),避免误导
-    // toast + 无意义 reload。
-    if (Object.keys(parsed.settings).length === 0) {
-      toast.error('文件中没有可识别的配置项,可能不是本应用的配置')
-      return
-    }
-    setPendingImport(parsed.settings)
-    setImportOpen(true)
-  }
-
-  const executeImport = async () => {
-    if (!pendingImport) return
-    setImporting(true)
-    try {
-      await saveSettings(pendingImport)
-      toast.success('配置已导入，页面即将刷新')
-      setImportOpen(false)
-      setTimeout(() => window.location.reload(), 600)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '导入失败')
-    } finally {
-      setImporting(false)
-    }
-  }
 
   const loadAllCleanupStats = useCallback(async () => {
     setRefreshingStats(true)
@@ -223,27 +146,6 @@ export default function DataTab() {
 
   return (
     <div className="space-y-2 pt-2">
-      {/* 配置导入/导出 */}
-      <Card className="py-0">
-        <CardContent className="space-y-2 p-3">
-          <div className="border-b pb-2 text-sm font-semibold">配置导入/导出</div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={handleExport} disabled={exporting} className="h-7 gap-1.5 px-2.5 text-xs">
-              {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-              导出配置
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importing} className="h-7 gap-1.5 px-2.5 text-xs">
-              {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileUp className="h-3.5 w-3.5" />}
-              导入配置
-            </Button>
-            <input ref={fileInputRef} type="file" accept="application/json,.json" onChange={handleFilePicked} className="hidden" />
-          </div>
-          <p className="text-xs text-muted-foreground">⚠️ 配置备份包含所有可编辑设置、API 密钥和 Webhook，请妥善保管导出的文件。</p>
-        </CardContent>
-      </Card>
-
-      <DataExportPanel />
-
       {/* 数据 */}
       <Card className="py-0">
         <CardContent className="space-y-2.5 p-3">
@@ -364,25 +266,6 @@ export default function DataTab() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 导入配置二次确认 */}
-      <AlertDialog open={importOpen} onOpenChange={setImportOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认导入配置？</AlertDialogTitle>
-            <AlertDialogDescription>
-              将覆盖导出文件中的所有可编辑设置，包括模型参数、提示词、推送规则、API 密钥和 Webhook。
-              文件中未包含的参数保持不变。导入后页面将自动刷新。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={executeImport} disabled={importing}>
-              {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              确认导入
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

@@ -6,7 +6,7 @@
  *   - AI 模型测试（POST /api/settings/test-ai）
  *   - Webhook 测试（POST /api/settings/test-webhook）
  *
- * 与 maintenance-api.client 协同：data.tsx 同时承担导入导出 + 清理操作。
+ * 配置备份由 backup-api.client 统一负责，本文件只处理设置编辑能力。
  */
 import { requestJson } from '@/lib/request-json.client';
 import type { PromptVersionSnapshot } from '@/lib/prompts';
@@ -106,20 +106,6 @@ export async function revealSettings(
     body: keys.length > 0 ? { keys } : undefined,
     signal,
   });
-}
-
-/**
- * 设置导出：返回完整 payload（含明文 API 密钥和 Webhook），用于下载为 JSON。
- * 返回结构：{ type, version, exportedAt, settings: SettingsMap }。
- */
-export interface SettingsExportPayload {
-  type: string;
-  version: number;
-  exportedAt: string;
-  settings: SettingsMap;
-}
-export async function exportSettings(signal?: AbortSignal): Promise<SettingsExportPayload> {
-  return requestJson<SettingsExportPayload>('POST', '/api/settings/export', { signal });
 }
 
 export interface AiTestResult {

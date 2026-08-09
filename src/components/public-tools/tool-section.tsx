@@ -18,7 +18,7 @@ export default function PublicToolSection({
         <span className="text-xs tabular-nums text-[var(--public-muted)]">{category.tools.length} 项</span>
       </div>
 
-      <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4">
+      <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
         {category.tools.map((tool, toolIndex) => (
           <PublicToolCard key={tool.id} tool={tool} revealIndex={sectionIndex * 2 + toolIndex} />
         ))}

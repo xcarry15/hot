@@ -76,7 +76,7 @@ export const toolCategoryReorderSchema = z.object({
   direction: z.enum(['up', 'down']),
 }).strict();
 
-const toolBackupItemSchema = z.object({
+const toolSnapshotItemSchema = z.object({
   id: z.string().trim().min(1, '工具 ID 无效').max(100, '工具 ID 无效'),
   name: toolFields.name,
   description: toolFields.description,
@@ -89,16 +89,13 @@ const toolBackupItemSchema = z.object({
   archivedAt: z.string().datetime({ offset: true, message: '下架时间无效' }).nullable(),
 }).strict();
 
-export const toolDirectoryBackupSchema = z.object({
-  type: z.literal('hot2-tool-directory-backup'),
-  version: z.literal(1),
-  exportedAt: z.string().datetime({ offset: true, message: '备份时间无效' }),
+export const toolDirectorySnapshotSchema = z.object({
   categories: z.array(z.object({
     id: z.enum(categoryIds as [typeof categoryIds[number], ...typeof categoryIds[number][]]),
     name: z.string().trim().min(1, '分类名称为必填项').max(30, '分类名称不能超过 30 个字符'),
     sortOrder: z.number().int('分类排序无效').min(0, '分类排序无效').max(100, '分类排序无效'),
   }).strict()).length(categoryIds.length, '分类数量不匹配'),
-  tools: z.array(toolBackupItemSchema).max(1_000, '工具数量超过上限'),
+  tools: z.array(toolSnapshotItemSchema).max(1_000, '工具数量超过上限'),
 }).strict().superRefine((value, context) => {
   const categoryIdsInBackup = value.categories.map((category) => category.id);
   if (new Set(categoryIdsInBackup).size !== categoryIdsInBackup.length) {
@@ -148,4 +145,4 @@ export type ToolUpdateInput = z.infer<typeof toolUpdateSchema>;
 export type ToolReorderInput = z.infer<typeof toolReorderSchema>;
 export type ToolCategoryUpdateInput = z.infer<typeof toolCategoryUpdateSchema>;
 export type ToolCategoryReorderInput = z.infer<typeof toolCategoryReorderSchema>;
-export type ToolDirectoryBackupInput = z.infer<typeof toolDirectoryBackupSchema>;
+export type ToolDirectorySnapshotInput = z.infer<typeof toolDirectorySnapshotSchema>;

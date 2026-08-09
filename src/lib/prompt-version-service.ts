@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { PROMPT_VERSION_KEYS, PROMPT_VERSION_LIMIT, type PromptVersionSnapshot } from '@/lib/prompts';
 
-const PROMPT_VERSIONS_SETTING_KEY = 'prompt_versions_v1';
+export const PROMPT_VERSIONS_SETTING_KEY = 'prompt_versions_v1';
 const MAX_PROMPT_LENGTH = 20_000;
 
 export interface PromptVersion {

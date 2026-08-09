@@ -1,13 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   ArrowDown,
   ArrowUp,
   ChevronDown,
   ChevronUp,
-  Download,
   ExternalLink,
   Eye,
   EyeOff,
@@ -16,29 +15,25 @@ import {
   Pencil,
   Plus,
   RotateCcw,
-  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   TOOL_CATEGORY_SEED_DEFINITIONS,
   TOOL_DIRECTORY_ICON_NAMES,
-  TOOL_DIRECTORY_STATUSES,
   TOOL_DIRECTORY_TAG_DEFINITIONS,
   isToolDirectoryLinkableStatus,
-  type ToolDirectoryBackupPayload,
   type ToolDirectoryCategoryDto,
   type ToolDirectoryItemDto,
+  type ToolDirectoryStatus,
   type ToolDirectoryTag,
 } from '@/contracts/tool-directory';
 import {
   archiveToolDirectoryItem,
   createToolDirectoryItem,
-  exportToolDirectoryBackup,
   fetchToolDirectoryCategories,
   fetchToolDirectory,
   moveToolDirectoryCategory,
   moveToolDirectoryItem,
-  restoreToolDirectoryBackup,
   restoreToolDirectoryItem,
   updateToolDirectoryCategory,
   updateToolDirectoryItem,
@@ -67,9 +62,8 @@ const EMPTY_FORM: ToolFormState = {
   tags: [],
 };
 
-const STATUS_LABELS: Record<(typeof TOOL_DIRECTORY_STATUSES)[number], string> = {
+const STATUS_LABELS: Record<ToolDirectoryStatus, string> = {
   active: '正常',
-  beta: '内测中',
   maintenance: '维护中',
   coming_soon: '即将上线',
   disabled: '停用',
@@ -88,7 +82,6 @@ function toFormState(tool: ToolDirectoryItemDto): ToolFormState {
 }
 
 function statusClass(status: ToolDirectoryItemDto['status']): string {
-  if (status === 'beta') return 'text-amber-700';
   if (status === 'maintenance') return 'text-orange-700';
   if (status === 'coming_soon') return 'text-sky-700';
   if (status === 'disabled') return 'text-muted-foreground';
@@ -111,10 +104,6 @@ export default function ToolDirectoryManagement() {
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [categoryDrafts, setCategoryDrafts] = useState<Record<string, string>>({});
   const [categoryBusyId, setCategoryBusyId] = useState<string | null>(null);
-  const [backupBusy, setBackupBusy] = useState<'export' | 'import' | null>(null);
-  const [pendingBackup, setPendingBackup] = useState<ToolDirectoryBackupPayload | null>(null);
-  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
-  const backupInputRef = useRef<HTMLInputElement>(null);
 
   const loadTools = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -242,6 +231,10 @@ export default function ToolDirectoryManagement() {
     }
   };
 
+  const selectStatus = (status: ToolDirectoryStatus) => {
+    setFormValue('status', status);
+  };
+
   const openCategoryManagement = () => {
     setCategoryDrafts(Object.fromEntries(categories.map((category) => [category.id, category.name])));
     setCategoryDialogOpen(true);
@@ -278,59 +271,6 @@ export default function ToolDirectoryManagement() {
     }
   };
 
-  const handleBackupExport = async () => {
-    setBackupBusy('export');
-    try {
-      const backup = await exportToolDirectoryBackup();
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const stamp = new Date().toISOString().slice(0, 10).replaceAll('-', '');
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `hot2-tool-directory-${stamp}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-      toast.success('工具中心配置已备份');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '备份工具中心失败');
-    } finally {
-      setBackupBusy(null);
-    }
-  };
-
-  const handleBackupSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    if (file.size > 1_000_000) {
-      toast.error('备份文件过大，最大支持 1MB');
-      return;
-    }
-    try {
-      const backup = JSON.parse(await file.text()) as ToolDirectoryBackupPayload;
-      setPendingBackup(backup);
-      setRestoreDialogOpen(true);
-    } catch {
-      toast.error('备份文件不是有效的 JSON');
-    }
-  };
-
-  const handleBackupRestore = async () => {
-    if (!pendingBackup) return;
-    setBackupBusy('import');
-    try {
-      const result = await restoreToolDirectoryBackup(pendingBackup);
-      await loadTools();
-      setRestoreDialogOpen(false);
-      setPendingBackup(null);
-      toast.success(`已恢复 ${result.categoryCount} 个分类和 ${result.toolCount} 个工具`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '恢复工具中心失败');
-    } finally {
-      setBackupBusy(null);
-    }
-  };
-
   if (loading) {
     return <div className="space-y-2 p-3"><div className="h-8 animate-pulse bg-muted" /><div className="h-24 animate-pulse bg-muted" /><div className="h-24 animate-pulse bg-muted" /></div>;
   }
@@ -349,17 +289,8 @@ export default function ToolDirectoryManagement() {
       <div className="flex flex-wrap items-center gap-2 border-b pb-2">
         <div className="mr-auto">
           <p className="font-medium">工具中心目录</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">管理公开工具入口、分类、状态和标签；可单独备份并恢复。</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">管理公开工具入口、分类和标签；备份恢复统一前往“备份”页。</p>
         </div>
-        <input ref={backupInputRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => void handleBackupSelected(event)} />
-        <Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" disabled={backupBusy !== null} onClick={() => void handleBackupExport()}>
-          {backupBusy === 'export' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-          备份
-        </Button>
-        <Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" disabled={backupBusy !== null} onClick={() => backupInputRef.current?.click()}>
-          <Upload className="h-3.5 w-3.5" />
-          上传恢复
-        </Button>
         <Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={openCategoryManagement}>
           <FolderCog className="h-3.5 w-3.5" />
           分类维护
@@ -396,7 +327,6 @@ export default function ToolDirectoryManagement() {
                     <div className="min-w-0 flex-1 basis-44">
                       <div className="flex min-w-0 items-center gap-1.5">
                         <span className="truncate font-medium">{tool.name}</span>
-                        <span className={`shrink-0 ${statusClass(tool.status)}`}>{STATUS_LABELS[tool.status]}</span>
                         {tool.href && (
                           <a href={tool.href} target="_blank" rel="noopener noreferrer" className="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-[10px] text-muted-foreground hover:text-foreground" title={tool.href}>
                             <ExternalLink className="h-3 w-3 shrink-0" />
@@ -407,6 +337,9 @@ export default function ToolDirectoryManagement() {
                       <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{tool.description}</p>
                     </div>
                     <div className="flex max-w-full flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
+                      <Badge variant="outline" className={`h-5 rounded-none px-1.5 text-[10px] ${statusClass(tool.status)}`}>
+                        {STATUS_LABELS[tool.status]}
+                      </Badge>
                       {tool.tags.map((tag) => (
                         <Badge key={tag} variant="outline" className="h-5 rounded-none px-1.5 text-[10px]">
                           {TOOL_DIRECTORY_TAG_DEFINITIONS.find((definition) => definition.id === tag)?.label ?? tag}
@@ -472,28 +405,40 @@ export default function ToolDirectoryManagement() {
               <Label htmlFor="tool-description" className="text-xs">简介 *</Label>
               <Textarea id="tool-description" value={form.description} onChange={(event) => setFormValue('description', event.target.value)} className="min-h-20 rounded-none text-xs" placeholder="简要说明工具用途" />
             </div>
-            <div className="grid gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
-              <div className="space-y-1.5">
-                <Label className="text-xs">状态 *</Label>
-                <Select value={form.status} onValueChange={(value) => setFormValue('status', value as ToolFormState['status'])}>
-                  <SelectTrigger className="h-8 w-full rounded-none text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent className="rounded-none shadow-sm">
-                    {TOOL_DIRECTORY_STATUSES.map((status) => <SelectItem key={status} value={status} className="rounded-none">{STATUS_LABELS[status]}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">HTTPS 链接</Label>
-                <Input value={form.href} onChange={(event) => setFormValue('href', event.target.value)} className="h-8 rounded-none text-xs" placeholder="https://..." />
-              </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">HTTPS 链接</Label>
+              <Input value={form.href} onChange={(event) => setFormValue('href', event.target.value)} className="h-8 rounded-none text-xs" placeholder="https://..." />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">标签</Label>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs">标签</Label>
+                <span className="text-[10px] text-muted-foreground">前四项仅选一项，其余可多选</span>
+              </div>
               <div className="flex flex-wrap gap-1.5">
-                {TOOL_DIRECTORY_TAG_DEFINITIONS.map((tag) => {
-                  const selected = form.tags.includes(tag.id);
-                  return <Button key={tag.id} type="button" variant={selected ? 'default' : 'outline'} className="h-7 rounded-none px-2 text-xs" onClick={() => toggleTag(tag.id)}>{tag.label}</Button>;
-                })}
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(STATUS_LABELS).map(([status, label]) => {
+                    const selected = form.status === status;
+                    return (
+                      <Button
+                        key={status}
+                        type="button"
+                        variant={selected ? 'default' : 'outline'}
+                        className="h-7 rounded-none px-2 text-xs"
+                        aria-pressed={selected}
+                        title="工具状态"
+                        onClick={() => selectStatus(status as ToolDirectoryStatus)}
+                      >
+                        {label}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <div className="ml-2 flex flex-wrap gap-1.5">
+                  {TOOL_DIRECTORY_TAG_DEFINITIONS.map((tag) => {
+                    const selected = form.tags.includes(tag.id);
+                    return <Button key={tag.id} type="button" variant={selected ? 'default' : 'outline'} className="h-7 rounded-none px-2 text-xs" aria-pressed={selected} onClick={() => toggleTag(tag.id)}>{tag.label}</Button>;
+                  })}
+                </div>
               </div>
             </div>
             <div className="space-y-1.5">
@@ -570,37 +515,6 @@ export default function ToolDirectoryManagement() {
           </div>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog
-        open={restoreDialogOpen}
-        onOpenChange={(open) => {
-          if (!open && backupBusy !== 'import') {
-            setRestoreDialogOpen(false);
-            setPendingBackup(null);
-          }
-        }}
-      >
-        <AlertDialogContent className="rounded-none">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-base">确认恢复工具中心配置？</AlertDialogTitle>
-            <AlertDialogDescription className="text-sm">恢复会覆盖当前全部工具、分类名称和排序，当前配置将被替换。建议先执行一次备份。</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="rounded-none text-xs" disabled={backupBusy === 'import'}>取消</AlertDialogCancel>
-            <AlertDialogAction
-              className="rounded-none text-xs"
-              disabled={backupBusy === 'import'}
-              onClick={(event) => {
-                event.preventDefault();
-                void handleBackupRestore();
-              }}
-            >
-              {backupBusy === 'import' && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              {backupBusy === 'import' ? '恢复中...' : '确认恢复'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog open={archiveTarget !== null} onOpenChange={(open) => { if (!open) setArchiveTarget(null); }}>
         <AlertDialogContent className="rounded-none">

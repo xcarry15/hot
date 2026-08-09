@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
@@ -29,8 +29,6 @@ import {
   Trash2,
   Loader2,
   Tag,
-  Upload,
-  Download,
   Search,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -44,9 +42,7 @@ import {
   bulkClearKeywords,
   deleteKeyword,
   deleteKeywordCandidate,
-  exportKeywordsXlsxBlob,
   fetchKeywords,
-  importKeywordsXlsx,
   fetchKeywordCandidates,
   dismissKeywordCandidates,
   updateKeywordCandidate,
@@ -81,7 +77,6 @@ export default function KeywordsTab() {
   const [bulkCategory, setBulkCategory] = useState<string>(KEYWORD_DEFAULT_CATEGORY)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const loadKeywords = useCallback(async () => {
     try {
@@ -166,37 +161,6 @@ export default function KeywordsTab() {
       toast.error('添加失败')
     } finally {
       setBulkLoading(false)
-    }
-  }
-
-  const handleExport = async () => {
-    try {
-      const blob = await exportKeywordsXlsxBlob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'keywords.xlsx'
-      a.click()
-      URL.revokeObjectURL(url)
-      toast.success('已导出关键词及候选词状态')
-    } catch {
-      toast.error('导出失败')
-    }
-  }
-
-  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setBulkLoading(true)
-    try {
-      const data = await importKeywordsXlsx(file)
-      toast.success(`已导入 ${data.imported} 个关键词，恢复 ${data.restored} 篇，候选状态已同步`)
-      loadKeywords()
-    } catch (err) {
-      toast.error(err instanceof Error && err.message ? err.message : '导入失败，请检查 XLSX 工作簿格式')
-    } finally {
-      setBulkLoading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
@@ -358,36 +322,9 @@ export default function KeywordsTab() {
           <Tag className="h-3.5 w-3.5 text-primary shrink-0" />
           <span className="text-xs font-semibold">关键词管理</span>
           <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">{keywords.length}</Badge>
-          <span className="hidden text-[10px] text-muted-foreground sm:inline">黑名单命中直接拦截；其余关键词命中即抓取；未命中丢弃；XLSX 同步候选词状态</span>
+          <span className="hidden text-[10px] text-muted-foreground sm:inline">黑名单命中直接拦截；其余关键词命中即抓取；未命中丢弃</span>
           <div className="flex-1" />
           <div className="flex items-center gap-1 flex-wrap">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="hidden"
-              onChange={handleImport}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 gap-1 px-1.5 text-[11px]"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={bulkLoading}
-            >
-              <Upload className="h-3 w-3" />
-              <span className="hidden sm:inline">导入</span>
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 gap-1 px-1.5 text-[11px]"
-              onClick={handleExport}
-              disabled={keywords.length === 0 && candidates.length === 0}
-            >
-              <Download className="h-3 w-3" />
-              <span className="hidden sm:inline">导出</span>
-            </Button>
             <Button
               size="sm"
               variant="outline"

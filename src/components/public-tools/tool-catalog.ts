@@ -75,10 +75,10 @@ export const PUBLIC_TOOL_CATEGORIES = [
       {
         id: 'bs-8',
         name: 'H3六边形可视化',
-        description: '内测中',
+        description: '即将上线',
         href: 'https://6.tstwg.cn/',
         icon: 'hexagon',
-        status: 'beta',
+        status: 'coming_soon',
       },
     ],
   },

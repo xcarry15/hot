@@ -46,7 +46,7 @@ vi.mock('@/lib/execution', () => ({
 import { PUT as settingsPUT } from '@/app/api/settings/route';
 import { parseWebhookConfigs } from '@/contracts/webhook';
 import { DEFAULT_BLOCK_SUMMARY } from '@/lib/prompts';
-import { decryptWebhookConfigsForRuntime } from '@/lib/settings-crypto';
+import { decryptWebhookConfigsForRuntime, encryptWebhookConfigsForStorage } from '@/lib/settings-crypto';
 
 describe('settings PUT 事务化', () => {
   beforeEach(() => {
@@ -59,7 +59,11 @@ describe('settings PUT 事务化', () => {
     mocks.transaction.mockImplementation(async (operation) => {
       if (Array.isArray(operation)) return Promise.all(operation);
       return operation({
-        setting: { upsert: mocks.settingUpsert, findUnique: mocks.settingFindUnique },
+        setting: {
+          upsert: mocks.settingUpsert,
+          findMany: mocks.settingFindMany,
+          findUnique: mocks.settingFindUnique,
+        },
         article: { findMany: mocks.articleFindMany, update: mocks.articleUpdate },
       });
     });
@@ -206,7 +210,7 @@ describe('settings PUT 事务化', () => {
       { url: 'https://open.feishu.cn/open-apis/bot/v2/hook/existing', remark: '主群', enabled: true },
     ]);
     mocks.settingFindMany.mockResolvedValue([
-      { key: 'feishu_webhook_url', value: existingWebhook },
+      { key: 'feishu_webhook_url', value: encryptWebhookConfigsForStorage(existingWebhook) },
     ]);
 
     const req = new Request('http://localhost/api/settings', {
@@ -265,7 +269,7 @@ describe('settings PUT 事务化', () => {
       { url: 'https://open.feishu.cn/open-apis/bot/v2/hook/existing', remark: '主群', enabled: true },
     ]);
     mocks.settingFindMany.mockResolvedValue([
-      { key: 'feishu_webhook_url', value: existingWebhook },
+      { key: 'feishu_webhook_url', value: encryptWebhookConfigsForStorage(existingWebhook) },
     ]);
 
     const req = new Request('http://localhost/api/settings', {

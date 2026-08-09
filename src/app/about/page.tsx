@@ -31,28 +31,6 @@ export default function AboutPage() {
         </header>
 
         <section
-          className="public-section-enter public-detail-delay-1 mt-7 grid gap-3 sm:mt-8 sm:grid-cols-2 sm:gap-4"
-          aria-label="本站提供的内容"
-        >
-          <div className="bg-[var(--public-surface-soft)] px-5 py-4">
-            <p className="text-xs font-semibold text-[var(--public-primary)]">
-              01 · 精选资讯
-            </p>
-            <p className="mt-2 text-sm leading-7 text-[var(--public-body)]">
-              聚合、筛选并去重，只保留值得关注的行业动态。
-            </p>
-          </div>
-          <div className="bg-[var(--public-surface-soft)] px-5 py-4">
-            <p className="text-xs font-semibold text-[var(--public-primary)]">
-              02 · 实用工具
-            </p>
-            <p className="mt-2 text-sm leading-7 text-[var(--public-body)]">
-              汇集选址、地图与数据分析工具，方便快速使用。
-            </p>
-          </div>
-        </section>
-
-        <section
           className="public-section-enter public-detail-delay-2 mt-9 sm:mt-11"
           aria-labelledby="about-contact-title"
         >

@@ -15,7 +15,7 @@
 - `src/components/`: UI. `public-tools/` is the public tool-directory module; `intelligence-inbox.tsx` and the article workspace own the unified admin workbench.
 - `src/features/`: browser API clients. Components must not recreate request logic already available here.
 - `src/contracts/`: shared DTOs and state contracts.
-- `src/lib/`: services, pipeline, scheduling, publication, push, export, and maintenance rules. Keep business rules here rather than in components or Route Handlers.
+- `src/lib/`: services, pipeline, scheduling, publication, push, backup, export, and maintenance rules. Keep business rules here rather than in components or Route Handlers.
 - `prisma/`: schema, seed, and the only supported ordered migration chain.
 - `tests/`: Vitest coverage; `scripts/`: production and maintenance scripts; `bat/`: Windows initialization, packaging, and operations.
 
@@ -35,8 +35,9 @@
 - `工作台` owns Job monitoring, operational source/job state, technical recovery, server-side article search, and opening the shared Article/Event drawer.
 - The Article drawer owns content calibration, human review, Event correction, publication decisions, and Event-level manual push. Do not merge these service responsibilities into the task surface.
 - Settings sections are lazy-loaded. Sensitive AI keys and Webhooks are revealed only through their protected path and must not be overwritten by ordinary saves before reveal succeeds.
+- `设置 → 备份` is the only backup and data-migration surface. Keep full restore atomic in `backup-service`; keep Article Excel archival-only and individual settings sections free of backup controls.
 - `/tools` reads non-archived `ToolDirectoryItem` rows. The seed snapshot runs only when the table is empty and is not a runtime fallback.
-- Tool statuses are `active`, `beta`, `maintenance`, `coming_soon`, and `disabled`; only `active` or `beta` entries with a valid public HTTPS URL are clickable. Tags are `free`, `paid`, `popular`, `updated`, and `latest`.
+- Tool statuses are `active`, `maintenance`, `coming_soon`, and `disabled`; only `active` entries with a valid public HTTPS URL are clickable. Tags are `free`, `paid`, `popular`, `updated`, and `latest`.
 - Public pages share `PublicPageShell`, the public header/footer, and `src/lib/public-brand.ts`. Keep public styling flat, square, low-decoration, and scoped away from admin UI.
 
 ## Workflow and Performance Rules
@@ -74,7 +75,7 @@
 - Use strict TypeScript, two-space indentation, single quotes, semicolons, and the `@/*` alias.
 - Prefer small typed functions and existing service boundaries. Components and Route Handlers should orchestrate, not own business policy.
 - Name components and types in PascalCase, functions and variables in camelCase, and tests `*.test.ts`.
-- Keep setting definitions in `src/lib/settings-catalog.ts`, publication policy in the public/event services, feedback in `src/lib/feedback-service.ts`, and Excel export in `src/lib/export/`.
+- Keep setting definitions in `src/lib/settings-catalog.ts`, unified backup rules in `src/lib/backup-service.ts`, publication policy in the public/event services, feedback in `src/lib/feedback-service.ts`, and Excel export in `src/lib/export/`.
 - Add or update regression tests for pipeline, deduplication, API, database, cancellation, push-delivery, schema, or migration changes. Run the relevant test first, then the proportional suite.
 - Follow Conventional Commits. PRs explain scope, validation, schema/deployment impact, and include screenshots for UI changes.
 - Never commit `.env`, credentials, Webhooks, SQLite data, export files, or deployment archives.

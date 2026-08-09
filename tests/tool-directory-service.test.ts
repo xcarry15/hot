@@ -84,6 +84,20 @@ describe('tool-directory-service', () => {
     expect(categories).toHaveLength(5);
   });
 
+  it('公开目录不下发不可点击工具的 URL', async () => {
+    mocks.toolDirectoryItem.findMany.mockResolvedValue([
+      storedTool({ status: 'maintenance' }),
+    ]);
+
+    const categories = await getPublicToolCategories();
+
+    expect(categories[0].tools[0]).toMatchObject({
+      id: 'tool-1',
+      status: 'maintenance',
+      href: null,
+    });
+  });
+
   it('后台默认隐藏已下架工具，显式查询才返回下架数据', async () => {
     const archived = storedTool({ archivedAt: new Date('2026-08-08T01:00:00.000Z') });
     mocks.toolDirectoryItem.findMany.mockResolvedValue([archived]);

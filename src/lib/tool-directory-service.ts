@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache';
 import { db } from '@/lib/db';
 import {
@@ -5,7 +6,8 @@ import {
   TOOL_DIRECTORY_ICON_NAMES,
   TOOL_DIRECTORY_STATUSES,
   TOOL_DIRECTORY_TAG_DEFINITIONS,
-  type ToolDirectoryBackupPayload,
+  isToolDirectoryLinkableStatus,
+  type ToolDirectorySnapshot,
   type ToolDirectoryCategoryDto,
   type ToolDirectoryCategoryId,
   type ToolDirectoryIconName,
@@ -15,10 +17,9 @@ import {
 } from '@/contracts/tool-directory';
 import {
   toolCreateSchema,
-  toolDirectoryBackupSchema,
   type ToolCategoryUpdateInput,
   type ToolCreateInput,
-  type ToolDirectoryBackupInput,
+  type ToolDirectorySnapshotInput,
   type ToolUpdateInput,
 } from '@/lib/tool-directory-schema';
 
@@ -77,10 +78,11 @@ function mapStoredCategory(category: NonNullable<StoredCategory>): ToolDirectory
 }
 
 function mapStoredTool(item: NonNullable<StoredTool>): ToolDirectoryItemDto {
+  const status = item.status as ToolDirectoryStatus;
   if (
     !categoryIdSet.has(item.category)
     || !iconNameSet.has(item.icon)
-    || !statusSet.has(item.status)
+    || !statusSet.has(status)
   ) {
     throw new Error(`工具数据无效：${item.id}`);
   }
@@ -90,9 +92,9 @@ function mapStoredTool(item: NonNullable<StoredTool>): ToolDirectoryItemDto {
     name: item.name,
     description: item.description,
     category: item.category as ToolDirectoryCategoryId,
-    href: item.href,
+    href: isToolDirectoryLinkableStatus(status) ? item.href : null,
     icon: item.icon as ToolDirectoryIconName,
-    status: item.status as ToolDirectoryStatus,
+    status,
     tags: parseStoredTags(item.tags),
     sortOrder: item.sortOrder,
     archivedAt: item.archivedAt?.toISOString() ?? null,
@@ -202,7 +204,7 @@ function validateCompleteTool(input: unknown): ToolCreateInput {
   return parsed.data;
 }
 
-function invalidatePublicTools(): void {
+export function invalidatePublicTools(): void {
   revalidatePath('/tools');
   revalidateTag(TOOL_DIRECTORY_CACHE_TAG, 'max');
 }
@@ -344,7 +346,7 @@ export async function moveToolDirectoryCategory(
   return mapStoredCategory(category);
 }
 
-export async function exportToolDirectoryBackup(): Promise<ToolDirectoryBackupPayload> {
+export async function getToolDirectorySnapshot(): Promise<ToolDirectorySnapshot> {
   const [storedCategories, storedTools] = await db.$transaction([
     db.toolDirectoryCategory.findMany({ orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] }),
     db.toolDirectoryItem.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] }),
@@ -352,9 +354,6 @@ export async function exportToolDirectoryBackup(): Promise<ToolDirectoryBackupPa
   const categories = storedCategories.map(mapStoredCategory);
   const tools = sortTools(storedTools.map(mapStoredTool), categories);
   return {
-    type: 'hot2-tool-directory-backup',
-    version: 1,
-    exportedAt: new Date().toISOString(),
     categories,
     tools: tools.map(({ id, name, description, category, href, icon, status, tags, sortOrder, archivedAt }) => ({
       id,
@@ -371,39 +370,33 @@ export async function exportToolDirectoryBackup(): Promise<ToolDirectoryBackupPa
   };
 }
 
-export async function restoreToolDirectoryBackup(input: unknown): Promise<{ categoryCount: number; toolCount: number }> {
-  const parsed = toolDirectoryBackupSchema.safeParse(input);
-  if (!parsed.success) {
-    throw new ToolDirectoryValidationError(parsed.error.issues[0]?.message || '工具中心备份文件无效');
-  }
-  const backup = parsed.data as ToolDirectoryBackupInput;
-  await db.$transaction(async (tx) => {
-    await tx.toolDirectoryItem.deleteMany();
-    await tx.toolDirectoryCategory.deleteMany();
-    await tx.toolDirectoryCategory.createMany({
-      data: backup.categories.map((category) => ({
-        id: category.id,
-        name: category.name,
-        sortOrder: category.sortOrder,
+export async function replaceToolDirectorySnapshotInTransaction(
+  tx: Prisma.TransactionClient,
+  snapshot: ToolDirectorySnapshotInput,
+): Promise<void> {
+  await tx.toolDirectoryItem.deleteMany();
+  await tx.toolDirectoryCategory.deleteMany();
+  await tx.toolDirectoryCategory.createMany({
+    data: snapshot.categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      sortOrder: category.sortOrder,
+    })),
+  });
+  if (snapshot.tools.length > 0) {
+    await tx.toolDirectoryItem.createMany({
+      data: snapshot.tools.map((tool) => ({
+        id: tool.id,
+        name: tool.name,
+        description: tool.description,
+        category: tool.category,
+        href: tool.href,
+        icon: tool.icon,
+        status: tool.status,
+        tags: JSON.stringify(tool.tags),
+        sortOrder: tool.sortOrder,
+        archivedAt: tool.archivedAt ? new Date(tool.archivedAt) : null,
       })),
     });
-    if (backup.tools.length > 0) {
-      await tx.toolDirectoryItem.createMany({
-        data: backup.tools.map((tool) => ({
-          id: tool.id,
-          name: tool.name,
-          description: tool.description,
-          category: tool.category,
-          href: tool.href,
-          icon: tool.icon,
-          status: tool.status,
-          tags: JSON.stringify(tool.tags),
-          sortOrder: tool.sortOrder,
-          archivedAt: tool.archivedAt ? new Date(tool.archivedAt) : null,
-        })),
-      });
-    }
-  });
-  invalidatePublicTools();
-  return { categoryCount: backup.categories.length, toolCount: backup.tools.length };
+  }
 }

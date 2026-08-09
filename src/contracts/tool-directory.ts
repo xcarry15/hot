@@ -27,14 +27,13 @@ export type ToolDirectoryTag = (typeof TOOL_DIRECTORY_TAG_DEFINITIONS)[number]['
 
 export const TOOL_DIRECTORY_STATUSES = [
   'active',
-  'beta',
   'maintenance',
   'coming_soon',
   'disabled',
 ] as const;
 export type ToolDirectoryStatus = (typeof TOOL_DIRECTORY_STATUSES)[number];
 
-export const TOOL_DIRECTORY_LINKABLE_STATUSES = ['active', 'beta'] as const satisfies readonly ToolDirectoryStatus[];
+export const TOOL_DIRECTORY_LINKABLE_STATUSES = ['active'] as const satisfies readonly ToolDirectoryStatus[];
 
 export function isToolDirectoryLinkableStatus(status: ToolDirectoryStatus): boolean {
   return TOOL_DIRECTORY_LINKABLE_STATUSES.includes(status as (typeof TOOL_DIRECTORY_LINKABLE_STATUSES)[number]);
@@ -164,10 +163,7 @@ export interface ToolDirectorySeedItem {
   sortOrder: number;
 }
 
-export interface ToolDirectoryBackupPayload {
-  type: 'hot2-tool-directory-backup';
-  version: 1;
-  exportedAt: string;
+export interface ToolDirectorySnapshot {
   categories: ToolDirectoryCategoryDto[];
   tools: Array<Pick<
     ToolDirectoryItemDto,
