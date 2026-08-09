@@ -167,6 +167,7 @@ deployDescribe('production release deployment', () => {
       normalizedPath(path.join(APP_DIR, 'shared', 'db')),
     );
     expect(readFileSync(LOG_PATH, 'utf8')).toContain('npm run build');
+    expect(existsSync(path.join(APP_DIR, 'releases', 'release-one', '.next'))).toBe(true);
   });
 
   it('健康检查失败时恢复数据库备份和旧 current', () => {
