@@ -495,7 +495,6 @@ async function getLatestPushedEventIds(tx: ExportDb, snapshotAt: Date): Promise<
   const deliveryWhere: Prisma.PushDeliveryWhereInput = {
     createdAt: { lte: snapshotAt },
     updatedAt: { lte: snapshotAt },
-    target: { is: { enabled: true } },
   };
   if (typeof tx.pushDelivery.groupBy !== 'function') {
     const rows = await tx.pushDelivery.findMany({

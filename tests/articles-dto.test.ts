@@ -71,7 +71,7 @@ describe('Article API DTO', () => {
         status: 'success',
         errorMessage: '',
         retryCount: 0,
-        webhookUrl: 'https://open.feishu.cn/hook/test',
+        webhookTarget: 'https://open.feishu.cn/…/***test',
         webhookRemark: '主群',
         createdAt: new Date('2026-07-11T02:00:00Z'),
       }],

@@ -11,6 +11,7 @@ import {
 } from '@/contracts/backup'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +25,7 @@ import {
 import DataExportPanel from '@/components/settings/data-export'
 import { exportProjectBackup, restoreProjectBackup } from '@/features/backup-api.client'
 import { exportKeywordsXlsxBlob, importKeywordsXlsx } from '@/features/keywords-api.client'
+import { decryptProjectBackup, encryptProjectBackup } from '@/features/project-backup-crypto.client'
 
 const MAX_BACKUP_BYTES = 50_000_000
 
@@ -58,18 +60,23 @@ export default function BackupTab() {
   const [backupBusy, setBackupBusy] = useState<'export' | 'restore' | null>(null)
   const [keywordBusy, setKeywordBusy] = useState<'export' | 'import' | null>(null)
   const [pendingBackup, setPendingBackup] = useState<ProjectBackupPayload | null>(null)
+  const [backupPassphrase, setBackupPassphrase] = useState('')
+  const [backupPassphraseConfirm, setBackupPassphraseConfirm] = useState('')
   const backupInputRef = useRef<HTMLInputElement>(null)
   const keywordInputRef = useRef<HTMLInputElement>(null)
 
   const handleBackupExport = async () => {
     setBackupBusy('export')
     try {
+      if (backupPassphrase !== backupPassphraseConfirm) throw new Error('两次输入的备份保护密码不一致')
+      if (backupPassphrase.length < 12 || !backupPassphrase.trim()) throw new Error('备份保护密码至少需要 12 个字符')
       const payload = await exportProjectBackup()
+      const encrypted = await encryptProjectBackup(payload, backupPassphrase)
       downloadBlob(
-        new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
+        new Blob([JSON.stringify(encrypted, null, 2)], { type: 'application/json' }),
         `开发选址助手-完整备份-${dateStamp()}.json`,
       )
-      toast.success('完整备份已下载')
+      toast.success('加密完整备份已下载')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '导出完整备份失败')
     } finally {
@@ -86,7 +93,8 @@ export default function BackupTab() {
       return
     }
     try {
-      const payload: unknown = JSON.parse(await file.text())
+      const encrypted: unknown = JSON.parse(await file.text())
+      const payload = await decryptProjectBackup(encrypted, backupPassphrase)
       if (!isProjectBackupPayload(payload)) throw new Error('不是当前项目的完整备份文件')
       setPendingBackup(payload)
     } catch (error) {
@@ -150,13 +158,13 @@ export default function BackupTab() {
                 完整配置备份
               </div>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                一个 JSON 文件统一保存设置、提示词版本、数据源、关键词与候选词、工具目录；恢复时整体覆盖这些配置。
+                加密 JSON 统一保存设置、提示词版本、数据源、关键词与候选词、工具目录；恢复时整体覆盖这些配置。
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
               <Button type="button" size="sm" variant="outline" className="h-7 gap-1.5 px-2.5 text-xs" disabled={backupBusy !== null} onClick={() => void handleBackupExport()}>
                 {backupBusy === 'export' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                下载完整备份
+                下载加密备份
               </Button>
               <Button type="button" size="sm" variant="outline" className="h-7 gap-1.5 px-2.5 text-xs" disabled={backupBusy !== null} onClick={() => backupInputRef.current?.click()}>
                 <FileUp className="h-3.5 w-3.5" />
@@ -165,9 +173,29 @@ export default function BackupTab() {
               <input ref={backupInputRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => void handleBackupSelected(event)} />
             </div>
           </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input
+              type="password"
+              value={backupPassphrase}
+              onChange={(event) => setBackupPassphrase(event.target.value)}
+              placeholder="备份保护密码（至少 12 位）"
+              autoComplete="new-password"
+              minLength={12}
+              disabled={backupBusy !== null}
+            />
+            <Input
+              type="password"
+              value={backupPassphraseConfirm}
+              onChange={(event) => setBackupPassphraseConfirm(event.target.value)}
+              placeholder="确认备份保护密码（下载时校验）"
+              autoComplete="new-password"
+              minLength={12}
+              disabled={backupBusy !== null}
+            />
+          </div>
           <div className="flex gap-2 border-t pt-2 text-xs text-amber-700">
             <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <p>备份包含明文 API 密钥和 Webhook，请按敏感文件保管；不包含文章正文、运行日志和任务历史。</p>
+            <p>备份内的 API 密钥和 Webhook 已由保护密码加密；忘记密码无法恢复。不包含文章正文、运行日志和任务历史。</p>
           </div>
         </CardContent>
       </Card>

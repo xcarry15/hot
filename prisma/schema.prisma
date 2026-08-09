@@ -297,7 +297,6 @@ model PushLog {
   status                  String // success, failure
   errorMessage            String   @default("")
   retryCount              Int      @default(0)
-  webhookUrl              String   @default("") // @deprecated: 使用 targetId 替代，仅用于历史数据迁移兼容
   webhookRemark           String   @default("")
   createdAt               DateTime @default(now())
 
@@ -315,8 +314,6 @@ model PushTarget {
   id        String   @id @default(cuid())
   name      String
   urlHash   String   @unique
-  secretRef String   @default("") // 加密引用或环境变量名
-  enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

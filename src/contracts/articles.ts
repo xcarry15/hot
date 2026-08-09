@@ -4,8 +4,6 @@
  * 列表是摘要投影，详情才是完整投影；二者不能共用 select，避免列表把正文、
  * 内容哈希、重试与去重内部状态意外扩散到浏览器。
  */
-import { maskWebhookTarget } from '@/lib/webhook-display';
-
 export type ArticleListSort =
   | 'newest'
   | 'oldest'
@@ -242,7 +240,7 @@ export interface ArticlePushLogRecord {
   status: string;
   errorMessage: string;
   retryCount: number;
-  webhookUrl: string;
+  webhookTarget: string;
   webhookRemark: string;
   createdAt: DateValue;
 }
@@ -342,7 +340,7 @@ export function serializeArticleDetail(article: ArticleDetailRecord): ArticleDet
       status: log.status,
       errorMessage: log.errorMessage,
       retryCount: log.retryCount,
-      webhookTarget: maskWebhookTarget(log.webhookUrl),
+      webhookTarget: log.webhookTarget,
       webhookRemark: log.webhookRemark,
       createdAt: toRequiredIso(log.createdAt),
     })),

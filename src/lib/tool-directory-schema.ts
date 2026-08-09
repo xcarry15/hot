@@ -27,7 +27,7 @@ function validateToolLink(value: string | null | undefined, status: string, addI
   const href = value?.trim() || null;
   if (!href) {
     if (isToolDirectoryLinkableStatus(status as (typeof TOOL_DIRECTORY_STATUSES)[number])) {
-      addIssue('正常或内测工具必须填写 HTTPS 链接');
+      addIssue('可用工具必须填写 HTTPS 链接');
     }
     return;
   }

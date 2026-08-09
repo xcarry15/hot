@@ -4,7 +4,6 @@
  * 字段形状由 server 决定；本文件不锁定具体 schema，由调用方 narrow。
  */
 import { requestJson } from '@/lib/request-json.client';
-import { getApiToken } from '@/lib/api-client';
 
 export interface Keyword {
   id: string;
@@ -93,14 +92,12 @@ export async function importKeywordsXlsx(
   file: Blob,
   signal?: AbortSignal,
 ): Promise<{ imported: number; skipped: number; importedCandidates: number; skippedCandidates: number; restored: number; processQueued: boolean }> {
-  const token = getApiToken();
   const res = await fetch('/api/keywords', {
     method: 'POST',
     body: file,
     signal,
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
   const body = await res.json().catch(() => ({})) as { error?: string };
@@ -110,10 +107,8 @@ export async function importKeywordsXlsx(
 
 export async function exportKeywordsXlsxBlob(signal?: AbortSignal): Promise<Blob> {
   // XLSX is a raw binary blob; use plain fetch for the Blob body
-  const token = getApiToken();
   const res = await fetch('/api/keywords?format=xlsx', {
     signal,
-    ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.blob();

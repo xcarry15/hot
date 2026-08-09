@@ -11,8 +11,6 @@
  *   const data = await requestJson<MyDto>('GET', '/api/foo', undefined, signal);
  *   const data = await requestJson<MyDto>('POST', '/api/bar', { body: 'x' }, signal);
  */
-import { getApiToken } from '@/lib/api-client';
-
 export interface RequestJsonError extends Error {
   status: number;
   body?: unknown;
@@ -59,10 +57,6 @@ export async function requestJson<T = unknown>(
   const finalHeaders = new Headers(headers);
   if (hasBody && !finalHeaders.has('Content-Type')) {
     finalHeaders.set('Content-Type', 'application/json');
-  }
-  if (!finalHeaders.has('Authorization')) {
-    const token = getApiToken();
-    if (token) finalHeaders.set('Authorization', `Bearer ${token}`);
   }
   const requestInit: RequestInit = {
     method,

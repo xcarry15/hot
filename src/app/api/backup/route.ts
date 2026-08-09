@@ -5,11 +5,18 @@ import { runJob } from '@/lib/execution';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 
 const MAX_BACKUP_BYTES = 50_000_000;
+const BACKUP_RESPONSE_HEADERS = {
+  'Cache-Control': 'no-store, max-age=0',
+  Pragma: 'no-cache',
+};
 
 /** 导出内容包含明文密钥，使用 POST 避免被普通 GET 缓存或预取。 */
 export async function POST() {
   try {
-    return NextResponse.json(await runExclusiveMutation('导出完整备份', exportProjectBackup));
+    return NextResponse.json(
+      await runExclusiveMutation('导出完整备份', exportProjectBackup),
+      { headers: BACKUP_RESPONSE_HEADERS },
+    );
   } catch (error: unknown) {
     return apiError(error, '导出完整备份失败');
   }
@@ -39,7 +46,10 @@ export async function PUT(request: Request) {
       console.error('[backup] rebuild wake-up failed; scheduler will retry:', error);
     }
 
-    return NextResponse.json({ ...result, rebuildJobQueued, rebuildDeferred });
+    return NextResponse.json(
+      { ...result, rebuildJobQueued, rebuildDeferred },
+      { headers: BACKUP_RESPONSE_HEADERS },
+    );
   } catch (error: unknown) {
     return apiError(error, '恢复完整备份失败');
   }

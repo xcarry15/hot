@@ -59,7 +59,7 @@ async function resolvePushTarget(config: WebhookConfig): Promise<{ id: string; n
     return existing;
   }
   return db.pushTarget.create({
-    data: { name: targetName, urlHash, enabled: config.enabled },
+    data: { name: targetName, urlHash },
     select: { id: true, name: true, urlHash: true },
   });
 }

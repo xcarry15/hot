@@ -32,7 +32,6 @@ import { DEFAULT_PROMPT_SETTINGS } from './prompts';
 import type { WebhookConfig } from '@/contracts/webhook';
 import {
   parseWebhookConfigs,
-  serializeWebhookConfigsForServer,
 } from '@/contracts/webhook';
 import { decryptWebhookConfigsForRuntime } from '@/lib/settings-crypto';
 
@@ -76,28 +75,13 @@ export async function readAllSettings(): Promise<Record<string, string>> {
 // ── Webhook 配置 ──────────────────────────────────────────────────
 //
 // Webhook 的纯 codec（结构、parse、两种 serialize）统一在 `@/contracts/webhook`。
-// 这里只保留服务端专属的读取入口和向后兼容别名，避免服务端调用方在多
-// 个批次里同步修改。
+// 这里只保留服务端专属的读取入口。
 
 export type { WebhookConfig } from '@/contracts/webhook';
 export { parseWebhookConfigs } from '@/contracts/webhook';
-
-/**
- * 向后兼容的服务端序列化别名：行为等价于 `serializeWebhookConfigsForServer`，
- * 丢弃 URL 为空的配置。
- */
-export function serializeWebhookConfigs(configs: WebhookConfig[]): string {
-  return serializeWebhookConfigsForServer(configs);
-}
 
 /** 从数据库读取并解析 webhook 配置 */
 export async function getWebhookConfigs(): Promise<WebhookConfig[]> {
   const raw = await getSetting(SETTING_KEYS.FEISHU_WEBHOOK_URL);
   return parseWebhookConfigs(decryptWebhookConfigsForRuntime(raw));
-}
-
-/** 便捷方法：返回所有启用的 webhook URL 列表 */
-export async function getEnabledWebhookUrls(): Promise<string[]> {
-  const configs = await getWebhookConfigs();
-  return configs.filter(c => c.enabled && c.url.trim() !== '').map(c => c.url.trim());
 }

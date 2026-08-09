@@ -12,7 +12,7 @@ import { ADMIN_SESSION_COOKIE, isValidAdminSession, isValidApiToken } from '@/li
  * - 生产模式无 API_TOKEN → 拒绝所有受保护操作（fail-closed，避免默认放行）
  *
  * 部署：生产环境在 .env 设置 `API_TOKEN=<random-string>`；未配置即拒绝 API 请求。
- * 客户端：请求 helper 从 localStorage 读 token（key=api_token）并显式加 header。
+ * 客户端：后台登录后使用 HttpOnly Session Cookie；代理在服务端注入 API Token。
  */
 
 export function proxy(request: NextRequest) {

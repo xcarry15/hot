@@ -36,8 +36,6 @@ declare global {
 const LAST_CRAWL_AT_KEY = SETTING_KEYS.SCHEDULER_LAST_CRAWL_AT;
 const LAST_PUSH_DATE_KEY = SETTING_KEYS.SCHEDULER_LAST_PUSH_DATE;
 const PUSH_JOB_MARKER_KEY = SETTING_KEYS.SCHEDULER_PUSH_JOB || 'scheduler_push_job';
-let pushTask: ReturnType<typeof nodeCron.schedule> | null = null;
-let pushTaskKey = '';
 let schedulerTickPromise: Promise<void> | null = null;
 
 interface ZonedClock {
@@ -232,20 +230,6 @@ export async function maybeEnqueueRealtimePush(settings: Record<string, string>)
   if (result.queued) console.log('[scheduler] started deferred realtime push job', result.jobId);
 }
 
-/** 把每日 HH:mm 配置转换成 node-cron 表达式。 */
-function toCronExpression(pushTime: string): string | null {
-  const trimmed = (pushTime || '').trim();
-  const m = trimmed.match(/^(\d{2}):(\d{2})$/);
-  if (m) {
-    const H = parseInt(m[1], 10);
-    const M = parseInt(m[2], 10);
-    if (H >= 0 && H <= 23 && M >= 0 && M <= 59) {
-      return `${M} ${H} * * *`;
-    }
-  }
-  return null;
-}
-
 async function maybeEnqueueCrawl(settings: Record<string, string>): Promise<void> {
   // 配置缺失也按关闭处理：新安装与迁移中的数据库不能意外自动抓取。
   if (settings[SETTING_KEYS.AUTO_CRAWL_ENABLED] !== 'true') return;
@@ -332,28 +316,6 @@ async function runSchedulerTickInternal(): Promise<void> {
   await maybeEnqueueBatchPush(settings);
   await maybeEnqueueRealtimePush(settings);
   await maybeEnqueueTechnicalRetry(settings);
-  syncPushSchedule(settings);
-}
-
-function syncPushSchedule(settings: Record<string, string>): void {
-  const pushMode = parsePushMode(settings[SETTING_KEYS.PUSH_MODE]);
-  const configuredPushTime = settings[SETTING_KEYS.PUSH_TIME] || '08:30';
-  // 兼容历史版本遗留的 cron: 值；新版本只允许每日固定时间。
-  const pushTime = toCronExpression(configuredPushTime) ? configuredPushTime : '08:30';
-  const pushCron = toCronExpression(pushTime);
-  const nextKey = pushMode === 'batch' && pushCron ? `${pushMode}:${pushCron}` : 'off';
-
-  if (nextKey === pushTaskKey) return;
-
-  // 批量推送由每分钟的 runSchedulerTick 统一驱动。保留 pushTask 的 stop 逻辑，
-  // 以便热更新时终止旧版本留下的定时器，但不再在精确时间点直接写“已完成”。
-  pushTask?.stop();
-  pushTask = null;
-  pushTaskKey = nextKey;
-
-  if (pushMode === 'batch' && pushCron && nodeCron.validate(pushCron)) {
-    console.log(`[scheduler] push catch-up enabled at ${pushTime} (cron: ${pushCron})`);
-  }
 }
 
 /**
@@ -389,9 +351,6 @@ export function startScheduler(): void {
       console.error('[scheduler] crawl tick failed:', err instanceof Error ? err.message : err);
     }
   });
-
-  // Push: minute-tick catch-up, synchronized when settings change.
-  readAllSettings().then(settings => syncPushSchedule(settings));
 
   console.log('🕐 Scheduler started (direct execution mode)');
   console.log('  - Crawl interval: reads from settings.crawl_interval_min (default 120 min)');

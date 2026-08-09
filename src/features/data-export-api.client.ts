@@ -1,5 +1,4 @@
 import { requestJson } from '@/lib/request-json.client';
-import { getApiToken } from '@/lib/api-client';
 import type {
   ExportFilter,
   ExportJobDto,
@@ -37,10 +36,7 @@ export async function deleteDataExportJob(id: string, signal?: AbortSignal): Pro
 }
 
 export async function downloadDataExportFile(id: string, signal?: AbortSignal): Promise<void> {
-  const headers = new Headers();
-  const token = getApiToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-  const response = await fetch(`/api/data-export/${encodeURIComponent(id)}/download`, { headers, signal });
+  const response = await fetch(`/api/data-export/${encodeURIComponent(id)}/download`, { signal });
   if (!response.ok) {
     const message = await response.text();
     throw new Error(message || `HTTP ${response.status}`);

@@ -1,17 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  getApiToken: vi.fn(),
   fetch: vi.fn(),
-}));
-
-vi.mock('@/lib/api-client', () => ({
-  getApiToken: mocks.getApiToken,
 }));
 
 import { requestJson } from '@/lib/request-json.client';
 
-describe('requestJson authorization boundary', () => {
+describe('requestJson request boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.fetch.mockImplementation(() =>
@@ -20,11 +15,10 @@ describe('requestJson authorization boundary', () => {
     global.fetch = mocks.fetch as unknown as typeof fetch;
   });
 
-  it('显式注入本地 token，且不篡改调用方已有 Authorization', async () => {
-    mocks.getApiToken.mockReturnValue('local-token');
+  it('不读取浏览器 Token，且保留调用方显式 Authorization', async () => {
     await requestJson('GET', '/api/articles');
     const firstHeaders = new Headers(mocks.fetch.mock.calls[0]?.[1]?.headers);
-    expect(firstHeaders.get('Authorization')).toBe('Bearer local-token');
+    expect(firstHeaders.get('Authorization')).toBeNull();
 
     await requestJson('GET', '/api/articles', {
       headers: { Authorization: 'Bearer explicit-token' },

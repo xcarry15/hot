@@ -1,5 +1,4 @@
 import { db } from '@/lib/db';
-import { maskWebhookTarget } from '@/lib/webhook-display';
 import { Prisma } from '@prisma/client';
 
 export async function listPushLogs(
@@ -27,7 +26,23 @@ export async function listPushLogs(
     where.representativeArticleId = { in: articleIds.map((article) => article.id) };
   }
   const [logs, total] = await Promise.all([
-    db.pushLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize, select: { id: true, eventId: true, representativeArticleId: true, status: true, errorMessage: true, retryCount: true, webhookUrl: true, webhookRemark: true, createdAt: true } }),
+    db.pushLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        eventId: true,
+        representativeArticleId: true,
+        status: true,
+        errorMessage: true,
+        retryCount: true,
+        webhookRemark: true,
+        createdAt: true,
+        target: { select: { name: true } },
+      },
+    }),
     db.pushLog.count({ where }),
   ]);
   const representativeIds = [...new Set(logs.flatMap((log) => log.representativeArticleId ? [log.representativeArticleId] : []))];
@@ -39,11 +54,12 @@ export async function listPushLogs(
     : [];
   const articlesById = new Map(articles.map((article) => [article.id, article]));
   return {
-    items: logs.map(({ webhookUrl, ...log }) => ({
+    items: logs.map(({ target, ...log }) => ({
       ...log,
       articleId: log.representativeArticleId,
       article: log.representativeArticleId ? articlesById.get(log.representativeArticleId) ?? null : null,
-      webhookTarget: maskWebhookTarget(webhookUrl),
+      // PushTarget 的 name 只保存人工备注或脱敏目标名；日志不再读取 URL 字段。
+      webhookTarget: target?.name || log.webhookRemark || '已删除的推送目标',
     })),
     total,
     page,

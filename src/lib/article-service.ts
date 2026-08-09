@@ -398,14 +398,18 @@ export async function getArticleDetail(id: string): Promise<ArticleDetailDto | n
       status: true,
       errorMessage: true,
       retryCount: true,
-      webhookUrl: true,
       webhookRemark: true,
       createdAt: true,
+      target: { select: { name: true } },
     },
   }) : [];
   return serializeArticleDetail({
     ...article,
-    pushLogs: pushLogs.map((log) => ({ ...log, articleId: log.representativeArticleId ?? article.id })),
+    pushLogs: pushLogs.map(({ target, ...log }) => ({
+      ...log,
+      articleId: log.representativeArticleId ?? article.id,
+      webhookTarget: target?.name || log.webhookRemark || '已删除的推送目标',
+    })),
   });
 }
 
