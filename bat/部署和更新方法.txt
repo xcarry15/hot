@@ -26,19 +26,19 @@
 
 自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh`，依次执行：
 
-1. 验证部署密钥、`.env`、SQLite 和 release 中的完整 migration 集合。
-2. migration 历史兼容后停止 PM2，并用 SQLite `.backup` 创建备份。
-3. 使用 `rsync --delete` 同步代码，保留 `.env*`、`db/` 和 `node_modules/`。
-4. 执行 `npm ci`、`db:migrate:deploy`、`db:generate`、`db:optimize` 和 `npm run build`。
-5. 以单实例启动 `h2-hot2`，检查 `/api/health`、公开首页和 CSS 资源。
+1. 验证部署密钥、共享 `.env`、SQLite 和 release 中的完整 migration 集合。
+2. 将代码解压到版本化 release 目录，执行 `npm ci`、`db:generate` 和生产构建；此时 current 版本保持不变。
+3. 停止 PM2，普通部署用 SQLite `.backup` 创建可回滚备份，再执行 `db:migrate:deploy` 和 `db:optimize`。
+4. 原子切换 `current` 软链，保留最近 5 个 release，启动单实例 `h2-hot2`。
+5. 检查 `/api/health`、公开首页和 CSS 资源；普通部署失败会恢复数据库备份与旧 current，生产重置不自动回滚。
 
-部署失败不会自动回滚代码或 migration。手动运行 `Deploy production` 不会补跑 CI，只应用于已经确认过的提交。
+正常部署失败会在备份可用时恢复数据库与旧 current；生产重置不提供自动回滚。手动运行 `Deploy production` 不会补跑 CI，只应用于已经确认过的提交。
 
 ### 生产数据库重置
 
 `reset_production=yes` 会跳过备份，直接删除生产 SQLite，再按当前 migration 和 seed 全新初始化。它只适用于明确放弃现有生产数据的情况，必须先获得明确授权。
 
-普通部署允许当前发布包中尚未执行的新 migration 由 `db:migrate:deploy` 增量应用；发现未知或未完成的 migration 时，会在停止服务前拒绝继续。项目不维护旧 migration 历史的兼容升级路径。
+普通部署允许当前发布包中尚未执行的新 migration 由 `db:migrate:deploy` 增量应用；发现未知或未完成的 migration 时，会在停止服务前拒绝继续。项目不维护旧 migration 历史的兼容升级路径。`releases/` 和 `current` 由部署脚本维护，不要手动删除 current 指向的目录。
 
 ## 二、首次部署或完全重建
 

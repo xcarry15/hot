@@ -17,14 +17,48 @@ import { abortCurrentJob } from '@/lib/worker-stop';
 import { getDbFileSize, runVacuum } from '@/lib/maintenance/sqlite';
 import { deleteArticlesByIds } from '@/lib/article-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
-import { rebuildPublicPublicationSnapshot } from '@/lib/public-publication-service';
+import { rebuildPublicPublicationSnapshotInBatches } from '@/lib/public-publication-service';
 import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
 import { recalculateEventsInTransaction } from '@/lib/event-service';
 import { deleteAllExportJobs } from '@/lib/export/export-service';
 import type { Prisma } from '@prisma/client';
 
 type MaintenanceTransaction = Prisma.TransactionClient;
-type AiResetArticle = Prisma.ArticleGetPayload<object>;
+
+export const AI_RESET_BATCH_SIZE = 100;
+export const AI_RESET_ARTICLE_SELECT = {
+  id: true,
+  eventId: true,
+  manualOverrides: true,
+  manualCorrectedAt: true,
+  relevance: true,
+  summary: true,
+  brand: true,
+  category: true,
+  eventSubjects: true,
+  eventAction: true,
+  eventObject: true,
+  keyPoints: true,
+  eventScore: true,
+  contentScore: true,
+  adProbability: true,
+  isAd: true,
+} as const satisfies Prisma.ArticleSelect;
+
+type AiResetArticle = Prisma.ArticleGetPayload<{ select: typeof AI_RESET_ARTICLE_SELECT }>;
+
+export type AiResetAction = 'reset-ai' | 'reset-ai-failed';
+
+export function buildAiResetWhere(action: AiResetAction): Prisma.ArticleWhereInput {
+  return action === 'reset-ai'
+    ? { aiStatus: { not: 'pending' } }
+    : {
+        OR: [
+          { aiStatus: 'failed' },
+          { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
+        ],
+      };
+}
 
 // ── 只读：统计 ──────────────────────────────────────────────────
 
@@ -151,7 +185,7 @@ function pauseAndResetOps() {
 
 // ── 重置 AI 状态 ────────────────────────────────────────────────
 
-async function resetArticleAiAndEventState(
+export async function resetArticleAiAndEventState(
   tx: MaintenanceTransaction,
   articles: AiResetArticle[],
 ): Promise<void> {
@@ -180,35 +214,58 @@ async function resetArticleAiAndEventState(
   await recalculateEventsInTransaction(tx, eventIds);
 }
 
-export async function resetAllAi(): Promise<{ reset: number }> {
-  let reset = 0;
-  await db.$transaction(async tx => {
-    const articles = await tx.article.findMany({ where: { aiStatus: { not: 'pending' } } });
-    await resetArticleAiAndEventState(tx, articles);
-    reset = articles.length;
-    if (reset > 0) await rebuildPublicPublicationSnapshot(tx);
+/**
+ * 处理一批 AI 重置。游标按 Article id 前进，事务只覆盖当前批次，
+ * 使任务可以在进程重启后从 Job payload 中断点续跑。
+ */
+export async function resetAiBatch(
+  action: AiResetAction,
+  cursor?: string,
+): Promise<{ processed: number; nextCursor: string | null }> {
+  const where: Prisma.ArticleWhereInput = {
+    ...buildAiResetWhere(action),
+    ...(cursor ? { id: { gt: cursor } } : {}),
+  };
+  const articles = await db.article.findMany({
+    where,
+    orderBy: { id: 'asc' },
+    take: AI_RESET_BATCH_SIZE,
+    select: AI_RESET_ARTICLE_SELECT,
   });
-  if (reset > 0) invalidatePublicArticleCache();
+  if (articles.length === 0) return { processed: 0, nextCursor: null };
+
+  await db.$transaction(async tx => {
+    await resetArticleAiAndEventState(tx, articles);
+  });
+  return {
+    processed: articles.length,
+    nextCursor: articles[articles.length - 1]?.id ?? null,
+  };
+}
+
+async function runAiResetImmediately(action: AiResetAction): Promise<{ reset: number }> {
+  let reset = 0;
+  let cursor: string | undefined;
+  while (true) {
+    const result = await resetAiBatch(action, cursor);
+    if (result.processed === 0) break;
+    reset += result.processed;
+    cursor = result.nextCursor ?? undefined;
+  }
+  if (reset > 0) {
+    await rebuildPublicPublicationSnapshotInBatches();
+    invalidatePublicArticleCache();
+  }
   return { reset };
 }
 
-export async function resetFailedAi(): Promise<{ reset: number }> {
-  let reset = 0;
-  await db.$transaction(async tx => {
-    const articles = await tx.article.findMany({
-      where: {
-        OR: [
-          { aiStatus: 'failed' },
-          { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
-        ],
-      },
-    });
-    await resetArticleAiAndEventState(tx, articles);
-    reset = articles.length;
-    if (reset > 0) await rebuildPublicPublicationSnapshot(tx);
-  });
-  if (reset > 0) invalidatePublicArticleCache();
-  return { reset };
+/** 保留服务层的同步入口，批处理语义与后台 Job 完全一致。 */
+export function resetAllAi(): Promise<{ reset: number }> {
+  return runAiResetImmediately('reset-ai');
+}
+
+export function resetFailedAi(): Promise<{ reset: number }> {
+  return runAiResetImmediately('reset-ai-failed');
 }
 
 // ── 清空日志类 ─────────────────────────────────────────────────

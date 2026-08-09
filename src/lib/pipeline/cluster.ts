@@ -2,8 +2,7 @@ import { Prisma } from '@prisma/client';
 import { EVENT_CLUSTER_MAX_RETRIES } from '@/contracts/event-clustering';
 import { db } from '@/lib/db';
 import { clusterArticle, markClusterFailure } from '@/lib/event-clustering-service';
-import { autoConfirmSingleArticleReviewEvents, repairStaleEventRepresentatives } from '@/lib/event-service';
-import { repairAttachedClusterFailures, repairDirtyEvents, repairDuplicateEventKeyCandidates, repairPersistedCandidateReviews } from '@/lib/event/event-consistency-service';
+import { repairDirtyEvents } from '@/lib/event/event-consistency-service';
 import { advanceJobProgress, startJobStage } from '@/lib/job-progress';
 import { assertNotAborted } from '@/lib/worker-stop';
 
@@ -48,30 +47,8 @@ export async function clusterAllPending(
     }
     return { total: 0, processed: 0, errors: 0 };
   }
-  const repairedDuplicateEventKeys = await repairDuplicateEventKeyCandidates();
-  if (repairedDuplicateEventKeys > 0) {
-    console.warn(`[clusterAllPending] moved ${repairedDuplicateEventKeys} duplicate eventKey Event(s) to review`);
-  }
-  const repairedPersistedCandidates = await repairPersistedCandidateReviews();
-  if (repairedPersistedCandidates > 0) {
-    console.warn(`[clusterAllPending] moved ${repairedPersistedCandidates} persisted candidate Article(s) to review`);
-  }
-  const autoConfirmedReviewEvents = await autoConfirmSingleArticleReviewEvents();
-  if (autoConfirmedReviewEvents > 0) {
-    console.warn(`[clusterAllPending] auto-confirmed ${autoConfirmedReviewEvents} standalone review Event(s)`);
-  }
-  const repairedAttachedFailures = await repairAttachedClusterFailures();
-  if (repairedAttachedFailures > 0) {
-    console.warn(`[clusterAllPending] repaired ${repairedAttachedFailures} attached failed Article(s)`);
-  }
-  const repairedDirtyEvents = await repairDirtyEvents(undefined, signal);
-  if (repairedDirtyEvents > 0) {
-    console.warn(`[clusterAllPending] repaired ${repairedDirtyEvents} dirty Event(s)`);
-  }
-  const repairedRepresentatives = await repairStaleEventRepresentatives();
-  if (repairedRepresentatives > 0) {
-    console.warn(`[clusterAllPending] repaired ${repairedRepresentatives} stale Event representative pointer(s)`);
-  }
+  // 历史一致性修复由独立的 repairOnly Job 通过队列分批处理；不能在每次
+  // 聚类前重新扫描整张 Article/Event 表，避免数据规模增长后拖慢主流水线。
   const total = await db.article.count({ where: buildClusterPendingWhere(new Date(), forceRetry) });
   if (jobId) await startJobStage(jobId, { stage: 'cluster', total });
   let processed = 0;

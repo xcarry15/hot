@@ -450,6 +450,7 @@ enum JobType {
   cluster // only cluster AI-analyzed articles into events
   ai // only run AI on pending articles
   push // only push unpushed articles
+  maintenance // resumable administrative maintenance work
 }
 
 enum JobStatus {

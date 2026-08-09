@@ -6,6 +6,8 @@ APP_NAME="${APP_NAME:-h2-hot2}"
 SITE_URL="${SITE_URL:-https://hot.kfxz.cn}"
 LOCAL_HEALTH_URL="${LOCAL_HEALTH_URL:-http://127.0.0.1:3011/api/health}"
 BACKUP_ROOT="${BACKUP_ROOT:-/www/backup/h2-hot2}"
+SHARED_DIR="${SHARED_DIR:-$APP_DIR/shared}"
+CURRENT_LINK="${CURRENT_LINK:-$APP_DIR/current}"
 INITIALIZATION_COMPLETE=0
 
 fail() {
@@ -39,19 +41,29 @@ npm_major="${npm_version%%.*}"
   || fail "npm 版本必须 >= 10，当前为 $npm_version"
 
 [[ -d "$APP_DIR" ]] || fail "项目目录不存在：$APP_DIR"
-cd "$APP_DIR"
+if [[ -L "$CURRENT_LINK" ]]; then
+  ACTIVE_DIR="$(readlink -f "$CURRENT_LINK")"
+  [[ -d "$ACTIVE_DIR" ]] || fail "current release 目录不存在：$ACTIVE_DIR"
+  ENV_PATH="$SHARED_DIR/.env"
+  DB_DIR="$SHARED_DIR/db"
+else
+  ACTIVE_DIR="$APP_DIR"
+  ENV_PATH="$APP_DIR/.env"
+  DB_DIR="$APP_DIR/db"
+fi
+cd "$ACTIVE_DIR"
 
 [[ -f package.json ]] || fail "项目根目录缺少 package.json，请重新解压部署包"
 [[ -f package-lock.json ]] || fail "项目根目录缺少 package-lock.json，请重新打包并解压到正确目录"
-[[ -f .env ]] || fail "缺少生产 .env；请先恢复或创建 .env，再执行初始化"
+[[ -f "$ENV_PATH" ]] || fail "缺少生产 .env；请先恢复或创建 .env，再执行初始化"
 
-grep -Eq "^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*['\"]?file:\.\./db/custom\.db['\"]?[[:space:]]*$" .env \
+grep -Eq "^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*['\"]?file:\.\./db/custom\.db['\"]?[[:space:]]*$" "$ENV_PATH" \
   || fail ".env 中 DATABASE_URL 必须为 file:../db/custom.db"
-grep -Eq '^[[:space:]]*API_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]]+' .env \
+grep -Eq '^[[:space:]]*API_TOKEN[[:space:]]*=[[:space:]]*[^[:space:]]+' "$ENV_PATH" \
   || fail ".env 中 API_TOKEN 不能为空"
-grep -Eq '^[[:space:]]*SETTINGS_ENCRYPTION_KEY[[:space:]]*=[[:space:]]*[^[:space:]]+' .env \
+grep -Eq '^[[:space:]]*SETTINGS_ENCRYPTION_KEY[[:space:]]*=[[:space:]]*[^[:space:]]+' "$ENV_PATH" \
   || fail ".env 中 SETTINGS_ENCRYPTION_KEY 不能为空"
-grep -Eq '^[[:space:]]*NEXT_PUBLIC_SITE_URL[[:space:]]*=[[:space:]]*https?://' .env \
+grep -Eq '^[[:space:]]*NEXT_PUBLIC_SITE_URL[[:space:]]*=[[:space:]]*https?://' "$ENV_PATH" \
   || fail ".env 中 NEXT_PUBLIC_SITE_URL 必须是完整站点地址"
 
 if [[ "${CONFIRM_RESET:-}" != "YES" ]]; then
@@ -66,23 +78,23 @@ echo "[1/8] 停止并移除旧 PM2 应用"
 pm2 stop "$APP_NAME" >/dev/null 2>&1 || true
 pm2 delete "$APP_NAME" >/dev/null 2>&1 || true
 
-if [[ -s db/custom.db ]]; then
+if [[ -s "$DB_DIR/custom.db" ]]; then
   command -v sqlite3 >/dev/null || fail "现有数据库需要备份，但服务器缺少 sqlite3"
   backup_dir="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)-before-reset"
   echo "[2/8] 备份旧数据库到 $backup_dir"
   umask 077
   mkdir -p "$backup_dir"
-  sqlite3 db/custom.db ".timeout 5000" ".backup '$backup_dir/custom.db'"
+  sqlite3 "$DB_DIR/custom.db" ".timeout 5000" ".backup '$backup_dir/custom.db'"
   [[ -s "$backup_dir/custom.db" ]] || fail "数据库备份无效，停止初始化"
-  cp -a db/custom.db-wal db/custom.db-shm "$backup_dir/" 2>/dev/null || true
+  cp -a "$DB_DIR/custom.db-wal" "$DB_DIR/custom.db-shm" "$backup_dir/" 2>/dev/null || true
 else
   echo "[2/8] 未发现旧数据库，跳过备份"
 fi
 
 echo "[3/8] 清理旧数据库、依赖和构建产物"
 rm -rf -- .next node_modules
-mkdir -p db
-rm -f -- db/custom.db db/custom.db-journal db/custom.db-wal db/custom.db-shm
+mkdir -p "$DB_DIR"
+rm -f -- "$DB_DIR/custom.db" "$DB_DIR/custom.db-journal" "$DB_DIR/custom.db-wal" "$DB_DIR/custom.db-shm"
 
 echo "[4/8] 按 package-lock.json 全新安装依赖"
 npm ci

@@ -11,7 +11,7 @@
  *     · 退避 where：OR[ nextAiRetryAt=null, nextAiRetryAt <= now ]
  *     · Promise.allSettled 把 rejected 计入 errors
  */
-import type { Article, Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { processWithAI } from '@/lib/ai';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
@@ -23,7 +23,7 @@ import {
 } from '@/lib/job-progress';
 
 const AI_TIMEOUT_MS = 90_000;
-const MAX_BATCH_SIZE = 500;
+const MAX_BATCH_SIZE = 100;
 const DEFAULT_AI_CONCURRENCY = 1;
 const MIN_AI_CONCURRENCY = 1;
 const MAX_AI_CONCURRENCY = 10;
@@ -70,14 +70,13 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   const articleSelect = {
       id: true,
       title: true,
-      sourceId: true,
       cleanContent: true,
       articleBody: true,
-      rawContent: true,
       fetchStatus: true,
       publishedAt: true,
       createdAt: true,
       aiStatus: true,
+      eventId: true,
       aiRetryCount: true,
       relevance: true,
       summary: true,
@@ -100,7 +99,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
       manualOverrides: true,
       aiSnapshot: true,
       manualCorrectedAt: true,
-  } as const;
+  } as const satisfies Prisma.ArticleSelect;
 
   let processed = 0;
   let errors = 0;
@@ -127,7 +126,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
       assertNotAborted(signal);
       const batch = pending.slice(i, i + concurrency);
       const results = await Promise.allSettled(batch.map(a => withTimeout(
-        timeoutSignal => processWithAI(a as Article, timeoutSignal),
+        timeoutSignal => processWithAI(a, timeoutSignal),
         AI_TIMEOUT_MS,
         `AI分析超时 "${a.title}"`,
         signal,

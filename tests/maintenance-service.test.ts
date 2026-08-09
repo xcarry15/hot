@@ -18,7 +18,7 @@ const recalculateEventsInTransaction = vi.hoisted(() => vi.fn());
 const deleteArticlesByIds = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/maintenance/sqlite', () => ({ getDbFileSize, runVacuum }));
 vi.mock('@/lib/article-service', () => ({ deleteArticlesByIds }));
-vi.mock('@/lib/public-publication-service', () => ({ rebuildPublicPublicationSnapshot: vi.fn() }));
+vi.mock('@/lib/public-publication-service', () => ({ rebuildPublicPublicationSnapshotInBatches: vi.fn() }));
 vi.mock('@/lib/public-article-cache', () => ({ invalidatePublicArticleCache: vi.fn() }));
 vi.mock('@/lib/event-service', () => ({ recalculateEventsInTransaction }));
 
@@ -68,9 +68,10 @@ describe('maintenance-service', () => {
       eventObject: '', keyPoints: '[]', eventScore: 70, contentScore: 60, adProbability: 5, isAd: false,
     };
     const tx = {
-      article: { findMany: vi.fn().mockResolvedValue([article]), update: vi.fn().mockResolvedValue({}) },
+      article: { update: vi.fn().mockResolvedValue({}) },
       eventClusterAudit: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
     };
+    mocks.article.findMany.mockResolvedValueOnce([article]).mockResolvedValueOnce([]);
     (db.$transaction as ReturnType<typeof vi.fn>).mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
 
     await expect(resetAllAi()).resolves.toEqual({ reset: 1 });
@@ -84,20 +85,23 @@ describe('maintenance-service', () => {
 
   it('重置失败 AI 不包含正常跳过文章', async () => {
     const tx = {
-      article: { findMany: vi.fn().mockResolvedValue([]), update: vi.fn() },
+      article: { update: vi.fn() },
       eventClusterAudit: { deleteMany: vi.fn() },
     };
+    mocks.article.findMany.mockResolvedValue([]);
     (db.$transaction as ReturnType<typeof vi.fn>).mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
 
     await expect(resetFailedAi()).resolves.toEqual({ reset: 0 });
-    expect(tx.article.findMany).toHaveBeenCalledWith({
+    expect(mocks.article.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         OR: [
           { aiStatus: 'failed' },
           { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
         ],
       },
-    });
+      orderBy: { id: 'asc' },
+      take: 100,
+    }));
   });
 
   it('低质量清理不会删除无价值业务跳过稿', async () => {

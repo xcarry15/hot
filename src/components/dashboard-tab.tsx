@@ -176,6 +176,10 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
   }, [active, fetchData])
 
   useEffect(() => {
+    if (range === 'all') {
+      setAutoRefresh(false)
+      return
+    }
     if (!active || !autoRefresh) return
     const tick = () => {
       if (document.visibilityState === 'visible') void fetchData()
@@ -189,7 +193,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
       if (intervalRef.current) window.clearInterval(intervalRef.current)
       document.removeEventListener('visibilitychange', handleVisibility)
     }
-  }, [active, autoRefresh, fetchData])
+  }, [active, autoRefresh, fetchData, range])
 
   useEffect(() => {
     if (!tooltipInfo) return
@@ -235,11 +239,12 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
             {RANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
           <button
-            className={`h-6 border px-1.5 text-[10px] transition-colors hover:bg-muted ${autoRefresh ? 'text-foreground' : 'text-muted-foreground'}`}
+            className={`h-6 border px-1.5 text-[10px] transition-colors ${range === 'all' ? 'cursor-not-allowed text-muted-foreground' : 'hover:bg-muted'} ${autoRefresh ? 'text-foreground' : 'text-muted-foreground'}`}
             onClick={() => setAutoRefresh(!autoRefresh)}
             aria-pressed={autoRefresh}
+            disabled={range === 'all'}
           >
-            自动更新 {autoRefresh ? '开' : '关'}
+            自动更新 {range === 'all' ? '关（全部范围）' : autoRefresh ? '开' : '关'}
           </button>
           <Button size="sm" variant="ghost" className="h-6 gap-1 rounded-none px-1.5 text-[10px]" onClick={handleRefresh}>
             <RefreshCw className="h-3 w-3" />刷新

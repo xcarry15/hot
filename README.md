@@ -81,6 +81,8 @@
 
 工作台负责任务状态与技术恢复；详情抽屉负责内容校准、Event 修正、公开决策和 Event 级人工推送。两者共用服务层，但不合并职责。
 
+`设置 → 数据` 的 AI 重置会进入可恢复的 `maintenance` Job：每批 100 篇文章独立提交事务，并将游标写回 Job payload，进程重启后可继续。概览默认只查询近 1 周；选择“全部”时关闭自动刷新。Event 一致性修复单独消费 `EventDirty` 队列，不在聚类前重复全表扫描。
+
 ## 项目目录
 
 ```text
@@ -173,9 +175,9 @@ npm run db:cleanup-logs
 推送或合并 master → CI → CI 成功 → Deploy production → 健康检查
 ```
 
-自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh`：校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、`rsync --delete` 同步、安装依赖、应用 migration、构建、单实例启动并检查健康接口与 CSS 资源。
+自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh`：先在版本化 release 目录安装依赖并构建，再校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、应用 migration，最后原子切换 `current` 软链、启动单实例并检查健康接口与 CSS 资源。旧 release 默认保留 5 个，普通部署失败时会恢复数据库备份和旧版本；生产重置不提供自动回滚。
 
-手动 `reset_production=yes` 会在不备份的情况下删除生产 SQLite，并从当前 migration 与 seed 全新初始化。只有在明确接受丢失生产数据时才可使用；部署不会自动回滚代码或 migration。
+手动 `reset_production=yes` 会在不备份的情况下删除生产 SQLite，并从当前 migration 与 seed 全新初始化。只有在明确接受丢失生产数据时才可使用；生产重置失败不提供自动数据库回滚。
 
 ## 文档边界
 

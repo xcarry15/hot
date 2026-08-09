@@ -1,10 +1,9 @@
 import { db } from './db';
-import type { Article } from '@prisma/client';
 import { AIClientError, createChatCompletion, getAISettings } from './ai-client';
 import type { AISettings } from './ai-client';
 import type { ChatMessage } from './ai-client';
 import { fetchArticleDetail } from './detail-fetcher';
-import { cleanContentMarkdown, extractArticleBody, meaningfulTextLength } from './cleaner';
+import { cleanContentMarkdown, meaningfulTextLength } from './cleaner';
 import { MIN_MEANINGFUL_CHARS } from './shared/content-policy';
 import { buildStep2Prompt } from './prompts';
 import { buildSystemContent } from './ai-helpers';
@@ -59,7 +58,77 @@ export const AI_MAX_RETRIES = 5;
 /**
  * Deep analysis with full article content
  */
-async function deepAnalyze(article: Article, settings: AISettings, signal?: AbortSignal): Promise<{
+export type AIProcessArticle = {
+  id: string;
+  title: string;
+  aiStatus: string;
+  cleanContent: string | null;
+  articleBody: string | null;
+  fetchStatus: 'pending' | 'fetched' | 'failed';
+  publishedAt: Date | null;
+  createdAt: Date;
+  summary: string | null;
+  relevance: number;
+  brand: string;
+  category: string;
+  eventSubjects: string;
+  eventAction: string;
+  eventObject: string;
+  eventKey: string;
+  eventKeyConfidence: number | null;
+  keyPoints: string;
+  score: number;
+  keywordMatched: boolean | null;
+  eventScore: number | null;
+  contentScore: number | null;
+  rawScore: number | null;
+  adProbability: number | null;
+  aiConfidence: number | null;
+  isAd: boolean;
+  manualOverrides: string;
+  aiSnapshot: string;
+  manualCorrectedAt: Date | null;
+  aiRetryCount: number;
+  eventId: string | null;
+};
+
+type MinimalAIProcessArticle = Pick<AIProcessArticle, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'summary' | 'publishedAt'> & {
+  aiRetryCount?: number;
+};
+
+function normalizeAIProcessArticle(article: AIProcessArticle | MinimalAIProcessArticle): AIProcessArticle {
+  if ('eventId' in article) return article;
+  return {
+    ...article,
+    articleBody: null,
+    fetchStatus: 'fetched',
+    createdAt: new Date(0),
+    relevance: 0,
+    brand: '',
+    category: '',
+    eventSubjects: '[]',
+    eventAction: '',
+    eventObject: '',
+    eventKey: '',
+    eventKeyConfidence: null,
+    keyPoints: '[]',
+    score: 0,
+    keywordMatched: null,
+    eventScore: null,
+    contentScore: null,
+    rawScore: null,
+    adProbability: null,
+    aiConfidence: null,
+    isAd: false,
+    manualOverrides: '[]',
+    aiSnapshot: '{}',
+    manualCorrectedAt: null,
+    aiRetryCount: article.aiRetryCount ?? 0,
+    eventId: null,
+  };
+}
+
+async function deepAnalyze(article: AIProcessArticle, settings: AISettings, signal?: AbortSignal): Promise<{
   eventScore: number;
   isAd: boolean;
   relevance: number;
@@ -95,8 +164,9 @@ async function deepAnalyze(article: Article, settings: AISettings, signal?: Abor
     const textLen = meaningfulTextLength(content);
     if (textLen < MIN_MEANINGFUL_CHARS) return null;
   } else {
-    // 优先用缓存的 articleBody（fetch 阶段已提取一次），避免每次 AI 都重新跑 extractArticleBody
-    const articleBody = article.articleBody || extractArticleBody(article.rawContent || content);
+    // 优先使用已经清洗的正文；批量 DTO 不携带 rawContent，避免把整张原文列
+    // 读入内存。极少数缺失正文的文章已在上面的分支通过详情接口补取。
+    const articleBody = article.articleBody || content;
     content = cleanContentMarkdown(articleBody);
   }
 
@@ -171,12 +241,13 @@ export type AIProcessResult = {
   /** Provider 级暂停的可展示原因；不得包含请求正文或密钥。 */
   globalMessage?: string;
 };
-type AIProcessArticle = Pick<Article, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'publishedAt'> &
-  Partial<Omit<Article, 'id' | 'title' | 'aiStatus' | 'cleanContent' | 'publishedAt' | 'summary'>> & {
-    summary: string | null;
-  };
-
-export async function processWithAI(article: AIProcessArticle, signal?: AbortSignal): Promise<AIProcessResult> {
+export function processWithAI(article: AIProcessArticle, signal?: AbortSignal): Promise<AIProcessResult>;
+export function processWithAI(article: MinimalAIProcessArticle, signal?: AbortSignal): Promise<AIProcessResult>;
+export async function processWithAI(
+  input: AIProcessArticle | MinimalAIProcessArticle,
+  signal?: AbortSignal,
+): Promise<AIProcessResult> {
+  const article = normalizeAIProcessArticle(input);
   const { id: articleId } = article;
   assertNotAborted(signal);
 
@@ -208,7 +279,7 @@ export async function processWithAI(article: AIProcessArticle, signal?: AbortSig
   let step2;
   let aiFailure: { message: string; kind?: string; global?: boolean; retryable?: boolean } | null = null;
   try {
-    step2 = await deepAnalyze(article as Article, settings, signal);
+    step2 = await deepAnalyze(article, settings, signal);
   } catch (error) {
     if (signal?.aborted) throw error;
     aiFailure = {
@@ -406,6 +477,7 @@ export async function reprocessWithAI(
       id: true,
       title: true,
       aiStatus: true,
+      eventId: true,
       cleanContent: true,
       articleBody: true,
       rawContent: true,
@@ -449,7 +521,7 @@ export async function reprocessWithAI(
       technicalIgnoredAt: null,
     },
   });
-  const result = await processWithAI({ ...articleData, aiStatus: 'pending', aiRetryCount: 0 } as Article, signal);
+  const result = await processWithAI({ ...articleData, aiStatus: 'pending', aiRetryCount: 0 }, signal);
   if (jobId) {
     await advanceJobProgress(jobId, {
       doneDelta: 1,

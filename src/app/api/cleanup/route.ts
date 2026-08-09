@@ -12,6 +12,7 @@ import {
   type MaintenanceAction,
 } from '@/lib/maintenance-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
+import { runJob } from '@/lib/execution';
 
 const KNOWN_ACTIONS = [
   'purge-all',
@@ -47,8 +48,8 @@ export async function GET() {
  * - pushed-articles: Delete articles that have been pushed
  * - dedup-logs: Clear dedup-type discarded records
  * - fetch-logs: Clear all fetch logs
- * - reset-ai: Reset all articles' AI status to pending
- * - reset-ai-failed: Reset only technical AI failures to pending
+ * - reset-ai: Queue a resumable reset of all articles' AI status to pending
+ * - reset-ai-failed: Queue a resumable reset of technical AI failures to pending
  * - vacuum: 压缩数据库文件，回收 DELETE 后未释放的磁盘空间
  */
 export async function POST(request: Request) {
@@ -58,6 +59,18 @@ export async function POST(request: Request) {
 
     if (!action || !(KNOWN_ACTIONS as readonly string[]).includes(action)) {
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+    }
+
+    if (action === 'reset-ai' || action === 'reset-ai-failed') {
+      const result = await runJob('maintenance', {
+        action,
+        trigger: 'manual',
+        idempotencyKey: `maintenance:${action}`,
+      });
+      if (!result.queued) {
+        return NextResponse.json({ error: result.reason }, { status: 409 });
+      }
+      return NextResponse.json(result);
     }
 
     const result = await runExclusiveMutation(`数据清理（${action}）`, () =>

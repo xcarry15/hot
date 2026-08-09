@@ -64,6 +64,11 @@ export default function DataTab() {
       const result = (await executeMaintenanceAction(action as MaintenanceAction)) as {
         deleted?: number;
         reset?: number;
+        queued?: boolean;
+      }
+      if (result.queued) {
+        toast.success(`${label}已加入后台任务，可在工作台查看进度`)
+        return
       }
       const count = result.deleted ?? result.reset ?? 0
       toast.success(`${label}完成，共处理 ${count} 条`)

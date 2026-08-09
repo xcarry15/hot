@@ -45,6 +45,8 @@
 - Single-article recovery uses `POST /api/articles/[id]/workflow`: `retry` handles the current recoverable failure; `regenerate` resets and recomputes from the requested stage. Neither is a full repush shortcut.
 - Push delivery modes stay `normal`, `retry_failed`, `manual_force`, and `repush_all`. `manual_force` may bypass score, relevance, and the automatic switch, but still requires an active Event, eligible representative, completed AI, and completed clustering.
 - Batch process, AI, and cluster stages drain all currently eligible backlog before a Job completes. Query limits are chunk sizes, not completion boundaries.
+- `设置 → 数据` 的 AI 重置必须创建可恢复的 `maintenance` Job；每批 100 篇、每批独立事务，游标写入 Job payload，不能把全量文章放进一个事务。
+- 概览默认使用有限日期范围；只有显式选择“全部”时才允许全量查询，并关闭自动刷新。Event 一致性修复由独立 Job 消费 `EventDirty` 队列，不得在每次聚类前全表扫描。
 - Technical failures use finite automatic retries, then become manual work or may be ignored without deleting the Article.
 - Crawl-log source groups include enabled, non-deleted sources only. Merge every current manual/auto-retry technical item by Article ID so actionable failures cannot disappear outside the bounded recent window.
 - Keep crawl polling adaptive: fast while a Job runs, slow while idle, paused while hidden. Keep article-detail cache short-lived and invalidate it after writes.
@@ -55,8 +57,8 @@
 
 - `prisma/migrations/` is the complete supported migration set. Production with an unexpected or incomplete history must be backed up and rebuilt; there is no historical compatibility bridge.
 - Routine production migration uses `npm run db:migrate:deploy`. Never use `db:push` or `db:danger:reset` in production.
-- Deployment archives are unpacked outside the app directory, then synchronized with `rsync --delete` while preserving `.env*`, `db/`, and `node_modules/`.
-- Stop PM2 and create a consistent SQLite `.backup` before normal production migrations. PM2 runs one `h2-hot2` instance.
+- Deployment archives are built in versioned release directories under the app root; `.env` and `db/` live in shared state, and the `current` symlink is switched atomically only after the release build and normal migration backup succeed. Keep the previous releases for rollback. PM2 runs one `h2-hot2` instance.
+- Stop PM2 and create a consistent SQLite `.backup` before normal production migrations; a failed normal release restores that backup and the previous `current` target when possible.
 - `reset_production=yes` deletes production SQLite without backup. Use it only after explicit approval to lose production data.
 - Routine application releases do not clear the server-wide Nginx cache or reload Nginx.
 

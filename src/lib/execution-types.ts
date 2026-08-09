@@ -1,4 +1,6 @@
-export type JobType = 'full' | 'collect' | 'process' | 'ai' | 'cluster' | 'push';
+import type { JOB_TYPE_VALUES } from '@/contracts/state';
+
+export type JobType = (typeof JOB_TYPE_VALUES)[number];
 
 export type JobExecutor = (
   payload: Record<string, unknown>,

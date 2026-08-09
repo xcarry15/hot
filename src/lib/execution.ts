@@ -46,11 +46,13 @@ import { ACTIVE_JOB_STATUSES, CLAIMABLE_JOB_STATUSES } from './job-status';
 import { assertJobNotCancelled } from './execution-cancellation';
 import { executeCollectJob, summarizeCollectResult } from './execution-collect';
 import { executeAiJob } from './execution-ai';
+import { executeMaintenanceJob } from './execution-maintenance';
 import {
   executeClusterJob,
   executeProcessJob,
   executePushJob,
 } from './execution-stage-executors';
+import { JOB_TYPE_VALUES, parseJsonObject } from '@/contracts/state';
 import type { JobExecutor, JobType } from './execution-types';
 
 export type { JobType } from './execution-types';
@@ -413,6 +415,7 @@ const JOB_EXECUTORS: Record<JobType, JobExecutor> = {
   cluster: executeClusterJob,
   ai: executeAiJob,
   push: executePushJob,
+  maintenance: executeMaintenanceJob,
 };
 
 async function executeFullJob(
@@ -493,18 +496,11 @@ async function executeFullJob(
 }
 
 function isRunnableJobType(type: string): type is JobType {
-  return ['full', 'collect', 'process', 'ai', 'cluster', 'push'].includes(type);
+  return (JOB_TYPE_VALUES as readonly string[]).includes(type);
 }
 
 function parseJobPayload(payload: string): Record<string, unknown> | null {
-  try {
-    const parsed: unknown = JSON.parse(payload);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
+  return parseJsonObject(payload);
 }
 
 function retryDelayMs(attempt: number): number {

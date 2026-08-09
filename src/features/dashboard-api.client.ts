@@ -145,7 +145,7 @@ export interface DashboardAnalytics {
 }
 
 export async function fetchDashboardAnalytics(
-  range: DashboardAnalyticsRange = 'all',
+  range: DashboardAnalyticsRange = '7d',
   sourceId?: string,
   signal?: AbortSignal,
   crawl?: DashboardCrawlQuery,

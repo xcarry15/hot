@@ -169,7 +169,7 @@ export default function ToolDirectoryManagement() {
       return;
     }
     if (isToolDirectoryLinkableStatus(form.status) && !form.href.trim()) {
-      toast.error('正常或内测工具必须填写 HTTPS 链接');
+      toast.error('可用工具必须填写 HTTPS 链接');
       return;
     }
     setSaving(true);

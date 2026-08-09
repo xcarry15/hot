@@ -369,6 +369,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       ? WORKFLOW_SINGLE_STAGES[startStage]
       : activeJob.type === 'full'
         ? [...WORKFLOW_STAGES]
+        : activeJob.type === 'maintenance'
+          ? ['ai' as WorkflowStage]
         : [activeJob.type]
     const currentStage = activeJob.currentStage ?? startStage
     const currentIndex = currentStage ? stages.indexOf(currentStage) : -1
@@ -379,6 +381,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       ? '单篇恢复'
       : activeJob.type === 'full'
         ? '全量抓取'
+        : activeJob.type === 'maintenance'
+          ? '数据维护'
         : `${currentStage ? WORKFLOW_STAGE_LABELS[currentStage as WorkflowStage] : '批量'}任务`
     return {
       taskLabel,

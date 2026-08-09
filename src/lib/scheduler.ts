@@ -266,9 +266,9 @@ async function maybeEnqueueTechnicalRetry(settings?: Record<string, string>): Pr
   ]);
   if (!hasTechnicalRecovery && !hasEventRepair) return;
 
-  const res = await runJob(hasTechnicalRecovery ? 'full' : 'cluster', {
+  const res = await runJob(hasTechnicalRecovery ? 'full' : 'maintenance', {
     trigger: 'auto_retry',
-    ...(hasTechnicalRecovery ? { skipCollect: true } : { repairOnly: true }),
+    ...(hasTechnicalRecovery ? { skipCollect: true } : { action: 'repair-events' }),
   });
   if (res.queued) {
     console.log(`[scheduler] started ${hasTechnicalRecovery ? 'technical' : 'Event'} recovery job`, res.jobId);

@@ -55,7 +55,7 @@ const RANGE_DAYS: Record<Exclude<DashboardAnalyticsRange, 'all'>, number> = {
 export function parseDashboardAnalyticsRange(value: string | null): DashboardAnalyticsRange {
   if (value === 'all') return value;
   if (value === 'today' || value === '3d' || value === '7d' || value === '30d') return value;
-  return 'all';
+  return '7d';
 }
 
 /**
@@ -218,7 +218,7 @@ function toQualityStats(stats: MutableStats) {
 }
 
 async function buildDashboardAnalytics(
-  range: DashboardAnalyticsRange = 'all',
+  range: DashboardAnalyticsRange = '7d',
   sourceId?: string,
   crawlFilters: CrawlRecordFilters = {},
 ) {
@@ -591,7 +591,7 @@ export function invalidateDashboardAnalyticsCache(): void {
 }
 
 export function getDashboardAnalytics(
-  range: DashboardAnalyticsRange = 'all',
+  range: DashboardAnalyticsRange = '7d',
   sourceId?: string,
   crawlFilters: CrawlRecordFilters = {},
 ): Promise<DashboardAnalyticsResult> {
