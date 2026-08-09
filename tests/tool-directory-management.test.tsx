@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   fetchToolDirectory: vi.fn(),
+  fetchToolDirectoryCategories: vi.fn(),
+  updateToolDirectoryCategory: vi.fn(),
+  moveToolDirectoryCategory: vi.fn(),
+  exportToolDirectoryBackup: vi.fn(),
+  restoreToolDirectoryBackup: vi.fn(),
   createToolDirectoryItem: vi.fn(),
   updateToolDirectoryItem: vi.fn(),
   archiveToolDirectoryItem: vi.fn(),
@@ -17,6 +22,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/features/tool-directory-api.client', () => ({
   fetchToolDirectory: mocks.fetchToolDirectory,
+  fetchToolDirectoryCategories: mocks.fetchToolDirectoryCategories,
+  updateToolDirectoryCategory: mocks.updateToolDirectoryCategory,
+  moveToolDirectoryCategory: mocks.moveToolDirectoryCategory,
+  exportToolDirectoryBackup: mocks.exportToolDirectoryBackup,
+  restoreToolDirectoryBackup: mocks.restoreToolDirectoryBackup,
   createToolDirectoryItem: mocks.createToolDirectoryItem,
   updateToolDirectoryItem: mocks.updateToolDirectoryItem,
   archiveToolDirectoryItem: mocks.archiveToolDirectoryItem,
@@ -47,6 +57,14 @@ const tool = {
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
+const categories = [
+  { id: 'business-support' as const, name: '业务支持', sortOrder: 0 },
+  { id: 'geo-location' as const, name: '地理位置', sortOrder: 1 },
+  { id: 'data-analysis' as const, name: '数据分析', sortOrder: 2 },
+  { id: 'network-planning' as const, name: '点位分析', sortOrder: 3 },
+  { id: 'other-tools' as const, name: '其他工具', sortOrder: 4 },
+];
+
 function requestAbortedError(): Error & { status: number } {
   const error = new Error('请求已取消') as Error & { status: number };
   error.name = 'RequestJsonError';
@@ -59,6 +77,8 @@ describe('工具目录首次加载', () => {
 
   beforeEach(() => {
     mocks.fetchToolDirectory.mockReset();
+    mocks.fetchToolDirectoryCategories.mockReset();
+    mocks.fetchToolDirectoryCategories.mockResolvedValue(categories);
     mocks.fetchToolDirectory.mockImplementation((_includeArchived: boolean, signal?: AbortSignal) => {
       if (mocks.fetchToolDirectory.mock.calls.length === 1) {
         return new Promise((_resolve, reject) => {

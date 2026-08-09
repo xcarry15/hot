@@ -9,7 +9,7 @@ import PublicPageShell from '@/components/public-page-shell'
 import PublicViewTracker from '@/components/public-view-tracker'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import { getPublicArticleDetail } from '@/lib/public-article-service'
-import { PUBLIC_SITE_NAME } from '@/lib/public-brand'
+import { PUBLIC_BROWSER_SITE_NAME, PUBLIC_SITE_NAME } from '@/lib/public-brand'
 import { getPublicSiteUrl } from '@/lib/public-site'
 import { splitBrands } from '@/lib/shared/article-codecs'
 import { formatDaysAgo } from '@/lib/shared/date'
@@ -37,13 +37,13 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   try {
     article = await getCachedPublicArticleDetail(id)
   } catch {
-    return { title: `文章暂时不可用 · ${PUBLIC_SITE_NAME}`, robots: { index: false, follow: false } }
+    return { title: `文章暂时不可用 · ${PUBLIC_BROWSER_SITE_NAME}`, robots: { index: false, follow: false } }
   }
-  if (!article) return { title: `文章不存在 · ${PUBLIC_SITE_NAME}`, robots: { index: false, follow: false } }
+  if (!article) return { title: `文章不存在 · ${PUBLIC_BROWSER_SITE_NAME}`, robots: { index: false, follow: false } }
   const description = article.summary || article.excerpt
   const canonical = `/news/${article.id}`
   return {
-    title: `${article.title} · ${PUBLIC_SITE_NAME}`,
+    title: `${article.title} · ${PUBLIC_BROWSER_SITE_NAME}`,
     description: description.slice(0, 160),
     alternates: { canonical },
     robots: { index: true, follow: true },

@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { getSeedSettingDefaults } from '../src/lib/settings-catalog';
 import { PRESET_SOURCES } from '../src/lib/preset-sources';
+import { TOOL_CATEGORY_SEED_DEFINITIONS } from '../src/contracts/tool-directory';
 import { TOOL_DIRECTORY_SEED } from '../src/lib/tool-directory-seed';
 
 async function seed() {
@@ -28,6 +29,18 @@ async function seed() {
     await db.setting.upsert({ where: { key: s.key }, update: {}, create: s });
   }
   console.log('✓ Created default settings');
+
+  const toolCategoryCount = await db.toolDirectoryCategory.count();
+  if (toolCategoryCount === 0) {
+    await db.toolDirectoryCategory.createMany({
+      data: TOOL_CATEGORY_SEED_DEFINITIONS.map((category, sortOrder) => ({
+        id: category.id,
+        name: category.label,
+        sortOrder,
+      })),
+    });
+    console.log(`✓ Created ${TOOL_CATEGORY_SEED_DEFINITIONS.length} default tool categories`);
+  }
 
   const toolDirectoryCount = await db.toolDirectoryItem.count();
   if (toolDirectoryCount === 0) {

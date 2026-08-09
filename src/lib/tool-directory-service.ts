@@ -1,10 +1,12 @@
 import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache';
 import { db } from '@/lib/db';
 import {
-  TOOL_CATEGORY_DEFINITIONS,
+  TOOL_CATEGORY_SEED_DEFINITIONS,
   TOOL_DIRECTORY_ICON_NAMES,
   TOOL_DIRECTORY_STATUSES,
   TOOL_DIRECTORY_TAG_DEFINITIONS,
+  type ToolDirectoryBackupPayload,
+  type ToolDirectoryCategoryDto,
   type ToolDirectoryCategoryId,
   type ToolDirectoryIconName,
   type ToolDirectoryItemDto,
@@ -13,7 +15,10 @@ import {
 } from '@/contracts/tool-directory';
 import {
   toolCreateSchema,
+  toolDirectoryBackupSchema,
+  type ToolCategoryUpdateInput,
   type ToolCreateInput,
+  type ToolDirectoryBackupInput,
   type ToolUpdateInput,
 } from '@/lib/tool-directory-schema';
 
@@ -39,14 +44,13 @@ export class ToolDirectoryValidationError extends Error {
   }
 }
 
-const categoryOrder = new Map<string, number>(
-  TOOL_CATEGORY_DEFINITIONS.map((category, index) => [category.id, index]),
-);
+const categoryIdSet = new Set<string>(TOOL_CATEGORY_SEED_DEFINITIONS.map(({ id }) => id));
 const iconNameSet = new Set<string>(TOOL_DIRECTORY_ICON_NAMES);
 const statusSet = new Set<string>(TOOL_DIRECTORY_STATUSES);
 const tagSet = new Set<string>(TOOL_DIRECTORY_TAG_DEFINITIONS.map(({ id }) => id));
 
 type StoredTool = Awaited<ReturnType<typeof db.toolDirectoryItem.findUnique>>;
+type StoredCategory = Awaited<ReturnType<typeof db.toolDirectoryCategory.findUnique>>;
 
 function parseStoredTags(value: string): ToolDirectoryTag[] {
   let parsed: unknown;
@@ -63,9 +67,18 @@ function parseStoredTags(value: string): ToolDirectoryTag[] {
   return tags;
 }
 
+function mapStoredCategory(category: NonNullable<StoredCategory>): ToolDirectoryCategoryDto {
+  if (!categoryIdSet.has(category.id)) throw new Error(`工具分类数据无效：${category.id}`);
+  return {
+    id: category.id as ToolDirectoryCategoryId,
+    name: category.name,
+    sortOrder: category.sortOrder,
+  };
+}
+
 function mapStoredTool(item: NonNullable<StoredTool>): ToolDirectoryItemDto {
   if (
-    !categoryOrder.has(item.category)
+    !categoryIdSet.has(item.category)
     || !iconNameSet.has(item.icon)
     || !statusSet.has(item.status)
   ) {
@@ -88,7 +101,11 @@ function mapStoredTool(item: NonNullable<StoredTool>): ToolDirectoryItemDto {
   };
 }
 
-function sortTools(tools: ToolDirectoryItemDto[]): ToolDirectoryItemDto[] {
+function sortTools(
+  tools: ToolDirectoryItemDto[],
+  categories: readonly ToolDirectoryCategoryDto[],
+): ToolDirectoryItemDto[] {
+  const categoryOrder = new Map(categories.map((category, index) => [category.id, index]));
   return tools.sort((left, right) => (
     (categoryOrder.get(left.category) ?? Number.MAX_SAFE_INTEGER)
       - (categoryOrder.get(right.category) ?? Number.MAX_SAFE_INTEGER)
@@ -110,43 +127,65 @@ function toPublicTool(item: ToolDirectoryItemDto) {
   };
 }
 
-async function readPublicToolItems(): Promise<ToolDirectoryItemDto[]> {
+async function readToolItems(includeArchived: boolean): Promise<ToolDirectoryItemDto[]> {
   const items = await db.toolDirectoryItem.findMany({
-    where: { archivedAt: null },
+    where: includeArchived ? undefined : { archivedAt: null },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
   });
-  return sortTools(items.map(mapStoredTool));
+  return items.map(mapStoredTool);
 }
 
-const readCachedPublicToolItems = unstable_cache(
-  readPublicToolItems,
-  ['public-tool-directory-items'],
-  { revalidate: 3600, tags: [TOOL_DIRECTORY_CACHE_TAG] },
-);
+export async function listToolDirectoryCategories(): Promise<ToolDirectoryCategoryDto[]> {
+  const categories = await db.toolDirectoryCategory.findMany({
+    orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+  });
+  return categories.map(mapStoredCategory);
+}
 
-export async function getPublicToolCategories() {
-  const tools = await readCachedPublicToolItems();
-  return TOOL_CATEGORY_DEFINITIONS.map((category) => ({
+async function readPublicToolCategories() {
+  const [categories, tools] = await Promise.all([
+    listToolDirectoryCategories(),
+    readToolItems(false),
+  ]);
+  const sortedTools = sortTools(tools, categories);
+  return categories.map((category) => ({
     id: category.id,
-    label: category.label,
-    tools: tools
+    label: category.name,
+    tools: sortedTools
       .filter((tool) => tool.category === category.id)
       .map(toPublicTool),
   }));
 }
 
+const readCachedPublicToolCategories = unstable_cache(
+  readPublicToolCategories,
+  ['public-tool-directory-categories'],
+  { revalidate: 3600, tags: [TOOL_DIRECTORY_CACHE_TAG] },
+);
+
+export async function getPublicToolCategories() {
+  return readCachedPublicToolCategories();
+}
+
 export async function listToolDirectory(includeArchived = false): Promise<ToolDirectoryItemDto[]> {
-  const items = await db.toolDirectoryItem.findMany({
-    where: includeArchived ? undefined : { archivedAt: null },
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-  });
-  return sortTools(items.map(mapStoredTool));
+  const [categories, tools] = await Promise.all([
+    listToolDirectoryCategories(),
+    readToolItems(includeArchived),
+  ]);
+  return sortTools(tools, categories);
 }
 
 async function getToolOrThrow(id: string) {
   const item = await db.toolDirectoryItem.findUnique({ where: { id } });
   if (!item) throw new ToolDirectoryNotFoundError();
   return item;
+}
+
+async function getCategoryOrThrow(id: string, tx = db) {
+  if (!categoryIdSet.has(id)) throw new ToolDirectoryValidationError('工具分类不存在');
+  const category = await tx.toolDirectoryCategory.findUnique({ where: { id } });
+  if (!category) throw new ToolDirectoryValidationError('工具分类不存在');
+  return category;
 }
 
 async function nextSortOrder(category: string, tx = db) {
@@ -170,6 +209,7 @@ function invalidatePublicTools(): void {
 
 export async function createToolDirectoryItem(input: ToolCreateInput): Promise<ToolDirectoryItemDto> {
   const parsed = validateCompleteTool(input);
+  await getCategoryOrThrow(parsed.category);
   const item = await db.toolDirectoryItem.create({
     data: {
       name: parsed.name,
@@ -199,6 +239,7 @@ export async function updateToolDirectoryItem(id: string, input: ToolUpdateInput
     tags: input.tags ?? existingDto.tags,
   });
   const categoryChanged = candidate.category !== existingDto.category;
+  if (categoryChanged) await getCategoryOrThrow(candidate.category);
   const item = await db.toolDirectoryItem.update({
     where: { id },
     data: {
@@ -261,4 +302,108 @@ export async function moveToolDirectoryItem(id: string, direction: 'up' | 'down'
   });
   invalidatePublicTools();
   return mapStoredTool(item);
+}
+
+export async function updateToolDirectoryCategory(
+  id: ToolDirectoryCategoryId,
+  input: ToolCategoryUpdateInput,
+): Promise<ToolDirectoryCategoryDto> {
+  await getCategoryOrThrow(id);
+  const duplicate = await db.toolDirectoryCategory.findUnique({ where: { name: input.name } });
+  if (duplicate && duplicate.id !== id) throw new ToolDirectoryValidationError('分类名称已存在');
+  const category = await db.toolDirectoryCategory.update({
+    where: { id },
+    data: { name: input.name },
+  });
+  invalidatePublicTools();
+  return mapStoredCategory(category);
+}
+
+export async function moveToolDirectoryCategory(
+  id: ToolDirectoryCategoryId,
+  direction: 'up' | 'down',
+): Promise<ToolDirectoryCategoryDto> {
+  const category = await db.$transaction(async (tx) => {
+    const categories = await tx.toolDirectoryCategory.findMany({
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+    });
+    const currentIndex = categories.findIndex((item) => item.id === id);
+    if (currentIndex < 0) throw new ToolDirectoryValidationError('工具分类不存在');
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= categories.length) return categories[currentIndex];
+
+    const reordered = [...categories];
+    const [moved] = reordered.splice(currentIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+    for (const [sortOrder, item] of reordered.entries()) {
+      await tx.toolDirectoryCategory.update({ where: { id: item.id }, data: { sortOrder } });
+    }
+    return tx.toolDirectoryCategory.findUniqueOrThrow({ where: { id } });
+  });
+  invalidatePublicTools();
+  return mapStoredCategory(category);
+}
+
+export async function exportToolDirectoryBackup(): Promise<ToolDirectoryBackupPayload> {
+  const [storedCategories, storedTools] = await db.$transaction([
+    db.toolDirectoryCategory.findMany({ orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] }),
+    db.toolDirectoryItem.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] }),
+  ]);
+  const categories = storedCategories.map(mapStoredCategory);
+  const tools = sortTools(storedTools.map(mapStoredTool), categories);
+  return {
+    type: 'hot2-tool-directory-backup',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    categories,
+    tools: tools.map(({ id, name, description, category, href, icon, status, tags, sortOrder, archivedAt }) => ({
+      id,
+      name,
+      description,
+      category,
+      href,
+      icon,
+      status,
+      tags,
+      sortOrder,
+      archivedAt,
+    })),
+  };
+}
+
+export async function restoreToolDirectoryBackup(input: unknown): Promise<{ categoryCount: number; toolCount: number }> {
+  const parsed = toolDirectoryBackupSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new ToolDirectoryValidationError(parsed.error.issues[0]?.message || '工具中心备份文件无效');
+  }
+  const backup = parsed.data as ToolDirectoryBackupInput;
+  await db.$transaction(async (tx) => {
+    await tx.toolDirectoryItem.deleteMany();
+    await tx.toolDirectoryCategory.deleteMany();
+    await tx.toolDirectoryCategory.createMany({
+      data: backup.categories.map((category) => ({
+        id: category.id,
+        name: category.name,
+        sortOrder: category.sortOrder,
+      })),
+    });
+    if (backup.tools.length > 0) {
+      await tx.toolDirectoryItem.createMany({
+        data: backup.tools.map((tool) => ({
+          id: tool.id,
+          name: tool.name,
+          description: tool.description,
+          category: tool.category,
+          href: tool.href,
+          icon: tool.icon,
+          status: tool.status,
+          tags: JSON.stringify(tool.tags),
+          sortOrder: tool.sortOrder,
+          archivedAt: tool.archivedAt ? new Date(tool.archivedAt) : null,
+        })),
+      });
+    }
+  });
+  invalidatePublicTools();
+  return { categoryCount: backup.categories.length, toolCount: backup.tools.length };
 }

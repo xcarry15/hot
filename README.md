@@ -55,11 +55,12 @@
 
 ### 工具目录
 
-- 运行时数据来自 `ToolDirectoryItem`，公开端不以静态目录作降级数据源。
-- 数据库为空时，`prisma/seed.ts` 才会写入 `src/components/public-tools/tool-catalog.ts` 中的初始化快照；之后由后台维护。
+- 运行时数据来自 `ToolDirectoryItem` 与 `ToolDirectoryCategory`，公开端不以静态目录作降级数据源。
+- 数据库为空时，`prisma/seed.ts` 才会写入 `src/components/public-tools/tool-catalog.ts` 中的初始化快照和默认分类；之后由后台维护。
 - 分类、状态、标签和图标契约集中在 `src/contracts/tool-directory.ts`。
 - 仅 `active`、`beta` 且具有公网 HTTPS 地址的条目可点击；其他未归档条目继续展示但不可打开。
-- `设置 → 工具中心` 提供新增、编辑、排序、归档和恢复，保存后会失效公开目录缓存。
+- `设置 → 工具中心` 提供工具新增、编辑、排序、归档和恢复，以及分类改名和排序；保存后会失效公开目录缓存。
+- 工具中心可导出独立 JSON 备份；上传恢复会在一个事务中覆盖全部分类、工具、状态、标签、排序和归档状态，适用于数据库重新初始化后的配置恢复。
 
 ### 数据导出与统计
 

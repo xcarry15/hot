@@ -14,6 +14,9 @@ const mocks = db as unknown as {
     findMany: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
+  toolDirectoryCategory: {
+    findMany: ReturnType<typeof vi.fn>;
+  };
 };
 
 function storedTool(overrides: Record<string, unknown> = {}) {
@@ -34,14 +37,39 @@ function storedTool(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function storedCategory(id: string, sortOrder: number, name?: string) {
+  const labels: Record<string, string> = {
+    'business-support': '业务支持',
+    'geo-location': '地理位置',
+    'data-analysis': '数据分析',
+    'network-planning': '点位分析',
+    'other-tools': '其他工具',
+  };
+  return { id, name: name ?? labels[id], sortOrder, createdAt: new Date(), updatedAt: new Date() };
+}
+
 describe('tool-directory-service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.toolDirectoryItem.findMany.mockResolvedValue([]);
     mocks.toolDirectoryItem.findUnique.mockResolvedValue(null);
+    mocks.toolDirectoryCategory.findMany.mockResolvedValue([
+      storedCategory('business-support', 0),
+      storedCategory('geo-location', 1),
+      storedCategory('data-analysis', 2),
+      storedCategory('network-planning', 3),
+      storedCategory('other-tools', 4),
+    ]);
   });
 
-  it('按固定分类顺序返回公开工具，并解析标签', async () => {
+  it('按维护后的分类顺序返回公开工具，并解析标签', async () => {
+    mocks.toolDirectoryCategory.findMany.mockResolvedValue([
+      storedCategory('geo-location', 0, '位置工具'),
+      storedCategory('business-support', 1, '业务工具'),
+      storedCategory('data-analysis', 2),
+      storedCategory('network-planning', 3),
+      storedCategory('other-tools', 4),
+    ]);
     mocks.toolDirectoryItem.findMany.mockResolvedValue([
       storedTool({ id: 'tool-2', category: 'geo-location', sortOrder: 0 }),
       storedTool({ id: 'tool-1', category: 'business-support', sortOrder: 1 }),
@@ -49,9 +77,10 @@ describe('tool-directory-service', () => {
 
     const categories = await getPublicToolCategories();
 
-    expect(categories[0].label).toBe('业务支持');
-    expect(categories[0].tools[0]).toMatchObject({ id: 'tool-1', tags: ['updated'] });
-    expect(categories[1].tools[0]).toMatchObject({ id: 'tool-2' });
+    expect(categories[0].label).toBe('位置工具');
+    expect(categories[0].tools[0]).toMatchObject({ id: 'tool-2', tags: ['updated'] });
+    expect(categories[1].label).toBe('业务工具');
+    expect(categories[1].tools[0]).toMatchObject({ id: 'tool-1' });
     expect(categories).toHaveLength(5);
   });
 

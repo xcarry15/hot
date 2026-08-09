@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
-import { PUBLIC_SITE_DESCRIPTION, PUBLIC_SITE_NAME } from "@/lib/public-brand";
+import {
+  PUBLIC_BROWSER_SITE_NAME,
+  PUBLIC_SITE_DESCRIPTION,
+  PUBLIC_SITE_NAME,
+} from "@/lib/public-brand";
 import { getPublicSiteUrl } from "@/lib/public-site";
 import appleTouchIcon from "@/pic/Logo/apple-touch-icon.png";
 import logo from "@/pic/Logo/icon-192x192.png";
@@ -15,7 +19,7 @@ export const revalidate = 0;
 
 export const metadata: Metadata = {
   metadataBase: getPublicSiteUrl(),
-  title: PUBLIC_SITE_NAME,
+  title: PUBLIC_BROWSER_SITE_NAME,
   description: PUBLIC_SITE_DESCRIPTION,
   applicationName: PUBLIC_SITE_NAME,
   icons: {

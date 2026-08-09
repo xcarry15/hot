@@ -1,4 +1,5 @@
-export const TOOL_CATEGORY_DEFINITIONS = [
+/** 工具中心初始化分类；运行时名称与排序由数据库维护。 */
+export const TOOL_CATEGORY_SEED_DEFINITIONS = [
   { id: 'business-support', label: '业务支持' },
   { id: 'geo-location', label: '地理位置' },
   { id: 'data-analysis', label: '数据分析' },
@@ -6,7 +7,13 @@ export const TOOL_CATEGORY_DEFINITIONS = [
   { id: 'other-tools', label: '其他工具' },
 ] as const;
 
-export type ToolDirectoryCategoryId = (typeof TOOL_CATEGORY_DEFINITIONS)[number]['id'];
+export type ToolDirectoryCategoryId = (typeof TOOL_CATEGORY_SEED_DEFINITIONS)[number]['id'];
+
+export interface ToolDirectoryCategoryDto {
+  id: ToolDirectoryCategoryId;
+  name: string;
+  sortOrder: number;
+}
 
 export const TOOL_DIRECTORY_TAG_DEFINITIONS = [
   { id: 'free', label: '免费' },
@@ -155,4 +162,15 @@ export interface ToolDirectorySeedItem {
   status: ToolDirectoryStatus;
   tags: ToolDirectoryTag[];
   sortOrder: number;
+}
+
+export interface ToolDirectoryBackupPayload {
+  type: 'hot2-tool-directory-backup';
+  version: 1;
+  exportedAt: string;
+  categories: ToolDirectoryCategoryDto[];
+  tools: Array<Pick<
+    ToolDirectoryItemDto,
+    'id' | 'name' | 'description' | 'category' | 'href' | 'icon' | 'status' | 'tags' | 'sortOrder' | 'archivedAt'
+  >>;
 }

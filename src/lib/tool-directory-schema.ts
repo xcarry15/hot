@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  TOOL_CATEGORY_DEFINITIONS,
+  TOOL_CATEGORY_SEED_DEFINITIONS,
   TOOL_DIRECTORY_ICON_NAMES,
   TOOL_DIRECTORY_STATUSES,
   TOOL_DIRECTORY_TAG_DEFINITIONS,
@@ -8,7 +8,7 @@ import {
 } from '@/contracts/tool-directory';
 import { isBlockedOutboundHostname } from '@/lib/outbound-url';
 
-const categoryIds = TOOL_CATEGORY_DEFINITIONS.map(({ id }) => id) as [string, ...string[]];
+const categoryIds = TOOL_CATEGORY_SEED_DEFINITIONS.map(({ id }) => id) as [string, ...string[]];
 const iconNames = TOOL_DIRECTORY_ICON_NAMES as unknown as [string, ...string[]];
 const statuses = TOOL_DIRECTORY_STATUSES as unknown as [string, ...string[]];
 const tagIds = TOOL_DIRECTORY_TAG_DEFINITIONS.map(({ id }) => id) as [string, ...string[]];
@@ -67,6 +67,78 @@ export const toolReorderSchema = z.object({
   direction: z.enum(['up', 'down']),
 }).strict();
 
+export const toolCategoryUpdateSchema = z.object({
+  name: z.string().trim().min(1, '分类名称为必填项').max(30, '分类名称不能超过 30 个字符'),
+}).strict();
+
+export const toolCategoryReorderSchema = z.object({
+  id: z.enum(categoryIds as [typeof categoryIds[number], ...typeof categoryIds[number][]]),
+  direction: z.enum(['up', 'down']),
+}).strict();
+
+const toolBackupItemSchema = z.object({
+  id: z.string().trim().min(1, '工具 ID 无效').max(100, '工具 ID 无效'),
+  name: toolFields.name,
+  description: toolFields.description,
+  category: z.enum(categoryIds as [typeof categoryIds[number], ...typeof categoryIds[number][]]),
+  href: z.string().trim().max(2048, '链接不能超过 2048 个字符').nullable(),
+  icon: toolFields.icon,
+  status: toolFields.status,
+  tags: toolFields.tags,
+  sortOrder: z.number().int('工具排序无效').min(0, '工具排序无效').max(100_000, '工具排序无效'),
+  archivedAt: z.string().datetime({ offset: true, message: '下架时间无效' }).nullable(),
+}).strict();
+
+export const toolDirectoryBackupSchema = z.object({
+  type: z.literal('hot2-tool-directory-backup'),
+  version: z.literal(1),
+  exportedAt: z.string().datetime({ offset: true, message: '备份时间无效' }),
+  categories: z.array(z.object({
+    id: z.enum(categoryIds as [typeof categoryIds[number], ...typeof categoryIds[number][]]),
+    name: z.string().trim().min(1, '分类名称为必填项').max(30, '分类名称不能超过 30 个字符'),
+    sortOrder: z.number().int('分类排序无效').min(0, '分类排序无效').max(100, '分类排序无效'),
+  }).strict()).length(categoryIds.length, '分类数量不匹配'),
+  tools: z.array(toolBackupItemSchema).max(1_000, '工具数量超过上限'),
+}).strict().superRefine((value, context) => {
+  const categoryIdsInBackup = value.categories.map((category) => category.id);
+  if (new Set(categoryIdsInBackup).size !== categoryIdsInBackup.length) {
+    context.addIssue({ code: 'custom', path: ['categories'], message: '分类 ID 不能重复' });
+  }
+  if (categoryIdsInBackup.some((id) => !categoryIds.includes(id))) {
+    context.addIssue({ code: 'custom', path: ['categories'], message: '分类 ID 无效' });
+  }
+  const categoryNames = value.categories.map((category) => category.name.toLocaleLowerCase());
+  if (new Set(categoryNames).size !== categoryNames.length) {
+    context.addIssue({ code: 'custom', path: ['categories'], message: '分类名称不能重复' });
+  }
+  const sortOrders = value.categories.map((category) => category.sortOrder);
+  if (new Set(sortOrders).size !== sortOrders.length) {
+    context.addIssue({ code: 'custom', path: ['categories'], message: '分类排序不能重复' });
+  }
+  const toolIds = value.tools.map((tool) => tool.id);
+  if (new Set(toolIds).size !== toolIds.length) {
+    context.addIssue({ code: 'custom', path: ['tools'], message: '工具 ID 不能重复' });
+  }
+  for (const [index, tool] of value.tools.entries()) {
+    const parsed = toolCreateSchema.safeParse({
+      name: tool.name,
+      description: tool.description,
+      category: tool.category,
+      href: tool.href,
+      icon: tool.icon,
+      status: tool.status,
+      tags: tool.tags,
+    });
+    if (!parsed.success) {
+      context.addIssue({
+        code: 'custom',
+        path: ['tools', index],
+        message: parsed.error.issues[0]?.message || '工具配置无效',
+      });
+    }
+  }
+});
+
 export function formatToolSchemaError(error: z.ZodError): string {
   return error.issues[0]?.message || '工具参数无效';
 }
@@ -74,3 +146,6 @@ export function formatToolSchemaError(error: z.ZodError): string {
 export type ToolCreateInput = z.infer<typeof toolCreateSchema>;
 export type ToolUpdateInput = z.infer<typeof toolUpdateSchema>;
 export type ToolReorderInput = z.infer<typeof toolReorderSchema>;
+export type ToolCategoryUpdateInput = z.infer<typeof toolCategoryUpdateSchema>;
+export type ToolCategoryReorderInput = z.infer<typeof toolCategoryReorderSchema>;
+export type ToolDirectoryBackupInput = z.infer<typeof toolDirectoryBackupSchema>;

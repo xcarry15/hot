@@ -1,36 +1,46 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArrowDown,
   ArrowUp,
   ChevronDown,
   ChevronUp,
+  Download,
   ExternalLink,
   Eye,
   EyeOff,
+  FolderCog,
   Loader2,
   Pencil,
   Plus,
   RotateCcw,
+  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  TOOL_CATEGORY_DEFINITIONS,
+  TOOL_CATEGORY_SEED_DEFINITIONS,
   TOOL_DIRECTORY_ICON_NAMES,
   TOOL_DIRECTORY_STATUSES,
   TOOL_DIRECTORY_TAG_DEFINITIONS,
   isToolDirectoryLinkableStatus,
+  type ToolDirectoryBackupPayload,
+  type ToolDirectoryCategoryDto,
   type ToolDirectoryItemDto,
   type ToolDirectoryTag,
 } from '@/contracts/tool-directory';
 import {
   archiveToolDirectoryItem,
   createToolDirectoryItem,
+  exportToolDirectoryBackup,
+  fetchToolDirectoryCategories,
   fetchToolDirectory,
+  moveToolDirectoryCategory,
   moveToolDirectoryItem,
+  restoreToolDirectoryBackup,
   restoreToolDirectoryItem,
+  updateToolDirectoryCategory,
   updateToolDirectoryItem,
   type ToolDirectoryInput,
 } from '@/features/tool-directory-api.client';
@@ -50,7 +60,7 @@ type ToolFormState = Omit<ToolDirectoryInput, 'href'> & { href: string };
 const EMPTY_FORM: ToolFormState = {
   name: '',
   description: '',
-  category: TOOL_CATEGORY_DEFINITIONS[0].id,
+  category: TOOL_CATEGORY_SEED_DEFINITIONS[0].id,
   href: '',
   icon: TOOL_DIRECTORY_ICON_NAMES[0],
   status: 'active',
@@ -87,6 +97,7 @@ function statusClass(status: ToolDirectoryItemDto['status']): string {
 
 export default function ToolDirectoryManagement() {
   const [tools, setTools] = useState<ToolDirectoryItemDto[]>([]);
+  const [categories, setCategories] = useState<ToolDirectoryCategoryDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -97,12 +108,24 @@ export default function ToolDirectoryManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ToolFormState>(EMPTY_FORM);
   const [archiveTarget, setArchiveTarget] = useState<ToolDirectoryItemDto | null>(null);
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [categoryDrafts, setCategoryDrafts] = useState<Record<string, string>>({});
+  const [categoryBusyId, setCategoryBusyId] = useState<string | null>(null);
+  const [backupBusy, setBackupBusy] = useState<'export' | 'import' | null>(null);
+  const [pendingBackup, setPendingBackup] = useState<ToolDirectoryBackupPayload | null>(null);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const backupInputRef = useRef<HTMLInputElement>(null);
 
   const loadTools = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setLoadError(false);
     try {
-      setTools(await fetchToolDirectory(true, signal));
+      const [loadedTools, loadedCategories] = await Promise.all([
+        fetchToolDirectory(true, signal),
+        fetchToolDirectoryCategories(signal),
+      ]);
+      setTools(loadedTools);
+      setCategories(loadedCategories);
     } catch (error) {
       // StrictMode 首次挂载会取消第一轮请求；取消不应覆盖随后成功的重读结果。
       if (isRequestAborted(error)) return;
@@ -219,6 +242,95 @@ export default function ToolDirectoryManagement() {
     }
   };
 
+  const openCategoryManagement = () => {
+    setCategoryDrafts(Object.fromEntries(categories.map((category) => [category.id, category.name])));
+    setCategoryDialogOpen(true);
+  };
+
+  const handleCategorySave = async (category: ToolDirectoryCategoryDto) => {
+    const name = categoryDrafts[category.id]?.trim() ?? '';
+    if (!name) {
+      toast.error('分类名称不能为空');
+      return;
+    }
+    if (name === category.name) return;
+    setCategoryBusyId(`${category.id}:save`);
+    try {
+      await updateToolDirectoryCategory(category.id, name);
+      toast.success('分类名称已更新');
+      await loadTools();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '更新分类失败');
+    } finally {
+      setCategoryBusyId(null);
+    }
+  };
+
+  const handleCategoryMove = async (category: ToolDirectoryCategoryDto, direction: 'up' | 'down') => {
+    setCategoryBusyId(`${category.id}:${direction}`);
+    try {
+      await moveToolDirectoryCategory(category.id, direction);
+      await loadTools();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '调整分类排序失败');
+    } finally {
+      setCategoryBusyId(null);
+    }
+  };
+
+  const handleBackupExport = async () => {
+    setBackupBusy('export');
+    try {
+      const backup = await exportToolDirectoryBackup();
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().slice(0, 10).replaceAll('-', '');
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `hot2-tool-directory-${stamp}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success('工具中心配置已备份');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '备份工具中心失败');
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
+  const handleBackupSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 1_000_000) {
+      toast.error('备份文件过大，最大支持 1MB');
+      return;
+    }
+    try {
+      const backup = JSON.parse(await file.text()) as ToolDirectoryBackupPayload;
+      setPendingBackup(backup);
+      setRestoreDialogOpen(true);
+    } catch {
+      toast.error('备份文件不是有效的 JSON');
+    }
+  };
+
+  const handleBackupRestore = async () => {
+    if (!pendingBackup) return;
+    setBackupBusy('import');
+    try {
+      const result = await restoreToolDirectoryBackup(pendingBackup);
+      await loadTools();
+      setRestoreDialogOpen(false);
+      setPendingBackup(null);
+      toast.success(`已恢复 ${result.categoryCount} 个分类和 ${result.toolCount} 个工具`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '恢复工具中心失败');
+    } finally {
+      setBackupBusy(null);
+    }
+  };
+
   if (loading) {
     return <div className="space-y-2 p-3"><div className="h-8 animate-pulse bg-muted" /><div className="h-24 animate-pulse bg-muted" /><div className="h-24 animate-pulse bg-muted" /></div>;
   }
@@ -237,8 +349,21 @@ export default function ToolDirectoryManagement() {
       <div className="flex flex-wrap items-center gap-2 border-b pb-2">
         <div className="mr-auto">
           <p className="font-medium">工具中心目录</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">管理公开工具入口、分类、状态和标签</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">管理公开工具入口、分类、状态和标签；可单独备份并恢复。</p>
         </div>
+        <input ref={backupInputRef} type="file" accept="application/json,.json" className="hidden" onChange={(event) => void handleBackupSelected(event)} />
+        <Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" disabled={backupBusy !== null} onClick={() => void handleBackupExport()}>
+          {backupBusy === 'export' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+          备份
+        </Button>
+        <Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" disabled={backupBusy !== null} onClick={() => backupInputRef.current?.click()}>
+          <Upload className="h-3.5 w-3.5" />
+          上传恢复
+        </Button>
+        <Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={openCategoryManagement}>
+          <FolderCog className="h-3.5 w-3.5" />
+          分类维护
+        </Button>
         <Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => setShowArchived((value) => !value)}>
           {showArchived ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           {showArchived ? '隐藏已下架' : '查看已下架'}
@@ -250,14 +375,14 @@ export default function ToolDirectoryManagement() {
       </div>
 
       <div className="space-y-4">
-        {TOOL_CATEGORY_DEFINITIONS.map((category) => {
+        {categories.map((category) => {
           const categoryTools = visibleTools.filter((tool) => tool.category === category.id);
           if (categoryTools.length === 0 && !(showArchived && tools.some((tool) => tool.category === category.id))) return null;
           const activeCategoryTools = categoryTools.filter((tool) => !tool.archivedAt);
           return (
             <section key={category.id} className="space-y-1.5">
               <div className="flex items-center gap-2 border-b px-1 pb-1.5">
-                <h2 className="font-medium">{category.label}</h2>
+                <h2 className="font-medium">{category.name}</h2>
                 <span className="text-[11px] text-muted-foreground">{activeCategoryTools.length} 项</span>
               </div>
               <div className="space-y-px">
@@ -338,7 +463,7 @@ export default function ToolDirectoryManagement() {
                 <Select value={form.category} onValueChange={(value) => setFormValue('category', value as ToolFormState['category'])}>
                   <SelectTrigger className="h-8 rounded-none text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent className="rounded-none shadow-sm">
-                    {TOOL_CATEGORY_DEFINITIONS.map((category) => <SelectItem key={category.id} value={category.id} className="rounded-none">{category.label}</SelectItem>)}
+                    {categories.map((category) => <SelectItem key={category.id} value={category.id} className="rounded-none">{category.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -407,6 +532,75 @@ export default function ToolDirectoryManagement() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
+        <DialogContent className="rounded-none sm:max-w-lg [&_[data-slot=dialog-close]]:rounded-none">
+          <DialogHeader>
+            <DialogTitle className="text-base">分类维护</DialogTitle>
+            <DialogDescription className="text-xs">可修改公开页分类名称和展示顺序；分类 ID 保持不变，已有工具无需迁移。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {categories.map((category, index) => (
+              <div key={category.id} className="flex items-center gap-1.5 border px-2 py-2">
+                <span className="w-5 shrink-0 text-center text-[11px] tabular-nums text-muted-foreground">{index + 1}</span>
+                <Input
+                  value={categoryDrafts[category.id] ?? category.name}
+                  onChange={(event) => setCategoryDrafts((current) => ({ ...current, [category.id]: event.target.value }))}
+                  className="h-7 min-w-0 flex-1 rounded-none text-xs"
+                  aria-label={`${category.name}分类名称`}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2 text-xs"
+                  disabled={categoryBusyId !== null || (categoryDrafts[category.id] ?? category.name).trim() === category.name}
+                  onClick={() => void handleCategorySave(category)}
+                >
+                  {categoryBusyId === `${category.id}:save` ? <Loader2 className="h-3 w-3 animate-spin" /> : '保存'}
+                </Button>
+                <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={categoryBusyId !== null || index === 0} onClick={() => void handleCategoryMove(category, 'up')} title="上移分类">
+                  {categoryBusyId === `${category.id}:up` ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowUp className="h-3 w-3" />}
+                </Button>
+                <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={categoryBusyId !== null || index === categories.length - 1} onClick={() => void handleCategoryMove(category, 'down')} title="下移分类">
+                  {categoryBusyId === `${category.id}:down` ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowDown className="h-3 w-3" />}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={restoreDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && backupBusy !== 'import') {
+            setRestoreDialogOpen(false);
+            setPendingBackup(null);
+          }
+        }}
+      >
+        <AlertDialogContent className="rounded-none">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base">确认恢复工具中心配置？</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm">恢复会覆盖当前全部工具、分类名称和排序，当前配置将被替换。建议先执行一次备份。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-none text-xs" disabled={backupBusy === 'import'}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="rounded-none text-xs"
+              disabled={backupBusy === 'import'}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleBackupRestore();
+              }}
+            >
+              {backupBusy === 'import' && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              {backupBusy === 'import' ? '恢复中...' : '确认恢复'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={archiveTarget !== null} onOpenChange={(open) => { if (!open) setArchiveTarget(null); }}>
         <AlertDialogContent className="rounded-none">

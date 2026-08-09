@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import PublicPageShell from "@/components/public-page-shell";
-import { PUBLIC_SITE_NAME } from "@/lib/public-brand";
+import { PUBLIC_BROWSER_SITE_NAME, PUBLIC_SITE_NAME } from "@/lib/public-brand";
 import FeishuGroupQrCode from "@/pic/QRcode/飞书群-资讯推送.jpg";
 import WechatQrCode from "@/pic/QRcode/微信-沈浪.jpg";
 
 export const metadata: Metadata = {
-  title: `关于 · ${PUBLIC_SITE_NAME}`,
+  title: `关于 · ${PUBLIC_BROWSER_SITE_NAME}`,
   description: `了解${PUBLIC_SITE_NAME}提供的精选资讯、选址与数据工具。`,
   alternates: { canonical: "/about" },
 };

@@ -1,12 +1,12 @@
 import type { Metadata } from 'next';
 import PublicToolsPage from '@/components/public-tools/public-tools-page';
-import { PUBLIC_SITE_NAME } from '@/lib/public-brand';
+import { PUBLIC_BROWSER_SITE_NAME } from '@/lib/public-brand';
 import { getPublicToolCategories } from '@/lib/tool-directory-service';
 
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: `工具中心 · ${PUBLIC_SITE_NAME}`,
+  title: `工具 · ${PUBLIC_BROWSER_SITE_NAME}`,
   description: '选址、地理位置、数据分析与文件工具入口。',
 };
 

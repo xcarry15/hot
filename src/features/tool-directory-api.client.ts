@@ -1,5 +1,9 @@
 import { requestJson } from '@/lib/request-json.client';
-import type { ToolDirectoryItemDto } from '@/contracts/tool-directory';
+import type {
+  ToolDirectoryBackupPayload,
+  ToolDirectoryCategoryDto,
+  ToolDirectoryItemDto,
+} from '@/contracts/tool-directory';
 
 export interface ToolDirectoryInput {
   name: string;
@@ -46,6 +50,46 @@ export async function moveToolDirectoryItem(
 ): Promise<ToolDirectoryItemDto> {
   return requestJson<ToolDirectoryItemDto>('POST', '/api/tools/reorder', {
     body: { id, direction },
+    signal,
+  });
+}
+
+export async function fetchToolDirectoryCategories(signal?: AbortSignal): Promise<ToolDirectoryCategoryDto[]> {
+  return requestJson<ToolDirectoryCategoryDto[]>('GET', '/api/tools/categories', { signal });
+}
+
+export async function updateToolDirectoryCategory(
+  id: ToolDirectoryCategoryDto['id'],
+  name: string,
+  signal?: AbortSignal,
+): Promise<ToolDirectoryCategoryDto> {
+  return requestJson<ToolDirectoryCategoryDto>('PUT', `/api/tools/categories/${id}`, {
+    body: { name },
+    signal,
+  });
+}
+
+export async function moveToolDirectoryCategory(
+  id: ToolDirectoryCategoryDto['id'],
+  direction: 'up' | 'down',
+  signal?: AbortSignal,
+): Promise<ToolDirectoryCategoryDto> {
+  return requestJson<ToolDirectoryCategoryDto>('POST', '/api/tools/categories/reorder', {
+    body: { id, direction },
+    signal,
+  });
+}
+
+export async function exportToolDirectoryBackup(signal?: AbortSignal): Promise<ToolDirectoryBackupPayload> {
+  return requestJson<ToolDirectoryBackupPayload>('GET', '/api/tools/backup', { signal });
+}
+
+export async function restoreToolDirectoryBackup(
+  backup: ToolDirectoryBackupPayload,
+  signal?: AbortSignal,
+): Promise<{ categoryCount: number; toolCount: number }> {
+  return requestJson<{ categoryCount: number; toolCount: number }>('POST', '/api/tools/backup', {
+    body: backup,
     signal,
   });
 }

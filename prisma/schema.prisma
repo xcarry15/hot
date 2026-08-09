@@ -391,6 +391,17 @@ model ToolDirectoryItem {
   @@map("tool_directory_items")
 }
 
+model ToolDirectoryCategory {
+  id        String   @id
+  name      String   @unique
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sortOrder])
+  @@map("tool_directory_categories")
+}
+
 model DiscardedItem {
   id              String    @id @default(cuid())
   sourceId        String
