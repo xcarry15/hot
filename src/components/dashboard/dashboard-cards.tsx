@@ -24,6 +24,35 @@ interface CrawlTimeCardProps {
 }
 
 function formatNumber(value: number): string { return value.toLocaleString() }
+const CHART_VIEWBOX_WIDTH = 640
+const CHART_HEIGHT = 160
+const CHART_PLOT_TOP = 12
+const CHART_PLOT_BOTTOM = CHART_HEIGHT - 26
+const CHART_AXIS_LEFT = 34
+const CHART_AXIS_RIGHT = 12
+const CHART_PLOT_WIDTH = CHART_VIEWBOX_WIDTH - CHART_AXIS_LEFT - CHART_AXIS_RIGHT
+const MAX_DATE_LABELS = 20
+const RECENT_CONTINUOUS_DATE_LABELS = 7
+
+function getDateLabelIndexes(length: number): Set<number> {
+  const indexes = new Set<number>()
+  if (length <= MAX_DATE_LABELS) {
+    for (let index = 0; index < length; index += 1) indexes.add(index)
+    return indexes
+  }
+
+  const recentStart = length - RECENT_CONTINUOUS_DATE_LABELS
+  for (let index = recentStart; index < length; index += 1) indexes.add(index)
+
+  const olderLabelCount = MAX_DATE_LABELS - RECENT_CONTINUOUS_DATE_LABELS
+  const olderDateCount = recentStart
+  for (let labelIndex = 0; labelIndex < olderLabelCount; labelIndex += 1) {
+    const ratio = labelIndex / (olderLabelCount - 1)
+    indexes.add(Math.round(ratio * (olderDateCount - 1)))
+  }
+  return indexes
+}
+
 function getChartAxisMax(value: number): number {
   if (value <= 0) return 1
   const magnitude = 10 ** Math.floor(Math.log10(value))
@@ -134,25 +163,24 @@ export function DailyNewArticlesCard({
 }) {
   const total = articles.reduce((sum, item) => sum + item.count, 0)
   const chartAxisMax = getChartAxisMax(Math.max(0, ...articles.map((item) => item.count)))
-  const labelStep = Math.max(1, Math.ceil(articles.length / 6))
-  const chartHeight = 160
-  const plotTop = 12
-  const plotBottom = chartHeight - 26
+  const dateLabelIndexes = getDateLabelIndexes(articles.length)
+  const chartHeight = CHART_HEIGHT
+  const plotTop = CHART_PLOT_TOP
+  const plotBottom = CHART_PLOT_BOTTOM
   const plotHeight = plotBottom - plotTop
-  const axisLeft = 34
-  const axisRight = 12
-  const slotWidth = Math.max(52, 500 / Math.max(1, articles.length))
-  const plotWidth = Math.max(500, articles.length * slotWidth)
-  const chartWidth = axisLeft + plotWidth + axisRight
+  const axisLeft = CHART_AXIS_LEFT
+  const slotWidth = CHART_PLOT_WIDTH / Math.max(1, articles.length)
+  const plotWidth = CHART_PLOT_WIDTH
+  const chartWidth = CHART_VIEWBOX_WIDTH
   const getX = (index: number) => axisLeft + slotWidth * (index + 0.5)
   const getY = (value: number) => plotBottom - (value / chartAxisMax) * plotHeight
-  const barWidth = Math.min(28, slotWidth * 0.42)
+  const barWidth = Math.max(2, Math.min(28, slotWidth * 0.68))
   const axisTicks = getChartAxisTicks(chartAxisMax, plotBottom, plotHeight)
   const points = articles.map((item, index) => `${getX(index)},${getY(item.count)}`).join(' ')
 
   return (
-    <Card className="rounded-none py-0 shadow-none">
-      <CardContent className="p-2">
+      <Card className="min-w-0 max-w-full rounded-none py-0 shadow-none">
+        <CardContent className="min-w-0 p-2">
         <div className="mb-1 flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium">每日新增</h3>
           <span className="text-[10px] text-muted-foreground">期间合计 {formatNumber(total)} 篇</span>
@@ -162,11 +190,11 @@ export function DailyNewArticlesCard({
           <span className="text-muted-foreground/75">按入库时间统计 · 单位：篇</span>
         </div>
         {articles.length > 0 ? (
-          <div className="mt-1 h-[180px] overflow-x-auto border-b border-l px-1 pb-1 pt-2">
+          <div className="mt-1 h-[180px] min-w-0 max-w-full overflow-hidden border-b border-l px-1 pb-1 pt-2">
             <svg
-              className="block"
-              width={chartWidth}
-              height={chartHeight}
+              className="block h-[160px] w-full"
+              viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+              preserveAspectRatio="none"
               role="img"
               aria-label="每日新增文章数量和趋势"
             >
@@ -183,7 +211,7 @@ export function DailyNewArticlesCard({
               {articles.map((item, index) => {
                 const x = getX(index)
                 const [, month, day] = item.date.split('-')
-                const showLabel = articles.length <= 7 || index === 0 || index === articles.length - 1 || index % labelStep === 0
+                const showLabel = dateLabelIndexes.has(index)
                 const barHeight = (item.count / chartAxisMax) * plotHeight
                 return (
                   <g key={item.date}>
@@ -222,23 +250,22 @@ function DailyActivityCard({
   emptyText: string
 }) {
   const chartAxisMax = getChartAxisMax(Math.max(0, ...articles.map((item) => item[metric])))
-  const labelStep = Math.max(1, Math.ceil(articles.length / 6))
-  const chartHeight = 160
-  const plotTop = 12
-  const plotBottom = chartHeight - 26
+  const dateLabelIndexes = getDateLabelIndexes(articles.length)
+  const chartHeight = CHART_HEIGHT
+  const plotTop = CHART_PLOT_TOP
+  const plotBottom = CHART_PLOT_BOTTOM
   const plotHeight = plotBottom - plotTop
-  const axisLeft = 34
-  const axisRight = 12
-  const slotWidth = Math.max(52, 500 / Math.max(1, articles.length))
-  const plotWidth = Math.max(500, articles.length * slotWidth)
-  const chartWidth = axisLeft + plotWidth + axisRight
+  const axisLeft = CHART_AXIS_LEFT
+  const slotWidth = CHART_PLOT_WIDTH / Math.max(1, articles.length)
+  const plotWidth = CHART_PLOT_WIDTH
+  const chartWidth = CHART_VIEWBOX_WIDTH
   const getX = (index: number) => axisLeft + slotWidth * (index + 0.5)
-  const barWidth = Math.min(28, slotWidth * 0.42)
+  const barWidth = Math.max(2, Math.min(28, slotWidth * 0.68))
   const axisTicks = getChartAxisTicks(chartAxisMax, plotBottom, plotHeight)
 
   return (
-    <Card className="rounded-none py-0 shadow-none">
-      <CardContent className="p-2">
+    <Card className="min-w-0 max-w-full rounded-none py-0 shadow-none">
+      <CardContent className="min-w-0 p-2">
         <div className="mb-1 flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium">{title}</h3>
         </div>
@@ -247,11 +274,11 @@ function DailyActivityCard({
           <span className="text-muted-foreground/75">按动作发生日 · 单位：次</span>
         </div>
         {articles.length > 0 ? (
-          <div className="mt-1 h-[180px] overflow-x-auto border-b border-l px-1 pb-1 pt-2">
+          <div className="mt-1 h-[180px] min-w-0 max-w-full overflow-hidden border-b border-l px-1 pb-1 pt-2">
             <svg
-              className="block"
-              width={chartWidth}
-              height={chartHeight}
+              className="block h-[160px] w-full"
+              viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+              preserveAspectRatio="none"
               role="img"
               aria-label={`${title}数量`}
             >
@@ -267,7 +294,7 @@ function DailyActivityCard({
               {articles.map((item, index) => {
                 const x = getX(index)
                 const [, month, day] = item.date.split('-')
-                const showLabel = articles.length <= 7 || index === 0 || index === articles.length - 1 || index % labelStep === 0
+                const showLabel = dateLabelIndexes.has(index)
                 const value = item[metric]
                 const barHeight = (value / chartAxisMax) * plotHeight
                 return (
