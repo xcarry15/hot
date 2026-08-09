@@ -27,7 +27,7 @@
 自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh`，依次执行：
 
 1. 验证部署密钥、`.env`、SQLite 和 release 中的完整 migration 集合。
-2. migration 历史匹配后停止 PM2，并用 SQLite `.backup` 创建备份。
+2. migration 历史兼容后停止 PM2，并用 SQLite `.backup` 创建备份。
 3. 使用 `rsync --delete` 同步代码，保留 `.env*`、`db/` 和 `node_modules/`。
 4. 执行 `npm ci`、`db:migrate:deploy`、`db:generate`、`db:optimize` 和 `npm run build`。
 5. 以单实例启动 `h2-hot2`，检查 `/api/health`、公开首页和 CSS 资源。
@@ -38,7 +38,7 @@
 
 `reset_production=yes` 会跳过备份，直接删除生产 SQLite，再按当前 migration 和 seed 全新初始化。它只适用于明确放弃现有生产数据的情况，必须先获得明确授权。
 
-普通部署发现未知、缺失或未完成的 migration 时会在停止服务前拒绝继续。项目不维护旧 migration 历史的兼容升级路径。
+普通部署允许当前发布包中尚未执行的新 migration 由 `db:migrate:deploy` 增量应用；发现未知或未完成的 migration 时，会在停止服务前拒绝继续。项目不维护旧 migration 历史的兼容升级路径。
 
 ## 二、首次部署或完全重建
 

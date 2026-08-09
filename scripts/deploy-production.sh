@@ -54,9 +54,10 @@ if [[ "$RESET_PRODUCTION" == "NO" ]]; then
     echo "Run the manual Deploy production workflow with reset_production=yes after explicit approval." >&2
     exit 1
   fi
-  UNEXPECTED_MIGRATIONS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name NOT IN ($EXPECTED_MIGRATION_SQL) OR finished_at IS NULL;")"
-  CURRENT_MIGRATION_COUNT="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(DISTINCT migration_name) FROM _prisma_migrations WHERE migration_name IN ($EXPECTED_MIGRATION_SQL) AND finished_at IS NOT NULL;")"
-  if [[ "$UNEXPECTED_MIGRATIONS" != "0" || "$CURRENT_MIGRATION_COUNT" != "$EXPECTED_MIGRATION_COUNT" ]]; then
+  INVALID_MIGRATIONS="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name NOT IN ($EXPECTED_MIGRATION_SQL) OR finished_at IS NULL;")"
+  BASELINE_MIGRATION="${EXPECTED_MIGRATIONS[0]}"
+  BASELINE_APPLIED="$(sqlite3 "$APP_DIR/db/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name = '$BASELINE_MIGRATION' AND finished_at IS NOT NULL;")"
+  if [[ "$INVALID_MIGRATIONS" != "0" || "$BASELINE_APPLIED" != "1" ]]; then
     echo "Production database uses an obsolete migration history; refusing an in-place compatibility upgrade." >&2
     echo "Run the manual Deploy production workflow with reset_production=yes after explicit approval." >&2
     exit 1

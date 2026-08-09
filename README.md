@@ -173,7 +173,7 @@ npm run db:cleanup-logs
 推送或合并 master → CI → CI 成功 → Deploy production → 健康检查
 ```
 
-自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh`：校验 migration 历史、停止 PM2、备份 SQLite、`rsync --delete` 同步、安装依赖、应用 migration、构建、单实例启动并检查健康接口与 CSS 资源。
+自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh`：校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、`rsync --delete` 同步、安装依赖、应用 migration、构建、单实例启动并检查健康接口与 CSS 资源。
 
 手动 `reset_production=yes` 会在不备份的情况下删除生产 SQLite，并从当前 migration 与 seed 全新初始化。只有在明确接受丢失生产数据时才可使用；部署不会自动回滚代码或 migration。
 
