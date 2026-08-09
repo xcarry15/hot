@@ -13,6 +13,8 @@ RELEASES_DIR="${RELEASES_DIR:-$APP_DIR/releases}"
 CURRENT_LINK="${CURRENT_LINK:-$APP_DIR/current}"
 RELEASE_KEEP_COUNT="${RELEASE_KEEP_COUNT:-5}"
 RELEASE_ID="${RELEASE_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
+HEALTH_RETRY_COUNT="${HEALTH_RETRY_COUNT:-20}"
+HEALTH_RETRY_DELAY="${HEALTH_RETRY_DELAY:-3}"
 
 RELEASE_STAGING_DIR=""
 RELEASE_DIR=""
@@ -44,6 +46,13 @@ restart_service() {
   fi
   pm2 start npm --name "$APP_NAME" -- start
   pm2 save
+}
+
+wait_for_health() {
+  curl --fail --silent --show-error \
+    --retry "$HEALTH_RETRY_COUNT" \
+    --retry-delay "$HEALTH_RETRY_DELAY" \
+    "$SITE_URL/api/health" >/dev/null
 }
 
 restore_database_backup() {
@@ -257,7 +266,11 @@ CURRENT_LINK_CHANGED=1
 restart_service
 
 echo "[deploy] restarting PM2 and checking health"
-curl --fail --silent --show-error --retry 10 --retry-delay 3 "$SITE_URL/api/health" >/dev/null
+if ! wait_for_health; then
+  echo "[deploy] health check did not stabilize; restarting PM2 once before rollback"
+  restart_service
+  wait_for_health
+fi
 PUBLIC_HTML="$(curl --fail --silent --show-error --retry 10 --retry-delay 3 "${SITE_URL%/}/")"
 PUBLIC_CSS_PATH="$(printf '%s' "$PUBLIC_HTML" | sed -n 's/.*href="\([^\"]*\.css\)".*/\1/p' | head -n 1)"
 [[ -n "$PUBLIC_CSS_PATH" ]] || { echo "Deployment check failed: no Next.js CSS asset found in public HTML." >&2; exit 1; }
