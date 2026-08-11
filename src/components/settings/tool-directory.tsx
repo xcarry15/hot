@@ -43,7 +43,7 @@ import {
 } from '@/features/tool-directory-api.client';
 import { isRequestAborted } from '@/lib/request-json.client';
 import PublicToolIcon from '@/components/public-tools/tool-icons';
-import { STATUS_BADGE_META, TAG_BADGE_CLASSES, ToolBadgeToggle, ToolMetaLabel } from '@/components/public-tools/tool-badges';
+import { STATUS_BADGE_META, TAG_BADGE_CLASSES, ToolBadgeToggle } from '@/components/public-tools/tool-badges';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -71,6 +71,13 @@ const STATUS_LABELS: Record<Exclude<ToolDirectoryStatus, 'active'>, string> = {
   coming_soon: '即将上线',
   disabled: '停用',
 };
+
+/** 紧凑标签：与工具名称同行时不撑高行高（公开页保持 ToolMetaLabel 原大小） */
+function CompactMetaLabel({ label, className }: { label: string; className: string }) {
+  return (
+    <span className={`inline-flex h-5 shrink-0 items-center whitespace-nowrap border px-1.5 text-[10px] font-semibold leading-none ${className}`}>{label}</span>
+  );
+}
 
 function toFormState(tool: ToolDirectoryItemDto): ToolFormState {
   return {
@@ -382,6 +389,19 @@ export default function ToolDirectoryManagement() {
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-1.5">
                           <span className="truncate font-medium">{tool.name}</span>
+                          {STATUS_BADGE_META[tool.status].label && (
+                            <CompactMetaLabel
+                              label={STATUS_BADGE_META[tool.status].label}
+                              className={STATUS_BADGE_META[tool.status].className}
+                            />
+                          )}
+                          {tool.tags.map((tag) => (
+                            <CompactMetaLabel
+                              key={tag}
+                              label={TOOL_DIRECTORY_TAG_DEFINITIONS.find((definition) => definition.id === tag)?.label ?? tag}
+                              className={TAG_BADGE_CLASSES[tag]}
+                            />
+                          ))}
                           {tool.href && (
                             <a href={tool.href} target="_blank" rel="noopener noreferrer" className="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-[10px] text-muted-foreground hover:text-foreground" title={tool.href}>
                               <ExternalLink className="h-3 w-3 shrink-0" />
@@ -415,21 +435,6 @@ export default function ToolDirectoryManagement() {
                           </Button>
                         )}
                       </div>
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-1">
-                      {STATUS_BADGE_META[tool.status].label && (
-                        <ToolMetaLabel
-                          label={STATUS_BADGE_META[tool.status].label}
-                          className={STATUS_BADGE_META[tool.status].className}
-                        />
-                      )}
-                      {tool.tags.map((tag) => (
-                        <ToolMetaLabel
-                          key={tag}
-                          label={TOOL_DIRECTORY_TAG_DEFINITIONS.find((definition) => definition.id === tag)?.label ?? tag}
-                          className={TAG_BADGE_CLASSES[tag]}
-                        />
-                      ))}
                     </div>
                   </div>
                   );
