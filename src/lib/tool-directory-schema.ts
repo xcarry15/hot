@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  TOOL_CATEGORY_SEED_DEFINITIONS,
+  TOOL_CATEGORY_ID_PATTERN,
   TOOL_DIRECTORY_ICON_NAMES,
   TOOL_DIRECTORY_STATUSES,
   TOOL_DIRECTORY_TAG_DEFINITIONS,
@@ -8,7 +8,6 @@ import {
 } from '@/contracts/tool-directory';
 import { isBlockedOutboundHostname } from '@/lib/outbound-url';
 
-const categoryIds = TOOL_CATEGORY_SEED_DEFINITIONS.map(({ id }) => id) as [string, ...string[]];
 const iconNames = TOOL_DIRECTORY_ICON_NAMES as unknown as [string, ...string[]];
 const statuses = TOOL_DIRECTORY_STATUSES as unknown as [string, ...string[]];
 const tagIds = TOOL_DIRECTORY_TAG_DEFINITIONS.map(({ id }) => id) as [string, ...string[]];
@@ -16,7 +15,7 @@ const tagIds = TOOL_DIRECTORY_TAG_DEFINITIONS.map(({ id }) => id) as [string, ..
 const toolFields = {
   name: z.string().trim().min(1, '名称为必填项').max(100, '名称不能超过 100 个字符'),
   description: z.string().trim().min(1, '简介为必填项').max(500, '简介不能超过 500 个字符'),
-  category: z.enum(categoryIds as [typeof categoryIds[number], ...typeof categoryIds[number][]]),
+  category: z.string().trim().min(1, '请选择分类'),
   href: z.string().trim().max(2048, '链接不能超过 2048 个字符').nullable().optional(),
   icon: z.enum(iconNames as [typeof iconNames[number], ...typeof iconNames[number][]]),
   status: z.enum(statuses as [typeof statuses[number], ...typeof statuses[number][]]),
@@ -69,10 +68,21 @@ export const toolReorderSchema = z.object({
 
 export const toolCategoryUpdateSchema = z.object({
   name: z.string().trim().min(1, '分类名称为必填项').max(30, '分类名称不能超过 30 个字符'),
+  hidden: z.boolean(),
+}).partial().strict().refine(
+  (value) => Object.keys(value).length > 0,
+  '至少提供一个要更新的字段',
+);
+
+export const toolCategoryCreateSchema = z.object({
+  id: z.string().trim()
+    .regex(TOOL_CATEGORY_ID_PATTERN, '分类标识仅支持小写字母、数字与连字符，且以小写字母开头')
+    .max(50, '分类标识不能超过 50 个字符'),
+  name: z.string().trim().min(1, '分类名称为必填项').max(30, '分类名称不能超过 30 个字符'),
 }).strict();
 
 export const toolCategoryReorderSchema = z.object({
-  id: z.enum(categoryIds as [typeof categoryIds[number], ...typeof categoryIds[number][]]),
+  id: z.string().trim().min(1, '分类 ID 无效'),
   direction: z.enum(['up', 'down']),
 }).strict();
 
@@ -80,7 +90,7 @@ const toolSnapshotItemSchema = z.object({
   id: z.string().trim().min(1, '工具 ID 无效').max(100, '工具 ID 无效'),
   name: toolFields.name,
   description: toolFields.description,
-  category: z.enum(categoryIds as [typeof categoryIds[number], ...typeof categoryIds[number][]]),
+  category: z.string().trim().min(1, '分类无效'),
   href: z.string().trim().max(2048, '链接不能超过 2048 个字符').nullable(),
   icon: toolFields.icon,
   status: toolFields.status,
@@ -91,18 +101,19 @@ const toolSnapshotItemSchema = z.object({
 
 export const toolDirectorySnapshotSchema = z.object({
   categories: z.array(z.object({
-    id: z.enum(categoryIds as [typeof categoryIds[number], ...typeof categoryIds[number][]]),
+    id: z.string().trim().min(1, '分类 ID 无效').max(50, '分类 ID 无效'),
     name: z.string().trim().min(1, '分类名称为必填项').max(30, '分类名称不能超过 30 个字符'),
     sortOrder: z.number().int('分类排序无效').min(0, '分类排序无效').max(100, '分类排序无效'),
-  }).strict()).length(categoryIds.length, '分类数量不匹配'),
+    hidden: z.boolean().optional(),
+  }).strict()).min(1, '至少需要一个分类').max(50, '分类数量超过上限'),
   tools: z.array(toolSnapshotItemSchema).max(1_000, '工具数量超过上限'),
 }).strict().superRefine((value, context) => {
   const categoryIdsInBackup = value.categories.map((category) => category.id);
   if (new Set(categoryIdsInBackup).size !== categoryIdsInBackup.length) {
     context.addIssue({ code: 'custom', path: ['categories'], message: '分类 ID 不能重复' });
   }
-  if (categoryIdsInBackup.some((id) => !categoryIds.includes(id))) {
-    context.addIssue({ code: 'custom', path: ['categories'], message: '分类 ID 无效' });
+  if (categoryIdsInBackup.some((id) => !TOOL_CATEGORY_ID_PATTERN.test(id))) {
+    context.addIssue({ code: 'custom', path: ['categories'], message: '分类 ID 仅支持小写字母、数字与连字符' });
   }
   const categoryNames = value.categories.map((category) => category.name.toLocaleLowerCase());
   if (new Set(categoryNames).size !== categoryNames.length) {
@@ -117,6 +128,9 @@ export const toolDirectorySnapshotSchema = z.object({
     context.addIssue({ code: 'custom', path: ['tools'], message: '工具 ID 不能重复' });
   }
   for (const [index, tool] of value.tools.entries()) {
+    if (!categoryIdsInBackup.includes(tool.category)) {
+      context.addIssue({ code: 'custom', path: ['tools', index, 'category'], message: '工具引用了不存在的分类' });
+    }
     const parsed = toolCreateSchema.safeParse({
       name: tool.name,
       description: tool.description,
@@ -143,6 +157,7 @@ export function formatToolSchemaError(error: z.ZodError): string {
 export type ToolCreateInput = z.infer<typeof toolCreateSchema>;
 export type ToolUpdateInput = z.infer<typeof toolUpdateSchema>;
 export type ToolReorderInput = z.infer<typeof toolReorderSchema>;
+export type ToolCategoryCreateInput = z.infer<typeof toolCategoryCreateSchema>;
 export type ToolCategoryUpdateInput = z.infer<typeof toolCategoryUpdateSchema>;
 export type ToolCategoryReorderInput = z.infer<typeof toolCategoryReorderSchema>;
 export type ToolDirectorySnapshotInput = z.infer<typeof toolDirectorySnapshotSchema>;

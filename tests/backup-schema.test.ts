@@ -62,4 +62,49 @@ describe('project backup schema', () => {
       },
     }).success).toBe(false);
   });
+
+  it('接受带动态分类 ID 与可选 hidden 字段的工具目录备份', () => {
+    expect(projectBackupSchema.safeParse({
+      ...validBackup,
+      toolDirectory: {
+        categories: [
+          { id: 'business-support', name: '业务支持', sortOrder: 0 },
+          { id: 'custom-tools', name: '自定义分类', sortOrder: 1, hidden: true },
+        ],
+        tools: [{
+          id: 'tool-1',
+          name: '示例工具',
+          description: '用于验证工具目录输入的示例工具。',
+          category: 'custom-tools',
+          href: 'https://example.com/tool',
+          icon: 'store',
+          status: 'active',
+          tags: ['updated'],
+          sortOrder: 0,
+          archivedAt: null,
+        }],
+      },
+    }).success).toBe(true);
+  });
+
+  it('拒绝引用了备份中不存在分类的工具备份', () => {
+    expect(projectBackupSchema.safeParse({
+      ...validBackup,
+      toolDirectory: {
+        categories: validBackup.toolDirectory.categories,
+        tools: [{
+          id: 'tool-1',
+          name: '示例工具',
+          description: '用于验证工具目录输入的示例工具。',
+          category: 'missing-category',
+          href: 'https://example.com/tool',
+          icon: 'store',
+          status: 'active',
+          tags: ['updated'],
+          sortOrder: 0,
+          archivedAt: null,
+        }],
+      },
+    }).success).toBe(false);
+  });
 });

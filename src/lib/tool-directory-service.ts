@@ -74,6 +74,7 @@ function mapStoredCategory(category: NonNullable<StoredCategory>): ToolDirectory
     id: category.id as ToolDirectoryCategoryId,
     name: category.name,
     sortOrder: category.sortOrder,
+    hidden: category.hidden,
   };
 }
 

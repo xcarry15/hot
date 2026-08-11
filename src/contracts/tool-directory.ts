@@ -1,4 +1,4 @@
-/** 工具中心初始化分类；运行时名称与排序由数据库维护。 */
+/** 初始种子，运行时分类由数据库维护。 */
 export const TOOL_CATEGORY_SEED_DEFINITIONS = [
   { id: 'business-support', label: '业务支持' },
   { id: 'geo-location', label: '地理位置' },
@@ -7,12 +7,17 @@ export const TOOL_CATEGORY_SEED_DEFINITIONS = [
   { id: 'other-tools', label: '其他工具' },
 ] as const;
 
-export type ToolDirectoryCategoryId = (typeof TOOL_CATEGORY_SEED_DEFINITIONS)[number]['id'];
+/** 工具分类 ID 由数据库维护，运行时动态创建；保留种子仅为初始化。 */
+export type ToolDirectoryCategoryId = string;
+
+/** 新分类 slug 格式：小写字母开头，仅小写字母/数字/连字符。 */
+export const TOOL_CATEGORY_ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 export interface ToolDirectoryCategoryDto {
   id: ToolDirectoryCategoryId;
   name: string;
   sortOrder: number;
+  hidden: boolean;
 }
 
 export const TOOL_DIRECTORY_TAG_DEFINITIONS = [
