@@ -21,6 +21,7 @@ const mocks = db as unknown as {
     create: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
     aggregate: ReturnType<typeof vi.fn>;
+    count: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -67,6 +68,7 @@ describe('tool-directory-service', () => {
       storedCategory('network-planning', 3),
       storedCategory('other-tools', 4),
     ]);
+    mocks.toolDirectoryCategory.count.mockResolvedValue(5);
   });
 
   it('按维护后的分类顺序返回公开工具，并解析标签', async () => {
@@ -158,5 +160,12 @@ describe('tool-directory-service', () => {
 
     mocks.toolDirectoryItem.findFirst.mockResolvedValue({ id: 'tool-1' });
     await expect(deleteToolDirectoryCategory('other-tools')).rejects.toThrow('分类下仍有工具');
+  });
+
+  it('禁止删除最后一个分类', async () => {
+    mocks.toolDirectoryCategory.findUnique.mockResolvedValue(storedCategory('other-tools', 0, '其他工具'));
+    mocks.toolDirectoryCategory.count.mockResolvedValue(1);
+    await expect(deleteToolDirectoryCategory('other-tools')).rejects.toThrow('至少保留一个分类');
+    expect(mocks.toolDirectoryCategory.delete).not.toHaveBeenCalled();
   });
 });

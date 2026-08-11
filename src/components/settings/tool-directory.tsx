@@ -134,7 +134,11 @@ export default function ToolDirectoryManagement() {
 
   const openCreate = () => {
     setEditingId(null);
-    setForm({ ...EMPTY_FORM, tags: [] });
+    setForm({
+      ...EMPTY_FORM,
+      category: categories.find((category) => !category.hidden)?.id ?? categories[0]?.id ?? EMPTY_FORM.category,
+      tags: [],
+    });
     setIconPickerOpen(false);
     setDialogOpen(true);
   };
@@ -294,6 +298,7 @@ export default function ToolDirectoryManagement() {
 
   const handleCategoryDelete = async () => {
     if (!categoryDeleteTarget) return;
+    if (categoryBusyKey?.startsWith('delete:')) return;
     setCategoryBusyKey(`delete:${categoryDeleteTarget.id}`);
     try {
       await deleteToolDirectoryCategory(categoryDeleteTarget.id);
@@ -648,7 +653,7 @@ export default function ToolDirectoryManagement() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="rounded-none text-xs">取消</AlertDialogCancel>
-            <AlertDialogAction className="rounded-none bg-destructive text-xs hover:bg-destructive/90" onClick={() => void handleCategoryDelete()}>
+            <AlertDialogAction className="rounded-none bg-destructive text-xs hover:bg-destructive/90" disabled={categoryBusyKey?.startsWith('delete:')} onClick={() => void handleCategoryDelete()}>
               {categoryBusyKey?.startsWith('delete:') ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
               确认删除
             </AlertDialogAction>

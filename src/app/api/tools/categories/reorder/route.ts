@@ -3,7 +3,6 @@ import { apiError } from '@/lib/api-helpers';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 import { formatToolSchemaError, toolCategoryReorderSchema } from '@/lib/tool-directory-schema';
 import { moveToolDirectoryCategory } from '@/lib/tool-directory-service';
-import type { ToolDirectoryCategoryId } from '@/contracts/tool-directory';
 
 export async function POST(request: Request) {
   try {
@@ -12,7 +11,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: formatToolSchemaError(parsed.error) }, { status: 400 });
     }
     const category = await runExclusiveMutation('调整工具分类排序', () => (
-      moveToolDirectoryCategory(parsed.data.id as ToolDirectoryCategoryId, parsed.data.direction)
+      moveToolDirectoryCategory(parsed.data.id, parsed.data.direction)
     ));
     return NextResponse.json(category);
   } catch (error: unknown) {

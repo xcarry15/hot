@@ -8,7 +8,6 @@ import {
   isToolDirectoryLinkableStatus,
   type ToolDirectorySnapshot,
   type ToolDirectoryCategoryDto,
-  type ToolDirectoryCategoryId,
   type ToolDirectoryIconName,
   type ToolDirectoryItemDto,
   type ToolDirectoryStatus,
@@ -90,7 +89,7 @@ function mapStoredTool(item: NonNullable<StoredTool>): ToolDirectoryItemDto {
     id: item.id,
     name: item.name,
     description: item.description,
-    category: item.category as ToolDirectoryCategoryId,
+    category: item.category,
     href: isToolDirectoryLinkableStatus(status) ? item.href : null,
     icon: item.icon as ToolDirectoryIconName,
     status,
@@ -327,6 +326,8 @@ export async function createToolDirectoryCategory(input: ToolCategoryCreateInput
 
 export async function deleteToolDirectoryCategory(id: string): Promise<ToolDirectoryCategoryDto> {
   const category = await getCategoryOrThrow(id);
+  const totalCount = await db.toolDirectoryCategory.count();
+  if (totalCount <= 1) throw new ToolDirectoryValidationError('至少保留一个分类');
   const hasTools = await db.toolDirectoryItem.findFirst({
     where: { category: id },
     select: { id: true },
@@ -355,7 +356,7 @@ export async function updateToolDirectoryCategory(
 }
 
 export async function moveToolDirectoryCategory(
-  id: ToolDirectoryCategoryId,
+  id: string,
   direction: 'up' | 'down',
 ): Promise<ToolDirectoryCategoryDto> {
   const category = await db.$transaction(async (tx) => {

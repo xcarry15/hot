@@ -237,4 +237,29 @@ describe('分类维护弹窗', () => {
     expect(bizDelete).not.toBeNull();
     expect(bizDelete!.disabled).toBe(true);
   });
+
+  it('删除进行中确认按钮禁用，双击不会重复触发删除', async () => {
+    await renderManagement();
+    await clickAndSettle(findButton('分类维护'));
+
+    const geoInput = document.querySelector<HTMLInputElement>('input[aria-label="地理位置分类名称"]');
+    expect(geoInput).not.toBeNull();
+    const geoRow = geoInput!.parentElement;
+    const geoDelete = geoRow?.querySelector<HTMLButtonElement>('button[title="删除分类"]');
+    expect(geoDelete).not.toBeNull();
+    await clickAndSettle(geoDelete!);
+    expect(document.body.textContent).toContain('确认删除分类');
+
+    mocks.deleteToolDirectoryCategory.mockImplementation(() => new Promise<void>(() => undefined));
+    const confirmButton = findButton('确认删除');
+
+    await clickAndSettle(confirmButton);
+
+    expect(confirmButton.disabled).toBe(true);
+    expect(mocks.deleteToolDirectoryCategory).toHaveBeenCalledTimes(1);
+
+    await clickAndSettle(confirmButton);
+    expect(mocks.deleteToolDirectoryCategory).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteToolDirectoryCategory).toHaveBeenCalledWith('geo-location');
+  });
 });
