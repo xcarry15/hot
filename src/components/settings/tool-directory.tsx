@@ -29,7 +29,9 @@ import {
 } from '@/contracts/tool-directory';
 import {
   archiveToolDirectoryItem,
+  createToolDirectoryCategory,
   createToolDirectoryItem,
+  deleteToolDirectoryCategory,
   fetchToolDirectoryCategories,
   fetchToolDirectory,
   moveToolDirectoryCategory,
@@ -43,11 +45,13 @@ import { isRequestAborted } from '@/lib/request-json.client';
 import PublicToolIcon from '@/components/public-tools/tool-icons';
 import { STATUS_BADGE_META, TAG_BADGE_CLASSES, ToolBadgeToggle, ToolMetaLabel } from '@/components/public-tools/tool-badges';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 
 type ToolFormState = Omit<ToolDirectoryInput, 'href'> & { href: string };
@@ -260,6 +264,59 @@ export default function ToolDirectoryManagement() {
       toast.error(error instanceof Error ? error.message : '调整分类排序失败');
     } finally {
       setCategoryBusyId(null);
+    }
+  };
+
+  const [categoryCreateOpen, setCategoryCreateOpen] = useState(false);
+  const [categoryForm, setCategoryForm] = useState({ id: '', name: '' });
+  const [categoryBusyKey, setCategoryBusyKey] = useState<string | null>(null);
+  const [categoryDeleteTarget, setCategoryDeleteTarget] = useState<ToolDirectoryCategoryDto | null>(null);
+  const [categorySaving, setCategorySaving] = useState(false);
+
+  const handleCategoryCreate = async () => {
+    if (!categoryForm.id.trim() || !categoryForm.name.trim()) {
+      toast.error('请填写分类标识和名称');
+      return;
+    }
+    setCategorySaving(true);
+    try {
+      await createToolDirectoryCategory({ id: categoryForm.id.trim(), name: categoryForm.name.trim() });
+      toast.success('分类已创建');
+      setCategoryCreateOpen(false);
+      setCategoryForm({ id: '', name: '' });
+      await loadTools();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '创建分类失败');
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const handleCategoryDelete = async () => {
+    if (!categoryDeleteTarget) return;
+    setCategoryBusyKey(`delete:${categoryDeleteTarget.id}`);
+    try {
+      await deleteToolDirectoryCategory(categoryDeleteTarget.id);
+      toast.success('分类已删除');
+      setCategoryDeleteTarget(null);
+      await loadTools();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除分类失败');
+    } finally {
+      setCategoryBusyKey(null);
+    }
+  };
+
+  const handleCategoryToggleHidden = async (category: ToolDirectoryCategoryDto) => {
+    setCategoryBusyKey(`hidden:${category.id}`);
+    try {
+      await updateToolDirectoryCategory(category.id, { hidden: !category.hidden });
+      toast.success(category.hidden ? '分类已显示' : '分类已隐藏');
+      await loadTools();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '更新分类失败');
+    } finally {
+      setCategoryBusyKey(null);
     }
   };
 
@@ -484,14 +541,21 @@ export default function ToolDirectoryManagement() {
 
       <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
         <DialogContent className="rounded-none sm:max-w-lg [&_[data-slot=dialog-close]]:rounded-none">
-          <DialogHeader>
-            <DialogTitle className="text-base">分类维护</DialogTitle>
+          <DialogHeader className="gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <DialogTitle className="text-base">分类维护</DialogTitle>
+              <Button type="button" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setCategoryCreateOpen(true)}>
+                <Plus className="h-3.5 w-3.5" />
+                新增分类
+              </Button>
+            </div>
             <DialogDescription className="text-xs">可修改公开页分类名称和展示顺序；分类 ID 保持不变，已有工具无需迁移。</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             {categories.map((category, index) => (
               <div key={category.id} className="flex items-center gap-1.5 border px-2 py-2">
                 <span className="w-5 shrink-0 text-center text-[11px] tabular-nums text-muted-foreground">{index + 1}</span>
+                {category.hidden && <Badge variant="outline" className="rounded-none px-1.5 text-[10px] text-muted-foreground">已隐藏</Badge>}
                 <Input
                   value={categoryDrafts[category.id] ?? category.name}
                   onChange={(event) => setCategoryDrafts((current) => ({ ...current, [category.id]: event.target.value }))}
@@ -514,11 +578,83 @@ export default function ToolDirectoryManagement() {
                 <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={categoryBusyId !== null || index === categories.length - 1} onClick={() => void handleCategoryMove(category, 'down')} title="下移分类">
                   {categoryBusyId === `${category.id}:down` ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowDown className="h-3 w-3" />}
                 </Button>
+                <Switch
+                  checked={!category.hidden}
+                  onCheckedChange={() => void handleCategoryToggleHidden(category)}
+                  disabled={categoryBusyKey !== null}
+                  aria-label={`${category.name} 显示状态`}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                  disabled={categoryBusyKey !== null || tools.some((tool) => tool.category === category.id)}
+                  title="删除分类"
+                  onClick={() => setCategoryDeleteTarget(category)}
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                </Button>
               </div>
             ))}
           </div>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={categoryCreateOpen} onOpenChange={setCategoryCreateOpen}>
+        <DialogContent className="rounded-none sm:max-w-md [&_[data-slot=dialog-close]]:rounded-none">
+          <DialogHeader>
+            <DialogTitle className="text-base">新增分类</DialogTitle>
+            <DialogDescription className="text-xs">英文标识用于排序与引用，创建后不可修改。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">英文标识（slug）*</Label>
+              <Input
+                value={categoryForm.id}
+                onChange={(event) => setCategoryForm((current) => ({ ...current, id: event.target.value }))}
+                className="h-8 rounded-none text-xs"
+                placeholder="如 store-opening"
+              />
+              <p className="text-[10px] text-muted-foreground">仅小写字母、数字与连字符，以小写字母开头。</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">分类名称 *</Label>
+              <Input
+                value={categoryForm.name}
+                onChange={(event) => setCategoryForm((current) => ({ ...current, name: event.target.value }))}
+                className="h-8 rounded-none text-xs"
+                placeholder="如 开店选址"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" className="rounded-none" onClick={() => setCategoryCreateOpen(false)}>取消</Button>
+            <Button type="button" size="sm" className="rounded-none" disabled={categorySaving} onClick={() => void handleCategoryCreate()}>
+              {categorySaving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              创建分类
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={categoryDeleteTarget !== null} onOpenChange={(open) => { if (!open) setCategoryDeleteTarget(null); }}>
+        <AlertDialogContent className="rounded-none">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base">确认删除分类</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm">
+              仅空分类可删除；分类下有工具时会被阻止。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-none text-xs">取消</AlertDialogCancel>
+            <AlertDialogAction className="rounded-none bg-destructive text-xs hover:bg-destructive/90" onClick={() => void handleCategoryDelete()}>
+              {categoryBusyKey?.startsWith('delete:') ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={archiveTarget !== null} onOpenChange={(open) => { if (!open) setArchiveTarget(null); }}>
         <AlertDialogContent className="rounded-none">
