@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Check, Copy, Download, LoaderCircle, Share2 } from 'lucide-react'
+import { Download, LoaderCircle, Share2 } from 'lucide-react'
 import QRCode from 'qrcode'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { PUBLIC_SITE_NAME, PUBLIC_SITE_TAGLINE } from '@/lib/public-brand'
