@@ -392,6 +392,7 @@ model ToolDirectoryCategory {
   id        String   @id
   name      String   @unique
   sortOrder Int      @default(0)
+  hidden    Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
