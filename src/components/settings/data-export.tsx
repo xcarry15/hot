@@ -30,6 +30,15 @@ const STATUS_LABELS: Record<string, string> = {
   expired: '已过期',
 }
 
+const JOB_STATUS_CLASSES: Record<string, string> = {
+  queued: 'text-sky-600',
+  running: 'text-sky-600',
+  succeeded: 'text-emerald-600',
+  failed: 'text-destructive',
+  cancelled: 'text-muted-foreground',
+  expired: 'text-muted-foreground',
+}
+
 const SOURCE_STATUS_OPTIONS = [
   ['pending', '待抓取'],
   ['fetched', '已抓取'],
@@ -108,7 +117,7 @@ function MultiSelect({
       <div className="flex items-center justify-between gap-1">
         <span className="min-w-0 truncate text-muted-foreground">
           {label}
-          <span className="ml-1 text-[11px] text-foreground/70">{selectedCount > 0 ? `已选 ${selectedCount}` : '全部'}</span>
+          <span className="ml-1 text-[11px] tabular-nums text-foreground/70">{selectedCount > 0 ? `已选 ${selectedCount}` : '全部'}</span>
         </span>
         <span className="flex shrink-0 items-center">
           <button
@@ -130,7 +139,7 @@ function MultiSelect({
           </button>
         </span>
       </div>
-      <div className="grid max-h-14 grid-cols-2 gap-x-1 overflow-y-auto border p-1">
+      <div className="grid max-h-14 grid-cols-2 gap-x-1 overflow-y-auto p-1">
         {options.length > 0 ? options.map(([optionValue, optionLabel]) => (
           <label key={optionValue} className="flex min-w-0 cursor-pointer items-center gap-1 px-1 py-0.5 hover:bg-accent">
             <input
@@ -225,9 +234,9 @@ export default function DataExportPanel() {
   }
 
   return (
-    <Card className="rounded-none border shadow-none py-0">
-      <CardContent className="space-y-2 p-2.5">
-        <div className="flex items-center justify-between border-b pb-1.5">
+    <Card className="py-0">
+      <CardContent className="space-y-3 p-3">
+        <div className="flex items-center justify-between pb-2">
           <div className="flex items-center gap-2">
             <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-semibold">文章 Excel 导出</span>
@@ -262,7 +271,7 @@ export default function DataExportPanel() {
 
         <div className="flex items-center justify-between text-[11px] text-muted-foreground">
           <span>多选筛选</span>
-          <span>可同时勾选多个值；未选择表示全部</span>
+          <span>可多选；未选即全部</span>
         </div>
 
         <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
@@ -286,21 +295,21 @@ export default function DataExportPanel() {
               <option value="all">全部</option><option value="yes">已推送</option><option value="no">未推送</option>
             </select>
           </label>
-          <label className="flex h-8 items-center gap-2 border px-2 text-xs">
+          <label className="flex h-8 items-center gap-2 px-2 text-xs">
             <input type="checkbox" checked={filter.includeDiscarded} onChange={(event) => updateFilter('includeDiscarded', event.target.checked)} />
             包含未入库条目
           </label>
         </div>
 
-        <div className="flex flex-col gap-1.5 border-t pt-1.5 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[11px] leading-4 text-muted-foreground">按筛选条件导出文章及处理结果，生成 8 个固定工作表；文件保留 24 小时。</p>
+        <div className="flex flex-col gap-1.5 pt-1.5 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[11px] leading-4 text-muted-foreground">按条件导出文章及处理结果，文件保留 24 小时。</p>
           <Button size="sm" onClick={() => void handleCreate()} disabled={creating} className="h-8 shrink-0 gap-1.5 rounded-none px-3 text-xs">
             {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             创建 Excel 导出
           </Button>
         </div>
 
-        <div className="space-y-1.5 border-t pt-2">
+        <div className="space-y-1.5 pt-2">
           <div className="flex items-center justify-between text-xs">
             <span className="font-medium">最近导出任务</span>
             <span className="text-[11px] text-muted-foreground">最多显示 20 条</span>
@@ -308,12 +317,12 @@ export default function DataExportPanel() {
           {loading ? <div className="text-xs text-muted-foreground">加载中…</div> : jobs.length === 0 ? <div className="text-xs text-muted-foreground">暂无任务</div> : jobs.map((job) => {
             const percent = job.progressTotal > 0 ? Math.min(100, Math.round((job.progressDone / job.progressTotal) * 100)) : 0
             return (
-              <div key={job.id} className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-2 border px-2 py-1 text-xs">
-                <span className="shrink-0 font-medium">{STATUS_LABELS[job.status] ?? job.status}</span>
+              <div key={job.id} className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1 text-xs">
+                <span className={`shrink-0 font-medium ${JOB_STATUS_CLASSES[job.status] ?? ''}`}>{STATUS_LABELS[job.status] ?? job.status}</span>
                 <div className="min-w-0">
                   <div className="truncate">{job.fileName || job.currentItemLabel || '等待处理'}</div>
-                  {(job.status === 'queued' || job.status === 'running') && <div className="text-[11px] text-muted-foreground">进度 {percent}%</div>}
-                  {job.status === 'succeeded' && <div className="truncate text-[11px] text-muted-foreground">{formatSize(job.fileSizeBytes)} · {formatDate(job.expiresAt)} 过期</div>}
+                  {(job.status === 'queued' || job.status === 'running') && <div className="text-[11px] tabular-nums text-muted-foreground">进度 {percent}%</div>}
+                  {job.status === 'succeeded' && <div className="truncate text-[11px] tabular-nums text-muted-foreground">{formatSize(job.fileSizeBytes)} · {formatDate(job.expiresAt)} 过期</div>}
                   {job.status === 'failed' && <div className="max-w-full truncate text-[11px] text-destructive" title={job.error}>{job.error}</div>}
                 </div>
                 <div className="flex shrink-0 items-center justify-end gap-0.5">

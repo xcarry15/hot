@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import PublicToolsPage from '@/components/public-tools/public-tools-page';
+import PublicToolsSkeleton from '@/components/public-tools/public-tools-skeleton';
 import { PUBLIC_BROWSER_SITE_NAME } from '@/lib/public-brand';
 import { getPublicToolCategories } from '@/lib/tool-directory-service';
 
@@ -10,7 +12,15 @@ export const metadata: Metadata = {
   description: '选址、地理位置、数据分析与文件工具入口。',
 };
 
-export default async function ToolsRoute() {
+export default function ToolsRoute() {
+  return (
+    <Suspense fallback={<PublicToolsSkeleton />}>
+      <ToolsContent />
+    </Suspense>
+  );
+}
+
+async function ToolsContent() {
   let categories;
   let hasError = false;
   try {

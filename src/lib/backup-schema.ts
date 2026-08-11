@@ -39,7 +39,14 @@ const sourceSnapshotSchema = z.object({
   parserConfig: z.string().max(100_000, '数据源解析配置过长'),
   enabled: z.boolean(),
   publicEnabled: z.boolean(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  // 验证数据源 URL 格式
+  try {
+    new URL(value.url);
+  } catch {
+    context.addIssue({ code: 'custom', path: ['url'], message: '数据源 URL 格式无效' });
+  }
+});
 
 const keywordSchema = z.object({
   category: z.string().trim().min(1, '关键词分类不能为空').max(100, '关键词分类过长'),

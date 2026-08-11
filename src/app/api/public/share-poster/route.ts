@@ -60,30 +60,39 @@ export async function POST(request: Request) {
     color: { dark: '#141413', light: '#ffffff' },
   })
   const titleLines = wrapText(title, 34, 4)
-  const summaryLines = wrapText(summary || '扫码查看文章详情与 AI 洞察。', 54, 7)
+  const summaryLines = wrapText(summary || '扫码查看文章详情与 AI 洞察。', 54, 5)
+  const summaryY = 122 + titleLines.length * 31 + 24
+  const fadeY = summaryY + summaryLines.length * 21 - 24
   const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="900" height="1120" viewBox="0 0 900 1120">
+    <svg xmlns="http://www.w3.org/2000/svg" width="450" height="560" viewBox="0 0 450 560">
       <defs>
         <filter id="poster-shadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
-          <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#59483b" flood-opacity="0.28"/>
-          <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#59483b" flood-opacity="0.16"/>
+          <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#141413" flood-opacity="0.12"/>
         </filter>
+        <linearGradient id="fade-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="1"/>
+        </linearGradient>
+        <linearGradient id="fade-gradient-top" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="1"/>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+        </linearGradient>
       </defs>
-      <rect width="900" height="1120" fill="#f3eee6"/>
-      <rect width="900" height="18" fill="#cc785c"/>
-      <rect x="54" y="54" width="792" height="1008" fill="#fffdf9" stroke="#d6cfc4" stroke-width="2" filter="url(#poster-shadow)"/>
+      <rect x="27" y="27" width="396" height="504" fill="#ffffff" stroke="#e5e5e5" stroke-width="1" filter="url(#poster-shadow)"/>
       <g font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif">
-        <text x="104" y="125" fill="#141413" font-size="30" font-weight="700">${escapeXml(PUBLIC_SITE_NAME)}</text>
-        <text x="796" y="124" fill="#8e8b82" font-size="18" font-weight="500" text-anchor="end">${escapeXml(publishedAt)}</text>
-        <line x1="104" y1="178" x2="796" y2="178" stroke="#d6cfc4" stroke-width="2"/>
-        ${textLines(titleLines, 104, 245, 62, 'fill="#141413" font-size="43" font-weight="700"')}
-        ${textLines(summaryLines, 104, 245 + titleLines.length * 62 + 48, 42, 'fill="#4f4d48" font-size="24" font-weight="400"')}
-        <line x1="104" y1="858" x2="796" y2="858" stroke="#e6dfd8" stroke-width="2"/>
-        <rect x="104" y="893" width="150" height="150" fill="#ffffff"/>
-        <image href="${qrDataUrl}" x="104" y="893" width="150" height="150"/>
-        <text x="290" y="942" fill="#141413" font-size="22" font-weight="700">扫码阅读完整文章</text>
-        <text x="290" y="980" fill="#8e8b82" font-size="18">${escapeXml(PUBLIC_SITE_TAGLINE)}</text>
-        <text x="290" y="1018" fill="#8e8b82" font-size="18">hot.kfxz.cn</text>
+        <text x="52" y="62" fill="#141413" font-size="15" font-weight="700">${escapeXml(PUBLIC_SITE_NAME)}</text>
+        <text x="398" y="62" fill="#888888" font-size="9" font-weight="500" text-anchor="end">${escapeXml(publishedAt)}</text>
+        <line x1="52" y1="89" x2="398" y2="89" stroke="#e5e5e5" stroke-width="1"/>
+        ${textLines(titleLines, 52, 122, 31, 'fill="#141413" font-size="24" font-weight="700"')}
+        <rect x="52" y="${summaryY}" width="346" height="16" fill="url(#fade-gradient-top)"/>
+        ${textLines(summaryLines, 52, summaryY, 21, 'fill="#666666" font-size="14" font-weight="400"')}
+        <rect x="52" y="${fadeY}" width="346" height="16" fill="url(#fade-gradient)"/>
+        <line x1="52" y1="429" x2="398" y2="429" stroke="#e5e5e5" stroke-width="1"/>
+        <rect x="52" y="446" width="75" height="75" fill="#ffffff"/>
+        <image href="${qrDataUrl}" x="52" y="446" width="75" height="75"/>
+        <text x="145" y="471" fill="#141413" font-size="11" font-weight="700">扫码阅读完整文章</text>
+        <text x="145" y="490" fill="#888888" font-size="9">${escapeXml(PUBLIC_SITE_TAGLINE)}</text>
+        <text x="145" y="509" fill="#888888" font-size="9">hot.kfxz.cn</text>
       </g>
     </svg>`
   const png = await sharp(Buffer.from(svg)).png().toBuffer()

@@ -41,8 +41,8 @@ import {
 } from '@/features/tool-directory-api.client';
 import { isRequestAborted } from '@/lib/request-json.client';
 import PublicToolIcon from '@/components/public-tools/tool-icons';
+import { STATUS_BADGE_META, TAG_BADGE_CLASSES, ToolBadgeToggle, ToolMetaLabel } from '@/components/public-tools/tool-badges';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -62,8 +62,7 @@ const EMPTY_FORM: ToolFormState = {
   tags: [],
 };
 
-const STATUS_LABELS: Record<ToolDirectoryStatus, string> = {
-  active: '正常',
+const STATUS_LABELS: Record<Exclude<ToolDirectoryStatus, 'active'>, string> = {
   maintenance: '维护中',
   coming_soon: '即将上线',
   disabled: '停用',
@@ -79,13 +78,6 @@ function toFormState(tool: ToolDirectoryItemDto): ToolFormState {
     status: tool.status,
     tags: [...tool.tags],
   };
-}
-
-function statusClass(status: ToolDirectoryItemDto['status']): string {
-  if (status === 'maintenance') return 'text-orange-700';
-  if (status === 'coming_soon') return 'text-sky-700';
-  if (status === 'disabled') return 'text-muted-foreground';
-  return 'text-emerald-700';
 }
 
 export default function ToolDirectoryManagement() {
@@ -232,7 +224,7 @@ export default function ToolDirectoryManagement() {
   };
 
   const selectStatus = (status: ToolDirectoryStatus) => {
-    setFormValue('status', status);
+    setFormValue('status', status === form.status ? 'active' : status);
   };
 
   const openCategoryManagement = () => {
@@ -316,59 +308,66 @@ export default function ToolDirectoryManagement() {
                 <h2 className="font-medium">{category.name}</h2>
                 <span className="text-[11px] text-muted-foreground">{activeCategoryTools.length} 项</span>
               </div>
-              <div className="space-y-px">
+              <div className="grid grid-cols-1 gap-1.5 lg:grid-cols-2">
                 {categoryTools.map((tool) => {
                   const activeIndex = activeCategoryTools.findIndex((activeTool) => activeTool.id === tool.id);
                   return (
-                  <div key={tool.id} className={`flex flex-wrap items-center gap-2 border px-2 py-2 ${tool.archivedAt ? 'bg-muted/30 opacity-70' : 'bg-background'}`}>
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground">
-                      <PublicToolIcon name={tool.icon} />
-                    </span>
-                    <div className="min-w-0 flex-1 basis-44">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <span className="truncate font-medium">{tool.name}</span>
-                        {tool.href && (
-                          <a href={tool.href} target="_blank" rel="noopener noreferrer" className="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-[10px] text-muted-foreground hover:text-foreground" title={tool.href}>
-                            <ExternalLink className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{tool.href}</span>
-                          </a>
+                  <div key={tool.id} className={`flex min-w-0 flex-col border p-2.5 ${tool.archivedAt ? 'bg-muted/30 opacity-70' : 'bg-background'}`}>
+                    <div className="flex min-w-0 items-start gap-2">
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground">
+                        <PublicToolIcon name={tool.icon} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate font-medium">{tool.name}</span>
+                          {tool.href && (
+                            <a href={tool.href} target="_blank" rel="noopener noreferrer" className="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-[10px] text-muted-foreground hover:text-foreground" title={tool.href}>
+                              <ExternalLink className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{tool.href}</span>
+                            </a>
+                          )}
+                        </div>
+                        <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{tool.description}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        {!tool.archivedAt && (
+                          <>
+                            <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={busyId !== null || activeIndex === 0} onClick={() => void handleMove(tool, 'up')} title="上移">
+                              {busyId === `${tool.id}:up` ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowUp className="h-3 w-3" />}
+                            </Button>
+                            <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={busyId !== null || activeIndex === activeCategoryTools.length - 1} onClick={() => void handleMove(tool, 'down')} title="下移">
+                              {busyId === `${tool.id}:down` ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowDown className="h-3 w-3" />}
+                            </Button>
+                          </>
+                        )}
+                        <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={busyId !== null} onClick={() => openEdit(tool)} title="编辑">
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        {tool.archivedAt ? (
+                          <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={busyId !== null} onClick={() => void handleRestore(tool)} title="恢复">
+                            {busyId === tool.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                          </Button>
+                        ) : (
+                          <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive" disabled={busyId !== null} onClick={() => setArchiveTarget(tool)} title="下架">
+                            <Archive className="h-3 w-3" />
+                          </Button>
                         )}
                       </div>
-                      <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{tool.description}</p>
                     </div>
-                    <div className="flex max-w-full flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
-                      <Badge variant="outline" className={`h-5 rounded-none px-1.5 text-[10px] ${statusClass(tool.status)}`}>
-                        {STATUS_LABELS[tool.status]}
-                      </Badge>
+                    <div className="mt-2 flex flex-wrap items-center gap-1">
+                      {STATUS_BADGE_META[tool.status].label && (
+                        <ToolMetaLabel
+                          label={STATUS_BADGE_META[tool.status].label}
+                          className={STATUS_BADGE_META[tool.status].className}
+                        />
+                      )}
                       {tool.tags.map((tag) => (
-                        <Badge key={tag} variant="outline" className="h-5 rounded-none px-1.5 text-[10px]">
-                          {TOOL_DIRECTORY_TAG_DEFINITIONS.find((definition) => definition.id === tag)?.label ?? tag}
-                        </Badge>
+                        <ToolMetaLabel
+                          key={tag}
+                          label={TOOL_DIRECTORY_TAG_DEFINITIONS.find((definition) => definition.id === tag)?.label ?? tag}
+                          className={TAG_BADGE_CLASSES[tag]}
+                        />
                       ))}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-0.5">
-                      {!tool.archivedAt && (
-                        <>
-                          <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={busyId !== null || activeIndex === 0} onClick={() => void handleMove(tool, 'up')} title="上移">
-                            {busyId === `${tool.id}:up` ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowUp className="h-3 w-3" />}
-                          </Button>
-                          <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={busyId !== null || activeIndex === activeCategoryTools.length - 1} onClick={() => void handleMove(tool, 'down')} title="下移">
-                            {busyId === `${tool.id}:down` ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowDown className="h-3 w-3" />}
-                          </Button>
-                        </>
-                      )}
-                      <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={busyId !== null} onClick={() => openEdit(tool)} title="编辑">
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                      {tool.archivedAt ? (
-                        <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={busyId !== null} onClick={() => void handleRestore(tool)} title="恢复">
-                          {busyId === tool.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-                        </Button>
-                      ) : (
-                        <Button type="button" size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive" disabled={busyId !== null} onClick={() => setArchiveTarget(tool)} title="下架">
-                          <Archive className="h-3 w-3" />
-                        </Button>
-                      )}
                     </div>
                   </div>
                   );
@@ -412,31 +411,36 @@ export default function ToolDirectoryManagement() {
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
                 <Label className="text-xs">标签</Label>
-                <span className="text-[10px] text-muted-foreground">前四项仅选一项，其余可多选</span>
+                <span className="text-[10px] text-muted-foreground">状态单选，标签可多选</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 <div className="flex flex-wrap gap-1.5">
                   {Object.entries(STATUS_LABELS).map(([status, label]) => {
                     const selected = form.status === status;
                     return (
-                      <Button
+                      <ToolBadgeToggle
                         key={status}
-                        type="button"
-                        variant={selected ? 'default' : 'outline'}
-                        className="h-7 rounded-none px-2 text-xs"
-                        aria-pressed={selected}
+                        label={label}
                         title="工具状态"
+                        className={STATUS_BADGE_META[status as ToolDirectoryStatus].className}
+                        selected={selected}
                         onClick={() => selectStatus(status as ToolDirectoryStatus)}
-                      >
-                        {label}
-                      </Button>
+                      />
                     );
                   })}
                 </div>
                 <div className="ml-2 flex flex-wrap gap-1.5">
                   {TOOL_DIRECTORY_TAG_DEFINITIONS.map((tag) => {
                     const selected = form.tags.includes(tag.id);
-                    return <Button key={tag.id} type="button" variant={selected ? 'default' : 'outline'} className="h-7 rounded-none px-2 text-xs" aria-pressed={selected} onClick={() => toggleTag(tag.id)}>{tag.label}</Button>;
+                    return (
+                      <ToolBadgeToggle
+                        key={tag.id}
+                        label={tag.label}
+                        className={TAG_BADGE_CLASSES[tag.id]}
+                        selected={selected}
+                        onClick={() => toggleTag(tag.id)}
+                      />
+                    );
                   })}
                 </div>
               </div>

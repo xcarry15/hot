@@ -40,7 +40,8 @@ function parseSampleTitles(value: string): string[] {
     return Array.isArray(parsed)
       ? parsed.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).slice(0, 5)
       : [];
-  } catch {
+  } catch (error) {
+    console.warn('[backup] Failed to parse sampleTitles:', error);
     return [];
   }
 }
@@ -99,7 +100,7 @@ export async function exportProjectBackup(): Promise<ProjectBackupPayload> {
 export async function restoreProjectBackup(input: unknown): Promise<ProjectBackupRestoreResult> {
   const parsed = projectBackupSchema.safeParse(input);
   if (!parsed.success) throw new ProjectBackupValidationError(formatProjectBackupError(parsed.error));
-  const backup = parsed.data as unknown as ProjectBackupPayload;
+  const backup = parsed.data as ProjectBackupPayload;
   let sources: ProjectBackupSource[];
   try {
     sources = backup.sources.map((source) => ({

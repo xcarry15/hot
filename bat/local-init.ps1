@@ -156,16 +156,15 @@ try {
     if ($ReuseDependencies) {
         Write-Host '[3/7] Reusing existing node_modules...' -ForegroundColor Gray
     } else {
-        Write-Host '[3/7] Installing dependencies from package-lock.json...'
-        Invoke-Npm @('ci', '--prefer-offline', '--no-audit', '--no-fund')
+        Write-Host '[3/7] Installing dependencies from package-lock.json...' -ForegroundColor Gray
+        Invoke-Npm @('ci', '--no-audit', '--no-fund')
     }
 
-    Write-Host '[4/7] Applying migrations and generating Prisma Client...'
+    Write-Host '[4/7] Running Prisma migrations...'
     Invoke-Npm @('run', 'db:migrate:deploy')
-    Invoke-Npm @('run', 'db:generate')
 
-    Write-Host '[5/7] Seeding the new database...'
-    Invoke-Npm @('run', 'db:seed')
+    Write-Host '[5/7] Generating Prisma Client...'
+    Invoke-Npm @('run', 'db:generate')
 
     Write-Host '[6/7] Optimizing and checking SQLite...'
     Invoke-Npm @('run', 'db:optimize')
@@ -176,12 +175,8 @@ try {
     Write-Host 'Press Ctrl+C to stop the server.' -ForegroundColor Gray
     Write-Host ''
 
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @(
-        '-NoLogo',
-        '-NoProfile',
-        '-Command',
-        "Start-Sleep -Seconds 4; Start-Process 'http://localhost:3011'"
-    )
+    $OpenBrowserScript = 'Start-Sleep -Seconds 4; Start-Process http://localhost:3011'
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoLogo', '-NoProfile', '-Command', $OpenBrowserScript
 
     & $script:NpmPath run dev
     exit $LASTEXITCODE
