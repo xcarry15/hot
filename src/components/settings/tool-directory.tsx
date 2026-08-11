@@ -241,7 +241,7 @@ export default function ToolDirectoryManagement() {
     if (name === category.name) return;
     setCategoryBusyId(`${category.id}:save`);
     try {
-      await updateToolDirectoryCategory(category.id, name);
+      await updateToolDirectoryCategory(category.id, { name });
       toast.success('分类名称已更新');
       await loadTools();
     } catch (error) {

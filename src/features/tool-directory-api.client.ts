@@ -58,14 +58,22 @@ export async function fetchToolDirectoryCategories(signal?: AbortSignal): Promis
 }
 
 export async function updateToolDirectoryCategory(
-  id: ToolDirectoryCategoryDto['id'],
-  name: string,
+  id: string,
+  input: { name?: string; hidden?: boolean },
   signal?: AbortSignal,
 ): Promise<ToolDirectoryCategoryDto> {
-  return requestJson<ToolDirectoryCategoryDto>('PUT', `/api/tools/categories/${id}`, {
-    body: { name },
-    signal,
-  });
+  return requestJson<ToolDirectoryCategoryDto>('PUT', `/api/tools/categories/${id}`, { body: input, signal });
+}
+
+export async function createToolDirectoryCategory(
+  input: { id: string; name: string },
+  signal?: AbortSignal,
+): Promise<ToolDirectoryCategoryDto> {
+  return requestJson<ToolDirectoryCategoryDto>('POST', '/api/tools/categories', { body: input, signal });
+}
+
+export async function deleteToolDirectoryCategory(id: string, signal?: AbortSignal): Promise<ToolDirectoryCategoryDto> {
+  return requestJson<ToolDirectoryCategoryDto>('DELETE', `/api/tools/categories/${id}`, { signal });
 }
 
 export async function moveToolDirectoryCategory(
