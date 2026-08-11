@@ -2,7 +2,6 @@ import type { Prisma } from '@prisma/client';
 import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache';
 import { db } from '@/lib/db';
 import {
-  TOOL_CATEGORY_SEED_DEFINITIONS,
   TOOL_DIRECTORY_ICON_NAMES,
   TOOL_DIRECTORY_STATUSES,
   TOOL_DIRECTORY_TAG_DEFINITIONS,
@@ -16,7 +15,9 @@ import {
   type ToolDirectoryTag,
 } from '@/contracts/tool-directory';
 import {
+  toolCategoryCreateSchema,
   toolCreateSchema,
+  type ToolCategoryCreateInput,
   type ToolCategoryUpdateInput,
   type ToolCreateInput,
   type ToolDirectorySnapshotInput,
@@ -45,7 +46,6 @@ export class ToolDirectoryValidationError extends Error {
   }
 }
 
-const categoryIdSet = new Set<string>(TOOL_CATEGORY_SEED_DEFINITIONS.map(({ id }) => id));
 const iconNameSet = new Set<string>(TOOL_DIRECTORY_ICON_NAMES);
 const statusSet = new Set<string>(TOOL_DIRECTORY_STATUSES);
 const tagSet = new Set<string>(TOOL_DIRECTORY_TAG_DEFINITIONS.map(({ id }) => id));
@@ -69,9 +69,8 @@ function parseStoredTags(value: string): ToolDirectoryTag[] {
 }
 
 function mapStoredCategory(category: NonNullable<StoredCategory>): ToolDirectoryCategoryDto {
-  if (!categoryIdSet.has(category.id)) throw new Error(`工具分类数据无效：${category.id}`);
   return {
-    id: category.id as ToolDirectoryCategoryId,
+    id: category.id,
     name: category.name,
     sortOrder: category.sortOrder,
     hidden: category.hidden,
@@ -81,8 +80,7 @@ function mapStoredCategory(category: NonNullable<StoredCategory>): ToolDirectory
 function mapStoredTool(item: NonNullable<StoredTool>): ToolDirectoryItemDto {
   const status = item.status as ToolDirectoryStatus;
   if (
-    !categoryIdSet.has(item.category)
-    || !iconNameSet.has(item.icon)
+    !iconNameSet.has(item.icon)
     || !statusSet.has(status)
   ) {
     throw new Error(`工具数据无效：${item.id}`);
@@ -151,7 +149,8 @@ async function readPublicToolCategories() {
     readToolItems(false),
   ]);
   const sortedTools = sortTools(tools, categories);
-  return categories.map((category) => ({
+  const visibleCategories = categories.filter((category) => !category.hidden);
+  return visibleCategories.map((category) => ({
     id: category.id,
     label: category.name,
     tools: sortedTools
@@ -185,7 +184,6 @@ async function getToolOrThrow(id: string) {
 }
 
 async function getCategoryOrThrow(id: string, tx = db) {
-  if (!categoryIdSet.has(id)) throw new ToolDirectoryValidationError('工具分类不存在');
   const category = await tx.toolDirectoryCategory.findUnique({ where: { id } });
   if (!category) throw new ToolDirectoryValidationError('工具分类不存在');
   return category;
@@ -307,17 +305,51 @@ export async function moveToolDirectoryItem(id: string, direction: 'up' | 'down'
   return mapStoredTool(item);
 }
 
+export async function createToolDirectoryCategory(input: ToolCategoryCreateInput): Promise<ToolDirectoryCategoryDto> {
+  const parsed = toolCategoryCreateSchema.safeParse(input);
+  if (!parsed.success) throw new ToolDirectoryValidationError(parsed.error.issues[0]?.message || '分类参数无效');
+  const { id, name } = parsed.data;
+
+  const [idTaken, nameTaken] = await Promise.all([
+    db.toolDirectoryCategory.findUnique({ where: { id } }),
+    db.toolDirectoryCategory.findUnique({ where: { name } }),
+  ]);
+  if (idTaken) throw new ToolDirectoryValidationError('分类标识已存在');
+  if (nameTaken) throw new ToolDirectoryValidationError('分类名称已存在');
+
+  const max = await db.toolDirectoryCategory.aggregate({ _max: { sortOrder: true } });
+  const category = await db.toolDirectoryCategory.create({
+    data: { id, name, sortOrder: (max._max.sortOrder ?? -1) + 1 },
+  });
+  invalidatePublicTools();
+  return mapStoredCategory(category);
+}
+
+export async function deleteToolDirectoryCategory(id: string): Promise<ToolDirectoryCategoryDto> {
+  const category = await getCategoryOrThrow(id);
+  const hasTools = await db.toolDirectoryItem.findFirst({
+    where: { category: id },
+    select: { id: true },
+  });
+  if (hasTools) throw new ToolDirectoryValidationError('分类下仍有工具，请先迁移或删除后再删除分类');
+  await db.toolDirectoryCategory.delete({ where: { id } });
+  invalidatePublicTools();
+  return mapStoredCategory(category);
+}
+
 export async function updateToolDirectoryCategory(
-  id: ToolDirectoryCategoryId,
+  id: string,
   input: ToolCategoryUpdateInput,
 ): Promise<ToolDirectoryCategoryDto> {
   await getCategoryOrThrow(id);
-  const duplicate = await db.toolDirectoryCategory.findUnique({ where: { name: input.name } });
-  if (duplicate && duplicate.id !== id) throw new ToolDirectoryValidationError('分类名称已存在');
-  const category = await db.toolDirectoryCategory.update({
-    where: { id },
-    data: { name: input.name },
-  });
+  const data: { name?: string; hidden?: boolean } = {};
+  if (input.name !== undefined) {
+    const duplicate = await db.toolDirectoryCategory.findUnique({ where: { name: input.name } });
+    if (duplicate && duplicate.id !== id) throw new ToolDirectoryValidationError('分类名称已存在');
+    data.name = input.name;
+  }
+  if (input.hidden !== undefined) data.hidden = input.hidden;
+  const category = await db.toolDirectoryCategory.update({ where: { id }, data });
   invalidatePublicTools();
   return mapStoredCategory(category);
 }
@@ -382,6 +414,7 @@ export async function replaceToolDirectorySnapshotInTransaction(
       id: category.id,
       name: category.name,
       sortOrder: category.sortOrder,
+      hidden: category.hidden ?? false,
     })),
   });
   if (snapshot.tools.length > 0) {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
-import { archiveToolDirectoryItem, getPublicToolCategories, listToolDirectory } from '@/lib/tool-directory-service';
+import { archiveToolDirectoryItem, createToolDirectoryCategory, deleteToolDirectoryCategory, getPublicToolCategories, listToolDirectory } from '@/lib/tool-directory-service';
 
 vi.mock('next/cache', () => ({
   revalidatePath: vi.fn(),
@@ -12,10 +12,15 @@ const mocks = db as unknown as {
   toolDirectoryItem: {
     findUnique: ReturnType<typeof vi.fn>;
     findMany: ReturnType<typeof vi.fn>;
+    findFirst: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
   toolDirectoryCategory: {
     findMany: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+    aggregate: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -45,7 +50,7 @@ function storedCategory(id: string, sortOrder: number, name?: string) {
     'network-planning': '点位分析',
     'other-tools': '其他工具',
   };
-  return { id, name: name ?? labels[id], sortOrder, createdAt: new Date(), updatedAt: new Date() };
+  return { id, name: name ?? labels[id], sortOrder, hidden: false, createdAt: new Date(), updatedAt: new Date() };
 }
 
 describe('tool-directory-service', () => {
@@ -53,6 +58,8 @@ describe('tool-directory-service', () => {
     vi.clearAllMocks();
     mocks.toolDirectoryItem.findMany.mockResolvedValue([]);
     mocks.toolDirectoryItem.findUnique.mockResolvedValue(null);
+    mocks.toolDirectoryItem.findFirst.mockResolvedValue(null);
+    mocks.toolDirectoryCategory.findUnique.mockResolvedValue(null);
     mocks.toolDirectoryCategory.findMany.mockResolvedValue([
       storedCategory('business-support', 0),
       storedCategory('geo-location', 1),
@@ -121,5 +128,35 @@ describe('tool-directory-service', () => {
       data: { archivedAt: expect.any(Date) },
     });
     expect(result.archivedAt).toBe('2026-08-08T02:00:00.000Z');
+  });
+
+  it('公开页过滤隐藏分类', async () => {
+    mocks.toolDirectoryCategory.findMany.mockResolvedValue([
+      storedCategory('geo-location', 0, '位置工具'),
+      { ...storedCategory('business-support', 1, '业务工具'), hidden: true },
+    ]);
+    mocks.toolDirectoryItem.findMany.mockResolvedValue([]);
+    const categories = await getPublicToolCategories();
+    expect(categories.map((c) => c.id)).toEqual(['geo-location']);
+  });
+
+  it('创建分类校验 slug 格式与查重', async () => {
+    mocks.toolDirectoryCategory.findUnique.mockResolvedValueOnce(null);
+    mocks.toolDirectoryCategory.findUnique.mockResolvedValueOnce(null);
+    mocks.toolDirectoryCategory.aggregate.mockResolvedValue({ _max: { sortOrder: 4 } });
+    mocks.toolDirectoryCategory.create.mockResolvedValue({ ...storedCategory('store-opening', 5, '新分类'), hidden: false });
+    const category = await createToolDirectoryCategory({ id: 'store-opening', name: '新分类' });
+    expect(category.id).toBe('store-opening');
+    await expect(createToolDirectoryCategory({ id: 'Bad_ID', name: 'x' })).rejects.toThrow('分类标识仅支持小写字母');
+  });
+
+  it('删除空分类成功，删除非空分类被拒', async () => {
+    mocks.toolDirectoryCategory.findUnique.mockResolvedValue(storedCategory('other-tools', 4, '其他工具'));
+    mocks.toolDirectoryItem.findFirst.mockResolvedValue(null);
+    mocks.toolDirectoryCategory.delete.mockResolvedValue(storedCategory('other-tools', 4, '其他工具'));
+    await expect(deleteToolDirectoryCategory('other-tools')).resolves.toBeTruthy();
+
+    mocks.toolDirectoryItem.findFirst.mockResolvedValue({ id: 'tool-1' });
+    await expect(deleteToolDirectoryCategory('other-tools')).rejects.toThrow('分类下仍有工具');
   });
 });
