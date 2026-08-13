@@ -207,8 +207,9 @@ async function createOpenAICompatibleCompletion(
       : {}),
   };
 
-  // OpenCode free models can be slower; give them a longer timeout
-  const timeoutMs = settings.provider === 'opencode' ? 60_000 : 15_000;
+  // 正文分析 prompt 较长；DeepSeek 首 token 可能超过 15 秒。
+  // 单篇超时由 AI pipeline 记录为当前文章失败，不能因为一篇慢文章暂停整批。
+  const timeoutMs = settings.provider === 'opencode' || settings.provider === 'deepseek' ? 60_000 : 15_000;
 
   console.log(`[ai-client] Calling ${settings.provider}: POST ${url} model=${settings.model}`);
 
@@ -234,13 +235,13 @@ async function createOpenAICompatibleCompletion(
       if (parentSignal?.aborted) throw fetchError;
       const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
 
-      // 网络错误/超时：记录并重试（不直接抛错）
+      // 网络错误重试；超时不重复发送同一个长 prompt，避免单篇请求占满批处理
+      // 的总时限。超时会作为当前文章的可重试失败返回给 AI pipeline。
       if (attempt < retries) {
-        const isAbort = /timeout|aborted|aborterror/i.test(errMsg);
         const isNetworkError = /ECONNREFUSED|ENOTFOUND|ECONNRESET|fetch failed/i.test(errMsg);
-        if (isAbort || isNetworkError) {
+        if (isNetworkError) {
           const delayMs = Math.min(2000 * Math.pow(2, attempt), 10000);
-          console.warn(`[ai-client] ${settings.provider} ${isAbort ? 'timeout' : 'network error'}, retry ${attempt + 1}/${retries} in ${delayMs}ms`);
+          console.warn(`[ai-client] ${settings.provider} network error, retry ${attempt + 1}/${retries} in ${delayMs}ms`);
           await abortableDelay(delayMs, parentSignal);
           continue;
         }
@@ -248,12 +249,12 @@ async function createOpenAICompatibleCompletion(
 
       // 超过重试次数或不可重试的错误
       if (/timeout|aborted|aborterror/i.test(errMsg)) {
-        throw new AIClientError(`${settings.provider}: 请求超时(${timeoutMs / 1000}s)`, 'timeout', true, true);
+        throw new AIClientError(`${settings.provider}: 请求超时(${timeoutMs / 1000}s)`, 'timeout', false, true);
       }
       if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|fetch failed/i.test(errMsg)) {
-        throw new AIClientError(`${settings.provider}: 无法连接 API 服务器`, 'network', true, true);
+        throw new AIClientError(`${settings.provider}: 无法连接 API 服务器`, 'network', false, true);
       }
-      throw new AIClientError(`${settings.provider}: 请求失败 - ${errMsg.substring(0, 200)}`, 'network', true, true);
+      throw new AIClientError(`${settings.provider}: 请求失败 - ${errMsg.substring(0, 200)}`, 'network', false, true);
     }
     if (response.ok) {
       let data: { choices?: Array<{ message?: { content?: unknown } }> };

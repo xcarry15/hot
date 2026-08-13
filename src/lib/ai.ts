@@ -420,8 +420,9 @@ export async function processWithAI(
 
     return { status: noValue ? 'skipped' : 'done' };
   } else {
-    // 所有 Provider 级错误（包括鉴权/配置）都与文章无关。保留为 pending 并
-    // 由批处理统一暂停，不能让同一配置问题逐篇耗尽重试次数、误标为已放弃。
+    // 鉴权、余额、限流和服务端故障属于 Provider 级错误，保留为 pending 并
+    // 由批处理统一暂停；文章超时/网络和请求体错误由 AIClientError 标为文章级，
+    // 进入当前文章的有限重试，不得污染整条队列。
     if (aiFailure?.global) {
       const retryDelayMs = aiFailure.kind === 'rate_limit'
         ? 5 * 60 * 1000

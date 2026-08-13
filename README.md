@@ -50,6 +50,7 @@
 - 单篇恢复统一使用 `POST /api/articles/[id]/workflow`：`retry` 重试当前可恢复失败，`regenerate` 从指定阶段重新计算。
 - 批处理会持续消费当前可处理积压；查询 chunk 只是单批大小，不是任务完成边界。
 - AI Provider 冷却状态只持久化在 Article 的 `nextAiRetryAt`；人工运行全流程会立即归一化等待、失败及旧 Event/聚类残留，重新获取正文后再探测 AI，不使用进程内熔断状态阻塞恢复。
+- 长正文 AI 请求使用足够的 Provider 超时；单篇超时或网络失败只进入该文章的有限重试，不暂停同批后续文章。鉴权、余额、限流和服务端 5xx 仍按 Provider 全局故障处理。
 - 技术失败经过有限自动重试后进入人工处理；不会通过删除 Article 来隐藏失败。
 - 调度器按数据库 Job 状态运行，并遵守 `Asia/Shanghai` 的静默时段；手动操作不受静默时段限制。
 - `PushDelivery` 保存当前目标投递状态，`PushLog` 只作为历史审计。
