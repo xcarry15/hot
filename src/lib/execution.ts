@@ -55,6 +55,7 @@ import {
 } from './execution-stage-executors';
 import { JOB_TYPE_VALUES, parseJsonObject } from '@/contracts/state';
 import type { JobExecutor, JobType } from './execution-types';
+import { normalizeAiRecoveryBacklog } from './pipeline/ai-recovery';
 
 export type { JobType } from './execution-types';
 export {
@@ -334,6 +335,9 @@ async function executeFullJob(
   }
   const skipCollect = payload.skipCollect === true;
   const forceRetry = payload.forceRetry === true;
+  // 人工“运行全流程”与单篇“全量重跑”使用同一恢复语义：先清理 AI/Event/
+  // 聚类残留并把正文置为待重新获取，随后再进入 process -> ai -> cluster。
+  const recoveredAiArticles = await normalizeAiRecoveryBacklog(forceRetry);
   const pushEnabled = await shouldPushAtPipelineEnd();
   const respectQuietHours = payload.trigger === 'auto' || payload.trigger === 'auto_retry';
   const tasks: PipelineStageTask[] = [
@@ -390,7 +394,7 @@ async function executeFullJob(
       if (jobId) await assertJobNotCancelled(jobId);
     },
   });
-  const result: Record<string, unknown> = { stages };
+  const result: Record<string, unknown> = { stages, recoveredAiArticles };
   if (!pushEnabled) {
     result.pushSkipped = true;
     result.reason = 'push_mode is not realtime';

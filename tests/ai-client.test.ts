@@ -23,7 +23,7 @@ vi.mock('@/lib/settings', () => ({
   },
 }));
 
-import { createChatCompletion, getAISettings, invalidateAISettingsCache } from '@/lib/ai-client';
+import { AIClientError, createChatCompletion, getAISettings, invalidateAISettingsCache } from '@/lib/ai-client';
 
 function collectComponentFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -141,6 +141,23 @@ describe('createChatCompletion', () => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 
+  it('Provider 恢复后下一次调用直接重新探测，不受进程内旧故障状态阻塞', async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('server error', { status: 503 }))
+      .mockResolvedValueOnce(new Response('server error', { status: 503 }))
+      .mockResolvedValueOnce(new Response('server error', { status: 503 }))
+      .mockResolvedValueOnce(makeOkResponse('recovered'));
+
+    const failed = expect(createChatCompletion([{ role: 'user', content: 'first' }])).rejects.toThrow('服务暂不可用');
+    await vi.advanceTimersByTimeAsync(30000);
+    await failed;
+
+    await expect(createChatCompletion([{ role: 'user', content: 'second' }])).resolves.toMatchObject({
+      content: 'recovered',
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(4);
+  });
+
   it('网络错误时重试并最终失败', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('fetch failed'));
 
@@ -164,5 +181,14 @@ describe('createChatCompletion', () => {
     global.fetch = vi.fn().mockResolvedValue(new Response('bad request', { status: 400 }));
 
     await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).rejects.toThrow('API 错误 (400)');
+  });
+
+  it('文章级 400 不标记为全局 Provider 故障，避免暂停后续文章', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response('maximum context length exceeded', { status: 400 }));
+
+    const error = await createChatCompletion([{ role: 'user', content: 'hi' }]).catch(value => value);
+
+    expect(error).toBeInstanceOf(AIClientError);
+    expect(error).toMatchObject({ kind: 'content', global: false, retryable: false, status: 400 });
   });
 });
