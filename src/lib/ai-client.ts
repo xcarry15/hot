@@ -34,20 +34,10 @@ export class AIClientError extends Error {
   }
 }
 
-const providerBreakers = new Map<AIProviderId, { failures: number; openUntil: number; reason: string }>();
-const BREAKER_FAILURE_THRESHOLD = 3;
-const BREAKER_OPEN_MS = 5 * 60_000;
-
-function assertProviderAvailable(provider: AIProviderId): void {
-  const state = providerBreakers.get(provider);
-  if (state && state.openUntil > Date.now()) throw new AIClientError(`${provider}: 服务熔断中（${state.reason}）`, 'provider', true, true);
-}
-
-function recordProviderSuccess(provider: AIProviderId): void { providerBreakers.delete(provider); }
-
-function recordProviderFailure(provider: AIProviderId, reason: string, forceOpen = false): void {
-  const failures = (providerBreakers.get(provider)?.failures ?? 0) + 1;
-  providerBreakers.set(provider, { failures, reason, openUntil: forceOpen || failures >= BREAKER_FAILURE_THRESHOLD ? Date.now() + BREAKER_OPEN_MS : 0 });
+function isArticleRequestError(status: number, message: string): boolean {
+  if (status === 413 || status === 422) return true;
+  if (status !== 400) return false;
+  return /context length|maximum context|too many tokens|prompt.{0,20}(long|large)|messages?.{0,20}(long|large)|request.{0,20}too large/i.test(message);
 }
 
 /**
@@ -153,8 +143,6 @@ export async function getAISettings(): Promise<AISettings> {
 
 export function invalidateAISettingsCache(): void {
   settingsCache.invalidate();
-  // 修改 API Key / Provider 后允许立即重新探测，不让旧熔断状态阻塞修复验证。
-  providerBreakers.clear();
 }
 
 // ── Chat Completion Types ─────────────────────────────────────────
@@ -182,7 +170,6 @@ export async function createChatCompletion(
   options?: { temperature?: number; maxTokens?: number; responseFormat?: ChatResponseFormat; signal?: AbortSignal }
 ): Promise<ChatCompletionResponse> {
   const settings = await getAISettings();
-  assertProviderAvailable(settings.provider);
 
   const finalOptions = {
     temperature: options?.temperature ?? settings.temperature,
@@ -261,11 +248,9 @@ async function createOpenAICompatibleCompletion(
 
       // 超过重试次数或不可重试的错误
       if (/timeout|aborted|aborterror/i.test(errMsg)) {
-        recordProviderFailure(settings.provider, '请求超时');
         throw new AIClientError(`${settings.provider}: 请求超时(${timeoutMs / 1000}s)`, 'timeout', true, true);
       }
       if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|fetch failed/i.test(errMsg)) {
-        recordProviderFailure(settings.provider, '网络连接失败');
         throw new AIClientError(`${settings.provider}: 无法连接 API 服务器`, 'network', true, true);
       }
       throw new AIClientError(`${settings.provider}: 请求失败 - ${errMsg.substring(0, 200)}`, 'network', true, true);
@@ -275,18 +260,15 @@ async function createOpenAICompatibleCompletion(
       try {
         data = JSON.parse(response.bodyText || '{}') as { choices?: Array<{ message?: { content?: unknown } }> };
       } catch {
-        recordProviderFailure(settings.provider, '响应不是 JSON');
         throw new AIClientError(`${settings.provider}: API 返回无效 JSON`, 'provider', true, true);
       }
       const rawContent = data?.choices?.[0]?.message?.content;
       const content = typeof rawContent === 'string' ? rawContent : '';
 
       if (!content) {
-        recordProviderFailure(settings.provider, '响应为空');
         throw new AIClientError(`${settings.provider}: API 返回空响应`, 'provider', true, true);
       }
 
-      recordProviderSuccess(settings.provider);
       return {
         content,
         provider: settings.provider,
@@ -320,12 +302,10 @@ async function createOpenAICompatibleCompletion(
     }
 
     if (response.status === 401 || response.status === 403) {
-      recordProviderFailure(settings.provider, '鉴权失败', true);
       throw new AIClientError(`${settings.provider}: API Key 无效或鉴权失败`, 'configuration', true, false, response.status);
     }
 
     if (response.status === 402) {
-      recordProviderFailure(settings.provider, '余额不足', true);
       throw new AIClientError(`${settings.provider}: 账户余额不足，请前往平台充值`, 'configuration', true, false, response.status);
     }
 
@@ -335,14 +315,22 @@ async function createOpenAICompatibleCompletion(
   // 根据最后一次错误抛出真实原因，避免固定文案误导用户
   if (lastError) {
     if (lastError.status === 429) {
-      recordProviderFailure(settings.provider, '请求频率超限');
       throw new AIClientError(`${settings.provider}: 请求频率超限，请稍后重试`, 'rate_limit', true, true, 429);
     }
     if (lastError.status >= 500) {
-      recordProviderFailure(settings.provider, `服务错误 ${lastError.status}`);
       throw new AIClientError(`${settings.provider}: 服务暂不可用(${lastError.status})`, 'provider', true, true, lastError.status);
     }
-    recordProviderFailure(settings.provider, `API 错误 ${lastError.status}`);
+    // 请求体/上下文导致的 4xx 只影响当前文章。若误判为全局 Provider 故障，
+    // 最老的一篇异常文章会在每次批处理开头暂停整个队列，使后续新文章饥饿。
+    if (isArticleRequestError(lastError.status, lastError.message)) {
+      throw new AIClientError(
+        `${settings.provider} API 错误 (${lastError.status}): ${lastError.message}`,
+        'content',
+        false,
+        false,
+        lastError.status,
+      );
+    }
     throw new AIClientError(
       `${settings.provider} API 错误 (${lastError.status}): ${lastError.message}`,
       'provider',
@@ -352,7 +340,6 @@ async function createOpenAICompatibleCompletion(
     );
   }
 
-  recordProviderFailure(settings.provider, '达到最大重试次数');
   throw new AIClientError(`${settings.provider}: 请求失败，已达到最大重试次数`, 'provider', true, true);
 }
 

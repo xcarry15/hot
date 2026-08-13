@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   clearExpiredJobRunnerLease: vi.fn(),
   runnerLeaseRenew: vi.fn(),
   runnerLeaseRelease: vi.fn(),
+  normalizeAiRecoveryBacklog: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -44,6 +45,7 @@ vi.mock('@/lib/pipeline/collect', () => ({
 }));
 vi.mock('@/lib/pipeline/process', () => ({ processAllPending: vi.fn() }));
 vi.mock('@/lib/pipeline/analyze', () => ({ analyzeAllPending: vi.fn() }));
+vi.mock('@/lib/pipeline/ai-recovery', () => ({ normalizeAiRecoveryBacklog: mocks.normalizeAiRecoveryBacklog }));
 vi.mock('@/lib/pipeline/push-bridge', () => ({ pushAllPendingArticles: mocks.pushAllPendingArticles }));
 vi.mock('@/lib/push/policy', () => ({ shouldPushAtPipelineEnd: vi.fn().mockResolvedValue(false) }));
 vi.mock('@/lib/job-runner-lease', () => ({
@@ -90,6 +92,7 @@ describe.sequential('global job execution invariant', () => {
       release: mocks.runnerLeaseRelease.mockResolvedValue(undefined),
     });
     mocks.clearExpiredJobRunnerLease.mockResolvedValue(undefined);
+    mocks.normalizeAiRecoveryBacklog.mockResolvedValue(0);
   });
 
   it('为自动重试任务按 Job 类型生成不同幂等键', () => {

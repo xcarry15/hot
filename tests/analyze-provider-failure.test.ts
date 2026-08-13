@@ -169,4 +169,26 @@ describe('analyzeAllPending Provider 全局异常', () => {
     await expect(analyzeAllPending()).rejects.toThrow('database write failed');
     expect(mocks.processWithAI).toHaveBeenCalledTimes(1);
   });
+
+  it('单篇请求错误只标记当前文章失败，后续文章继续分析', async () => {
+    mocks.articleCount.mockResolvedValueOnce(2);
+    mocks.articleFindMany
+      .mockResolvedValueOnce([
+        { id: 'bad-article', title: '异常文章' },
+        { id: 'good-article', title: '正常文章' },
+      ])
+      .mockResolvedValueOnce([]);
+    mocks.processWithAI
+      .mockResolvedValueOnce({ status: 'failed', errorKind: 'content', globalError: false })
+      .mockResolvedValueOnce({ status: 'done' });
+
+    await expect(analyzeAllPending()).resolves.toMatchObject({
+      total: 2,
+      processed: 1,
+      errors: 1,
+      providerPaused: false,
+    });
+    expect(mocks.processWithAI).toHaveBeenCalledTimes(2);
+  });
+
 });
