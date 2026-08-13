@@ -168,6 +168,55 @@ describe('createChatCompletion', () => {
     expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 
+  it('OpenCode 长正文请求使用 60 秒超时，且超时只影响当前文章', async () => {
+    global.fetch = vi.fn().mockImplementation((_url, options: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+
+    const assertion = expect(createChatCompletion([{ role: 'user', content: 'long article' }])).rejects.toMatchObject({
+      kind: 'timeout',
+      global: false,
+      retryable: true,
+    });
+    await vi.advanceTimersByTimeAsync(60000);
+    await assertion;
+  });
+
+  it('DeepSeek 长正文请求使用 60 秒超时，且超时只影响当前文章', async () => {
+    mocks.readAllSettings.mockResolvedValueOnce({
+      ai_provider: 'deepseek',
+      deepseek_api_key: 'test-key',
+      deepseek_base_url: 'https://api.deepseek.com',
+      deepseek_model: 'deepseek-v4-flash',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
+    global.fetch = vi.fn().mockImplementation((_url, options: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+
+    const assertion = expect(createChatCompletion([{ role: 'user', content: 'long article' }])).rejects.toMatchObject({
+      kind: 'timeout',
+      global: false,
+      retryable: true,
+    });
+    await vi.advanceTimersByTimeAsync(60000);
+    await assertion;
+  });
+
+  it('OpenCode 网关不支持 response_format 时自动降级为客户端 JSON 校验', async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('response_format is not supported', { status: 400 }))
+      .mockResolvedValueOnce(makeOkResponse('{"ok":true}'));
+
+    await expect(createChatCompletion([{ role: 'user', content: 'hi' }], { responseFormat: 'json_object' })).resolves.toMatchObject({
+      content: '{"ok":true}',
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const secondBody = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[1][1].body);
+    expect(secondBody.response_format).toBeUndefined();
+  });
+
   it('401 直接抛出鉴权失败', async () => {
     global.fetch = vi.fn().mockResolvedValue(new Response('unauth', { status: 401 }));
 

@@ -84,10 +84,10 @@ describe('analyzeAllPending Provider 全局异常', () => {
 
     expect(mocks.processWithAI).toHaveBeenCalledTimes(1);
     expect(mocks.articleUpdateMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({
-        aiStatus: { in: ['pending', 'failed'] },
-        fetchStatus: 'fetched',
-      }),
+      where: expect.objectContaining({ AND: expect.arrayContaining([
+        expect.objectContaining({ fetchStatus: 'fetched' }),
+        { id: { notIn: ['article-1'] } },
+      ]) }),
       data: expect.objectContaining({
         aiStatus: 'pending',
         aiError: null,
@@ -100,32 +100,27 @@ describe('analyzeAllPending Provider 全局异常', () => {
     }));
   });
 
-  it('批处理超时时连同触发文章一起等待恢复，不把超时标成内容失败', async () => {
+  it('单篇批处理超时只进入文章重试，后续文章继续分析', async () => {
     const articles = [
       { id: 'article-1', title: '文章 1' },
       { id: 'article-2', title: '文章 2' },
     ];
     mocks.articleCount.mockResolvedValueOnce(2);
-    mocks.articleFindMany.mockResolvedValueOnce(articles);
-    mocks.articleUpdateMany.mockResolvedValueOnce({ count: 2 });
+    mocks.articleFindMany
+      .mockResolvedValueOnce(articles)
+      .mockResolvedValueOnce([]);
     mocks.processWithAI.mockRejectedValueOnce(new Error('AI分析超时 "文章 1"'));
+    mocks.processWithAI.mockResolvedValueOnce({ status: 'done' });
 
-    await expect(analyzeAllPending()).resolves.toEqual({
+    await expect(analyzeAllPending()).resolves.toMatchObject({
       total: 2,
-      processed: 0,
-      errors: 0,
-      deferred: 2,
+      processed: 1,
+      errors: 1,
+      deferred: 0,
       providerUnavailable: false,
-      providerPaused: true,
+      providerPaused: false,
     });
-
-    expect(mocks.articleUpdateMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({
-        aiStatus: { in: ['pending', 'failed'] },
-        fetchStatus: 'fetched',
-      }),
-      data: expect.objectContaining({ aiStatus: 'pending', aiError: null }),
-    });
+    expect(mocks.processWithAI).toHaveBeenCalledTimes(2);
   });
 
   it('鉴权/配置错误暂停整批，未开始文章只等待恢复、不复制同一错误', async () => {

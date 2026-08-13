@@ -51,18 +51,22 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
 }> {
   assertNotAborted(signal);
 
-  const pendingWhere: Prisma.ArticleWhereInput = {
+  const pendingWhereBase: Prisma.ArticleWhereInput = {
     aiStatus: { in: ['pending', 'failed'] },
     fetchStatus: 'fetched',
     technicalIgnoredAt: null,
     eventId: null,
     clusterStatus: 'pending',
-    ...(forceRetry ? {} : {
+  };
+  const retryWindow: Prisma.ArticleWhereInput = {
       OR: [
         { nextAiRetryAt: null },
         { nextAiRetryAt: { lte: new Date() } },
       ],
-    }),
+  };
+  const pendingWhere: Prisma.ArticleWhereInput = {
+    ...pendingWhereBase,
+    ...(forceRetry ? {} : retryWindow),
   };
   const total = await db.article.count({ where: pendingWhere });
   if (jobId) await startJobStage(jobId, { stage: 'ai', total });
@@ -79,10 +83,17 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   );
 
   let providerPause: { retryable: boolean; errorKind?: string; message?: string } | null = null;
+  const attemptedArticleIds = new Set<string>();
+  const getPendingRowsWhere = (): Prisma.ArticleWhereInput => ({
+    ...pendingWhereBase,
+    // forceRetry 只跳过本 Job 第一次查询的退避；当前 Job 已尝试过的文章
+    // 必须等待 nextAiRetryAt，避免超时文章在同一 Job 内连续重试。
+    ...(forceRetry && attemptedArticleIds.size === 0 ? {} : retryWindow),
+  });
   let providerUnavailable = false;
   while (!providerPause) {
     const pendingRows = await db.article.findMany({
-      where: pendingWhere,
+      where: getPendingRowsWhere(),
       select: aiProcessSelect,
       orderBy: { createdAt: 'asc' },
       take: MAX_BATCH_SIZE,
@@ -92,6 +103,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
     for (let i = 0; i < pending.length; i += concurrency) {
       assertNotAborted(signal);
       const batch = pending.slice(i, i + concurrency);
+      for (const article of batch) attemptedArticleIds.add(article.id);
       const results = await Promise.allSettled(batch.map(a => withTimeout(
         timeoutSignal => processWithAI(a, timeoutSignal),
         AI_TIMEOUT_MS,
@@ -101,10 +113,33 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
       assertNotAborted(signal);
       let batchErrors = 0;
       let unexpectedError: unknown = null;
-      for (const r of results) {
+      for (const [resultIndex, r] of results.entries()) {
         if (r.status === 'rejected') {
           if (isTransientBatchError(r.reason)) {
-            providerPause ??= { retryable: true, errorKind: 'timeout' };
+            // 超时/网络失败可能只影响当前文章（例如长 prompt 首 token 超时）。
+            // processWithAI 已在文章级写入 failed + nextAiRetryAt；继续消费同批，
+            // 不让一篇慢文章把后续新文章全部改成 AI 等待。
+            errors++;
+            batchErrors++;
+            const article = batch[resultIndex];
+            const retryCount = (article.aiRetryCount ?? 0) + 1;
+            await db.article.updateMany({
+              where: { id: article.id, aiStatus: { in: ['pending', 'failed'] } },
+              data: retryCount >= 5
+                ? {
+                    aiStatus: 'skipped',
+                    aiError: String(r.reason).slice(0, 1000),
+                    aiRetryCount: retryCount,
+                    nextAiRetryAt: null,
+                    skipReason: `AI 连续失败 ${retryCount} 次，已放弃`,
+                  }
+                : {
+                    aiStatus: 'failed',
+                    aiError: String(r.reason).slice(0, 1000),
+                    aiRetryCount: retryCount,
+                    nextAiRetryAt: new Date(Date.now() + AI_PROVIDER_RETRY_DELAY_MS),
+                  },
+            });
           } else {
             errors++;
             batchErrors++;
@@ -156,7 +191,14 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
         ? (providerPause.errorKind === 'rate_limit' ? AI_RATE_LIMIT_RETRY_DELAY_MS : AI_PROVIDER_RETRY_DELAY_MS)
         : 30 * 60 * 1000;
       const paused = await db.article.updateMany({
-        where: pendingWhere,
+        where: {
+          AND: [
+            pendingWhere,
+            ...(attemptedArticleIds.size > 0
+              ? [{ id: { notIn: [...attemptedArticleIds] } }]
+              : []),
+          ],
+        },
         data: {
           aiStatus: 'pending',
           // 全局配置/余额问题只保留在实际触发请求的文章上；未开始文章
