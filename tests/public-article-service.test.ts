@@ -89,12 +89,13 @@ describe('public-article-service Event 门禁', () => {
   });
 
   it('详情使用 Event.id，并列出同事件与同品牌的近期文章', async () => {
+    const recentArticleDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
     mocks.eventFindMany
       .mockResolvedValueOnce([eventRow('e1', '2026-07-15T01:00:00Z', 2)])
       .mockResolvedValueOnce([eventRow('e1', '2026-07-15T01:00:00Z', 2)]);
     mocks.articleFindMany.mockResolvedValue([
-      { id: 'a1', eventId: 'e1', title: '来源一', summary: '', brand: '', score: 70, aiStatus: 'done', url: 'https://example.com/a1', publishedAt: null, createdAt: new Date('2026-07-15T01:00:00Z'), source: { name: '源一', type: 'html' }, event: { id: 'e1', firstSeenAt: new Date('2026-07-15T01:00:00Z') }, representedEvent: null },
-      { id: 'a2', eventId: 'e2', title: '品牌文章', summary: '', brand: '品牌A', score: 75, aiStatus: 'done', url: 'https://example.com/a2', publishedAt: null, createdAt: new Date('2026-07-15T02:00:00Z'), source: { name: '源二', type: 'rss' }, event: null, representedEvent: { id: 'e2', firstSeenAt: new Date('2026-07-15T02:00:00Z') } },
+      { id: 'a1', eventId: 'e1', title: '来源一', summary: '', brand: '', score: 70, aiStatus: 'done', url: 'https://example.com/a1', publishedAt: null, createdAt: recentArticleDate, source: { name: '源一', type: 'html' }, event: { id: 'e1', firstSeenAt: recentArticleDate }, representedEvent: null },
+      { id: 'a2', eventId: 'e2', title: '品牌文章', summary: '', brand: '品牌A', score: 75, aiStatus: 'done', url: 'https://example.com/a2', publishedAt: null, createdAt: new Date(recentArticleDate.getTime() + 60 * 60 * 1000), source: { name: '源二', type: 'rss' }, event: null, representedEvent: { id: 'e2', firstSeenAt: new Date(recentArticleDate.getTime() + 60 * 60 * 1000) } },
     ]);
     const detail = await getPublicArticleDetail('e1');
     expect(detail?.id).toBe('e1');
