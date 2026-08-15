@@ -43,9 +43,22 @@ const safeOutboundDispatcher = new Agent({ maxOrigins: 100 }).compose(
     maxItems: 100,
     dualStack: true,
     storage: safeDnsStorage,
-    lookup: (hostname: string | URL, _options: LookupOptions, callback: (error: NodeJS.ErrnoException | null, addresses: Array<{ address: string; family: 4 | 6; ttl: number }>) => void) => {
+    lookup: (hostname: string | URL, options: LookupOptions, callback: (error: NodeJS.ErrnoException | null, addresses: Array<{ address: string; family: 4 | 6; ttl: number }>) => void) => {
       const name = typeof hostname === 'string' ? hostname : hostname.hostname;
+      const signal = (options as LookupOptions & { signal?: AbortSignal })?.signal;
+      if (signal?.aborted) {
+        const abortError = new Error('DNS lookup aborted') as NodeJS.ErrnoException;
+        abortError.code = 'ECANCELLED';
+        callback(abortError, []);
+        return;
+      }
       lookupDns(name, { all: true, verbatim: true }, (error, addresses) => {
+        if (signal?.aborted) {
+          const abortError = new Error('DNS lookup aborted') as NodeJS.ErrnoException;
+          abortError.code = 'ECANCELLED';
+          callback(abortError, []);
+          return;
+        }
         if (error) {
           callback(error, []);
           return;

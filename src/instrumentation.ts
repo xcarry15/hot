@@ -8,6 +8,20 @@ import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici';
  * routes call runJob() (src/lib/execution.ts) directly. 前端从 Job 表轮询快照。
  */
 let developmentProxyConfigured = false;
+let undiciAbortRaceGuardConfigured = false;
+
+function configureUndiciAbortRaceGuard(): void {
+  if (undiciAbortRaceGuardConfigured) return;
+
+  process.on('uncaughtException', (error) => {
+    if (error instanceof TypeError && /reading 'port'|reading 'host'/.test(error.message)) {
+      console.warn('[instrumentation] suppressed undici abort race', error.message);
+      return;
+    }
+    throw error;
+  });
+  undiciAbortRaceGuardConfigured = true;
+}
 
 function configureDevelopmentOutboundProxy(): void {
   if (process.env.NODE_ENV !== 'development' || developmentProxyConfigured) return;
@@ -28,6 +42,7 @@ function configureDevelopmentOutboundProxy(): void {
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
+    configureUndiciAbortRaceGuard();
     configureDevelopmentOutboundProxy();
     try {
       const { initializeDatabaseRuntime } = await import('./lib/database-runtime');
