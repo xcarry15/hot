@@ -124,6 +124,8 @@ npm run dev
 
 以上命令适用于 Linux/macOS；Windows 可使用 `bat/本地一键初始化.bat` 完成数据库和依赖初始化。开发服务会启动数据库调度器，同一 SQLite 数据库不要同时运行多个 `npm run dev` 实例。
 
+本服务器通过公网 IP 远程开发时，访问 `http://43.166.0.19:3011`；`next.config.ts` 已允许该开发来源的 HMR 和字体资源。若公网 IP 变化，需要同步更新 `allowedDevOrigins` 后重启开发服务。
+
 ## 配置
 
 ```env

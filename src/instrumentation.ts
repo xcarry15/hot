@@ -1,71 +1,15 @@
-import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici';
-
 /**
  * Next.js instrumentation hook — runs once at server boot.
  *
- * Starts the scheduler, which directly runs crawl/push jobs at the configured
- * cadence. There is no separate polling worker anymore — scheduler and API
- * routes call runJob() (src/lib/execution.ts) directly. 前端从 Job 表轮询快照。
+ * The Node-only implementation is loaded only from the Node.js runtime branch.
+ * This keeps process APIs and the outbound proxy out of the Edge bundle.
  */
-let developmentProxyConfigured = false;
-let undiciAbortRaceGuardConfigured = false;
 
-export function isKnownUndiciAbortRace(error: unknown): boolean {
-  if (!(error instanceof TypeError)) return false;
-  if (!/^Cannot read properties of null \(reading '(?:port|host)'\)$/.test(error.message)) return false;
-
-  const stack = error.stack?.replaceAll('\\', '/') || '';
-  return stack.includes('/undici/lib/interceptor/dns.js')
-    || /DNSInstance\.(?:runLookup|pick)/.test(stack);
-}
-
-function configureUndiciAbortRaceGuard(): void {
-  if (undiciAbortRaceGuardConfigured) return;
-
-  process.on('uncaughtException', (error) => {
-    if (isKnownUndiciAbortRace(error)) {
-      console.warn('[instrumentation] suppressed undici abort race', error.message);
-      return;
-    }
-    throw error;
-  });
-  undiciAbortRaceGuardConfigured = true;
-}
-
-function configureDevelopmentOutboundProxy(): void {
-  if (process.env.NODE_ENV !== 'development' || developmentProxyConfigured) return;
-
-  const hasProxy = Boolean(
-    process.env.HTTP_PROXY
-      || process.env.HTTPS_PROXY
-      || process.env.http_proxy
-      || process.env.https_proxy,
-  );
-  if (!hasProxy) return;
-
-  // Node 原生 fetch 不会自动使用 HTTP(S)_PROXY；仅在本地开发时接管服务端出站请求。
-  setGlobalDispatcher(new EnvHttpProxyAgent());
-  developmentProxyConfigured = true;
-  console.log('[instrumentation] Development outbound HTTP proxy enabled');
-}
+export { isKnownUndiciAbortRace } from './lib/undici-abort-race';
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    configureUndiciAbortRaceGuard();
-    configureDevelopmentOutboundProxy();
-    try {
-      const { initializeDatabaseRuntime } = await import('./lib/database-runtime');
-      const database = await initializeDatabaseRuntime();
-      if (database.journalMode !== 'wal') {
-        console.warn(`[instrumentation] SQLite journal_mode=${database.journalMode}; expected wal`);
-      } else {
-        console.log(`[instrumentation] SQLite ready (wal, busy_timeout=${database.busyTimeout}ms)`);
-      }
-    } catch (error) {
-      console.error('[instrumentation] SQLite runtime optimization failed; continuing startup', error);
-    }
-    const { startScheduler } = await import('./lib/scheduler');
-    startScheduler();
-    console.log('[instrumentation] scheduler started (direct execution mode)');
+    const { registerNodeInstrumentation } = await import('./instrumentation-node');
+    await registerNodeInstrumentation();
   }
 }
