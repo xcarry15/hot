@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Download, LoaderCircle, Share2 } from 'lucide-react'
 import QRCode from 'qrcode'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { PUBLIC_SITE_NAME, PUBLIC_SITE_TAGLINE } from '@/lib/public-brand'
 
 type Props = {
@@ -19,7 +19,6 @@ export default function PublicSharePoster(props: Props) {
   const { open, publishedAt, shareUrl, summary, title } = props
   const [qrUrl, setQrUrl] = useState('')
   const [error, setError] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -43,9 +42,7 @@ export default function PublicSharePoster(props: Props) {
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1600)
-    } catch { setCopied(false) }
+    } catch {}
   }
 
   const savePoster = async () => {

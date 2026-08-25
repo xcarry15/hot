@@ -107,7 +107,7 @@ docs/                    公开端设计参考与阶段性设计资料
 
 ## 本地运行
 
-环境要求：Node.js >= 20.9.0、npm >= 10。
+环境要求：Node.js >= 20.9.0、npm >= 10。本服务器与 CI 使用 `.nvmrc` 固定到 Node.js 20.20.2，避免开发和部署使用不同的大版本。
 
 ```bash
 mkdir -p db
@@ -136,7 +136,9 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 - `DATABASE_URL`：固定使用项目目录下 `db/custom.db` 对应的 Prisma 相对路径。
 - `API_TOKEN`：后台和受保护 API 的令牌；生产环境必填。
 - `SETTINGS_ENCRYPTION_KEY`：敏感设置加密密钥；生产环境必填且部署间保持不变。
-- `NEXT_PUBLIC_SITE_URL`：canonical、Open Graph、robots 与 sitemap 使用的正式站点地址。
+- `NEXT_PUBLIC_SITE_URL`：canonical、Open Graph、robots 与 sitemap 使用的站点地址；本地可留空或使用 `http://localhost:3011`，生产必须配置正式 HTTPS 地址。不要把本地 `.env` 直接用于生产。
+
+本服务器当前使用新建的开发数据库 `db/custom.db`，初始化只执行 migration 和 seed，不自动恢复旧数据库。旧数据迁移需要单独准备经过确认的备份文件。
 
 ## 常用命令
 

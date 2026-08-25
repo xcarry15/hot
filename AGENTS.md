@@ -71,6 +71,7 @@
 - `npm run verify` — lint, typecheck, all tests, and production build.
 - `npm run build` / `npm run start` — production build and port `3011` service.
 - `npm run db:migrate:status`, `npm run db:migrate:deploy`, `npm run db:generate`, and `npm run db:optimize` — routine database operations.
+- The server development baseline is Node.js 20.20.2 from `.nvmrc`; keep CI on the same version unless a runtime upgrade is intentional.
 
 ## Code and Delivery Style
 
