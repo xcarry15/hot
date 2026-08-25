@@ -102,6 +102,7 @@ tests/                   Vitest 测试
 scripts/                 生产初始化、自动部署和数据库维护脚本
 bat/                     Windows 初始化、部署打包与运维说明
 .github/workflows/       CI 与生产部署工作流
+docs/                    公开端设计参考与阶段性设计资料
 ```
 
 ## 本地运行
@@ -109,9 +110,9 @@ bat/                     Windows 初始化、部署打包与运维说明
 环境要求：Node.js >= 20.9.0、npm >= 10。
 
 ```bash
+mkdir -p db
+if [ ! -f .env ]; then cp .env.example .env; fi
 npm ci
-copy .env.example .env       # Windows
-# cp .env.example .env       # Linux / macOS
 npm run db:migrate:deploy
 npm run db:generate
 npm run db:seed
@@ -121,13 +122,7 @@ npm run dev
 
 访问 `http://localhost:3011`。
 
-需要重新创建本地数据库时，双击 `bat/本地一键初始化.bat` 并输入 `RESET`。依赖或 lock 文件变化时使用：
-
-```text
-bat/本地一键初始化.bat -RefreshDependencies
-```
-
-该流程会删除本地 SQLite 与 `.next`，但保留 `.env`；不会运行测试或生产构建。
+以上命令适用于 Linux/macOS；Windows 可使用 `bat/本地一键初始化.bat` 完成数据库和依赖初始化。开发服务会启动数据库调度器，同一 SQLite 数据库不要同时运行多个 `npm run dev` 实例。
 
 ## 配置
 
@@ -173,15 +168,15 @@ npm run db:cleanup-logs
 
 ## 部署
 
-完整操作见 [`bat/部署和更新方法.txt`](bat/部署和更新方法.txt)，Nginx 模板见 [`bat/本项目的nginx.txt`](bat/本项目的nginx.txt)。
+完整操作见 [`bat/部署和更新方法.txt`](bat/部署和更新方法.txt)，Nginx 模板见 [`bat/本项目的nginx.txt`](bat/本项目的nginx.txt)。生产初始化脚本是 [`scripts/init-production.sh`](scripts/init-production.sh)，日常发布脚本是 [`scripts/deploy-production.sh`](scripts/deploy-production.sh)；两者依赖 PM2、SQLite 和反向代理环境。初始化脚本会重建生产依赖和数据库，执行前必须确认备份与数据范围。
 
-日常发布路径：
+当前仓库包含 GitHub Actions workflow，日常发布路径为：
 
 ```text
 推送或合并 master → CI → CI 成功 → Deploy production → 健康检查
 ```
 
-自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh`：先在版本化 release 目录安装依赖并构建，再校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、应用 migration，最后原子切换 `current` 软链、启动单实例并检查包含 SQLite 可访问性的健康接口与 CSS 资源。每次运行使用唯一发布归档并为 SSH/SCP 开启保活，避免长构建期间重跑任务互相清理归档或连接空闲断开。健康接口首次未稳定时会自动重启 PM2 一次并延长等待，仍失败才回滚。旧 release 默认保留 5 个，普通部署失败时会恢复数据库备份和旧版本；生产重置不提供自动回滚。
+发布脚本会在版本化 release 目录安装依赖并构建，再校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、应用 migration，最后原子切换 `current` 软链、启动单实例并检查包含 SQLite 可访问性的健康接口与 CSS 资源。旧 release 默认保留 5 个，普通部署失败时会恢复数据库备份和旧版本；生产重置不提供自动回滚。
 
 手动 `reset_production=yes` 会在不备份的情况下删除生产 SQLite，并从当前 migration 与 seed 全新初始化。只有在明确接受丢失生产数据时才可使用；生产重置失败不提供自动数据库回滚。
 
@@ -192,6 +187,8 @@ npm run db:cleanup-logs
 - `CONTEXT.md`：统一业务术语，不记录实现细节。
 - `docs/design/DESIGN.md`：公开端视觉参考，不作为产品或架构事实源。
 - `bat/部署和更新方法.txt`：可直接执行的生产运维步骤。
+- `scripts/init-production.sh`：生产首次初始化或明确批准后的重建入口。
+- `scripts/deploy-production.sh`：保留 release、备份 SQLite 和原子切换版本的发布入口。
 
 功能、命令、migration、部署流程或统一术语变化时，同步更新对应文档；已完成的阶段性方案不长期保留为第二套事实源。
 

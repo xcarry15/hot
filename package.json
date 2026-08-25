@@ -2,6 +2,10 @@
   "name": "hot2",
   "version": "0.2.0",
   "private": true,
+  "engines": {
+    "node": ">=20.9.0",
+    "npm": ">=10"
+  },
   "scripts": {
     "dev": "next dev -p 3011",
     "build": "next build",

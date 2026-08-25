@@ -67,6 +67,7 @@ test-run.*
 db/custom.db
 db/custom.db-wal
 db/custom.db-shm
+db/custom.db-journal
 db/exports/
 
 # Windows reserved device name accidentally created by cmd redirection

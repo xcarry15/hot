@@ -17,7 +17,7 @@
 - `src/contracts/`: shared DTOs and state contracts.
 - `src/lib/`: services, pipeline, scheduling, publication, push, backup, export, and maintenance rules. Keep business rules here rather than in components or Route Handlers.
 - `prisma/`: schema, seed, and the only supported ordered migration chain.
-- `tests/`: Vitest coverage; `scripts/`: production and maintenance scripts; `bat/`: Windows initialization, packaging, and operations.
+- `tests/`: Vitest coverage; `scripts/`: production initialization, deployment, and maintenance scripts; `bat/`: Windows initialization, packaging, and operations.
 
 ## Domain Invariants
 
