@@ -19,7 +19,7 @@
 - `/tools`：选址、地理位置、数据分析和文件工具目录。
 - `/about`：产品说明与联系入口。
 - `/admin`：Token 会话保护的管理后台。
-- `/api/health`：匿名健康检查。
+- `/api/health`：匿名就绪检查；同时验证应用进程与 SQLite 可访问性，数据库异常时返回 503。
 
 公开端统一复用 `PublicPageShell`、公共头部与页脚；产品名称和文案常量集中在 `src/lib/public-brand.ts`。
 
@@ -181,7 +181,7 @@ npm run db:cleanup-logs
 推送或合并 master → CI → CI 成功 → Deploy production → 健康检查
 ```
 
-自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh`：先在版本化 release 目录安装依赖并构建，再校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、应用 migration，最后原子切换 `current` 软链、启动单实例并检查健康接口与 CSS 资源。每次运行使用唯一发布归档并为 SSH/SCP 开启保活，避免长构建期间重跑任务互相清理归档或连接空闲断开。健康接口首次未稳定时会自动重启 PM2 一次并延长等待，仍失败才回滚。旧 release 默认保留 5 个，普通部署失败时会恢复数据库备份和旧版本；生产重置不提供自动回滚。
+自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh`：先在版本化 release 目录安装依赖并构建，再校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、应用 migration，最后原子切换 `current` 软链、启动单实例并检查包含 SQLite 可访问性的健康接口与 CSS 资源。每次运行使用唯一发布归档并为 SSH/SCP 开启保活，避免长构建期间重跑任务互相清理归档或连接空闲断开。健康接口首次未稳定时会自动重启 PM2 一次并延长等待，仍失败才回滚。旧 release 默认保留 5 个，普通部署失败时会恢复数据库备份和旧版本；生产重置不提供自动回滚。
 
 手动 `reset_production=yes` 会在不备份的情况下删除生产 SQLite，并从当前 migration 与 seed 全新初始化。只有在明确接受丢失生产数据时才可使用；生产重置失败不提供自动数据库回滚。
 
