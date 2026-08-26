@@ -140,6 +140,20 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 - `SETTINGS_ENCRYPTION_KEY`：敏感设置加密密钥；生产环境必填且部署间保持不变。
 - `NEXT_PUBLIC_SITE_URL`：canonical、Open Graph、robots 与 sitemap 使用的站点地址；本地可留空或使用 `http://localhost:3011`，生产必须配置正式 HTTPS 地址。不要把本地 `.env` 直接用于生产。
 
+### 配置 OpenCode Zen 免费模型
+
+项目通过 OpenAI 兼容接口接入 OpenCode Zen，默认 API 地址为 `https://opencode.ai/zen/v1`。在后台进入 `设置 → AI 模型`，选择 `OpenCode (免费)` 并填写 API Key；模型列表会从官方 `GET /zen/v1/models` 动态读取，接口不可用时使用内置兜底。项目只允许 OpenCode 免费模型，免费模型请求会自动串行、间隔约 4 秒，收到 429 后尊重 `Retry-After` 并暂停后续请求，不自动重复发送。OpenCode 官方部分免费模型使用 `/chat/completions`，Contributor Free 使用 `/responses`，项目会按模型自动选择协议。免费模型为限时活动，且部分模型可能将请求内容用于改进模型，请勿提交敏感内容。API Key 由设置系统加密保存，不要写入 `.env`、代码或 Git。
+
+模型列表与价格以 OpenCode 官方文档为准：<https://opencode.ai/docs/zh-cn/zen>；模型发现接口：<https://opencode.ai/zen/v1/models>。
+
+### 配置 OpenRouter 免费模型
+
+项目通过 OpenAI 兼容接口接入 OpenRouter，不需要额外安装 SDK。在后台进入 `设置 → AI 模型`，选择 `OpenRouter (免费模型)`，填写你自己的 API Key；默认 API 地址为 `https://openrouter.ai/api/v1`，默认模型为 `openrouter/free`。模型按钮会从官方 `GET /api/v1/models` 动态读取文本输出、输入与输出价格均为 0 的免费模型，并保留 `openrouter/free` 作为兜底；OpenRouter 的免费模型列表会变化，可点击“刷新免费模型”。免费模型存在速率限制。项目会对 OpenRouter 免费请求自动串行、每次间隔约 4 秒，收到 429 后停止本次自动重试并进入冷却，避免突发请求反复消耗额度。API Key 由设置系统加密保存，不要写入 `.env`、代码或 Git。
+
+这类保护只能避免短时间突发，不能绕过 OpenRouter 的每日额度；官方 FAQ 当前说明免费账户通常为每天 50 次，购买至少 10 美元额度后为每天 1000 次。积压文章超过每日额度时，AI 队列会保留为待处理，等待后续恢复，不会继续盲目请求。
+
+申请或管理 API Key：<https://openrouter.ai/keys>；接口说明：<https://openrouter.ai/docs/quickstart>；模型列表说明：<https://openrouter.ai/docs/api/api-reference/models/get-models>。
+
 本服务器当前使用新建的开发数据库 `db/custom.db`，初始化只执行 migration 和 seed，不自动恢复旧数据库。旧数据迁移需要单独准备经过确认的备份文件。
 
 ## 常用命令

@@ -4,6 +4,7 @@
  * 涵盖：
  *   - settings 读写（GET /api/settings、PUT /api/settings、/api/settings/reveal 解密）
  *   - AI 模型测试（POST /api/settings/test-ai）
+ *   - OpenCode / OpenRouter 免费模型列表
  *   - Webhook 测试（POST /api/settings/test-webhook）
  *
  * 配置备份由 backup-api.client 统一负责，本文件只处理设置编辑能力。
@@ -76,6 +77,14 @@ export interface OpenCodeModelsResult {
 
 export async function fetchOpenCodeModels(signal?: AbortSignal): Promise<OpenCodeModelsResult> {
   return requestJson<OpenCodeModelsResult>('GET', '/api/settings/opencode-models', { signal });
+}
+
+export interface OpenRouterModelsResult {
+  models: string[];
+}
+
+export async function fetchOpenRouterModels(signal?: AbortSignal): Promise<OpenRouterModelsResult> {
+  return requestJson<OpenRouterModelsResult>('GET', '/api/settings/openrouter-models', { signal });
 }
 
 export async function saveSettings(

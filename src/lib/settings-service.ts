@@ -6,6 +6,7 @@ import {
   EXPORTABLE_SETTING_KEYS, WRITABLE_SETTING_KEYS, SETTING_DEFINITION_MAP, SENSITIVE_SETTING_KEYS, getSettingDefaults, getExportableSettingDefaults,
 } from '@/lib/settings';
 import { SETTING_KEYS } from '@/lib/settings-catalog';
+import { isOpenCodeFreeModel, providerSettingKey } from '@/contracts/ai-provider';
 import { parseWebhookConfigsForServer, serializeWebhookConfigsForServer } from '@/contracts/webhook';
 import { decryptWebhookConfigsForRuntime, encryptWebhookConfigsForStorage } from '@/lib/settings-crypto';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
@@ -64,6 +65,9 @@ function validateSettingsInput(input: unknown, options: SettingsUpdateOptions = 
     if (!definition) { validationErrors.push(`${key}: 不可写(未在配置目录中声明)`); continue; }
     const result = definition.schema.safeParse(value);
     if (!result.success) validationErrors.push(`${key}: ${result.error.issues[0].message}`);
+    if (key === providerSettingKey('opencode', 'model') && value.trim() && !isOpenCodeFreeModel(value)) {
+      validationErrors.push(`${key}: OpenCode 仅允许免费模型`);
+    }
     if (key === SETTING_KEYS.FEISHU_WEBHOOK_URL) {
       try {
         parseWebhookConfigsForServer(value);

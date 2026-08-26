@@ -24,6 +24,7 @@ vi.mock('@/lib/settings', () => ({
 }));
 
 import { AIClientError, createChatCompletion, getAISettings, invalidateAISettingsCache } from '@/lib/ai-client';
+import { resetAIRateGateForTests } from '@/lib/ai-rate-gate';
 
 function collectComponentFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -47,6 +48,7 @@ describe('createChatCompletion', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     invalidateAISettingsCache();
+    resetAIRateGateForTests();
     mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'opencode',
       opencode_api_key: 'test-key',
@@ -68,11 +70,95 @@ describe('createChatCompletion', () => {
       headers: { 'Content-Type': 'application/json' },
     });
 
+  const makeResponsesOkResponse = (content: string) =>
+    new Response(JSON.stringify({
+      output_text: content,
+      output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
   it('正常返回 content', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('hello'));
 
     const res = await createChatCompletion([{ role: 'user', content: 'hi' }]);
     expect(res.content).toBe('hello');
+  });
+
+  it('OpenCode Responses 模型使用官方 responses 端点并解析 output_text', async () => {
+    mocks.readAllSettings.mockResolvedValueOnce({
+      ai_provider: 'opencode',
+      opencode_api_key: 'test-key',
+      opencode_base_url: 'https://opencode.ai/zen/v1',
+      opencode_model: 'muse-spark-1.2-contributor-free',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(makeResponsesOkResponse('{"ok":true}'));
+
+    await expect(createChatCompletion([
+      { role: 'system', content: 'system rule' },
+      { role: 'user', content: 'hi' },
+    ])).resolves.toMatchObject({
+      content: '{"ok":true}',
+      provider: 'opencode',
+      model: 'muse-spark-1.2-contributor-free',
+    });
+
+    const [requestUrl, requestInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [RequestInfo, RequestInit];
+    expect(String(requestUrl)).toBe('https://opencode.ai/zen/v1/responses');
+    const body = JSON.parse(String(requestInit.body));
+    expect(body.input).toEqual([
+      { role: 'system', content: 'system rule' },
+      { role: 'user', content: [{ type: 'input_text', text: 'hi' }] },
+    ]);
+    expect(body.max_output_tokens).toBe(10240);
+    expect(body.max_tokens).toBeUndefined();
+  });
+
+  it('OpenRouter 使用 OpenAI 兼容接口和免费路由模型', async () => {
+    mocks.readAllSettings.mockResolvedValueOnce({
+      ai_provider: 'openrouter',
+      openrouter_api_key: 'test-key',
+      openrouter_base_url: 'https://openrouter.ai/api/v1',
+      openrouter_model: 'openrouter/free',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('free response'));
+
+    await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).resolves.toMatchObject({
+      content: 'free response',
+      provider: 'openrouter',
+      model: 'openrouter/free',
+    });
+
+    const [requestUrl, requestInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [RequestInfo, RequestInit];
+    expect(String(requestUrl)).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(requestInit.headers).toBeInstanceOf(Headers);
+    expect((requestInit.headers as Headers).get('authorization')).toBe('Bearer test-key');
+  });
+
+  it('OpenRouter 免费模型收到 429 时不重复发送重试请求', async () => {
+    mocks.readAllSettings.mockResolvedValueOnce({
+      ai_provider: 'openrouter',
+      openrouter_api_key: 'test-key',
+      openrouter_base_url: 'https://openrouter.ai/api/v1',
+      openrouter_model: 'openrouter/free',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response('rate limit', {
+      status: 429,
+      headers: { 'Retry-After': '60' },
+    }));
+
+    await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).rejects.toMatchObject({
+      kind: 'rate_limit',
+      status: 429,
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('HTTP 成功但返回非 JSON 时按 Provider 全局故障处理', async () => {
@@ -117,20 +203,28 @@ describe('createChatCompletion', () => {
     });
   });
 
-  it('429 时重试并最终成功', async () => {
-    global.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(new Response('rate limit', { status: 429 }))
-      .mockResolvedValueOnce(makeOkResponse('ok'));
+  it('OpenCode 免费模型收到 429 时不重复发送重试请求', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response('rate limit', {
+      status: 429,
+      headers: { 'Retry-After': '60' },
+    }));
 
-    const promise = createChatCompletion([{ role: 'user', content: 'hi' }]);
-    await vi.advanceTimersByTimeAsync(15000);
-    const res = await promise;
-    expect(res.content).toBe('ok');
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).rejects.toMatchObject({
+      kind: 'rate_limit',
+      status: 429,
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('5xx 时重试并在仍失败后抛出服务端不可用', async () => {
+  it('非免费 Provider 的 5xx 时重试并在仍失败后抛出服务端不可用', async () => {
+    mocks.readAllSettings.mockResolvedValueOnce({
+      ai_provider: 'deepseek',
+      deepseek_api_key: 'test-key',
+      deepseek_base_url: 'https://api.deepseek.com',
+      deepseek_model: 'deepseek-v4-flash',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
     global.fetch = vi.fn().mockImplementation(() => new Response('server error', { status: 503 }));
 
     // 立即挂上 rejection 处理器，避免 advanceTimers 期间产生 unhandled rejection
@@ -142,6 +236,14 @@ describe('createChatCompletion', () => {
   });
 
   it('Provider 恢复后下一次调用直接重新探测，不受进程内旧故障状态阻塞', async () => {
+    mocks.readAllSettings.mockResolvedValueOnce({
+      ai_provider: 'deepseek',
+      deepseek_api_key: 'test-key',
+      deepseek_base_url: 'https://api.deepseek.com',
+      deepseek_model: 'deepseek-v4-flash',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
     global.fetch = vi.fn()
       .mockResolvedValueOnce(new Response('server error', { status: 503 }))
       .mockResolvedValueOnce(new Response('server error', { status: 503 }))
@@ -159,6 +261,14 @@ describe('createChatCompletion', () => {
   });
 
   it('网络错误时重试并最终失败', async () => {
+    mocks.readAllSettings.mockResolvedValueOnce({
+      ai_provider: 'deepseek',
+      deepseek_api_key: 'test-key',
+      deepseek_base_url: 'https://api.deepseek.com',
+      deepseek_model: 'deepseek-v4-flash',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
     global.fetch = vi.fn().mockRejectedValue(new Error('fetch failed'));
 
     const assertion = expect(createChatCompletion([{ role: 'user', content: 'hi' }])).rejects.toThrow('无法连接 API 服务器');

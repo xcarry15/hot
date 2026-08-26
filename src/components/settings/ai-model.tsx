@@ -23,7 +23,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { fetchOpenCodeModels, testAiSettings, type AiTestResult } from '@/features/settings-api.client'
+import { fetchOpenCodeModels, fetchOpenRouterModels, testAiSettings, type AiTestResult } from '@/features/settings-api.client'
 import {
   ProviderConfig,
   ProviderConfigs,
@@ -41,20 +41,21 @@ interface Props {
 }
 
 const OPENCODE_MODELS_STORAGE_KEY = 'hot2:opencode-free-models:v1'
-const MAX_CACHED_OPENCODE_MODELS = 50
+const OPENROUTER_MODELS_STORAGE_KEY = 'hot2:openrouter-free-models:v1'
+const MAX_CACHED_MODELS = 50
 
-function normalizeOpencodeModels(value: unknown): string[] {
+function normalizeModelIds(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return [...new Set(value
     .filter((model): model is string => typeof model === 'string')
     .map(model => model.trim())
-    .filter(Boolean))].slice(0, MAX_CACHED_OPENCODE_MODELS)
+    .filter(Boolean))].slice(0, MAX_CACHED_MODELS)
 }
 
 function readCachedOpencodeModels(): string[] {
   try {
     const value = window.localStorage.getItem(OPENCODE_MODELS_STORAGE_KEY)
-    return normalizeOpencodeModels(value ? JSON.parse(value) : null)
+    return normalizeModelIds(value ? JSON.parse(value) : null)
   } catch {
     return []
   }
@@ -62,7 +63,24 @@ function readCachedOpencodeModels(): string[] {
 
 function cacheOpencodeModels(models: string[]): void {
   try {
-    window.localStorage.setItem(OPENCODE_MODELS_STORAGE_KEY, JSON.stringify(normalizeOpencodeModels(models)))
+    window.localStorage.setItem(OPENCODE_MODELS_STORAGE_KEY, JSON.stringify(normalizeModelIds(models)))
+  } catch {
+    // localStorage 不可用时仍保留当前页面内的模型列表。
+  }
+}
+
+function readCachedOpenRouterModels(): string[] {
+  try {
+    const value = window.localStorage.getItem(OPENROUTER_MODELS_STORAGE_KEY)
+    return normalizeModelIds(value ? JSON.parse(value) : null)
+  } catch {
+    return []
+  }
+}
+
+function cacheOpenRouterModels(models: string[]): void {
+  try {
+    window.localStorage.setItem(OPENROUTER_MODELS_STORAGE_KEY, JSON.stringify(normalizeModelIds(models)))
   } catch {
     // localStorage 不可用时仍保留当前页面内的模型列表。
   }
@@ -74,6 +92,8 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   const [showApiKey, setShowApiKey] = useState(false)
   const [opencodeModels, setOpencodeModels] = useState<string[]>(() => [...AI_PROVIDERS.opencode.models])
   const [loadingOpenCodeModels, setLoadingOpenCodeModels] = useState(false)
+  const [openrouterModels, setOpenrouterModels] = useState<string[]>(() => [...AI_PROVIDERS.openrouter.models])
+  const [loadingOpenRouterModels, setLoadingOpenRouterModels] = useState(false)
 
   const currentProvider = AI_PROVIDERS[settings.ai_provider as AIProviderId] || AI_PROVIDERS.opencode
   const currentConfig = providerConfigs[currentProvider.id]
@@ -86,7 +106,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
         if (showToast) toast.info('OpenCode 暂无可用的免费模型')
         return
       }
-      const models = normalizeOpencodeModels(result.models)
+      const models = normalizeModelIds(result.models)
       setOpencodeModels(models)
       cacheOpencodeModels(models)
       if (showToast) toast.success(`已更新 ${models.length} 个免费模型`)
@@ -97,15 +117,46 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
     }
   }, [])
 
+  const loadOpenRouterModels = useCallback(async (showToast: boolean) => {
+    setLoadingOpenRouterModels(true)
+    try {
+      const result = await fetchOpenRouterModels()
+      if (result.models.length === 0) {
+        if (showToast) toast.info('OpenRouter 暂无可用的免费模型')
+        return
+      }
+      const models = normalizeModelIds(result.models)
+      setOpenrouterModels(models)
+      cacheOpenRouterModels(models)
+      if (showToast) toast.success(`已更新 ${models.length} 个 OpenRouter 免费模型`)
+    } catch {
+      if (showToast) toast.error('读取 OpenRouter 免费模型失败，已保留当前推荐项')
+    } finally {
+      setLoadingOpenRouterModels(false)
+    }
+  }, [])
+
   useEffect(() => {
+    if (currentProvider.id !== 'opencode') return
     const cachedModels = readCachedOpencodeModels()
     if (cachedModels.length > 0) setOpencodeModels(cachedModels)
     // 每次进入 AI 模型页后台同步一次最新列表；接口失败时保留上次成功结果。
     void loadOpenCodeModels(false)
-  }, [loadOpenCodeModels])
+  }, [currentProvider.id, loadOpenCodeModels])
+
+  useEffect(() => {
+    if (currentProvider.id !== 'openrouter') return
+    const cachedModels = readCachedOpenRouterModels()
+    if (cachedModels.length > 0) setOpenrouterModels(cachedModels)
+    void loadOpenRouterModels(false)
+  }, [currentProvider.id, loadOpenRouterModels])
 
   const handleRefreshOpenCodeModels = () => {
     void loadOpenCodeModels(true)
+  }
+
+  const handleRefreshOpenRouterModels = () => {
+    void loadOpenRouterModels(true)
   }
 
   const updateSetting = (key: keyof Settings, value: string) => {
@@ -243,9 +294,17 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
             className="h-8 font-mono text-xs"
             placeholder={currentProvider.defaultModel || '输入模型名称'}
           />
-          {(currentProvider.id === 'opencode' ? opencodeModels : currentProvider.models).length > 0 && (
+          {(currentProvider.id === 'opencode'
+            ? opencodeModels
+            : currentProvider.id === 'openrouter'
+              ? openrouterModels
+              : currentProvider.models).length > 0 && (
             <div className="flex flex-wrap gap-1 pt-1">
-              {(currentProvider.id === 'opencode' ? opencodeModels : currentProvider.models).map((m) => (
+              {(currentProvider.id === 'opencode'
+                ? opencodeModels
+                : currentProvider.id === 'openrouter'
+                  ? openrouterModels
+                  : currentProvider.models).map((m) => (
                 <button
                   key={m}
                   type="button"
@@ -303,7 +362,9 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
               step="1"
               placeholder="1"
             />
-            <p className="text-[11px] text-muted-foreground">调高可缩短处理时间，但更容易触发服务商限流。</p>
+            <p className="text-[11px] text-muted-foreground">
+              OpenCode / OpenRouter 免费模型会自动串行并间隔约 4 秒；其他服务商调高并发可缩短处理时间，但更容易触发限流。
+            </p>
           </div>
         </div>
 
@@ -357,10 +418,33 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
           </div>
         )}
 
+        {currentProvider.id === 'openrouter' && (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-1.5 text-[11px]"
+              disabled={loadingOpenRouterModels}
+              onClick={handleRefreshOpenRouterModels}
+            >
+              <RefreshCw className={`h-3 w-3 ${loadingOpenRouterModels ? 'animate-spin' : ''}`} />
+              {loadingOpenRouterModels ? '读取中' : '刷新免费模型'}
+            </Button>
+            <p className="text-[11px] text-muted-foreground">列表来自 OpenRouter Models API</p>
+          </div>
+        )}
+
         {settings.ai_provider === 'opencode' && (
           <p className="text-xs text-muted-foreground">
-            OpenCode 提供免费模型调用，需先申请 API Key。申请地址：
+            OpenCode Zen 仅允许免费模型调用，需先申请 API Key。申请地址：
             <a href="https://opencode.ai/auth" target="_blank" rel="noopener noreferrer" className="text-primary underline ml-1">opencode.ai/auth</a>
+          </p>
+        )}
+        {settings.ai_provider === 'openrouter' && (
+          <p className="text-xs text-muted-foreground">
+            OpenRouter 默认使用 <code className="rounded bg-muted px-1">openrouter/free</code>，会自动选择可用的免费模型。请先填写 API Key；免费模型有速率限制。申请地址：
+            <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-primary underline ml-1">openrouter.ai/keys</a>
           </p>
         )}
         {aiTestResult && !aiTestResult.success && aiTestResult.error?.includes('调用次数已用完') && (

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { readResponseText } from '@/lib/http';
+import { fetchSafe, readResponseText } from '@/lib/http';
+import { withTimeout } from '@/lib/shared/async';
+import { isOpenCodeFreeModel } from '@/contracts/ai-provider';
 
 const OPENCODE_MODELS_URL = 'https://opencode.ai/zen/v1/models';
 
@@ -26,7 +28,7 @@ function hasZeroPricing(value: unknown): boolean {
 
 function isFreeModel(model: OpenCodeModel): boolean {
   if (model.free === true || model.isFree === true || hasZeroPricing(model.pricing)) return true;
-  return model.id === 'big-pickle' || (typeof model.id === 'string' && model.id.endsWith('-free'));
+  return typeof model.id === 'string' && isOpenCodeFreeModel(model.id);
 }
 
 function getFreeModelIds(payload: unknown): string[] {
@@ -48,10 +50,15 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const response = await fetch(OPENCODE_MODELS_URL, {
-      cache: 'no-store',
-      headers: { Accept: 'application/json' },
-    });
+    const response = await withTimeout(
+      (signal) => fetchSafe(OPENCODE_MODELS_URL, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+        signal,
+      }),
+      10_000,
+      'OpenCode 模型列表请求超时',
+    );
     if (!response.ok) {
       return NextResponse.json({ error: `OpenCode 模型列表请求失败（${response.status}）` }, { status: 502 });
     }

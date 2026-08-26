@@ -44,7 +44,11 @@ import { RuntimeStatusBar } from './crawl-log/runtime-status-bar'
 import { getTodayPublicDateKey, isPublicDate } from './crawl-log/helpers'
 import { EmptyState } from '@/components/ui/empty-state'
 import { fetchSettings, saveSettings, subscribeToSettingsChanged } from '@/features/settings-api.client'
-import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
+import {
+  fetchWorkQueueSummary,
+  scheduleWorkQueueSummaryRefresh,
+  subscribeToWorkQueueSummary,
+} from '@/features/work-queue-api.client'
 import { fetchKeywordCategories } from '@/features/keywords-api.client'
 import {
   KEYWORD_BLACKLIST_CATEGORY,
@@ -113,17 +117,14 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const [libraryView, setLibraryView] = useState<'all' | 'attention' | 'cluster_review' | 'low_confidence'>('all')
   const [humanQueue, setHumanQueue] = useState({ total: 0, clusterReview: 0, lowConfidence: 0 })
 
-  const refreshHumanQueue = useCallback(() => {
-    fetchWorkQueueSummary(true).then((data) => setHumanQueue(data.human)).catch(() => undefined)
-  }, [])
-
   useEffect(() => {
     if (!active) return
-    refreshHumanQueue()
-    const handleFocus = () => refreshHumanQueue()
-    window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
-  }, [active, refreshHumanQueue])
+    const unsubscribe = subscribeToWorkQueueSummary((data) => {
+      setHumanQueue(data.human)
+    })
+    void fetchWorkQueueSummary().catch(() => undefined)
+    return unsubscribe
+  }, [active])
 
   // 从 URL 恢复详情状态。
   useEffect(() => {
@@ -451,6 +452,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       const result = await request() as { queued?: boolean; error?: string }
       if (!result.queued) throw new Error(result.error || failureMessage)
       toast.info(successMessage)
+      scheduleWorkQueueSummaryRefresh()
       await refreshSnapshot()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : failureMessage)
@@ -495,6 +497,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       }
       if (res.queued) {
         toast.info('任务已入队，等待调度', { duration: 1500 })
+        scheduleWorkQueueSummaryRefresh()
         // 服务端会 emit snapshot:changed；前端无需构造乐观状态
         await refreshSnapshot()
       } else {
@@ -545,6 +548,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       const result = await triggerArticleWorkflow(articleId, step, 'retry')
       if (!result.queued) throw new Error(result.reason || '任务未能启动')
       toast.success('恢复任务已启动，可持续查看 Job 进度', { duration: 1800 })
+      scheduleWorkQueueSummaryRefresh()
       await refreshSnapshot()
       return true
     } catch {
@@ -561,6 +565,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     try {
       await updateArticleTechnicalStatus(articleId, action)
       toast.success(action === 'ignore' ? '已从技术待办中忽略' : '已恢复技术待办')
+      scheduleWorkQueueSummaryRefresh()
       await refreshSnapshot()
     } catch {
       toast.error('操作失败')
@@ -586,9 +591,11 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   }, [openArticleWorkspace])
 
   const handleLibraryChanged = useCallback(() => {
-    void refreshSnapshot()
-    refreshHumanQueue()
-  }, [refreshHumanQueue, refreshSnapshot])
+    // Article/Event drawer already refreshes the current detail locally.
+    // The heavy source snapshot converges through adaptive polling instead of
+    // being rebuilt once per review action.
+    scheduleWorkQueueSummaryRefresh()
+  }, [])
 
   const handleOpenDiscarded = useCallback((id: string) => {
     setArticleDetailOpen(false)

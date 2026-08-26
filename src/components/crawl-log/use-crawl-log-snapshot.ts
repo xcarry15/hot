@@ -9,7 +9,7 @@
  *   1. 组件首次 mount
  *   2. 任务运行时每 3 秒拉轻量 Job 快照、空闲时每 15 秒刷新完整快照
  *   3. 页面 visibilitychange + focus
- *   4. 手动调用 refreshSnapshot() 与写操作成功后
+ *   4. 手动调用 refreshSnapshot()；文章复核详情由抽屉局部刷新，工作台快照由自适应轮询收敛
  *
  * 关键不变量：
  *   - 同一时间只允许一个 snapshot 请求在飞；并发请求时只设置 dirty=true，
@@ -22,6 +22,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CRAWL_LOG_DEFAULT_LIMIT, type CrawlLogSnapshot } from '@/contracts/crawl-log'
 import { fetchCrawlLogJobStatus, fetchCrawlLogSnapshot } from '@/features/crawl-log-api.client'
 import { isRequestAborted } from '@/lib/request-json.client'
+
+const ATTENTION_REFRESH_MIN_INTERVAL_MS = 1_000
+const ATTENTION_SNAPSHOT_MAX_AGE_MS = 5_000
 
 export type { CrawlLogSnapshot, JobSnapshot } from '@/contracts/crawl-log'
 
@@ -69,6 +72,8 @@ export function useCrawlLogSnapshot(
   const requestAbortRef = useRef<AbortController | null>(null)
   const pollingAbortRef = useRef<AbortController | null>(null)
   const snapshotRef = useRef<CrawlLogSnapshot | null>(null)
+  const lastSnapshotSyncedAtRef = useRef(0)
+  const lastAttentionRefreshAtRef = useRef(0)
   const refreshSnapshotRefForPolling = useRef<() => Promise<boolean>>(async () => false)
 
   const refreshSnapshot = useCallback(() => {
@@ -89,7 +94,9 @@ export function useCrawlLogSnapshot(
         if (myRequestId !== requestIdRef.current) return false
         setSnapshot(data)
         snapshotRef.current = data
-        setLastSyncedAt(Date.now())
+        const syncedAt = Date.now()
+        lastSnapshotSyncedAtRef.current = syncedAt
+        setLastSyncedAt(syncedAt)
         setError(null)
         return true
       } catch (err: unknown) {
@@ -159,7 +166,9 @@ export function useCrawlLogSnapshot(
                   const next = { ...current, activeJob: jobs.activeJob, latestJob: jobs.latestJob, fetchedAt: jobs.fetchedAt }
                   snapshotRef.current = next
                   setSnapshot(next)
-                  setLastSyncedAt(Date.now())
+                  const syncedAt = Date.now()
+                  lastSnapshotSyncedAtRef.current = syncedAt
+                  setLastSyncedAt(syncedAt)
                 }
               }
             } catch {
@@ -184,16 +193,27 @@ export function useCrawlLogSnapshot(
     }
   }, [enabled, idlePollIntervalMs, pollIntervalMs, refreshSnapshot])
 
-  // 2) visibilitychange + focus —— 重新可见/聚焦时拉一次
+  // 2) visibilitychange + focus —— 重新可见/聚焦时按需拉取一次。
+  // 浏览器通常会连续派发两个事件；短窗口和新鲜度门槛避免重复拉重快照。
   useEffect(() => {
     if (!enabled) return
+    const refreshOnAttention = () => {
+      if (document.visibilityState !== 'visible') return
+      if (inFlightRef.current || pollingAbortRef.current) return
+      const now = Date.now()
+      if (now - lastAttentionRefreshAtRef.current < ATTENTION_REFRESH_MIN_INTERVAL_MS) return
+      if (
+        lastSnapshotSyncedAtRef.current > 0
+        && now - lastSnapshotSyncedAtRef.current < ATTENTION_SNAPSHOT_MAX_AGE_MS
+      ) return
+      lastAttentionRefreshAtRef.current = now
+      void refreshSnapshot()
+    }
     function onVisible() {
-      if (document.visibilityState === 'visible') {
-        void refreshSnapshot()
-      }
+      refreshOnAttention()
     }
     function onFocus() {
-      void refreshSnapshot()
+      refreshOnAttention()
     }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onFocus)

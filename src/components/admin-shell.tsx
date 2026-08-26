@@ -7,7 +7,10 @@ import { useRouter } from 'next/navigation'
 import { useTheme } from '@/components/theme-provider'
 import { Activity, ExternalLink, Settings, Sun, Moon } from 'lucide-react'
 import { URL_PARAM_DETAIL, URL_PARAM_TAB } from '@/components/crawl-log/constants'
-import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
+import {
+  fetchWorkQueueSummary,
+  subscribeToWorkQueueSummary,
+} from '@/features/work-queue-api.client'
 import { APP_VERSION } from '@/contracts/app'
 import logo from '@/pic/Logo/icon-192x192.png'
 
@@ -77,17 +80,21 @@ function AdminContent({ initialTab }: { initialTab: TabKey }) {
     }
   }, [])
 
-  const refreshQueueCounts = useCallback((force = false) => {
-    fetchWorkQueueSummary(force).then((data) => {
-      setQueueCounts({ human: data.human.total, technical: data.technical.total })
-    }).catch(() => undefined)
+  const refreshQueueCounts = useCallback(() => {
+    void fetchWorkQueueSummary().catch(() => undefined)
   }, [])
 
   useEffect(() => {
+    const unsubscribe = subscribeToWorkQueueSummary((data) => {
+      setQueueCounts({ human: data.human.total, technical: data.technical.total })
+    })
     refreshQueueCounts()
-    const handleFocus = () => refreshQueueCounts(true)
+    const handleFocus = () => refreshQueueCounts()
     window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
+    return () => {
+      unsubscribe()
+      window.removeEventListener('focus', handleFocus)
+    }
   }, [refreshQueueCounts])
 
   const toggleTheme = () => {

@@ -119,6 +119,18 @@ describe('settings PUT 事务化', () => {
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
+  it('OpenCode 模型校验：付费模型被拒绝', async () => {
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ opencode_model: 'deepseek-v4' }),
+    });
+
+    const res = await settingsPUT(req);
+    expect(res.status).toBe(400);
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it('ai_temperature 合法边界值通过', async () => {
     const req = new Request('http://localhost/api/settings', {
       method: 'PUT',

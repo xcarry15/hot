@@ -34,7 +34,7 @@ vi.mock('@/lib/ai', () => ({
 }));
 vi.mock('@/lib/settings', () => ({
   getSetting: mocks.getSetting,
-  SETTING_KEYS: { AI_CONCURRENCY: 'ai_concurrency' },
+  SETTING_KEYS: { AI_PROVIDER: 'ai_provider', AI_CONCURRENCY: 'ai_concurrency' },
 }));
 vi.mock('@/lib/job-progress', () => ({
   advanceJobProgress: mocks.advanceJobProgress,

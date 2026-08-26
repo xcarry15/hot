@@ -7,7 +7,8 @@
  *
  * 历史：
  *   - 逻辑原先内联在 `crawler.ts.analyzeAllPending`；B13 抽离后保留：
- *     · MAX_BATCH_SIZE=500、CONCURRENCY=ai_concurrency(默认1)/DELAY_MS=300、timeout=90_000
+ *     · MAX_BATCH_SIZE=100、CONCURRENCY=ai_concurrency(默认1)/DELAY_MS=300、timeout=90_000
+ *     · OpenCode / OpenRouter 免费模型由 ai-rate-gate 统一串行并限速
  *     · 退避 where：OR[ nextAiRetryAt=null, nextAiRetryAt <= now ]
  *     · Promise.allSettled 把 rejected 计入 errors
  */
@@ -15,6 +16,8 @@ import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { aiProcessSelect, processWithAI, toAiProcessArticle } from '@/lib/ai';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
+import { isFreeAIModel } from '@/lib/ai-rate-gate';
+import { providerSettingKey } from '@/contracts/ai-provider';
 import { assertNotAborted } from '@/lib/worker-stop';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
 import {
@@ -39,7 +42,8 @@ function isTransientBatchError(reason: unknown): boolean {
 /**
  * Stage 3: Run AI for fetched, not-yet-clustered articles with aiStatus=pending or failed.
  * Batches with concurrency from settings.ai_concurrency (1-10, default 1)
- * and 300ms delay between batches.
+ * and 300ms delay between batches. OpenCode / OpenRouter free models have an
+ * additional process-wide request gate in `ai-rate-gate`.
  */
 export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, forceRetry = false): Promise<{
   total: number;
@@ -75,12 +79,23 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   let errors = 0;
   let deferred = 0;
   // AI 并发可配置（设置项 ai_concurrency，默认 1，范围 1-10）。
-  // 调高可缩短批处理时间但撞 429 风险增大；provider 故障时降低可减少无效请求。
-  const rawConcurrency = parseInt(await getSetting(SETTING_KEYS.AI_CONCURRENCY) || String(DEFAULT_AI_CONCURRENCY), 10);
-  const concurrency = Math.max(
-    MIN_AI_CONCURRENCY,
-    Math.min(MAX_AI_CONCURRENCY, Number.isFinite(rawConcurrency) ? rawConcurrency : DEFAULT_AI_CONCURRENCY),
+  // OpenCode / OpenRouter 免费模型强制并发 1，避免一批文章在 429 冷却期间
+  // 继续并发发请求。
+  const provider = await getSetting(SETTING_KEYS.AI_PROVIDER);
+  const model = provider === 'openrouter' || provider === 'opencode'
+    ? await getSetting(providerSettingKey(provider, 'model'))
+    : '';
+  const freeModel = isFreeAIModel(
+    provider,
+    model || (provider === 'openrouter' ? 'openrouter/free' : 'big-pickle'),
   );
+  const rawConcurrency = parseInt(await getSetting(SETTING_KEYS.AI_CONCURRENCY) || String(DEFAULT_AI_CONCURRENCY), 10);
+  const concurrency = freeModel
+    ? 1
+    : Math.max(
+      MIN_AI_CONCURRENCY,
+      Math.min(MAX_AI_CONCURRENCY, Number.isFinite(rawConcurrency) ? rawConcurrency : DEFAULT_AI_CONCURRENCY),
+    );
 
   let providerPause: { retryable: boolean; errorKind?: string; message?: string } | null = null;
   const attemptedArticleIds = new Set<string>();

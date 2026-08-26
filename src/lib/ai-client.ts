@@ -1,14 +1,14 @@
 /**
- * Unified AI Client — chat completions only.
+ * Unified AI Client — OpenAI-compatible Chat Completions / Responses.
  *
  * Supported providers (OpenAI-compatible):
- *   opencode (default, free) | deepseek
+ *   opencode (default, free) | deepseek | openrouter (free routing)
  *
  * The ZAI SDK is NOT used for chat. It is imported separately by `parser-html.ts`
  * and `crawler.ts` for `page_reader` / `web_search` (see `./zai`).
  *
  * Settings stored in DB (Setting table):
- *   ai_provider  — opencode | deepseek
+ *   ai_provider  — opencode | deepseek | openrouter
  *   {provider}_api_key / {provider}_base_url / {provider}_model
  *   ai_temperature — Temperature (0-2; default from settings catalog)
  *   ai_max_tokens  — Max tokens (1-65536; default from settings catalog)
@@ -19,7 +19,13 @@ import { readAllSettings, SETTING_KEYS } from './settings';
 import { getSettingDefinition } from './settings-catalog';
 import { abortableDelay, withTimeout } from './shared/async';
 import { fetchSafe, readResponseText } from './http';
-import { AI_PROVIDERS, providerSettingKey } from '@/contracts/ai-provider';
+import { noteAIRateLimit, waitForAIRequestSlot, isFreeAIModel } from './ai-rate-gate';
+import {
+  AI_PROVIDERS,
+  getOpenCodeModelProtocol,
+  isOpenCodeFreeModel,
+  providerSettingKey,
+} from '@/contracts/ai-provider';
 import type { AIProviderId } from '@/contracts/ai-provider';
 
 export { AI_PROVIDERS, providerSettingKey } from '@/contracts/ai-provider';
@@ -48,6 +54,15 @@ function clampWeight(raw: string | undefined, fallback: number): number {
   const n = parseInt(raw);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(0, Math.min(100, n));
+}
+
+function parseRetryAfterMs(headers: Headers): number | undefined {
+  const raw = headers.get('retry-after')?.trim();
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
 }
 
 // ── Settings cache ────────────────────────────────────────────────
@@ -112,7 +127,12 @@ export async function getAISettings(): Promise<AISettings> {
 
   const apiKey = map[providerSettingKey(provider, 'api_key')] ?? '';
   const baseUrl = map[providerSettingKey(provider, 'base_url')] || providerDef.baseUrl;
-  const model = map[providerSettingKey(provider, 'model')] || providerDef.defaultModel;
+  const configuredModel = map[providerSettingKey(provider, 'model')]?.trim() || providerDef.defaultModel;
+  // OpenCode 在本项目中只开放 Zen 免费模型。防止旧数据库或手工写入的
+  // 付费模型绕过设置页校验后产生费用。
+  const model = provider === 'opencode' && !isOpenCodeFreeModel(configuredModel)
+    ? providerDef.defaultModel
+    : configuredModel;
 
   const resolved: AISettings = {
     provider,
@@ -159,11 +179,49 @@ export interface ChatCompletionResponse {
 
 export type ChatResponseFormat = 'json_object';
 
+function toOpenAIResponsesInput(messages: ChatMessage[]): Array<Record<string, unknown>> {
+  return messages.map((message) => {
+    if (message.role === 'system') {
+      return { role: 'system', content: message.content };
+    }
+
+    return {
+      role: message.role,
+      content: [{
+        type: message.role === 'assistant' ? 'output_text' : 'input_text',
+        text: message.content,
+      }],
+    };
+  });
+}
+
+function extractResponsesContent(data: unknown): string {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return '';
+  const record = data as Record<string, unknown>;
+  if (typeof record.output_text === 'string' && record.output_text) return record.output_text;
+
+  if (!Array.isArray(record.output)) return '';
+  const chunks: string[] = [];
+  for (const item of record.output) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const content = (item as Record<string, unknown>).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (!part || typeof part !== 'object' || Array.isArray(part)) continue;
+      const partRecord = part as Record<string, unknown>;
+      if (partRecord.type === 'output_text' && typeof partRecord.text === 'string') {
+        chunks.push(partRecord.text);
+      }
+    }
+  }
+  return chunks.join('');
+}
+
 // ── Unified Chat Completion ───────────────────────────────────────
 
 /**
  * Create a chat completion using the configured provider.
- * Both supported providers use OpenAI-compatible APIs.
+ * Supported providers use OpenAI-compatible APIs.
  */
 export async function createChatCompletion(
   messages: ChatMessage[],
@@ -183,8 +241,8 @@ export async function createChatCompletion(
 }
 
 /**
- * OpenAI-compatible API completion (opencode, deepseek)
- * Includes retry with backoff for 429 errors and network failures.
+ * OpenAI-compatible API completion (opencode, deepseek, openrouter).
+ * OpenCode 的 Responses 模型按官方端点单独编码。
  */
 async function createOpenAICompatibleCompletion(
   settings: AISettings,
@@ -194,31 +252,61 @@ async function createOpenAICompatibleCompletion(
   parentSignal?: AbortSignal,
 ): Promise<ChatCompletionResponse> {
   const baseUrl = settings.baseUrl.replace(/\/+$/, '');
-  const url = `${baseUrl}/chat/completions`;
+  if (settings.provider === 'opencode' && !isOpenCodeFreeModel(settings.model)) {
+    throw new AIClientError('opencode: 仅允许调用免费模型', 'configuration', true, false);
+  }
+  const useResponses = settings.provider === 'opencode'
+    && getOpenCodeModelProtocol(settings.model) === 'responses';
+  const url = `${baseUrl}/${useResponses ? 'responses' : 'chat/completions'}`;
+  const isFreeModel = isFreeAIModel(settings.provider, settings.model);
+  // 免费模型的失败请求也可能消耗额度；不要在 429 后继续自动重试。
+  const effectiveRetries = isFreeModel ? 0 : retries;
 
-  const body: Record<string, unknown> = {
-    model: settings.model,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    stream: false,
-    temperature: options.temperature,
-    max_tokens: options.maxTokens,
-    ...(options.responseFormat === 'json_object'
-      ? { response_format: { type: 'json_object' } }
-      : {}),
-  };
+  const body: Record<string, unknown> = useResponses
+    ? {
+        model: settings.model,
+        input: toOpenAIResponsesInput(messages),
+        temperature: options.temperature,
+        max_output_tokens: options.maxTokens,
+        // Responses API 的结构化输出字段并非 Zen 免费模型的通用能力；
+        // 这里依赖现有 prompt + 客户端 Schema 校验，避免发送不兼容参数。
+      }
+    : {
+        model: settings.model,
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        stream: false,
+        temperature: options.temperature,
+        max_tokens: options.maxTokens,
+        ...(options.responseFormat === 'json_object'
+          ? { response_format: { type: 'json_object' } }
+          : {}),
+      };
 
-  // 正文分析 prompt 较长；DeepSeek 首 token 可能超过 15 秒。
+  // 正文分析 prompt 较长；DeepSeek 和 OpenRouter 免费路由首 token 可能超过 15 秒。
   // 单篇超时由 AI pipeline 记录为当前文章失败，不能因为一篇慢文章暂停整批。
-  const timeoutMs = settings.provider === 'opencode' || settings.provider === 'deepseek' ? 60_000 : 15_000;
+  const timeoutMs = settings.provider === 'opencode'
+    || settings.provider === 'deepseek'
+    || settings.provider === 'openrouter'
+    ? 60_000
+    : 15_000;
 
   console.log(`[ai-client] Calling ${settings.provider}: POST ${url} model=${settings.model}`);
 
-  let lastError: { status: number; message: string } | null = null;
+  let lastError: { status: number; message: string; retryAfterMs?: number } | null = null;
+  let responseFormatFallbackAttempted = false;
+  let responseFormatFallbackRetryPending = false;
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    let response: { ok: boolean; status: number; bodyText: string };
+  for (
+    let attempt = 0;
+    attempt <= effectiveRetries
+      || responseFormatFallbackRetryPending;
+    attempt++
+  ) {
+    responseFormatFallbackRetryPending = false;
+    let response: { ok: boolean; status: number; bodyText: string; headers: Headers };
     try {
       response = await withTimeout(async signal => {
+        await waitForAIRequestSlot(settings.provider, settings.model, signal);
         const rawResponse = await fetchSafe(url, {
           method: 'POST',
           headers: {
@@ -229,7 +317,7 @@ async function createOpenAICompatibleCompletion(
           signal,
         });
         const bodyText = await readResponseText(rawResponse);
-        return { ok: rawResponse.ok, status: rawResponse.status, bodyText };
+        return { ok: rawResponse.ok, status: rawResponse.status, bodyText, headers: rawResponse.headers };
       }, timeoutMs, `${settings.provider} request timeout`, parentSignal);
     } catch (fetchError) {
       if (parentSignal?.aborted) throw fetchError;
@@ -237,7 +325,7 @@ async function createOpenAICompatibleCompletion(
 
       // 网络错误重试；超时不重复发送同一个长 prompt，避免单篇请求占满批处理
       // 的总时限。超时会作为当前文章的可重试失败返回给 AI pipeline。
-      if (attempt < retries) {
+      if (attempt < effectiveRetries) {
         const isNetworkError = /ECONNREFUSED|ENOTFOUND|ECONNRESET|fetch failed/i.test(errMsg);
         if (isNetworkError) {
           const delayMs = Math.min(2000 * Math.pow(2, attempt), 10000);
@@ -257,13 +345,17 @@ async function createOpenAICompatibleCompletion(
       throw new AIClientError(`${settings.provider}: 请求失败 - ${errMsg.substring(0, 200)}`, 'network', false, true);
     }
     if (response.ok) {
-      let data: { choices?: Array<{ message?: { content?: unknown } }> };
+      let data: unknown;
       try {
-        data = JSON.parse(response.bodyText || '{}') as { choices?: Array<{ message?: { content?: unknown } }> };
+        data = JSON.parse(response.bodyText || '{}') as unknown;
       } catch {
         throw new AIClientError(`${settings.provider}: API 返回无效 JSON`, 'provider', true, true);
       }
-      const rawContent = data?.choices?.[0]?.message?.content;
+      const rawContent = useResponses
+        ? extractResponsesContent(data)
+        : data && typeof data === 'object' && !Array.isArray(data)
+          ? (((data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content))
+          : undefined;
       const content = typeof rawContent === 'string' ? rawContent : '';
 
       if (!content) {
@@ -280,11 +372,23 @@ async function createOpenAICompatibleCompletion(
     const errorText = response.bodyText;
     console.error(`[ai-client] ${settings.provider} API error (${response.status}): ${errorText.substring(0, 500)}`);
 
-    lastError = { status: response.status, message: errorText.substring(0, 200) };
+    const retryAfterMs = response.status === 429 ? parseRetryAfterMs(response.headers) : undefined;
+    if (response.status === 429) {
+      noteAIRateLimit(settings.provider, settings.model, retryAfterMs);
+    }
+    lastError = { status: response.status, message: errorText.substring(0, 200), retryAfterMs };
 
     // 部分 OpenAI 兼容网关不实现 response_format：去掉可选参数重试，
     // 但上层仍会执行严格 JSON 解析和 Schema 校验。
-    if (response.status === 400 && body.response_format && /response[_ -]?format|json_object|unsupported/i.test(errorText)) {
+    if (
+      !useResponses
+      && !responseFormatFallbackAttempted
+      && body.response_format
+      && response.status === 400
+      && /response[_ -]?format|json_object|unsupported/i.test(errorText)
+    ) {
+      responseFormatFallbackAttempted = true;
+      responseFormatFallbackRetryPending = true;
       delete body.response_format;
       console.warn(`[ai-client] ${settings.provider} 不支持 response_format，降级为严格客户端校验`);
       continue;
@@ -292,12 +396,14 @@ async function createOpenAICompatibleCompletion(
 
     // 429 与 5xx 服务端错误：指数退避重试。免费模型的限流恢复通常不是
     // 3 秒级，过短等待只会把同一配额窗口内的请求全部浪费掉。
-    if ((response.status === 429 || response.status >= 500) && attempt < retries) {
+    if ((response.status === 429 || response.status >= 500) && attempt < effectiveRetries) {
       const isRateLimit = response.status === 429;
       const baseDelay = Math.min(isRateLimit ? 10_000 * Math.pow(2, attempt) : 2000 * Math.pow(2, attempt), 30_000);
       const jitter = isRateLimit ? Math.floor(Math.random() * 1000) : 0;
-      const delayMs = baseDelay + jitter;
-      console.warn(`[ai-client] ${settings.provider} ${response.status} ${isRateLimit ? 'rate limit' : 'server error'}, retry ${attempt + 1}/${retries} in ${delayMs}ms`);
+      const delayMs = isRateLimit && retryAfterMs
+        ? retryAfterMs
+        : baseDelay + jitter;
+      console.warn(`[ai-client] ${settings.provider} ${response.status} ${isRateLimit ? 'rate limit' : 'server error'}, retry ${attempt + 1}/${effectiveRetries} in ${delayMs}ms`);
       await abortableDelay(delayMs, parentSignal);
       continue;
     }
@@ -385,6 +491,14 @@ export async function testAIConnection(overrides?: Partial<Pick<AISettings, 'pro
         provider: settings.provider,
         model: settings.model,
         error: '未填写模型名称',
+      };
+    }
+    if (settings.provider === 'opencode' && !isOpenCodeFreeModel(settings.model)) {
+      return {
+        success: false,
+        provider: settings.provider,
+        model: settings.model,
+        error: 'OpenCode 仅支持免费模型',
       };
     }
 
