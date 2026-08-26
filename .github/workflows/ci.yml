@@ -24,8 +24,8 @@ jobs:
       API_TOKEN: ci-only-token
       NEXT_PUBLIC_SITE_URL: https://hot.kfxz.cn
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -42,8 +42,8 @@ jobs:
     env:
       DATABASE_URL: file:../db/ci-migrations.db
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -61,8 +61,8 @@ jobs:
       SETTINGS_ENCRYPTION_KEY: ci-only-settings-encryption-key-for-e2e
       NEXT_PUBLIC_SITE_URL: https://hot.kfxz.cn
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
