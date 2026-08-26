@@ -194,6 +194,8 @@ npm run db:cleanup-logs
 推送或合并 master → CI → CI 成功 → Deploy production → 健康检查
 ```
 
+`Deploy production` 作为 CI 的复用 Job，仅在质量检查、迁移冒烟、生产构建和 E2E 全部成功后执行；也可从 GitHub Actions 手动运行。部署所需的 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY` 及可选的 `DEPLOY_PORT`、`DEPLOY_KNOWN_HOSTS` 应配置在 `production` Environment 的 Secrets/Variables 中。
+
 发布脚本会在版本化 release 目录安装依赖并构建，再校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、应用 migration，最后原子切换 `current` 软链、启动单实例并检查包含 SQLite 可访问性的健康接口与 CSS 资源。旧 release 默认保留 5 个，普通部署失败时会恢复数据库备份和旧版本；生产重置不提供自动回滚。
 
 手动 `reset_production=yes` 会在不备份的情况下删除生产 SQLite，并从当前 migration 与 seed 全新初始化。只有在明确接受丢失生产数据时才可使用；生产重置失败不提供自动数据库回滚。
