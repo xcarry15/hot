@@ -7,9 +7,17 @@ import {
   isLikelyJavaScriptVerificationPage,
   readResponseText,
 } from '@/lib/http';
-import { assertSafeOutboundUrl, isBlockedOutboundHostname } from '@/lib/outbound-url';
+import {
+  assertSafeOutboundUrl,
+  isBlockedOutboundHostname,
+  SAFE_DNS_RECORD_TTL_MS,
+} from '@/lib/outbound-url';
 
 describe('outbound URL boundary', () => {
+  it('keeps DNS records alive long enough for Undici to select an address', () => {
+    expect(SAFE_DNS_RECORD_TTL_MS).toBeGreaterThan(0);
+  });
+
   it.each([
     'localhost',
     'api.localhost',

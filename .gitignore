@@ -55,6 +55,8 @@ server.log
 
 # Test run artifacts
 test-run.*
+/test-results/
+/playwright-report/
 
 # Skills directory
 /skills/
@@ -75,3 +77,4 @@ db/exports/
 
 # Deployment archives (regenerated on demand, do not commit)
 bat/*.zip
+/.release-revision

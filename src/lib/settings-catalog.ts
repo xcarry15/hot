@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { AI_PROVIDERS, providerSettingKey, type AIProviderId } from '@/contracts/ai-provider';
 import { PUSH_MODES } from '@/contracts/push';
 import { DEFAULT_QUIET_END, DEFAULT_QUIET_START } from './quiet-hours';
+import { proxyUrlSchema } from '@/contracts/proxy';
 import {
   DEFAULT_BLOCK_AD,
   DEFAULT_BLOCK_BRAND,
@@ -27,6 +28,7 @@ import {
 } from './prompts';
 
 export const SETTING_KEYS = {
+  OUTBOUND_PROXY_URL: 'outbound_proxy_url',
   FEISHU_WEBHOOK_URL: 'feishu_webhook_url',
   PUSH_MODE: 'push_mode',
   PUSH_MIN_SCORE: 'push_min_score',
@@ -119,6 +121,15 @@ const providerSettingDefinitions: SettingDefinition[] = Object.values(AI_PROVIDE
 ]);
 
 const definitions: SettingDefinition[] = [
+  {
+    key: SETTING_KEYS.OUTBOUND_PROXY_URL,
+    defaultValue: '',
+    schema: proxyUrlSchema,
+    sensitive: true,
+    exportable: true,
+    frontend: true,
+    seed: false,
+  },
   {
     key: SETTING_KEYS.FEISHU_WEBHOOK_URL,
     defaultValue: '[]',

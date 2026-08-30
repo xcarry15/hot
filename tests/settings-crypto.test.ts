@@ -1,12 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  decryptSensitiveSetting,
   decryptWebhookConfigsForRuntime,
+  encryptSensitiveSetting,
   encryptWebhookConfigsForStorage,
 } from '@/lib/settings-crypto';
 
 afterEach(() => vi.unstubAllEnvs());
 
 describe('Webhook 配置加密', () => {
+  it('加密通用敏感设置并可恢复代理认证信息', () => {
+    const source = 'http://proxy-user:proxy-password@proxy.example:8080';
+    const encrypted = encryptSensitiveSetting(source);
+
+    expect(encrypted).toMatch(/^enc:v1:/);
+    expect(encrypted).not.toContain('proxy-password');
+    expect(decryptSensitiveSetting(encrypted)).toBe(source);
+  });
+
   it('加密 URL，保留末 6 位标识，并可恢复完整配置', () => {
     const source = JSON.stringify([
       {

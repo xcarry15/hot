@@ -67,6 +67,7 @@ jobs:
         run: |
           set -euo pipefail
           RELEASE_ARCHIVE_NAME="h2-hot2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tgz"
+          printf '%s\n' "$GITHUB_SHA" > .release-revision
           tar \
             --exclude=.git \
             --exclude=.github \
@@ -104,6 +105,13 @@ jobs:
             "APP_DIR='$APP_DIR' RELEASE_ARCHIVE='/tmp/$RELEASE_ARCHIVE_NAME' RESET_PRODUCTION='$RESET_PRODUCTION' bash -s" \
             < scripts/deploy-production.sh
 
-      - name: Verify public site
+      - name: Verify deployed revision
         shell: bash
-        run: curl --fail --silent --show-error --retry 5 --retry-delay 3 https://hot.kfxz.cn/api/health >/dev/null
+        run: |
+          set -euo pipefail
+          HEALTH_RESPONSE="$(curl --fail --silent --show-error --retry 5 --retry-delay 3 https://hot.kfxz.cn/api/health)"
+          DEPLOYED_REVISION="$(node -e 'const fs = require("node:fs"); const body = JSON.parse(fs.readFileSync(0, "utf8")); process.stdout.write(typeof body.revision === "string" ? body.revision : "")' <<<"$HEALTH_RESPONSE")"
+          test "$DEPLOYED_REVISION" = "$GITHUB_SHA" || {
+            echo "Expected revision $GITHUB_SHA, got ${DEPLOYED_REVISION:-missing}" >&2
+            exit 1
+          }

@@ -21,7 +21,7 @@
   → GitHub Actions: CI
   → CI 成功
   → Deploy production
-  → 站点健康检查
+  → 站点健康检查并核对线上 Git revision
 ```
 
 自动部署由 `.github/workflows/deploy.yml` 调用 `scripts/deploy-production.sh`，依次执行：
@@ -30,7 +30,7 @@
 2. 将代码解压到版本化 release 目录，执行 `npm ci`、`db:generate` 和生产构建；此时 current 版本保持不变。
 3. 停止 PM2，普通部署用 SQLite `.backup` 创建可回滚备份，再执行 `db:migrate:deploy` 和 `db:optimize`。
 4. 原子切换 `current` 软链，保留最近 5 个 release，启动单实例 `hot`。
-5. 检查 `/api/health`、公开首页和 CSS 资源；健康接口首次未稳定时会自动重启 PM2 一次并延长等待；普通部署仍失败会恢复数据库备份与旧 current，生产重置不自动回滚。
+5. 检查 `/api/health`、公开首页和 CSS 资源；GitHub Actions 部署还会核对健康接口返回的 Git revision 与目标提交一致。健康接口首次未稳定时会自动重启 PM2 一次并延长等待；普通部署仍失败会恢复数据库备份与旧 current，生产重置不自动回滚。
 
 正常部署失败会在备份可用时恢复数据库与旧 current；生产重置不提供自动回滚。手动运行 `Deploy production` 不会补跑 CI，只应用于已经确认过的提交。
 

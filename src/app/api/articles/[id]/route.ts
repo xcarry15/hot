@@ -42,6 +42,17 @@ export async function PATCH(
     const rawEventIdentity = body.eventIdentity && typeof body.eventIdentity === 'object'
       ? body.eventIdentity as Record<string, unknown>
       : null;
+    let expectedUpdatedAt: Date | undefined;
+    if (body.expectedUpdatedAt !== undefined) {
+      if (typeof body.expectedUpdatedAt !== 'string') {
+        return NextResponse.json({ error: '文章版本无效' }, { status: 400 });
+      }
+      const parsedExpectedUpdatedAt = new Date(body.expectedUpdatedAt);
+      if (!Number.isFinite(parsedExpectedUpdatedAt.getTime())) {
+        return NextResponse.json({ error: '文章版本无效' }, { status: 400 });
+      }
+      expectedUpdatedAt = parsedExpectedUpdatedAt;
+    }
     const article = await runExclusiveMutation('编辑文章', () => updateArticleEditorial(id, {
       summary: typeof body.summary === 'string' ? body.summary : undefined,
       brand: typeof body.brand === 'string' ? body.brand : undefined,
@@ -63,6 +74,7 @@ export async function PATCH(
       restoreFields: Array.isArray(body.restoreFields)
         ? body.restoreFields.filter((item): item is ManualOverrideField => typeof item === 'string' && MANUAL_OVERRIDE_FIELDS.includes(item as ManualOverrideField))
         : undefined,
+      expectedUpdatedAt,
     }));
     if (!article) return NextResponse.json({ error: '文章不存在' }, { status: 404 });
     return NextResponse.json(article);

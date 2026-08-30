@@ -1,14 +1,16 @@
 /**
  * Shared HTTP utilities for parsers that need raw fetch.
  *
- * Currently used by:
- * - parser-canyin88.ts (only parser doing direct fetch; others use ZAI SDK)
+ * Used by raw server-side HTTP callers, including parser-canyin88.ts and the
+ * proxy tester. Other parsers use the ZAI SDK directly.
  *
  * Provides:
  * - BROWSER_HEADERS: realistic browser-like request headers
  * - fetchWithRetry: exponential-backoff retry on network/timeout/5xx/429
  * - fetchHtml: fetch and decode HTML with charset detection (GBK/GB2312/UTF-8)
+ * - fetchHtmlDetailed: same fetch with HTTP status, final URL and transport diagnostics
  * - hostFromUrl: extract protocol+host from a URL (for relative→absolute)
+ * - optional global or per-request HTTP/HTTPS proxy dispatching
  *
  * Node's fetch transparently decompresses gzip/br/deflate when the
  * server sends `Content-Encoding`, so Accept-Encoding is mostly a hint
@@ -17,7 +19,21 @@
 
 import iconv from 'iconv-lite';
 import { abortableDelay, withTimeout } from './shared/async';
-import { assertSafeOutboundUrl, getSafeOutboundDispatcher } from './outbound-url';
+import {
+  assertSafeOutboundUrl,
+  getOutboundProxyDispatcher,
+  getSafeOutboundDispatcher,
+} from './outbound-url';
+import { getGlobalProxyUrl } from './proxy-config';
+
+type SafeRequestInit = RequestInit & {
+  /** 覆盖全局代理的单次 HTTP 代理，不进入请求头；通常只用于连通性测试。 */
+  proxyUrl?: string;
+  /** 列表源等公开资源需要直连时使用，避免被正在测试的失效代理阻塞。 */
+  bypassProxy?: boolean;
+  /** 覆盖共享 HTTP 层的默认重试次数；详情抓取由外层负责退避时可设为 0。 */
+  retries?: number;
+};
 
 const CHARSET_RE = /charset\s*=\s*([^"'\s;>]+)/i;
 const META_CHARSET_RE = /<meta[^>]+charset\s*=\s*["']?([^"'\s;>]+)/i;
@@ -39,7 +55,59 @@ const MAX_RETRIES = 2; // total 3 attempts
 export const MAX_HTTP_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
 
+export type FetchTransport = 'direct' | 'proxy';
+
+export interface FetchHtmlResult {
+  html: string | null;
+  /** 最后一跳真实 HTTP 状态；网络错误时为 null。 */
+  status: number | null;
+  statusText: string;
+  /** 重定向后的最终 URL；无法建立响应时回退到请求 URL。 */
+  finalUrl: string;
+  /** 本次请求实际使用的出站路径。 */
+  transport: FetchTransport;
+  /** 非 2xx、超时、网络或响应体解析失败的可读原因。 */
+  error?: string;
+}
+
+export interface FetchDiagnostic {
+  method: 'http' | 'zai';
+  transport?: FetchTransport;
+  status?: number | null;
+  finalUrl?: string;
+  error: string;
+}
+
+/** 诊断信息允许进入日志/Article.fetchError，但不能把 URL 中的凭据带出去。 */
+export function safeUrlForLog(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    url.username = '';
+    url.password = '';
+    if (url.search) url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+export function formatFetchDiagnostics(diagnostics: FetchDiagnostic[]): string {
+  return diagnostics.map((diagnostic) => {
+    const route = diagnostic.method === 'http' && diagnostic.transport
+      ? `${diagnostic.method}/${diagnostic.transport}`
+      : diagnostic.method;
+    const status = diagnostic.status === undefined || diagnostic.status === null
+      ? ''
+      : ` status=${diagnostic.status}`;
+    const finalUrl = diagnostic.finalUrl ? ` finalUrl=${safeUrlForLog(diagnostic.finalUrl)}` : '';
+    const error = diagnostic.error.replace(/\s+/g, ' ').slice(0, 500);
+    return `${route}${status}${finalUrl}: ${error}`;
+  }).join(' | ');
+}
+
 type RequestCookieJar = Map<string, Map<string, string>>;
+const responseFinalUrls = new WeakMap<Response, string>();
 
 function getResponseCookies(headers: Headers): string[] {
   const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
@@ -123,26 +191,33 @@ function extractJavaScriptVerificationCookie(html: string): string | null {
 
 export async function fetchSafe(
   rawUrl: string,
-  options: RequestInit & { signal?: AbortSignal } = {},
+  options: SafeRequestInit = {},
 ): Promise<Response> {
   return fetchSafeWithCookieJar(rawUrl, options, new Map());
 }
 
 async function fetchSafeWithCookieJar(
   rawUrl: string,
-  options: RequestInit & { signal?: AbortSignal },
+  options: SafeRequestInit,
   cookieJar: RequestCookieJar,
 ): Promise<Response> {
   let target = await assertSafeOutboundUrl(rawUrl);
   let requestHeaders: HeadersInit | undefined = options.headers;
+  const { proxyUrl, bypassProxy, ...requestOptions } = options;
+  const effectiveProxyUrl = bypassProxy ? undefined : proxyUrl?.trim() || await getGlobalProxyUrl();
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
     const response = await fetch(target, {
-      ...options,
+      ...requestOptions,
       headers: requestHeadersWithCookies(target, requestHeaders, cookieJar),
       redirect: 'manual',
-      dispatcher: getSafeOutboundDispatcher(),
+      dispatcher: effectiveProxyUrl
+        ? getOutboundProxyDispatcher(effectiveProxyUrl)
+        : getSafeOutboundDispatcher(),
     } as RequestInit);
-    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    if (![301, 302, 303, 307, 308].includes(response.status)) {
+      responseFinalUrls.set(response, target.toString());
+      return response;
+    }
     // 部分站点会在同域 302 中下发一次性验证 Cookie。Node fetch 不自带
     // Cookie jar，这里只在当前请求的同域重定向链里暂存，避免长期保存或跨域泄露。
     rememberRedirectCookies(target, response, cookieJar);
@@ -156,6 +231,10 @@ async function fetchSafeWithCookieJar(
     target = nextTarget;
   }
   throw new Error(`重定向次数超过 ${MAX_REDIRECTS}`);
+}
+
+function finalResponseUrl(response: Response, fallback: string): string {
+  return responseFinalUrls.get(response) || response.url || fallback;
 }
 
 async function readResponseBuffer(response: Response, maxBytes = MAX_HTTP_RESPONSE_BYTES): Promise<Buffer> {
@@ -204,14 +283,20 @@ export function ensureResponseTextWithinLimit(value: string, maxBytes = MAX_HTTP
  */
 async function fetchWithRetry(
   url: string,
-  options: RequestInit & { timeoutMs?: number } = {},
+  options: SafeRequestInit & { timeoutMs?: number } = {},
   retries: number = MAX_RETRIES,
   cookieJar?: RequestCookieJar,
 ): Promise<Response> {
-  const { timeoutMs = 15_000, signal: parentSignal, ...rest } = options;
+  const {
+    timeoutMs = 15_000,
+    signal: parentSignal,
+    retries: optionRetries,
+    ...rest
+  } = options;
+  const retryLimit = optionRetries ?? retries;
   let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  for (let attempt = 0; attempt <= retryLimit; attempt++) {
     try {
       const response = await withTimeout(
         signal => cookieJar
@@ -222,10 +307,10 @@ async function fetchWithRetry(
         parentSignal ?? undefined,
       );
 
-      if (RETRYABLE_STATUS.has(response.status) && attempt < retries) {
+      if (RETRYABLE_STATUS.has(response.status) && attempt < retryLimit) {
         const delay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
         console.warn(
-          `[http] ${url} -> HTTP ${response.status}, retry ${attempt + 1}/${retries} in ${delay}ms`,
+          `[http] ${url} -> HTTP ${response.status}, retry ${attempt + 1}/${retryLimit} in ${delay}ms`,
         );
         await response.body?.cancel();
         await abortableDelay(delay, parentSignal ?? undefined);
@@ -241,10 +326,10 @@ async function fetchWithRetry(
 
       lastError = new Error(isAbort ? `timeout after ${timeoutMs}ms` : errMsg);
 
-      if ((isAbort || isNetwork) && attempt < retries) {
+      if ((isAbort || isNetwork) && attempt < retryLimit) {
         const delay = 1000 * Math.pow(2, attempt);
         console.warn(
-          `[http] ${url} -> ${lastError.message}, retry ${attempt + 1}/${retries} in ${delay}ms`,
+          `[http] ${url} -> ${lastError.message}, retry ${attempt + 1}/${retryLimit} in ${delay}ms`,
         );
         await abortableDelay(delay, parentSignal ?? undefined);
         continue;
@@ -254,7 +339,7 @@ async function fetchWithRetry(
     }
   }
 
-  throw lastError ?? new Error(`fetch ${url} failed after ${retries + 1} attempts`);
+  throw lastError ?? new Error(`fetch ${url} failed after ${retryLimit + 1} attempts`);
 }
 
 /**
@@ -296,21 +381,53 @@ async function readHtmlResponse(response: Response): Promise<string> {
  * Fetch a URL and decode the response body with correct charset.
  * Handles GBK/GB2312 (via iconv-lite) and UTF-8.
  */
-async function fetchHtml(
+export async function fetchHtmlDetailed(
   url: string,
-  options: RequestInit & { timeoutMs?: number } = {},
-): Promise<string | null> {
-  const { timeoutMs = 20_000, signal: parentSignal, ...rest } = options;
+  options: SafeRequestInit & { timeoutMs?: number } = {},
+): Promise<FetchHtmlResult> {
+  const {
+    timeoutMs = 20_000,
+    signal: parentSignal,
+    proxyUrl,
+    bypassProxy,
+    retries,
+    ...rest
+  } = options;
+  const explicitProxyUrl = proxyUrl?.trim();
+  let effectiveProxyUrl: string | undefined;
+  let transport: FetchTransport = bypassProxy || !explicitProxyUrl ? 'direct' : 'proxy';
+  const baseRequestOptions = {
+    ...rest,
+    signal: parentSignal ?? undefined,
+    timeoutMs,
+    ...(retries === undefined ? {} : { retries }),
+  };
 
+  let responseForDiagnostics: Response | null = null;
   try {
+    effectiveProxyUrl = bypassProxy ? undefined : explicitProxyUrl || await getGlobalProxyUrl();
+    transport = effectiveProxyUrl ? 'proxy' : 'direct';
+    const requestOptions = {
+      ...baseRequestOptions,
+      ...(effectiveProxyUrl ? { proxyUrl: effectiveProxyUrl } : { bypassProxy: true }),
+    };
     const cookieJar: RequestCookieJar = new Map();
     let response = await fetchWithRetry(url, {
-      ...rest,
-      signal: parentSignal ?? undefined,
-      timeoutMs,
+      ...requestOptions,
     }, MAX_RETRIES, cookieJar);
-
-    if (!response.ok) return null;
+    responseForDiagnostics = response;
+    const finalUrl = finalResponseUrl(response, url);
+    if (!response.ok) {
+      await response.body?.cancel();
+      return {
+        html: null,
+        status: response.status,
+        statusText: response.statusText || '',
+        finalUrl,
+        transport,
+        error: `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
+      };
+    }
     let html = await readHtmlResponse(response);
 
     // 只解析明确的 Cookie 赋值，不执行第三方脚本；Cookie 仍仅保留在本次请求的同域 jar。
@@ -319,19 +436,48 @@ async function fetchHtml(
       : null;
     if (verificationCookie && rememberClientCookie(new URL(url), verificationCookie, cookieJar)) {
       response = await fetchWithRetry(url, {
-        ...rest,
-        signal: parentSignal ?? undefined,
-        timeoutMs,
+        ...requestOptions,
       }, MAX_RETRIES, cookieJar);
-      if (!response.ok) return null;
+      responseForDiagnostics = response;
+      if (!response.ok) {
+        await response.body?.cancel();
+        return {
+          html: null,
+          status: response.status,
+          statusText: response.statusText || '',
+          finalUrl: finalResponseUrl(response, url),
+          transport,
+          error: `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
+        };
+      }
       html = await readHtmlResponse(response);
     }
 
-    return html;
+    return {
+      html,
+      status: response.status,
+      statusText: response.statusText || '',
+      finalUrl: finalResponseUrl(response, url),
+      transport,
+    };
   } catch (error) {
     if (parentSignal?.aborted) throw error;
-    return null;
+    return {
+      html: null,
+      status: responseForDiagnostics?.status ?? null,
+      statusText: responseForDiagnostics?.statusText || '',
+      finalUrl: responseForDiagnostics ? finalResponseUrl(responseForDiagnostics, url) : url,
+      transport,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
+}
+
+async function fetchHtml(
+  url: string,
+  options: SafeRequestInit & { timeoutMs?: number } = {},
+): Promise<string | null> {
+  return (await fetchHtmlDetailed(url, options)).html;
 }
 
 export {

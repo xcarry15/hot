@@ -112,6 +112,11 @@ export function useEventCalibrationActions({
     const targetEventId = mergeTargetId.trim();
     if (!detail?.eventId || !targetEventId || eventAction) return;
     const target = eventOptions.find((event) => event.id === targetEventId);
+    if (!target) {
+      setMergeTargetId('');
+      toast.info('合并目标已失效，请重新搜索并选择');
+      return;
+    }
     if (!window.confirm(
       `确认将当前整个事件（${eventDetail?.articleCount ?? 0} 篇）并入目标事件？\n\n目标事件：${target?.representativeArticle?.title || targetEventId}\n\n当前事件会停止独立展示，历史推送不会撤回。`,
     )) return;
@@ -130,7 +135,7 @@ export function useEventCalibrationActions({
   }, [detail, eventAction, eventDetail, eventOptions, mergeTargetId, refreshCurrentArticle, setEventAction, setMergeTargetId]);
 
   const searchEvents = useCallback(async (query = eventSearch) => {
-    if (!detail?.eventId) return;
+    if (!detail?.eventId || eventAction) return;
     const requestId = ++eventSearchRequestRef.current;
     try {
       const result = await searchActiveEvents(query, detail.eventId);
@@ -140,7 +145,7 @@ export function useEventCalibrationActions({
       if (requestId !== eventSearchRequestRef.current) return;
       toast.error(errorMessage(error, '事件搜索失败'));
     }
-  }, [detail, eventSearch, eventSearchRequestRef, setEventOptions]);
+  }, [detail, eventAction, eventSearch, eventSearchRequestRef, setEventOptions]);
 
   const moveCurrentArticleToEvent = useCallback(async (
     targetEventId: string,
@@ -159,6 +164,7 @@ export function useEventCalibrationActions({
     try {
       await moveEventArticle(detail.eventId, detail.id, targetEventId);
       setEventOptions([]);
+      setMergeTargetId('');
       setEventSearch('');
       await refreshCurrentArticle();
       toast.success('当前文章已移至目标事件');
@@ -167,7 +173,7 @@ export function useEventCalibrationActions({
     } finally {
       setEventAction(null);
     }
-  }, [detail, eventAction, eventDetail, refreshCurrentArticle, setEventAction, setEventOptions, setEventSearch]);
+  }, [detail, eventAction, eventDetail, refreshCurrentArticle, setEventAction, setEventOptions, setEventSearch, setMergeTargetId]);
 
   const moveCurrentArticle = useCallback(async (targetEventId: string) => {
     const target = eventOptions.find((event) => event.id === targetEventId);

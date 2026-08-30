@@ -121,7 +121,7 @@ export const ArticleReviewPanel = memo(function ArticleReviewPanel({
                 size="sm"
                 variant="ghost"
                 className={`ml-auto ${WORKSPACE_COMPACT_BUTTON_CLASS}`}
-                disabled={detailAction !== null}
+                disabled={detailAction !== null || rowSaving || eventActionPending || editing}
                 onClick={() => onStartWorkflow('ai')}
               >
                 重新生成
@@ -159,7 +159,7 @@ export const ArticleReviewPanel = memo(function ArticleReviewPanel({
                 variant="ghost"
                 aria-pressed={detail.publicOverride === option.value}
                 className={`${WORKSPACE_BUTTON_CLASS} ${detail.publicOverride === option.value ? option.selectedClass : ''}`}
-                disabled={rowSaving}
+                disabled={rowSaving || detailAction !== null || eventActionPending || editing}
                 onClick={() => onChangePublicOverride(option.value)}
               >
                 {option.label}
@@ -170,7 +170,7 @@ export const ArticleReviewPanel = memo(function ArticleReviewPanel({
                 size="sm"
                 variant="ghost"
                 className={WORKSPACE_BUTTON_CLASS}
-                disabled={eventActionPending}
+                disabled={eventActionPending || detailAction !== null || rowSaving || editing}
                 onClick={() => onPushEvent(eventPushedAt ? 'repush' : 'manual')}
               >
                 {eventPushedAt ? '再次推送' : '强制推送'}
@@ -180,7 +180,7 @@ export const ArticleReviewPanel = memo(function ArticleReviewPanel({
               size="sm"
               variant="ghost"
               className={`col-span-2 ${WORKSPACE_BUTTON_CLASS} sm:col-span-1`}
-              disabled={detailAction !== null}
+              disabled={detailAction !== null || rowSaving || eventActionPending || editing}
               onClick={() => onStartWorkflow('process')}
             >
               全量重跑
@@ -205,7 +205,7 @@ export const ArticleReviewPanel = memo(function ArticleReviewPanel({
           <Button
             size="sm"
             className="h-8 rounded-none text-xs sm:col-span-2"
-            disabled={detailAction !== null}
+            disabled={detailAction !== null || rowSaving || eventActionPending}
             onClick={onSaveEditorial}
           >
             {detailAction === 'edit' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}

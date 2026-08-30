@@ -109,7 +109,7 @@ export const EventCalibrationPanel = memo(function EventCalibrationPanel({
 
   const searchEventKeyword = (keyword: string) => {
     const query = keyword.trim();
-    if (!query) return;
+    if (!query || eventActionPending) return;
     onEventSearchChange(query);
     onSearchEvents(query);
   };
@@ -138,16 +138,22 @@ export const EventCalibrationPanel = memo(function EventCalibrationPanel({
             <p className="text-xs font-medium text-amber-950">
               当前聚类存在歧义。完成复核前，本篇不能成为代表、公开或推送。
             </p>
-            <div className="flex flex-wrap gap-1">
-              <Button
-                size="sm"
-                className={WORKSPACE_BUTTON_CLASS}
-                disabled={eventActionPending}
-                onClick={onConfirmIndependent}
-              >
-                确认独立事件
-              </Button>
-            </div>
+            {eventDetail.articleCount === 1 ? (
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  size="sm"
+                  className={WORKSPACE_BUTTON_CLASS}
+                  disabled={eventActionPending}
+                  onClick={onConfirmIndependent}
+                >
+                  确认独立事件
+                </Button>
+              </div>
+            ) : (
+              <p className="text-[11px] leading-4 text-amber-900">
+                当前 Event 含多个成员，请使用下方“移为独立”或“移动本篇”明确处理归属。
+              </p>
+            )}
           </div>
         )}
 
@@ -205,8 +211,9 @@ export const EventCalibrationPanel = memo(function EventCalibrationPanel({
               onKeyDown={(event) => { if (event.key === 'Enter') onSearchEvents(); }}
               placeholder="标题、品牌或事件键"
               className={WORKSPACE_INPUT_CLASS}
+              disabled={eventActionPending}
             />
-            <Button size="sm" variant="outline" className={`${WORKSPACE_BUTTON_CLASS} shrink-0`} onClick={() => onSearchEvents()}>
+            <Button size="sm" variant="outline" className={`${WORKSPACE_BUTTON_CLASS} shrink-0`} disabled={eventActionPending} onClick={() => onSearchEvents()}>
               <Search className="h-3 w-3" />搜索
             </Button>
           </div>
@@ -221,6 +228,7 @@ export const EventCalibrationPanel = memo(function EventCalibrationPanel({
                     key={`brand-${brand}`}
                     type="button"
                     className={`${WORKSPACE_KEYWORD_CLASS} text-sky-700 hover:bg-sky-50 hover:text-sky-800`}
+                    disabled={eventActionPending}
                     onClick={() => searchEventKeyword(brand)}
                   >
                     {brand}
@@ -237,6 +245,7 @@ export const EventCalibrationPanel = memo(function EventCalibrationPanel({
                     type="button"
                     className={`${WORKSPACE_KEYWORD_CLASS} truncate text-sky-700 hover:bg-sky-50 hover:text-sky-800`}
                     title={keyword}
+                    disabled={eventActionPending}
                     onClick={() => searchEventKeyword(keyword)}
                   >
                     {keyword}

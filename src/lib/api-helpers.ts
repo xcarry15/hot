@@ -11,7 +11,8 @@ import { MutationConflictError } from '@/lib/mutation-guard';
 export function apiError(error: unknown, fallback: string, status = 500): NextResponse {
   if (error instanceof MutationConflictError || isExposedApiError(error)) {
     const errorStatus = isSafeStatus(error.status) ? error.status : status;
-    return NextResponse.json({ error: error.message }, { status: errorStatus });
+    const code = isExposedApiError(error) && typeof error.code === 'string' ? { code: error.code } : {};
+    return NextResponse.json({ error: error.message, ...code }, { status: errorStatus });
   }
   // 不把 Prisma、上游服务、文件路径或配置内容回显给浏览器；详细信息只留在
   // 服务端日志中，避免异常响应成为内部实现和凭据的旁路泄露。
@@ -19,7 +20,7 @@ export function apiError(error: unknown, fallback: string, status = 500): NextRe
   return NextResponse.json({ error: fallback }, { status });
 }
 
-function isExposedApiError(error: unknown): error is Error & { exposeToClient: true; status?: unknown } {
+function isExposedApiError(error: unknown): error is Error & { exposeToClient: true; status?: unknown; code?: unknown } {
   return error instanceof Error && (error as { exposeToClient?: unknown }).exposeToClient === true;
 }
 

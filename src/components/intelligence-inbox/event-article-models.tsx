@@ -114,7 +114,7 @@ interface CreateEventArticleModelsOptions {
   eventMembers: EventDetail['articles'];
   brandCandidates: EventDetail['brandCandidates'];
   selectedSplitIds: Set<string>;
-  eventAction: string | null;
+  interactionPending: boolean;
   recommendedEventId: string | null;
   recommendedEvent: RecommendedEvent | null;
   recommendedAudit: EventAudit | null;
@@ -134,7 +134,7 @@ export function createEventArticleModels({
   eventMembers,
   brandCandidates,
   selectedSplitIds,
-  eventAction,
+  interactionPending,
   recommendedEventId,
   recommendedEvent,
   recommendedAudit,
@@ -173,7 +173,7 @@ export function createEventArticleModels({
           type="checkbox"
           aria-label={`选择拆分 ${article.title}`}
           checked={selected}
-          disabled={(eventDetail?.articleCount ?? 0) <= 1 || eventAction !== null}
+          disabled={(eventDetail?.articleCount ?? 0) <= 1 || interactionPending}
           onChange={() => toggleSplitSelection(article.id)}
         />
       ),
@@ -182,12 +182,13 @@ export function createEventArticleModels({
           article={article}
           representative={representative}
           articleCount={eventDetail?.articleCount ?? 0}
-          eventActionPending={eventAction !== null}
+          eventActionPending={interactionPending}
           onSetRepresentative={setRepresentative}
           onSplitArticle={splitArticle}
         />
       ),
       tone: 'member',
+      titleDisabled: interactionPending,
       highlight: article.id === detail?.id ? 'current' : selected ? 'selected' : representative ? 'representative' : undefined,
       onTitleClick: () => selectArticle(article.id, 'cluster'),
     };
@@ -239,12 +240,12 @@ export function createEventArticleModels({
           pushStatus: recommendedEvent.pushedAt ? '已推送' : '未推送',
           actions: (
             <>
-              <ComparisonButton onClick={() => setComparisonTarget(target)} />
+              <ComparisonButton disabled={interactionPending} onClick={() => setComparisonTarget(target)} />
               <Button
                 size="sm"
                 variant="ghost"
                 className={`${WORKSPACE_COMPACT_BUTTON_CLASS} text-sky-700 hover:bg-sky-50 hover:text-sky-800`}
-                disabled={eventAction !== null}
+                disabled={interactionPending}
                 onClick={handleMoveToRecommendedEvent}
               >
                 将当前文章移至推荐事件
@@ -252,6 +253,7 @@ export function createEventArticleModels({
             </>
           ),
           tone: 'recommended' as const,
+          titleDisabled: interactionPending,
         }];
       })()
     : [];
@@ -291,13 +293,14 @@ export function createEventArticleModels({
         <CandidateActions
           candidate={candidate}
           target={target}
-          eventActionPending={eventAction !== null}
+          eventActionPending={interactionPending}
           onCompare={setComparisonTarget}
           onMoveCandidate={moveBrandCandidate}
           onMoveCurrentArticle={moveCurrentArticleToBrandEvent}
         />
       ),
       tone: 'brand',
+      titleDisabled: interactionPending,
       onTitleClick: () => selectArticle(candidate.id, 'cluster'),
     };
   });
@@ -348,12 +351,13 @@ function MemberActions({
   );
 }
 
-function ComparisonButton({ onClick }: { onClick: () => void }) {
+function ComparisonButton({ onClick, disabled = false }: { onClick: () => void; disabled?: boolean }) {
   return (
     <Button
       size="sm"
       variant="ghost"
       className={`${WORKSPACE_COMPACT_BUTTON_CLASS} text-slate-600 hover:bg-slate-100 hover:text-slate-900`}
+      disabled={disabled}
       onClick={onClick}
     >
       查看对比

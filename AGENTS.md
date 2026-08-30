@@ -57,7 +57,7 @@
 
 - `prisma/migrations/` is the complete supported migration set. Production with an unexpected or incomplete history must be backed up and rebuilt; there is no historical compatibility bridge.
 - Routine production migration uses `npm run db:migrate:deploy`. Never use `db:push` or `db:danger:reset` in production.
-- Deployment archives are built in versioned release directories under the app root; `.env` and `db/` live in shared state, and the `current` symlink is switched atomically only after the release build and normal migration backup succeed. Keep the previous releases for rollback. PM2 runs one `h2-hot2` instance.
+- Deployment archives are built in versioned release directories under the app root; `.env` and `db/` live in shared state, and the `current` symlink is switched atomically only after the release build and normal migration backup succeed. Keep the previous releases for rollback. PM2 runs one `hot` instance.
 - Stop PM2 and create a consistent SQLite `.backup` before normal production migrations; a failed normal release restores that backup and the previous `current` target when possible.
 - `reset_production=yes` deletes production SQLite without backup. Use it only after explicit approval to lose production data.
 - Routine application releases do not clear the server-wide Nginx cache or reload Nginx.

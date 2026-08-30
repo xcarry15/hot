@@ -16,11 +16,15 @@ describe('API error boundary', () => {
     class PublicError extends Error {
       readonly exposeToClient = true;
       readonly status = 409;
+      readonly code = 'article_revision_conflict';
     }
 
     const response = apiError(new PublicError('当前状态不允许此操作'), '操作失败');
 
     expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({ error: '当前状态不允许此操作' });
+    await expect(response.json()).resolves.toEqual({
+      error: '当前状态不允许此操作',
+      code: 'article_revision_conflict',
+    });
   });
 });

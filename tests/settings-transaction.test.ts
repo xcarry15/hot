@@ -46,7 +46,11 @@ vi.mock('@/lib/execution', () => ({
 import { PUT as settingsPUT } from '@/app/api/settings/route';
 import { parseWebhookConfigs } from '@/contracts/webhook';
 import { DEFAULT_BLOCK_SUMMARY } from '@/lib/prompts';
-import { decryptWebhookConfigsForRuntime, encryptWebhookConfigsForStorage } from '@/lib/settings-crypto';
+import {
+  decryptSensitiveSetting,
+  decryptWebhookConfigsForRuntime,
+  encryptWebhookConfigsForStorage,
+} from '@/lib/settings-crypto';
 
 describe('settings PUT 事务化', () => {
   beforeEach(() => {
@@ -242,6 +246,40 @@ describe('settings PUT 事务化', () => {
     expect(storedWebhook).toHaveLength(1);
     expect(storedWebhook[0].url).toMatch(/^enc:v1:6:isting:/);
     expect(decryptWebhookConfigsForRuntime(webhookUpsert.update.value)).toBe(existingWebhook);
+  });
+
+  it('全局代理保存为加密值', async () => {
+    const proxyUrl = 'http://proxy-user:proxy-password@proxy.example:8080';
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outbound_proxy_url: proxyUrl }),
+    });
+
+    const res = await settingsPUT(req);
+
+    expect(res.status).toBe(200);
+    const proxyUpsert = mocks.settingUpsert.mock.calls.find((call) => call[0].where.key === 'outbound_proxy_url')?.[0];
+    expect(proxyUpsert.update.value).toMatch(/^enc:v1:/);
+    expect(proxyUpsert.update.value).not.toContain('proxy-password');
+    expect(decryptSensitiveSetting(proxyUpsert.update.value)).toBe(proxyUrl);
+  });
+
+  it('全局代理提交空值时明确关闭代理', async () => {
+    mocks.settingFindMany.mockResolvedValue([
+      { key: 'outbound_proxy_url', value: 'encrypted-existing-proxy' },
+    ]);
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outbound_proxy_url: '' }),
+    });
+
+    const res = await settingsPUT(req);
+
+    expect(res.status).toBe(200);
+    const proxyUpsert = mocks.settingUpsert.mock.calls.find((call) => call[0].where.key === 'outbound_proxy_url')?.[0];
+    expect(proxyUpsert.update.value).toBe('');
   });
 
   it('服务端拒绝绕过设置页提交的非法 Webhook', async () => {

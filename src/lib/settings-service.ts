@@ -8,8 +8,14 @@ import {
 import { SETTING_KEYS } from '@/lib/settings-catalog';
 import { isOpenCodeFreeModel, providerSettingKey } from '@/contracts/ai-provider';
 import { parseWebhookConfigsForServer, serializeWebhookConfigsForServer } from '@/contracts/webhook';
-import { decryptWebhookConfigsForRuntime, encryptWebhookConfigsForStorage } from '@/lib/settings-crypto';
+import {
+  decryptSensitiveSetting,
+  decryptWebhookConfigsForRuntime,
+  encryptSensitiveSetting,
+  encryptWebhookConfigsForStorage,
+} from '@/lib/settings-crypto';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
+import { invalidateGlobalProxyCache } from '@/lib/proxy-config';
 import { PUBLIC_PUBLICATION_REBUILD_KEYS } from '@/lib/public-publication-service';
 import { DEFAULT_PROMPT_SETTINGS, SCORE_WEIGHT_META } from '@/lib/prompts';
 import { mergeSettingsRebuildPlan, SETTINGS_REBUILD_KEY } from '@/lib/settings-rebuild-service';
@@ -82,7 +88,11 @@ function validateSettingsInput(input: unknown, options: SettingsUpdateOptions = 
     ? new Set<string>()
     : new Set(
         Object.entries(parsed.data)
-          .filter(([key, value]) => SENSITIVE_SETTING_KEYS.has(key) && value.trim() === '')
+          // 代理页完成 reveal 后提交空值就是明确关闭代理；未完成 reveal 时
+          // 前端会直接移除该 key，因此其它敏感配置仍维持“空值=脱敏占位”的保护。
+          .filter(([key, value]) => SENSITIVE_SETTING_KEYS.has(key)
+            && key !== SETTING_KEYS.OUTBOUND_PROXY_URL
+            && value.trim() === '')
           .map(([key]) => key),
       );
   return { ok: true, data: { normalizedData, preserveRedactedSensitiveKeys } };
@@ -108,7 +118,9 @@ export async function exportSettingsValues(): Promise<Record<string, string>> {
   for (const row of rows) {
     settings[row.key] = row.key === SETTING_KEYS.FEISHU_WEBHOOK_URL
       ? decryptWebhookConfigsForRuntime(row.value)
-      : row.value;
+      : row.key === SETTING_KEYS.OUTBOUND_PROXY_URL
+        ? decryptSensitiveSetting(row.value)
+        : row.value;
   }
   return settings;
 }
@@ -127,6 +139,8 @@ export async function revealSensitiveSettings(requestedKeys?: string[]) {
       key,
       key === SETTING_KEYS.FEISHU_WEBHOOK_URL
         ? (value ? decryptWebhookConfigsForRuntime(value) : '[]')
+        : key === SETTING_KEYS.OUTBOUND_PROXY_URL
+          ? (value ? decryptSensitiveSetting(value) : '')
         : value,
     ];
   }));
@@ -147,6 +161,8 @@ export async function updateSettingsInTransaction(
   let updates = Object.entries(normalizedData) as [string, string][];
   updates = updates.map(([key, value]) => key === SETTING_KEYS.FEISHU_WEBHOOK_URL
     ? [key, encryptWebhookConfigsForStorage(serializeWebhookConfigsForServer(parseWebhookConfigsForServer(value)))]
+    : key === SETTING_KEYS.OUTBOUND_PROXY_URL
+      ? [key, encryptSensitiveSetting(value)]
     : [key, value]);
   const keepKeys = updates.filter(([key]) => preserveRedactedSensitiveKeys.has(key)).map(([key]) => key);
   if (keepKeys.length > 0) {
@@ -217,6 +233,7 @@ export async function updateSettingsInTransaction(
 export function invalidateSettingsRuntimeCaches(): void {
   invalidateAISettingsCache();
   invalidatePublicArticleCache();
+  invalidateGlobalProxyCache();
 }
 
 export async function updateSettings(input: unknown): Promise<SettingsUpdateResult> {

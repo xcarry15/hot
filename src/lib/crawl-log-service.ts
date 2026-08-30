@@ -476,6 +476,7 @@ export async function getCrawlLogSnapshot(
         ...(isLowAnalysisConfidence({ aiStatus: a.aiStatus, aiConfidence: a.aiConfidence })
           ? ['low-confidence' as const]
           : []),
+        ...(projection.push === 'filtered' ? ['filtered' as const] : []),
       ],
       push: projection.push,
       skipReason,

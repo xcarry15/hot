@@ -4,6 +4,7 @@ import path from 'node:path';
 
 const mocks = vi.hoisted(() => ({
   fetchHtml: vi.fn(),
+  fetchHtmlDetailed: vi.fn(),
   fetchWithRetry: vi.fn(),
   getZAI: vi.fn(),
 }));
@@ -11,11 +12,26 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/http', () => ({
   BROWSER_HEADERS: { 'User-Agent': 'test-browser' },
   fetchHtml: mocks.fetchHtml,
+  fetchHtmlDetailed: mocks.fetchHtmlDetailed,
   fetchWithRetry: mocks.fetchWithRetry,
+  MAX_RETRIES: 2,
   readResponseText: (response: { text: () => Promise<string> }) => response.text(),
   ensureResponseTextWithinLimit: (value: string) => value,
   hostFromUrl: (url: string) => new URL(url).origin,
   isLikelyJavaScriptVerificationPage: () => false,
+  formatFetchDiagnostics: (diagnostics: Array<{
+    method: string;
+    transport?: string;
+    status?: number | null;
+    finalUrl?: string;
+    error: string;
+  }>) => diagnostics.map((item) => [
+    `${item.method}${item.transport ? `/${item.transport}` : ''}`,
+    item.status == null ? '' : `status=${item.status}`,
+    item.finalUrl ? `finalUrl=${item.finalUrl}` : '',
+    item.error,
+  ].filter(Boolean).join(' ')).join(' | '),
+  safeUrlForLog: (url: string) => url,
 }));
 
 vi.mock('@/lib/zai', () => ({
@@ -45,9 +61,67 @@ it('解析器和注册表只依赖 crawl 纯契约，不反向依赖 crawler', (
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.fetchHtmlDetailed.mockImplementation(async (url: string, options: unknown) => {
+    const html = await mocks.fetchHtml(url, options);
+    return {
+      html,
+      status: html ? 200 : null,
+      statusText: html ? 'OK' : '',
+      finalUrl: url,
+      transport: 'direct',
+      ...(html ? {} : { error: 'mock failure' }),
+    };
+  });
 });
 
 describe('direct parser behavior', () => {
+  it('upgrades Winshang article URLs to HTTPS', async () => {
+    mocks.fetchHtml.mockImplementation(async (url: string) => (
+      url.includes('/list')
+        ? `
+          <div class="winew-list">
+            <li>
+              <h3><a href="http://news.winshang.com/html/074/1861.html">赢商品牌动态测试文章</a></h3>
+              <div class="win-new-info">品牌门店动态摘要</div>
+              <div class="win-new-tab">2026-08-29</div>
+            </li>
+          </div>
+        `
+        : null
+    ));
+
+    const result = await parseHtml('https://news.winshang.com/list-12.html', JSON.stringify({
+      listItem: '.winew-list li',
+      link: 'h3 a',
+      title: 'h3 a',
+      summary: '.win-new-info',
+      date: '.win-new-tab',
+    }));
+
+    expect(result.success).toBe(true);
+    expect(result.items[0]?.url).toBe('https://news.winshang.com/html/074/1861.html');
+  });
+
+  it('保留 HTTP 状态、最终 URL、代理路径和 ZAI 失败原因', async () => {
+    mocks.fetchHtmlDetailed.mockResolvedValue({
+      html: null,
+      status: 403,
+      statusText: 'Forbidden',
+      finalUrl: 'https://news.winshang.com/blocked',
+      transport: 'proxy',
+      error: 'HTTP 403 Forbidden',
+    });
+    mocks.getZAI.mockResolvedValue({
+      functions: { invoke: vi.fn().mockRejectedValue(new Error('ZAI page_reader 429')) },
+    });
+
+    const result = await parseHtml('https://news.winshang.com/list-12.html', '{}');
+
+    expect(result).toMatchObject({ success: false, items: [] });
+    expect(result.error).toContain('http/proxy status=403 finalUrl=https://news.winshang.com/blocked');
+    expect(result.error).toContain('zai ZAI page_reader 429');
+  });
+
   it('parseHtml extracts structured list items with resolved URLs', async () => {
     mocks.fetchHtml.mockResolvedValue(`
       <main>

@@ -6,11 +6,14 @@
  *   - AI 模型测试（POST /api/settings/test-ai）
  *   - OpenCode / OpenRouter 免费模型列表
  *   - Webhook 测试（POST /api/settings/test-webhook）
+ *   - 全局代理测试（POST /api/settings/test-proxy）
  *
  * 配置备份由 backup-api.client 统一负责，本文件只处理设置编辑能力。
  */
 import { requestJson } from '@/lib/request-json.client';
 import type { PromptVersionSnapshot } from '@/lib/prompts';
+import type { ProxyBatchTestResult, ProxyTestResult } from '@/contracts/proxy';
+export type { ProxyBatchTestResult, ProxyTestResult } from '@/contracts/proxy';
 
 /** Settings 行级 key→value 映射：与前端 Settings interface 一致。 */
 export type SettingsMap = Record<string, string>;
@@ -168,6 +171,20 @@ export async function testWebhook(
 ): Promise<WebhookTestResultDto> {
   return requestJson<WebhookTestResultDto>('POST', '/api/settings/test-webhook', {
     body: { webhookUrl: webhookUrl.trim() },
+    signal,
+  });
+}
+
+export async function testOutboundProxy(proxyUrl: string, signal?: AbortSignal): Promise<ProxyTestResult> {
+  return requestJson<ProxyTestResult>('POST', '/api/settings/test-proxy', {
+    body: { proxyUrl: proxyUrl.trim() },
+    signal,
+  });
+}
+
+export async function testAllOutboundProxies(forceRefresh = false, signal?: AbortSignal): Promise<ProxyBatchTestResult> {
+  return requestJson<ProxyBatchTestResult>('POST', '/api/settings/test-proxy', {
+    body: { action: 'all', refresh: forceRefresh },
     signal,
   });
 }

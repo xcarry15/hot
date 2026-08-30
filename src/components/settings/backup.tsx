@@ -12,6 +12,16 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -23,10 +33,17 @@ import {
 } from '@/components/ui/alert-dialog'
 import { downloadBlob, dateStamp, formatChinaTime } from '@/lib/browser-utils'
 import { exportProjectBackup, restoreProjectBackup } from '@/features/backup-api.client'
+import {
+  decryptProjectBackup,
+  encryptProjectBackup,
+  isEncryptedProjectBackup,
+  type EncryptedProjectBackup,
+} from '@/features/project-backup-crypto.client'
 import KeywordExportCard from './keyword-export'
 import DataExportPanel from './data-export'
 
 const MAX_BACKUP_BYTES = 50_000_000
+type BackupPasswordMode = 'export' | 'restore'
 
 function isProjectBackupPayload(value: unknown): value is ProjectBackupPayload {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -55,22 +72,18 @@ function validateSourceUrl(url: string): boolean {
 export default function BackupTab() {
   const [backupBusy, setBackupBusy] = useState<'export' | 'restore' | null>(null)
   const [pendingBackup, setPendingBackup] = useState<ProjectBackupPayload | null>(null)
+  const [pendingEncryptedBackup, setPendingEncryptedBackup] = useState<EncryptedProjectBackup | null>(null)
+  const [passwordMode, setPasswordMode] = useState<BackupPasswordMode | null>(null)
+  const [passphrase, setPassphrase] = useState('')
+  const [passphraseConfirmation, setPassphraseConfirmation] = useState('')
   const backupInputRef = useRef<HTMLInputElement>(null)
 
-  const handleBackupExport = async () => {
-    setBackupBusy('export')
-    try {
-      const payload = await exportProjectBackup()
-      downloadBlob(
-        new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
-        `开发选址助手-完整备份-${dateStamp()}.json`,
-      )
-      toast.success('完整备份已下载')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '导出完整备份失败')
-    } finally {
-      setBackupBusy(null)
-    }
+  const closePasswordDialog = () => {
+    if (backupBusy !== null) return
+    setPasswordMode(null)
+    setPendingEncryptedBackup(null)
+    setPassphrase('')
+    setPassphraseConfirmation('')
   }
 
   const handleBackupSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -82,18 +95,54 @@ export default function BackupTab() {
       return
     }
     try {
-      const payload: unknown = JSON.parse(await file.text())
-      if (!isProjectBackupPayload(payload)) throw new Error('不是当前项目的完整备份文件')
-      
-      // 验证数据源 URL 格式
-      const invalidUrls = payload.sources.filter(source => !validateSourceUrl(source.url))
-      if (invalidUrls.length > 0) {
-        throw new Error(`备份中包含 ${invalidUrls.length} 个无效的数据源 URL`)
-      }
-      
-      setPendingBackup(payload)
+      const encrypted: unknown = JSON.parse(await file.text())
+      if (!isEncryptedProjectBackup(encrypted)) throw new Error('不是当前项目的加密备份文件')
+      setPendingEncryptedBackup(encrypted)
+      setPasswordMode('restore')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '备份文件不是有效的 JSON')
+    }
+  }
+
+  const handlePasswordSubmit = async () => {
+    if (!passwordMode) return
+    if (passphrase.length < 12 || !passphrase.trim()) {
+      toast.error('备份保护密码至少需要 12 个字符')
+      return
+    }
+    if (passwordMode === 'export' && passphrase !== passphraseConfirmation) {
+      toast.error('两次输入的保护密码不一致')
+      return
+    }
+
+    setBackupBusy(passwordMode)
+    try {
+      if (passwordMode === 'export') {
+        const payload = await exportProjectBackup()
+        const encrypted = await encryptProjectBackup(payload, passphrase)
+        downloadBlob(
+          new Blob([JSON.stringify(encrypted, null, 2)], { type: 'application/json' }),
+          `开发选址助手-完整备份-${dateStamp()}.json`,
+        )
+        toast.success('加密备份已下载')
+      } else {
+        if (!pendingEncryptedBackup) throw new Error('加密备份文件已失效，请重新选择')
+        const payload = await decryptProjectBackup(pendingEncryptedBackup, passphrase)
+        if (!isProjectBackupPayload(payload)) throw new Error('备份解密成功，但内容格式无效')
+        const invalidUrls = payload.sources.filter(source => !validateSourceUrl(source.url))
+        if (invalidUrls.length > 0) {
+          throw new Error(`备份中包含 ${invalidUrls.length} 个无效的数据源 URL`)
+        }
+        setPendingBackup(payload)
+      }
+      setPasswordMode(null)
+      setPendingEncryptedBackup(null)
+      setPassphrase('')
+      setPassphraseConfirmation('')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : `${passwordMode === 'export' ? '导出' : '解密'}完整备份失败`)
+    } finally {
+      setBackupBusy(null)
     }
   }
 
@@ -127,15 +176,15 @@ export default function BackupTab() {
                   完整配置备份
                 </div>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  导出或恢复设置、提示词、数据源、关键词与工具目录。
+                  使用保护密码加密导出或恢复设置、提示词、数据源、关键词与工具目录。
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
-                <Button type="button" size="sm" variant="outline" className="h-7 gap-1.5 px-2.5 text-xs" disabled={backupBusy !== null} onClick={() => void handleBackupExport()}>
+                <Button type="button" size="sm" variant="outline" className="h-7 gap-1.5 px-2.5 text-xs" disabled={backupBusy !== null || passwordMode !== null} onClick={() => setPasswordMode('export')}>
                   {backupBusy === 'export' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                   下载备份
                 </Button>
-                <Button type="button" size="sm" variant="outline" className="h-7 gap-1.5 px-2.5 text-xs" disabled={backupBusy !== null} onClick={() => backupInputRef.current?.click()}>
+                <Button type="button" size="sm" variant="outline" className="h-7 gap-1.5 px-2.5 text-xs" disabled={backupBusy !== null || passwordMode !== null} onClick={() => backupInputRef.current?.click()}>
                   <FileUp className="h-3.5 w-3.5" />
                   上传恢复
                 </Button>
@@ -149,6 +198,54 @@ export default function BackupTab() {
       </div>
 
       <DataExportPanel />
+
+      <Dialog open={passwordMode !== null} onOpenChange={(open) => { if (!open) closePasswordDialog() }}>
+        <DialogContent showCloseButton={backupBusy === null}>
+          <DialogHeader>
+            <DialogTitle>{passwordMode === 'export' ? '设置备份保护密码' : '输入备份保护密码'}</DialogTitle>
+            <DialogDescription>
+              {passwordMode === 'export'
+                ? '保护密码至少 12 个字符，仅用于本次备份；密码丢失后无法恢复。'
+                : '备份将在浏览器中解密，保护密码不会发送到服务器。'}
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handlePasswordSubmit() }}>
+            <div className="space-y-2">
+              <Label htmlFor="backup-passphrase">保护密码</Label>
+              <Input
+                id="backup-passphrase"
+                type="password"
+                autoComplete={passwordMode === 'export' ? 'new-password' : 'current-password'}
+                minLength={12}
+                value={passphrase}
+                disabled={backupBusy !== null}
+                onChange={(event) => setPassphrase(event.target.value)}
+              />
+            </div>
+            {passwordMode === 'export' ? (
+              <div className="space-y-2">
+                <Label htmlFor="backup-passphrase-confirmation">确认保护密码</Label>
+                <Input
+                  id="backup-passphrase-confirmation"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={12}
+                  value={passphraseConfirmation}
+                  disabled={backupBusy !== null}
+                  onChange={(event) => setPassphraseConfirmation(event.target.value)}
+                />
+              </div>
+            ) : null}
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={backupBusy !== null} onClick={closePasswordDialog}>取消</Button>
+              <Button type="submit" disabled={backupBusy !== null}>
+                {backupBusy !== null ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+                {backupBusy === 'export' ? '加密中…' : backupBusy === 'restore' ? '解密中…' : passwordMode === 'export' ? '加密并下载' : '解密备份'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={pendingBackup !== null} onOpenChange={(open) => { if (!open && backupBusy !== 'restore') setPendingBackup(null) }}>
         <AlertDialogContent>

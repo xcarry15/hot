@@ -54,7 +54,7 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/public-publication-service', () => ({ refreshEventPublicPublication: mocks.refresh }));
 
-import { deriveEventClusterReviewStatus, mergeEvents, moveArticleToEvent, reconcileEventAfterArticleDeletion, repairStaleEventRepresentatives, selectRepresentativeCandidate, setEventRepresentative, sharedBrands, splitEventArticles } from '@/lib/event-service';
+import { confirmIndependentArticle, deriveEventClusterReviewStatus, mergeEvents, moveArticleToEvent, reconcileEventAfterArticleDeletion, repairStaleEventRepresentatives, selectRepresentativeCandidate, setEventRepresentative, sharedBrands, splitEventArticles } from '@/lib/event-service';
 
 describe('Event 人工纠错', () => {
   beforeEach(() => {
@@ -198,6 +198,18 @@ describe('Event 人工纠错', () => {
     });
     await expect(setEventRepresentative('e1', 'a1')).resolves.toBe(false);
     expect(mocks.eventUpdate).not.toHaveBeenCalled();
+  });
+
+  it('多成员待复核 Event 不能直接确认当前文章为独立事件', async () => {
+    mocks.eventFindUnique.mockResolvedValueOnce({
+      status: 'active',
+      clusterReviewStatus: 'pending',
+      _count: { articles: 2 },
+    });
+
+    await expect(confirmIndependentArticle('e1', 'a1')).resolves.toBe(false);
+    expect(mocks.articleFindFirst).not.toHaveBeenCalled();
+    expect(mocks.articleUpdate).not.toHaveBeenCalled();
   });
 
   it('移动文章到已有 Event 时保留 Article 自身事件身份', async () => {

@@ -8,6 +8,38 @@ import {
 const ALGORITHM = 'aes-256-gcm';
 const ENVELOPE_PREFIX = 'enc:v1:';
 
+function encryptSensitiveText(value: string): string {
+  const text = value.trim();
+  if (!text || text.startsWith(ENVELOPE_PREFIX)) return text;
+
+  const iv = randomBytes(12);
+  const cipher = createCipheriv(ALGORITHM, getEncryptionKey(), iv);
+  const ciphertext = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return [ENVELOPE_PREFIX.slice(0, -1), iv.toString('hex'), authTag.toString('hex'), ciphertext.toString('hex')].join(':');
+}
+
+function decryptSensitiveText(value: string): string {
+  if (!value.startsWith(ENVELOPE_PREFIX)) return value;
+  const payload = value.slice(ENVELOPE_PREFIX.length).split(':');
+  if (payload.length !== 3) throw new Error('敏感设置加密数据格式无效');
+  const [ivHex, authTagHex, ciphertextHex] = payload;
+  if (!/^[0-9a-f]+$/i.test(ivHex) || !/^[0-9a-f]+$/i.test(authTagHex) || !/^[0-9a-f]+$/i.test(ciphertextHex)) {
+    throw new Error('敏感设置加密数据编码无效');
+  }
+
+  try {
+    const decipher = createDecipheriv(ALGORITHM, getEncryptionKey(), Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(ciphertextHex, 'hex')),
+      decipher.final(),
+    ]).toString('utf8');
+  } catch {
+    throw new Error('敏感设置解密失败，请检查 SETTINGS_ENCRYPTION_KEY 是否与保存时一致');
+  }
+}
+
 /**
  * Webhook URL 的数据库存储格式：
  * enc:v1:<末 6 位长度>:<末 6 位明文>:<iv>:<authTag>:<ciphertext>
@@ -102,4 +134,13 @@ export function decryptWebhookConfigsForRuntime(value: string): string {
     ...config,
     url: decryptWebhookUrl(config.url),
   } satisfies WebhookConfig)));
+}
+
+/** 通用敏感设置的加密存储 codec，例如全局代理 URL。 */
+export function encryptSensitiveSetting(value: string): string {
+  return encryptSensitiveText(value);
+}
+
+export function decryptSensitiveSetting(value: string): string {
+  return decryptSensitiveText(value);
 }

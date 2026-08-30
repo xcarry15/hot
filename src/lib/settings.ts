@@ -33,7 +33,7 @@ import type { WebhookConfig } from '@/contracts/webhook';
 import {
   parseWebhookConfigs,
 } from '@/contracts/webhook';
-import { decryptWebhookConfigsForRuntime } from '@/lib/settings-crypto';
+import { decryptSensitiveSetting, decryptWebhookConfigsForRuntime } from '@/lib/settings-crypto';
 
 // ── 读写函数 ──────────────────────────────────────────────────────
 
@@ -44,6 +44,9 @@ export async function getSetting(key: string): Promise<string> {
 }
 
 function resolveSettingValue(key: string, value: string | null | undefined): string {
+  if (key === SETTING_KEYS.OUTBOUND_PROXY_URL) {
+    return value ? decryptSensitiveSetting(value) : '';
+  }
   if (key in DEFAULT_PROMPT_SETTINGS) {
     return value?.trim()
       ? value

@@ -33,6 +33,7 @@ const loadDashboard = () => import('@/components/dashboard-tab')
 const loadSources = () => import('@/components/sources-tab')
 const loadPublic = () => import('@/components/settings/public')
 const loadToolDirectory = () => import('@/components/settings/tool-directory')
+const loadProxy = () => import('@/components/settings/proxy')
 const AiModelTab = dynamic(loadAiModel, { loading: sectionLoading })
 const PromptsTab = dynamic(loadPrompts, { loading: sectionLoading })
 const PushTab = dynamic(loadPush, { loading: sectionLoading })
@@ -47,6 +48,7 @@ const SourcesManagement = dynamic(
 )
 const PublicTab = dynamic(loadPublic, { loading: sectionLoading })
 const ToolDirectoryManagement = dynamic(loadToolDirectory, { loading: sectionLoading })
+const ProxyTab = dynamic(loadProxy, { loading: sectionLoading })
 
 const sectionLoaders: Record<string, () => Promise<unknown>> = {
   dashboard: loadDashboard,
@@ -60,9 +62,10 @@ const sectionLoaders: Record<string, () => Promise<unknown>> = {
   data: loadData,
   backup: loadBackup,
   tools: loadToolDirectory,
+  proxy: loadProxy,
 }
 
-type SensitiveTab = 'ai-model' | 'push'
+type SensitiveTab = 'ai-model' | 'push' | 'proxy'
 type SensitiveRevealState = Record<SensitiveTab, 'idle' | 'loading' | 'ready' | 'error'>
 
 function buildSettingsSavePayload(
@@ -74,6 +77,7 @@ function buildSettingsSavePayload(
   // GET /api/settings 只返回脱敏占位值。未完成 reveal 时禁止提交敏感字段，
   // 避免一次普通设置保存把服务端仍然存在的密钥/Webhook 覆盖掉。
   if (!sensitiveReady.push) delete payload[SETTING_KEYS.FEISHU_WEBHOOK_URL]
+  if (!sensitiveReady.proxy) delete payload[SETTING_KEYS.OUTBOUND_PROXY_URL]
   // 前端按当前显示值完整保存；提示词空白值由服务端统一归一化为当前默认文本。
   for (const id of Object.keys(AI_PROVIDERS) as AIProviderId[]) {
     const config = providerConfigs[id]
@@ -106,7 +110,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   const settingsBaselineRef = useRef<string | null>(null)
   const settingsBaselineStateRef = useRef<SettingsType | null>(null)
   const providerBaselineRef = useRef<ProviderConfigs | null>(null)
-  const revealedSensitiveTabsRef = useRef<Set<'ai-model' | 'push'>>(new Set())
+  const revealedSensitiveTabsRef = useRef<Set<SensitiveTab>>(new Set())
   const pendingRevealBaselineRef = useRef<string | null>(null)
   // reveal 401 只提示一次：避免 StrictMode 双跑 / 刷新 / 切回设置页重复打扰。
   const warnedAuthRef = useRef(false)
@@ -116,6 +120,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   const [sensitiveRevealState, setSensitiveRevealState] = useState<SensitiveRevealState>({
     'ai-model': 'idle',
     push: 'idle',
+    proxy: 'idle',
   })
 
   // 异步保存期间用户仍可能继续编辑；保存完成时必须以最新状态判断是否还有未保存内容。
@@ -181,7 +186,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         }
       }
       setProviderConfigs(baseConfigs)
-      setSensitiveRevealState({ 'ai-model': 'idle', push: 'idle' })
+      setSensitiveRevealState({ 'ai-model': 'idle', push: 'idle', proxy: 'idle' })
 
     } catch {
       setLoadError(true)
@@ -191,14 +196,16 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     }
   }, [])
 
-  const revealSensitiveSettingsForEditor = useCallback(async (tab: 'ai-model' | 'push') => {
+  const revealSensitiveSettingsForEditor = useCallback(async (tab: SensitiveTab) => {
     const capturedSettings = settings
     const capturedProviders = providerConfigs
     setSensitiveRevealState((current) => ({ ...current, [tab]: 'loading' }))
     try {
       const revealKeys = tab === 'push'
         ? [SETTING_KEYS.FEISHU_WEBHOOK_URL]
-        : (Object.keys(AI_PROVIDERS) as AIProviderId[]).map((id) => providerKey(id, 'api_key'))
+        : tab === 'proxy'
+          ? [SETTING_KEYS.OUTBOUND_PROXY_URL]
+          : (Object.keys(AI_PROVIDERS) as AIProviderId[]).map((id) => providerKey(id, 'api_key'))
       const revealed = await revealSettings(revealKeys)
       if (revealKeys.some((key) => typeof revealed[key] !== 'string')) {
         throw new Error('敏感配置响应不完整')
@@ -206,9 +213,13 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
       const revealedWebhook = typeof revealed.feishu_webhook_url === 'string'
         ? revealed.feishu_webhook_url
         : undefined
+      const revealedProxy = typeof revealed[SETTING_KEYS.OUTBOUND_PROXY_URL] === 'string'
+        ? revealed[SETTING_KEYS.OUTBOUND_PROXY_URL]
+        : undefined
       const nextSettings = {
         ...capturedSettings,
         ...(revealedWebhook === undefined ? {} : { feishu_webhook_url: revealedWebhook }),
+        ...(revealedProxy === undefined ? {} : { outbound_proxy_url: revealedProxy }),
       }
       const nextProviders = Object.fromEntries(
         (Object.keys(AI_PROVIDERS) as AIProviderId[]).map((id) => {
@@ -220,9 +231,15 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
       pendingRevealBaselineRef.current = settingsFingerprint(nextSettings, nextProviders)
       // 回显请求可能晚于用户输入完成；只回填请求开始时仍未被修改的字段。
       setSettings((current) => (
-        revealedWebhook !== undefined && current.feishu_webhook_url === capturedSettings.feishu_webhook_url
-          ? { ...current, feishu_webhook_url: revealedWebhook }
-          : current
+        {
+          ...current,
+          ...(revealedWebhook !== undefined && current.feishu_webhook_url === capturedSettings.feishu_webhook_url
+            ? { feishu_webhook_url: revealedWebhook }
+            : {}),
+          ...(revealedProxy !== undefined && current.outbound_proxy_url === capturedSettings.outbound_proxy_url
+            ? { outbound_proxy_url: revealedProxy }
+            : {}),
+        }
       ))
       setProviderConfigs((current) => {
         const next = { ...current }
@@ -282,7 +299,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   }), [providerConfigs, settingsFingerprint])
 
   useEffect(() => {
-    const tab = activeTab === 'ai-model' || activeTab === 'push' ? activeTab : null
+    const tab = activeTab === 'ai-model' || activeTab === 'push' || activeTab === 'proxy' ? activeTab : null
     if (loading || loadError || !tab || revealedSensitiveTabsRef.current.has(tab)) return
     revealedSensitiveTabsRef.current.add(tab)
     void revealSensitiveSettingsForEditor(tab)
@@ -310,6 +327,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     const sensitiveReady = {
       'ai-model': sensitiveRevealState['ai-model'] === 'ready',
       push: sensitiveRevealState.push === 'ready',
+      proxy: sensitiveRevealState.proxy === 'ready',
     }
     const payload = buildSettingsSavePayload(submittedSettings, submittedProviderConfigs, sensitiveReady)
     const priorSettings = settingsBaselineStateRef.current
@@ -319,6 +337,9 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
     const pushSensitiveDirty = !sensitiveReady.push
       && Boolean(priorSettings)
       && submittedSettings.feishu_webhook_url !== priorSettings?.feishu_webhook_url
+    const proxySensitiveDirty = !sensitiveReady.proxy
+      && Boolean(priorSettings)
+      && submittedSettings.outbound_proxy_url !== priorSettings?.outbound_proxy_url
     const aiSensitiveDirty = !sensitiveReady['ai-model']
       && Boolean(priorProviders)
       && (Object.keys(AI_PROVIDERS) as AIProviderId[]).some((id) => (
@@ -326,6 +347,9 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
       ))
     if (!sensitiveReady.push && priorSettings) {
       persistedBaselineSettings.feishu_webhook_url = priorSettings.feishu_webhook_url
+    }
+    if (!sensitiveReady.proxy && priorSettings) {
+      persistedBaselineSettings.outbound_proxy_url = priorSettings.outbound_proxy_url
     }
     if (!sensitiveReady['ai-model'] && priorProviders) {
       for (const id of Object.keys(AI_PROVIDERS) as AIProviderId[]) {
@@ -352,6 +376,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
             : '',
           aiSensitiveDirty ? 'AI 密钥未保存（尚未完成安全读取）' : '',
           pushSensitiveDirty ? 'Webhook 未保存（尚未完成安全读取）' : '',
+          proxySensitiveDirty ? '代理未保存（尚未完成安全读取）' : '',
         ].filter(Boolean).join('，')
         toast.success(details ? `设置已保存，${details}` : '设置已保存')
       }
@@ -426,6 +451,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
             <TabsTrigger value="ai-model" data-value="ai-model" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">AI 模型</TabsTrigger>
             <TabsTrigger value="prompts" data-value="prompts" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">提示词</TabsTrigger>
             <TabsTrigger value="push" data-value="push" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">推送</TabsTrigger>
+            <TabsTrigger value="proxy" data-value="proxy" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">代理</TabsTrigger>
             <TabsTrigger value="account" data-value="account" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">账户</TabsTrigger>
             <TabsTrigger value="data" data-value="data" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">维护</TabsTrigger>
             <TabsTrigger value="backup" data-value="backup" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">备份</TabsTrigger>
@@ -474,6 +500,15 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
             setSettings={setSettings}
             sensitiveStatus={sensitiveRevealState.push}
             onRetrySensitive={() => retrySensitiveSettings('push')}
+          />
+        </TabsContent>
+
+        <TabsContent value="proxy" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
+          <ProxyTab
+            settings={settings}
+            setSettings={setSettings}
+            sensitiveStatus={sensitiveRevealState.proxy}
+            onRetrySensitive={() => retrySensitiveSettings('proxy')}
           />
         </TabsContent>
 

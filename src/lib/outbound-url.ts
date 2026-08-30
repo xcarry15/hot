@@ -2,9 +2,16 @@ import { lookup as lookupDns } from 'node:dns';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import type { LookupOptions } from 'node:dns';
-import { Agent, interceptors } from 'undici';
+import { Agent, interceptors, ProxyAgent } from 'undici';
+import type { Dispatcher } from 'undici';
 
 const BLOCKED_HOSTNAMES = new Set(['localhost', 'localhost.localdomain']);
+// Undici interprets DNS record TTL in milliseconds. A zero TTL expires the
+// record before the interceptor can select it, which makes the selected IP
+// null and crashes while reading its port.
+export const SAFE_DNS_RECORD_TTL_MS = 1_000;
+const MAX_CACHED_PROXY_DISPATCHERS = 32;
+const proxyDispatcherCache = new Map<string, Dispatcher>();
 
 type SafeDnsStorage = NonNullable<NonNullable<Parameters<typeof interceptors.dns>[0]>['storage']>;
 const safeDnsRecords = new Map<string, NonNullable<ReturnType<SafeDnsStorage['get']>>>();
@@ -39,7 +46,7 @@ const safeDnsStorage: SafeDnsStorage = {
  */
 const safeOutboundDispatcher = new Agent({ maxOrigins: 100 }).compose(
   interceptors.dns({
-    maxTTL: 1,
+    maxTTL: SAFE_DNS_RECORD_TTL_MS,
     maxItems: 100,
     dualStack: true,
     storage: safeDnsStorage,
@@ -63,7 +70,11 @@ const safeOutboundDispatcher = new Agent({ maxOrigins: 100 }).compose(
           callback(error, []);
           return;
         }
-        const records = addresses.map((entry) => ({ address: entry.address, family: entry.family as 4 | 6, ttl: 0 }));
+        const records = addresses.map((entry) => ({
+          address: entry.address,
+          family: entry.family as 4 | 6,
+          ttl: SAFE_DNS_RECORD_TTL_MS,
+        }));
         if (records.length === 0 || records.some((entry) => isBlockedOutboundHostname(entry.address))) {
           const blockedError = new Error('出站地址解析到受限网络') as NodeJS.ErrnoException;
           blockedError.code = 'EOUTBOUNDPRIVATE';
@@ -172,6 +183,31 @@ export function isBlockedOutboundHostname(hostname: string): boolean {
 
 export function getSafeOutboundDispatcher(): typeof safeOutboundDispatcher {
   return safeOutboundDispatcher;
+}
+
+/** 获取出站代理的 Dispatcher。限制缓存大小，避免测速大量失效节点时持续增长。 */
+export function getOutboundProxyDispatcher(proxyUrl: string): Dispatcher {
+  const normalized = proxyUrl.trim();
+  const parsed = new URL(normalized);
+  if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || !parsed.hostname) {
+    throw new Error('出站代理只支持 http/https');
+  }
+
+  const cached = proxyDispatcherCache.get(normalized);
+  if (cached) {
+    proxyDispatcherCache.delete(normalized);
+    proxyDispatcherCache.set(normalized, cached);
+    return cached;
+  }
+
+  if (proxyDispatcherCache.size >= MAX_CACHED_PROXY_DISPATCHERS) {
+    const oldest = proxyDispatcherCache.keys().next().value as string | undefined;
+    if (oldest) proxyDispatcherCache.delete(oldest);
+  }
+
+  const dispatcher = new ProxyAgent(normalized);
+  proxyDispatcherCache.set(normalized, dispatcher);
+  return dispatcher;
 }
 
 /**

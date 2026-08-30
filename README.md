@@ -19,7 +19,7 @@
 - `/tools`：选址、地理位置、数据分析和文件工具目录。
 - `/about`：产品说明与联系入口。
 - `/admin`：Token 会话保护的管理后台。
-- `/api/health`：匿名就绪检查；同时验证应用进程与 SQLite 可访问性，数据库异常时返回 503。
+- `/api/health`：匿名就绪检查；同时验证应用进程与 SQLite 可访问性，数据库异常时返回 503；GitHub Actions 发布包还返回当前 Git revision 供部署验收。
 
 公开端统一复用 `PublicPageShell`、公共头部与页脚；产品名称和文案常量集中在 `src/lib/public-brand.ts`。
 
@@ -52,6 +52,9 @@
 - AI Provider 冷却状态只持久化在 Article 的 `nextAiRetryAt`；人工运行全流程会立即归一化等待、失败及旧 Event/聚类残留，重新获取正文后再探测 AI，不使用进程内熔断状态阻塞恢复。
 - 长正文 AI 请求使用足够的 Provider 超时；单篇超时或网络失败只进入该文章的有限重试，不暂停同批后续文章。鉴权、余额、限流和服务端 5xx 仍按 Provider 全局故障处理。
 - 技术失败经过有限自动重试后进入人工处理；不会通过删除 Article 来隐藏失败。
+- 工作台文章标签会显示软文、重复、低分析置信和未达门槛；其中“未达门槛”由当前推送步骤的评分/相关性过滤状态派生，不代表抓取或 AI 流程失败。
+- HTML 来源失败会保留实际 HTTP 状态、重定向后的最终 URL，以及实际使用的直连/代理路径和 ZAI page_reader 原因；可选的详情发布时间补全只访问本轮可能新建的 URL，不对历史文章重复抓取。
+- 正文详情请求由文章层统一负责退避；共享 HTTP 层不再与外层重复重试，单篇抓取期间 ZAI page_reader 最多调用一次，避免失败时放大请求量。
 - 调度器按数据库 Job 状态运行，并遵守 `Asia/Shanghai` 的静默时段；手动操作不受静默时段限制。
 - `PushDelivery` 保存当前目标投递状态，`PushLog` 只作为历史审计。
 
@@ -79,7 +82,7 @@
 顶层导航只保留：
 
 - `工作台`：Job 监控、技术恢复、文章搜索和统一的 Article / Event 详情抽屉。
-- `设置`：概览、公开、源管理、关键词、AI 模型、提示词、推送、账户、维护、备份和工具中心。
+- `设置`：概览、公开、源管理、关键词、AI 模型、提示词、推送、代理、账户、维护、备份和工具中心。
 
 工作台负责任务状态与技术恢复；详情抽屉负责内容校准、Event 修正、公开决策和 Event 级人工推送。两者共用服务层，但不合并职责。
 
@@ -139,6 +142,11 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 - `API_TOKEN`：后台和受保护 API 的令牌；生产环境必填。
 - `SETTINGS_ENCRYPTION_KEY`：敏感设置加密密钥；生产环境必填且部署间保持不变。
 - `NEXT_PUBLIC_SITE_URL`：canonical、Open Graph、robots 与 sitemap 使用的站点地址；本地可留空或使用 `http://localhost:3011`，生产必须配置正式 HTTPS 地址。不要把本地 `.env` 直接用于生产。
+- `OUTBOUND_PROXY_URL`：可选，全局 HTTP/HTTPS 出站代理；设置页保存值优先。代理会用于项目共享 HTTP 层的来源抓取、AI、模型列表和 Webhook 请求，公共代理不适合承载敏感数据。
+
+### 代理与测速
+
+设置页的“获取并测速全部”会从 [RelayGlass](https://github.com/relayglass/free-proxy-list)、[Proxifly](https://github.com/proxifly/free-proxy-list) 和 [TheSpeedX](https://github.com/TheSpeedX/PROXY-List) 的公开列表读取候选，服务端去重后最多测试 24 个节点、同时测试 6 个。列表缓存 5 分钟，刷新失败时沿用上次候选；单节点测试包含目标页面响应体读取并有 8 秒总超时。测速通过后再点击“使用最快”并保存。公开免费代理可能随时失效，禁止传输密钥、Webhook、登录态或其他敏感数据。
 
 ### 配置 OpenCode Zen 免费模型
 
@@ -191,12 +199,12 @@ npm run db:cleanup-logs
 当前仓库包含 GitHub Actions workflow，日常发布路径为：
 
 ```text
-推送或合并 master → CI → CI 成功 → Deploy production → 健康检查
+推送或合并 master → CI → CI 成功 → Deploy production → 健康检查并核对线上 Git revision
 ```
 
 `Deploy production` 作为 CI 的复用 Job，仅在质量检查、迁移冒烟、生产构建和 E2E 全部成功后执行；也可从 GitHub Actions 手动运行。部署所需的 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY` 及可选的 `DEPLOY_PORT`、`DEPLOY_KNOWN_HOSTS` 应配置在 `production` Environment 的 Secrets/Variables 中。
 
-发布脚本会在版本化 release 目录安装依赖并构建，再校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、应用 migration，最后原子切换 `current` 软链、启动单实例并检查包含 SQLite 可访问性的健康接口与 CSS 资源。旧 release 默认保留 5 个，普通部署失败时会恢复数据库备份和旧版本；生产重置不提供自动回滚。
+发布脚本会在版本化 release 目录安装依赖并构建，再校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、应用 migration，最后原子切换 `current` 软链、启动单实例并检查包含 SQLite 可访问性的健康接口与 CSS 资源。GitHub Actions 随部署包写入目标 Git revision，并在外部健康检查后核对线上 revision。旧 release 默认保留 5 个，普通部署失败时会恢复数据库备份和旧版本；生产重置不提供自动回滚。
 
 手动 `reset_production=yes` 会在不备份的情况下删除生产 SQLite，并从当前 migration 与 seed 全新初始化。只有在明确接受丢失生产数据时才可使用；生产重置失败不提供自动数据库回滚。
 

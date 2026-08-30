@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 
 const ADMIN_TOKEN = process.env.API_TOKEN ?? 'ci-only-token';
@@ -32,18 +33,31 @@ test('tool directory distinguishes clickable and unavailable tools', async ({ pa
   await expect(cards.locator('[aria-disabled="true"] a')).toHaveCount(0);
 });
 
-test('backup downloads a full snapshot and opens restore confirmation', async ({ page }) => {
+test('backup encrypts the snapshot and decrypts it before restore confirmation', async ({ page }) => {
+  const passphrase = 'ci-backup-passphrase';
   await login(page);
   await page.getByRole('button', { name: '设置' }).click();
   await page.getByRole('tab', { name: '备份' }).click();
   await expect(page.getByText('完整配置备份')).toBeVisible();
 
-  const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: '下载备份', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '设置备份保护密码' })).toBeVisible();
+  await page.getByLabel('保护密码', { exact: true }).fill(passphrase);
+  await page.getByLabel('确认保护密码').fill(passphrase);
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: '加密并下载' }).click();
   const download = await downloadPromise;
   const backupPath = await download.path();
   expect(backupPath).toBeTruthy();
+  const serialized = await readFile(backupPath!, 'utf8');
+  const envelope = JSON.parse(serialized) as Record<string, unknown>;
+  expect(envelope).toMatchObject({ type: 'hot2-encrypted-project-backup', version: 1 });
+  expect(envelope).toHaveProperty('ciphertext');
+  expect(envelope).not.toHaveProperty('settings');
 
   await page.locator('input[type="file"][accept*="json"]').setInputFiles(backupPath!);
+  await expect(page.getByRole('heading', { name: '输入备份保护密码' })).toBeVisible();
+  await page.getByLabel('保护密码', { exact: true }).fill(passphrase);
+  await page.getByRole('button', { name: '解密备份' }).click();
   await expect(page.getByRole('heading', { name: '确认恢复完整备份？' })).toBeVisible();
 });

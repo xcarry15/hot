@@ -21,6 +21,7 @@ export type ProviderConfigs = Record<AIProviderId, ProviderConfig>
 
 export interface Settings extends Record<PromptBlockKey, string> {
   feishu_webhook_url: string
+  outbound_proxy_url: string
   push_mode: string
   push_time: string
   push_min_score: string

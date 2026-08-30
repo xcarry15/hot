@@ -47,6 +47,27 @@ import {
   WORKSPACE_SHEET_CLASS,
 } from "./intelligence-inbox/styles";
 
+function toEditorialDraft(result: ArticleDetailDto): ArticleEditorialDraft {
+  return {
+    summary: result.summary,
+    brand: splitBrands(result.brand).join("，"),
+    category: result.category,
+    eventSubjects: parseEventSubjects(result.eventSubjects).join("，"),
+    eventAction: result.eventAction,
+    eventObject: result.eventObject,
+    keyPoints: parseJsonArray(result.keyPoints).join("\n"),
+  };
+}
+
+function isArticleRevisionConflict(error: unknown): boolean {
+  if (!isRequestJsonError(error, 409) || !error.body || typeof error.body !== "object") return false;
+  return (error.body as { code?: unknown }).code === "article_revision_conflict";
+}
+
+function hasEditorialDraftChanges(detail: ArticleDetailDto, draft: ArticleEditorialDraft): boolean {
+  return JSON.stringify(toEditorialDraft(detail)) !== JSON.stringify(draft);
+}
+
 export interface IntelligenceInboxProps {
   articleId?: string | null;
   initialPanel?: DetailPanel | null;
@@ -97,6 +118,19 @@ export default function IntelligenceInbox({
   const selectedIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const currentId = selectedIdRef.current;
+    if (
+      articleId !== currentId
+      && currentId
+      && editing
+      && detail?.id === currentId
+      && hasEditorialDraftChanges(detail, draft)
+    ) {
+      if (!window.confirm("当前文章有未保存的人工修改，切换文章会丢失这些修改。确认切换吗？")) {
+        onArticleChange?.(currentId, requestedPanel);
+        return;
+      }
+    }
     setSelectedId(articleId);
     selectedIdRef.current = articleId;
     eventDetailRequestRef.current += 1;
@@ -107,7 +141,7 @@ export default function IntelligenceInbox({
     setMergeTargetId("");
     setSelectedSplitIds(new Set());
     setComparisonTarget(null);
-  }, [articleId]);
+  }, [articleId, detail, draft, editing, onArticleChange, requestedPanel]);
 
   useEffect(() => {
     setRequestedPanel(initialPanel);
@@ -137,15 +171,7 @@ export default function IntelligenceInbox({
         setDetail(result);
         setEditing(false);
         setShowFullContent(false);
-        setDraft({
-          summary: result.summary,
-          brand: splitBrands(result.brand).join("，"),
-          category: result.category,
-          eventSubjects: parseEventSubjects(result.eventSubjects).join("，"),
-          eventAction: result.eventAction,
-          eventObject: result.eventObject,
-          keyPoints: parseJsonArray(result.keyPoints).join("\n"),
-        });
+        setDraft(toEditorialDraft(result));
       })
       .catch((error) => {
         if (isRequestAborted(error)) return;
@@ -271,10 +297,19 @@ export default function IntelligenceInbox({
   }, [eventDetail]);
 
   const selectArticle = useCallback((nextArticleId: string, panel?: DetailPanel | null) => {
+    if (rowSavingId !== null || detailAction !== null || eventAction !== null) return;
+    if (nextArticleId === selectedId) {
+      if (panel !== undefined) setRequestedPanel(panel);
+      return;
+    }
+    if (editing && detail && hasEditorialDraftChanges(detail, draft)) {
+      if (!window.confirm("当前文章有未保存的人工修改，切换文章会丢失这些修改。确认切换吗？")) return;
+    }
+    setEditing(false);
     setSelectedId(nextArticleId);
     if (panel !== undefined) setRequestedPanel(panel);
     onArticleChange?.(nextArticleId, panel);
-  }, [onArticleChange]);
+  }, [detail, detailAction, draft, editing, eventAction, onArticleChange, rowSavingId, selectedId]);
 
   const updateDraft = useCallback((patch: Partial<ArticleEditorialDraft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -304,31 +339,42 @@ export default function IntelligenceInbox({
           refreshAfterMutation();
           toast.success(message);
         })
-        .catch((error) => toast.error(errorMessage(error, "更新失败")))
+        .catch(async (error) => {
+          if (isArticleRevisionConflict(error)) {
+            try {
+              await refreshArticleDetail(id);
+            } catch {
+              // 主错误仍由下面的提示交代，避免刷新失败覆盖冲突原因。
+            }
+            toast.warning("文章已被其他操作更新，已刷新当前版本");
+            return;
+          }
+          toast.error(errorMessage(error, "更新失败"));
+        })
         .finally(() => {
           rowSavingRef.current = null;
           setRowSavingId(null);
         })
         .then(() => undefined);
     },
-    [patchRow, refreshAfterMutation, refreshSelectedEvent],
+    [patchRow, refreshAfterMutation, refreshArticleDetail, refreshSelectedEvent],
   );
 
   const changePublicOverride = useCallback((next: "auto" | "public" | "hidden") => {
-    if (!detail || rowSavingId === detail.id || next === detail.publicOverride) return;
+    if (!detail || rowSavingId === detail.id || detailAction !== null || eventAction !== null || editing || next === detail.publicOverride) return;
     if (
       next === "hidden" &&
       !window.confirm("确认隐藏文章？\n\n该操作会强制覆盖自动公开策略；如果当前文章是事件代表，事件公开状态会立即重新计算。")
     ) return;
     queueRowUpdate(
       detail.id,
-      { publicOverride: next },
+      { publicOverride: next, expectedUpdatedAt: detail.updatedAt },
       next === "hidden" ? "文章已隐藏" : next === "public" ? "已设为强制公开" : "已恢复自动公开策略",
     );
-  }, [detail, queueRowUpdate, rowSavingId]);
+  }, [detail, detailAction, editing, eventAction, queueRowUpdate, rowSavingId]);
 
   const saveEditorial = useCallback(async () => {
-    if (!selectedId || detail?.id !== selectedId) return;
+    if (!selectedId || detail?.id !== selectedId || rowSavingRef.current || eventAction !== null) return;
     const nextSubjects = draft.eventSubjects
       .split(/[,，、+\n]/)
       .map((item) => item.trim())
@@ -339,6 +385,7 @@ export default function IntelligenceInbox({
     setDetailAction("edit");
     try {
       const updated = await updateArticleEditorial(selectedId, {
+        expectedUpdatedAt: detail.updatedAt,
         ...(draft.summary.trim() !== detail.summary ? { summary: draft.summary } : {}),
         ...(draft.brand.trim() !== splitBrands(detail.brand).join("，") ? { brand: draft.brand } : {}),
         ...(draft.category.trim() !== detail.category ? { category: draft.category } : {}),
@@ -362,26 +409,37 @@ export default function IntelligenceInbox({
       setEditing(false);
       toast.success("人工纠错已保存");
     } catch (error) {
+      if (isArticleRevisionConflict(error)) {
+        try {
+          const latest = await refreshArticleDetail(selectedId);
+          setDraft(toEditorialDraft(latest));
+          setEditing(false);
+          toast.warning("文章已被其他操作更新，已刷新当前版本，请重新确认修改");
+        } catch {
+          toast.error("文章已被其他操作更新，请刷新后重试");
+        }
+        return;
+      }
       toast.error(errorMessage(error, "保存失败"));
     } finally {
       setDetailAction(null);
     }
-  }, [detail, draft, patchRow, refreshAfterMutation, refreshSelectedEvent, selectedId]);
+  }, [detail, draft, eventAction, patchRow, refreshAfterMutation, refreshArticleDetail, refreshSelectedEvent, selectedId]);
 
   const startWorkflow = useCallback(async (startAt: "process" | "ai" | "cluster") => {
-    if (!detail || detailAction) return;
+    if (!detail || detailAction || rowSavingId !== null || eventAction !== null || editing) return;
     const label = startAt === "process"
       ? "重新获取全文并重跑"
       : startAt === "ai"
         ? "重新生成 AI 结果"
-        : "自动建立独立事件";
+        : "重新计算事件归属";
     if (
       !window.confirm(
         startAt === "process"
           ? "当前事件归属和 AI 结果将被重置，并从全文获取开始连续重跑。确认继续吗？"
           : startAt === "ai"
             ? "将重新生成 AI 结果，人工覆盖字段会保留。确认继续吗？"
-            : "将按当前 AI 结果重新计算事件归属；没有完整事件身份的文章会自动建立独立 Event，不再进入人工复核。确认继续吗？",
+            : "将按当前 AI 结果重新计算事件归属，可能归入已有事件或建立新的独立 Event。确认继续吗？",
       )
     )
       return;
@@ -400,7 +458,7 @@ export default function IntelligenceInbox({
     } finally {
       setDetailAction(null);
     }
-  }, [detail, detailAction, refreshAfterMutation]);
+  }, [detail, detailAction, editing, eventAction, refreshAfterMutation, rowSavingId]);
 
   const handleReviewWorkflow = useCallback((startAt: "process" | "ai") => {
     void startWorkflow(startAt);
@@ -434,9 +492,23 @@ export default function IntelligenceInbox({
     setEditing((value) => !value);
   }, []);
 
+  const handleEventSearchChange = useCallback((value: string) => {
+    setEventSearch(value);
+    setEventOptions([]);
+    setMergeTargetId("");
+  }, []);
+
   const handleSaveEditorial = useCallback(() => {
     void saveEditorial();
   }, [saveEditorial]);
+
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen && editing && detail && hasEditorialDraftChanges(detail, draft)) {
+      if (!window.confirm("当前文章有未保存的人工修改，关闭后会丢失。确认关闭吗？")) return;
+    }
+    if (!nextOpen) setEditing(false);
+    onOpenChange?.(nextOpen);
+  }, [detail, draft, editing, onOpenChange]);
 
   const toggleFullContent = useCallback(() => {
     setShowFullContent((value) => !value);
@@ -459,7 +531,7 @@ export default function IntelligenceInbox({
       eventMembers: workspace?.eventMembers ?? [],
       brandCandidates,
       selectedSplitIds,
-      eventAction,
+      interactionPending: detailAction !== null || rowSavingId !== null || eventAction !== null || editing,
       recommendedEventId,
       recommendedEvent,
       recommendedAudit,
@@ -475,7 +547,9 @@ export default function IntelligenceInbox({
     [
       brandCandidates,
       detail,
+      detailAction,
       eventAction,
+      editing,
       eventDetail,
       moveBrandCandidate,
       moveCurrentArticleToBrandEvent,
@@ -483,6 +557,7 @@ export default function IntelligenceInbox({
       recommendedAudit,
       recommendedEvent,
       recommendedEventId,
+      rowSavingId,
       selectArticle,
       selectedSplitIds,
       setComparisonTarget,
@@ -493,6 +568,7 @@ export default function IntelligenceInbox({
     ],
   );
   const { brandCandidateModels, eventMemberModels, recommendedEventModels } = eventArticleModels;
+  const reviewInteractionPending = detailAction !== null || rowSavingId !== null || eventAction !== null || editing;
   const detailWorkspace = detailLoading ? (
     <div className="space-y-2 p-3 lg:p-4">
       <Skeleton className="h-28 w-full rounded-none" />
@@ -512,7 +588,7 @@ export default function IntelligenceInbox({
           clickRate={workspace.clickRate}
           isRepresentative={workspace.isRepresentative}
           currentConclusion={workspace.currentConclusion}
-          detailActionPending={detailAction !== null}
+          detailActionPending={reviewInteractionPending}
           editing={editing}
           onToggleEditing={toggleEditing}
         />
@@ -552,14 +628,14 @@ export default function IntelligenceInbox({
               currentArticleClassificationAudit={workspace.currentArticleClassificationAudit}
               eventArticleTitles={workspace.eventArticleTitles}
               selectedSplitIds={selectedSplitIds}
-              eventActionPending={eventAction !== null}
+              eventActionPending={reviewInteractionPending}
               eventSearch={eventSearch}
               eventOptions={eventOptions}
               mergeTargetId={mergeTargetId}
               onConfirmIndependent={handleConfirmIndependent}
               onAutoCluster={handleClusterWorkflow}
               onSplitArticles={handleSplitArticles}
-              onEventSearchChange={setEventSearch}
+              onEventSearchChange={handleEventSearchChange}
               onSearchEvents={handleSearchEvents}
               onMoveCurrentArticle={handleMoveCurrentArticle}
               onMergeTargetChange={setMergeTargetId}
@@ -581,7 +657,7 @@ export default function IntelligenceInbox({
 
   return (
     <>
-      <Sheet open={open} onOpenChange={onOpenChange}>
+      <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent side="right" className={WORKSPACE_SHEET_CLASS}>
           <SheetHeader className="sr-only">
             <SheetTitle>文章审核与事件校准工作台</SheetTitle>

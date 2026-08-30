@@ -139,6 +139,9 @@ export const ArticleRow = memo(function ArticleRow({
         {article.anomalyLabels?.includes('low-confidence') && (
           <span className={`${ARTICLE_BADGE_CLASS} bg-violet-600`} title="AI 对文章分析结论的证据把握不足">低分析置信</span>
         )}
+        {article.anomalyLabels?.includes('filtered') && (
+          <span className={`${ARTICLE_BADGE_CLASS} bg-orange-500`} title="评分或相关性未达到当前推送门槛，未进入自动推送">未达门槛</span>
+        )}
         {article.clusterStatus === 'needs_review' && (
           <>
             <span className={`${ARTICLE_BADGE_CLASS} bg-red-600`}>待复核</span>

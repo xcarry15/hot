@@ -6,8 +6,10 @@ import { abortableDelay } from './shared/async';
 import { MIN_MEANINGFUL_CHARS } from './shared/content-policy';
 import {
   ensureResponseTextWithinLimit,
-  fetchHtml,
+  fetchHtmlDetailed,
+  formatFetchDiagnostics,
   BROWSER_HEADERS,
+  type FetchDiagnostic,
   isLikelyJavaScriptVerificationPage,
 } from './http';
 import { extractMetaPublishedAt } from './date-utils';
@@ -113,7 +115,8 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
 
   const isCanyin88 = article.source?.type === 'canyin88' || article.url.includes('canyin88.com');
   let lastError: Error | null = null;
-  let pageReaderTimedOut = false;
+  let pageReaderAttempted = false;
+  const diagnostics: FetchDiagnostic[] = [];
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -125,43 +128,61 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
 
       let html: string | null = null;
       let fetchMethod = '';
+      let fetchTransport = '';
 
       if (isCanyin88) {
-        const detailResult = await fetchCanyin88Detail(article.url, signal);
+        const detailResult = await fetchCanyin88Detail(article.url, signal, 0);
         html = detailResult?.html || null;
         fetchMethod = 'canyin88';
+        if (!html && detailResult?.diagnostic) diagnostics.push(detailResult.diagnostic);
       } else {
-        // Step 1: Try direct HTTP fetch with charset detection
-        const directHtml = await fetchHtml(article.url, {
+        // Step 1: Try the shared HTTP path (直连或全局代理) with charset detection
+        const directResult = await fetchHtmlDetailed(article.url, {
           signal,
           headers: { ...BROWSER_HEADERS, Referer: new URL(article.url).origin },
           timeoutMs: DIRECT_FETCH_TIMEOUT_MS,
+          // 外层已经按文章做 1s/2s/4s 退避，避免再叠加共享 HTTP 层的三次重试。
+          retries: 0,
         });
         // 某些站点会返回 HTTP 200 的 JS 验证页或空壳页面。它们不是有效正文，
         // 必须继续走 page_reader，不能因 html 非空而提前停止兜底。
         if (
-          directHtml
-          && !isLikelyJavaScriptVerificationPage(directHtml)
-          && hasUsableArticleContent(directHtml, article.source?.parserConfig)
+          directResult.html
+          && !isLikelyJavaScriptVerificationPage(directResult.html)
+          && hasUsableArticleContent(directResult.html, article.source?.parserConfig)
         ) {
-          html = directHtml;
-          fetchMethod = 'direct';
+          html = directResult.html;
+          fetchMethod = 'http';
+          fetchTransport = directResult.transport;
+        } else {
+          diagnostics.push({
+            method: 'http',
+            transport: directResult.transport,
+            status: directResult.status,
+            finalUrl: directResult.finalUrl,
+            error: directResult.error
+              || (directResult.html
+                ? (isLikelyJavaScriptVerificationPage(directResult.html)
+                  ? 'JavaScript verification page'
+                  : 'response has no usable article body')
+                : 'empty response'),
+          });
         }
 
         // Step 2: Fall back to ZAI page_reader if direct returned no usable article body.
-        if (!html && !pageReaderTimedOut) {
+        if (!html && !pageReaderAttempted) {
+          pageReaderAttempted = true;
           try {
             const pageResult = await readZaiPage(article.url, signal);
             html = pageResult?.data?.html ? ensureResponseTextWithinLimit(pageResult.data.html) : null;
             if (html) fetchMethod = 'zai';
+            else diagnostics.push({ method: 'zai', error: 'empty response' });
           } catch (error) {
             if (signal?.aborted) throw error;
-            if (error instanceof Error && error.message.includes('ZAI page_reader timeout')) {
-              // 当前 ZAI SDK 没有 AbortSignal 接口。超时只会中止本地等待，
-              // 若立刻重试会让同一文章挂起多个远程 page_reader 调用。
-              pageReaderTimedOut = true;
-            }
-            // Both methods failed
+            diagnostics.push({
+              method: 'zai',
+              error: error instanceof Error ? error.message : String(error),
+            });
           }
         }
       }
@@ -198,7 +219,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
           },
         });
 
-        console.log(`[fetchArticleDetail] article=${articleId} content_len=${cleaned.length} meaningful=${meaningful} attempt=${attempt} via=${fetchMethod}${detailPublishedAt ? ` detailDate=${detailPublishedAt.toISOString()}` : ''}`);
+        console.log(`[fetchArticleDetail] article=${articleId} content_len=${cleaned.length} meaningful=${meaningful} attempt=${attempt} via=${fetchMethod}${fetchTransport ? `/${fetchTransport}` : ''}${detailPublishedAt ? ` detailDate=${detailPublishedAt.toISOString()}` : ''}`);
         if (meaningful) return cleaned;
         lastError = new Error(`正文内容不足（有效文本 ${meaningfulTextLength(cleaned)} 字）`);
       }
@@ -209,9 +230,12 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
     }
   }
 
-  console.error(`[fetchArticleDetail] article=${articleId} all ${maxRetries + 1} attempts failed:`, lastError?.message);
+  const diagnosticMessage = formatFetchDiagnostics(diagnostics);
+  const failureMessage = [lastError?.message, diagnosticMessage].filter(Boolean).join(' | ')
+    || '未获取到有效正文';
+  console.error(`[fetchArticleDetail] article=${articleId} all ${maxRetries + 1} attempts failed:`, failureMessage);
   assertNotAborted(signal);
-  await markArticleFetchFailure(articleId, lastError ?? new Error('未获取到有效正文'));
+  await markArticleFetchFailure(articleId, new Error(failureMessage));
 
   // 失败时不能把旧的短正文当作本次抓取成功的结果返回。
   // 否则单篇重跑会继续进入 AI / 聚类，批处理也可能把失败文章计为已处理。

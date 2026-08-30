@@ -220,6 +220,19 @@ export interface UpdateArticleEditorialInput {
   adProbability?: number | null;
   isAd?: boolean;
   restoreFields?: ManualOverrideField[];
+  /** 浏览器打开详情时的文章版本；提供后拒绝覆盖更新后的文章。 */
+  expectedUpdatedAt?: Date;
+}
+
+export class ArticleRevisionConflictError extends Error {
+  readonly status = 409;
+  readonly exposeToClient = true;
+  readonly code = 'article_revision_conflict';
+
+  constructor() {
+    super('文章已被其他操作更新，请刷新后重新确认');
+    this.name = 'ArticleRevisionConflictError';
+  }
 }
 
 function cleanScore(value: number | null | undefined): number | null | undefined {
@@ -265,10 +278,14 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
       aiSnapshot: true,
       aiStatus: true,
       eventId: true,
+      updatedAt: true,
     },
   });
   if (!current) return null;
-  const data: Prisma.ArticleUpdateInput = {};
+  if (input.expectedUpdatedAt && current.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) {
+    throw new ArticleRevisionConflictError();
+  }
+  const data: Prisma.ArticleUncheckedUpdateManyInput = {};
   const touched: ManualOverrideField[] = [];
   const restored = input.restoreFields ?? [];
   const snapshot = parseArticleAiSnapshot(current.aiSnapshot);
@@ -327,7 +344,9 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
         ? snapshot.eventKeyConfidence
         : current.eventKeyConfidence ?? 0;
     data.eventKeyConfidence = capEventIdentityConfidence(identity, sourceConfidence);
-    data.event = { disconnect: true };
+    // 使用标量 eventId 以便下面的条件 updateMany 可以同时完成版本校验；
+    // 不能先 disconnect 再无条件 update，否则两个标签页可能互相覆盖。
+    data.eventId = null;
     data.clusterStatus = 'pending';
     data.clusteredAt = null;
     data.clusterError = null;
@@ -356,7 +375,14 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
   const contentChanged = touched.some((field) => ['summary', 'brand', 'category', 'keyPoints'].includes(field))
     || validRestored.some((field) => ['summary', 'brand', 'category', 'keyPoints'].includes(field));
   await db.$transaction(async (tx) => {
-    await tx.article.update({ where: { id }, data });
+    const updated = await tx.article.updateMany({
+      where: {
+        id,
+        ...(input.expectedUpdatedAt ? { updatedAt: input.expectedUpdatedAt } : {}),
+      },
+      data,
+    });
+    if (updated.count !== 1) throw new ArticleRevisionConflictError();
     await refreshArticleSearchIndex(id, tx);
     await refreshPublicPublication(id, tx, { contentChanged });
   });

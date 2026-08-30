@@ -30,6 +30,7 @@ export interface EventArticleRowModel {
   actions?: ReactNode;
   tone: EventArticleRowTone;
   highlight?: EventArticleRowHighlight;
+  titleDisabled?: boolean;
   onTitleClick?: () => void;
 }
 
@@ -73,7 +74,8 @@ function EventArticleCard({ row }: { row: EventArticleRowModel }) {
               <button
                 type="button"
                 onClick={row.onTitleClick}
-                className={`min-w-0 flex-1 text-left hover:underline ${titleLayoutClass}`}
+                disabled={row.titleDisabled}
+                className={`min-w-0 flex-1 text-left hover:underline disabled:cursor-not-allowed disabled:opacity-60 ${titleLayoutClass}`}
                 title={row.title}
               >
                 {row.title}

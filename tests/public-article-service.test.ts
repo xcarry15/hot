@@ -103,6 +103,22 @@ describe('public-article-service Event 门禁', () => {
     expect(detail?.recentArticles.map(({ relation }) => relation)).toEqual(['same_brand', 'same_event']);
   });
 
+  it('详情命中缓存时仍重新检查当前公开资格', async () => {
+    mocks.eventFindMany
+      .mockResolvedValueOnce([eventRow('e1', '2026-07-15T01:00:00Z', 2)])
+      .mockResolvedValueOnce([eventRow('e1', '2026-07-15T01:00:00Z', 2)]);
+
+    await expect(getPublicArticleDetail('e1')).resolves.toMatchObject({ id: 'e1' });
+    mocks.eventFindFirst.mockResolvedValueOnce(null);
+
+    await expect(getPublicArticleDetail('e1')).resolves.toBeNull();
+    expect(mocks.eventFindFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: 'e1', publicStatus: 'published' }),
+      select: { id: true },
+    });
+    expect(mocks.eventFindMany).toHaveBeenCalledTimes(2);
+  });
+
   it('sitemap 使用 Event.id 和代表文章内容更新时间', async () => {
     mocks.eventFindMany.mockResolvedValue([eventRow('e1', '2026-07-15T01:00:00Z')]);
     await expect(listPublicArticleIds()).resolves.toEqual([{ id: 'e1', updatedAt: new Date('2026-07-15T01:00:00Z') }]);

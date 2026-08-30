@@ -38,6 +38,13 @@ async function refreshEventRepresentatives(eventIds: string[]): Promise<void> {
 
 export async function confirmIndependentArticle(eventId: string, articleId: string): Promise<boolean> {
   const updated = await db.$transaction(async (tx) => {
+    const event = await tx.event.findUnique({
+      where: { id: eventId },
+      select: { status: true, clusterReviewStatus: true, _count: { select: { articles: true } } },
+    });
+    // “确认独立事件”只适用于系统单独建立的单篇待复核 Event。
+    // 多成员 Event 必须通过拆分/移动明确表达人工归属，不能悄悄把一篇成员标成已确认。
+    if (event?.status !== 'active' || event.clusterReviewStatus !== 'pending' || event._count.articles !== 1) return false;
     const article = await tx.article.findFirst({
       where: { id: articleId, eventId, aiStatus: 'done', clusterStatus: 'needs_review' },
       select: { id: true },

@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { buildArticleDeleteWhere, buildArticleListOrder, buildArticleListWhere } from '@/lib/article-service';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { db } from '@/lib/db';
+import {
+  ArticleRevisionConflictError,
+  buildArticleDeleteWhere,
+  buildArticleListOrder,
+  buildArticleListWhere,
+  updateArticleEditorial,
+} from '@/lib/article-service';
 
 describe('article-service filters', () => {
   it('全量列表缺省不加待处理条件', () => {
@@ -57,5 +64,22 @@ describe('article-service filters', () => {
       { publishedAt: 'desc' },
       { createdAt: 'desc' },
     ]);
+  });
+});
+
+describe('article-service 编辑版本保护', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('打开详情后文章已被更新时拒绝覆盖旧版本', async () => {
+    const currentUpdatedAt = new Date('2026-08-31T10:00:01.000Z');
+    vi.mocked(db.article.findUnique).mockResolvedValue({ updatedAt: currentUpdatedAt } as never);
+
+    await expect(updateArticleEditorial('article-1', {
+      summary: '旧标签页的修改',
+      expectedUpdatedAt: new Date('2026-08-31T10:00:00.000Z'),
+    })).rejects.toBeInstanceOf(ArticleRevisionConflictError);
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 });

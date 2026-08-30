@@ -68,6 +68,7 @@ import { db } from '@/lib/db';
 import { maybeEnqueueCrawl, maybeEnqueueTechnicalRetry } from '@/lib/scheduler';
 
 const sourceFindMany = vi.mocked(db.source.findMany);
+const jobFindFirst = vi.mocked(db.job.findFirst);
 
 function makeSource(over: Partial<{
   id: string; name: string; enabled: boolean; status: string;
@@ -89,6 +90,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockRunJob.mockResolvedValue({ queued: true, jobId: 'j-test' });
   mockHasDueTechnicalRecovery.mockResolvedValue(false);
+  jobFindFirst.mockResolvedValue(null);
   Object.keys(mockSettingStore).forEach(k => delete mockSettingStore[k]);
   // 调度器默认免打扰时段跨越午夜；测试固定关闭，避免在 22:00–08:00 执行时误拦截。
   mockSettingStore['crawl_quiet_start'] = '00:00';
@@ -164,6 +166,24 @@ describe('Scheduler — production maybeEnqueueCrawl', () => {
 
     await maybeEnqueueCrawl({ ...mockSettingStore });
     expect(mockRunJob).not.toHaveBeenCalled();
+  });
+
+  it('设置标记丢失时使用最近的自动抓取 Job 防止重复入队', async () => {
+    mockSettingStore['auto_crawl_enabled'] = 'true';
+    mockSettingStore['crawl_interval_min'] = '120';
+    mockSettingStore['scheduler_last_crawl_at'] = '0';
+    jobFindFirst.mockResolvedValueOnce({
+      createdAt: new Date(Date.now() - 60 * 1000),
+    } as Awaited<ReturnType<typeof db.job.findFirst>>);
+
+    await maybeEnqueueCrawl({ ...mockSettingStore });
+
+    expect(mockRunJob).not.toHaveBeenCalled();
+    expect(jobFindFirst).toHaveBeenCalledWith({
+      where: { type: 'full', idempotencyKey: { startsWith: 'crawl:' } },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
   });
 
   it('损坏的间隔配置回退为 120 分钟，不会每分钟重复入队', async () => {

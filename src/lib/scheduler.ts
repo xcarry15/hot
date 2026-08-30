@@ -242,8 +242,19 @@ async function maybeEnqueueCrawl(settings: Record<string, string>): Promise<void
     ? Math.max(5, configuredInterval)
     : 120;
   const intervalMs = intervalMinutes * 60 * 1000;
-  const lastCrawlAtStr = await getSetting(LAST_CRAWL_AT_KEY);
-  const lastCrawlAt = lastCrawlAtStr ? parseInt(lastCrawlAtStr, 10) : 0;
+  const [lastCrawlAtStr, latestScheduledJob] = await Promise.all([
+    getSetting(LAST_CRAWL_AT_KEY),
+    db.job.findFirst({
+      where: { type: 'full', idempotencyKey: { startsWith: 'crawl:' } },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    }),
+  ]);
+  const parsedLastCrawlAt = lastCrawlAtStr ? Number.parseInt(lastCrawlAtStr, 10) : 0;
+  const lastCrawlAt = Math.max(
+    Number.isFinite(parsedLastCrawlAt) ? parsedLastCrawlAt : 0,
+    latestScheduledJob?.createdAt.getTime() ?? 0,
+  );
 
   if (Date.now() - lastCrawlAt < intervalMs) return;
 

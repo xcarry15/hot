@@ -30,7 +30,7 @@ export interface ArticleProgress {
   /** AI 完成分析后的最终有效评分；业务正常跳过文章也保留评分，技术未完成时为 null。 */
   score: number | null;
   /** 仅用于列表标题后的轻量异常标签，不暴露 AI 分析明细。 */
-  anomalyLabels: Array<'ad' | 'duplicate' | 'low-confidence'>;
+  anomalyLabels: Array<'ad' | 'duplicate' | 'low-confidence' | 'filtered'>;
   push: StepStatus;
   skipReason?: string;
   /** 工作台时间列使用文章首次采集入库时间（createdAt），而非会被流水线更新刷新的 updatedAt。 */

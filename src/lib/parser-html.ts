@@ -1,9 +1,12 @@
 import * as cheerio from 'cheerio';
 import {
   ensureResponseTextWithinLimit,
-  fetchHtml,
+  fetchHtmlDetailed,
+  formatFetchDiagnostics,
   BROWSER_HEADERS,
+  type FetchDiagnostic,
   isLikelyJavaScriptVerificationPage,
+  safeUrlForLog,
 } from './http';
 import { resolveUrl } from './url-utils';
 import { extractDateFromUrl, extractMetaPublishedAt } from './date-utils';
@@ -23,7 +26,21 @@ interface HtmlConfig {
 }
 
 const DIRECT_FETCH_TIMEOUT_MS = 20_000;
+const DETAIL_DATE_FETCH_TIMEOUT_MS = 8_000;
 const DETAIL_DATE_CONCURRENCY = 4;
+
+function isWinshangUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === 'winshang.com' || hostname.endsWith('.winshang.com');
+  } catch {
+    return false;
+  }
+}
+
+function normalizeWinshangUrl(url: string): string {
+  return isWinshangUrl(url) ? url.replace(/^http:/i, 'https:') : url;
+}
 
 export async function parseHtml(url: string, parserConfigStr: string, signal?: AbortSignal): Promise<CrawlResult> {
   try {
@@ -32,38 +49,67 @@ export async function parseHtml(url: string, parserConfigStr: string, signal?: A
 
     let html: string | null = null;
     let fetchMethod = '';
+    let fetchTransport = '';
+    const diagnostics: FetchDiagnostic[] = [];
 
-    // Step 1: Try direct fetch with browser headers and charset detection
-    html = await fetchHtml(url, {
+    // Step 1: Try the shared HTTP path (直连或全局代理) with browser headers
+    const directResult = await fetchHtmlDetailed(url, {
       signal,
       headers: { ...BROWSER_HEADERS, ...customHeaders, Referer: new URL(url).origin },
       timeoutMs: DIRECT_FETCH_TIMEOUT_MS,
     });
-    if (html && !isLikelyJavaScriptVerificationPage(html)) fetchMethod = 'direct';
-    else html = null;
+    html = directResult.html;
+    if (html && !isLikelyJavaScriptVerificationPage(html)) {
+      fetchMethod = 'http';
+      fetchTransport = directResult.transport;
+    } else {
+      diagnostics.push({
+        method: 'http',
+        transport: directResult.transport,
+        status: directResult.status,
+        finalUrl: directResult.finalUrl,
+        error: directResult.error
+          || (html ? 'JavaScript verification page' : 'empty response'),
+      });
+      html = null;
+    }
 
     // Step 2: Fall back to ZAI page_reader if direct fetch returned nothing
     if (!html) {
       try {
         const result = await readZaiPage(url, signal);
         html = result?.data?.html ? ensureResponseTextWithinLimit(result.data.html) : null;
-        if (html) fetchMethod = 'zai';
+        if (html) {
+          fetchMethod = 'zai';
+        } else {
+          diagnostics.push({ method: 'zai', error: 'empty response' });
+        }
       } catch (error) {
         if (signal?.aborted) throw error;
-        // Both methods failed
+        diagnostics.push({
+          method: 'zai',
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
     if (!html) {
-      return { success: false, items: [], error: 'Failed to fetch HTML page (direct + ZAI both failed)' };
+      return {
+        success: false,
+        items: [],
+        error: formatFetchDiagnostics(diagnostics) || 'HTML page returned no content',
+      };
     }
 
-    console.log(`[parser-html] ${url} fetched via ${fetchMethod}, html_len=${html.length}`);
-    const items = extractLinksFromHtml(html, url, config);
-    if (shouldFetchDetailPublishedAt(url, config) && items.length > 0) {
-      await enrichDetailPublishedAt(items, signal);
-    }
-
+    console.log(
+      `[parser-html] ${safeUrlForLog(url)} fetched via ${fetchMethod}`
+      + (fetchTransport ? `/${fetchTransport}` : '')
+      + `, html_len=${html.length}`,
+    );
+    const items = extractLinksFromHtml(html, url, config).map((item) => ({
+      ...item,
+      url: normalizeWinshangUrl(item.url),
+    }));
     return { success: true, items };
   } catch (error: unknown) {
     if (signal?.aborted) throw error;
@@ -74,33 +120,48 @@ export async function parseHtml(url: string, parserConfigStr: string, signal?: A
 
 function shouldFetchDetailPublishedAt(url: string, config: HtmlConfig): boolean {
   if (config.fetchDetailPublishedAt === true) return true;
+  return isWinshangUrl(url);
+}
+
+export function sourceNeedsDetailPublishedAt(url: string, parserConfigStr: string): boolean {
   try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return hostname === 'winshang.com' || hostname.endsWith('.winshang.com');
+    const config: HtmlConfig = JSON.parse(parserConfigStr || '{}');
+    return shouldFetchDetailPublishedAt(url, config);
   } catch {
-    return false;
+    return isWinshangUrl(url);
   }
 }
 
-async function fetchDetailHtml(url: string, signal?: AbortSignal): Promise<string | null> {
+async function fetchDetailHtml(
+  url: string,
+  signal?: AbortSignal,
+): Promise<{ html: string | null; diagnostics: FetchDiagnostic[] }> {
   const headers = { ...BROWSER_HEADERS, Referer: new URL(url).origin };
-  const directHtml = await fetchHtml(url, {
+  const diagnostics: FetchDiagnostic[] = [];
+  const directResult = await fetchHtmlDetailed(url, {
     signal,
     headers,
-    timeoutMs: DIRECT_FETCH_TIMEOUT_MS,
+    timeoutMs: DETAIL_DATE_FETCH_TIMEOUT_MS,
+    // 这是可选的列表日期补全，不应叠加共享 HTTP 层的三次重试。
+    retries: 0,
   });
-  if (directHtml) return directHtml;
-
-  try {
-    const result = await readZaiPage(url, signal);
-    return result?.data?.html ? ensureResponseTextWithinLimit(result.data.html) : null;
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    return null;
+  if (directResult.html && !isLikelyJavaScriptVerificationPage(directResult.html)) {
+    return { html: directResult.html, diagnostics };
   }
+  diagnostics.push({
+    method: 'http',
+    transport: directResult.transport,
+    status: directResult.status,
+    finalUrl: directResult.finalUrl,
+    error: directResult.error
+      || (directResult.html ? 'JavaScript verification page' : 'empty response'),
+  });
+  // 日期只是列表字段的补全，不值得为每个条目再启动一次 page_reader；
+  // 正文阶段的新文章仍会按正式 HTTP → ZAI 兜底链路处理。
+  return { html: null, diagnostics };
 }
 
-async function enrichDetailPublishedAt(
+export async function enrichDetailPublishedAt(
   items: Array<{ title: string; url: string; summary?: string; publishedAt?: string }>,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -111,13 +172,20 @@ async function enrichDetailPublishedAt(
       const item = items[nextIndex];
       nextIndex += 1;
       try {
-        const detailHtml = await fetchDetailHtml(item.url, signal);
-        if (!detailHtml) continue;
-        const publishedAt = extractMetaPublishedAt(detailHtml);
+        const detailResult = await fetchDetailHtml(item.url, signal);
+        if (!detailResult.html) {
+          console.warn(
+            `[parser-html] detail publish date failed for ${safeUrlForLog(item.url)}: ${formatFetchDiagnostics(detailResult.diagnostics)}`,
+          );
+          continue;
+        }
+        const publishedAt = extractMetaPublishedAt(detailResult.html);
         if (publishedAt) item.publishedAt = publishedAt.toISOString();
       } catch (error) {
         if (signal?.aborted) throw error;
-        console.warn(`[parser-html] detail publish date failed for ${item.url}`);
+        console.warn(
+          `[parser-html] detail publish date failed for ${safeUrlForLog(item.url)}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
   };

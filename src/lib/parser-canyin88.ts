@@ -1,5 +1,16 @@
 import type { CrawlItem, CrawlResult } from '@/contracts/crawl';
-import { BROWSER_HEADERS, fetchWithRetry, hostFromUrl, readResponseText } from './http';
+import {
+  BROWSER_HEADERS,
+  fetchHtmlDetailed,
+  fetchWithRetry,
+  formatFetchDiagnostics,
+  hostFromUrl,
+  MAX_RETRIES,
+  readResponseText,
+  safeUrlForLog,
+  type FetchDiagnostic,
+} from './http';
+import { getGlobalProxyUrl } from './proxy-config';
 import { resolveUrl } from './url-utils';
 
 /**
@@ -28,7 +39,9 @@ export async function parseCanyin88(baseUrl: string, signal?: AbortSignal): Prom
 
     // Step 1: Fetch the mobile list page
     let html: string;
+    let transport: 'direct' | 'proxy' = 'direct';
     try {
+      transport = await getGlobalProxyUrl() ? 'proxy' : 'direct';
       const response = await fetchWithRetry(listUrl, {
         signal,
         headers: {
@@ -39,14 +52,22 @@ export async function parseCanyin88(baseUrl: string, signal?: AbortSignal): Prom
       });
 
       if (!response.ok) {
-        return { success: false, items: [], error: `HTTP ${response.status} fetching list page` };
+        return {
+          success: false,
+          items: [],
+          error: `http/${transport} status=${response.status} finalUrl=${safeUrlForLog(response.url || listUrl)}: fetching list page`,
+        };
       }
 
       html = await readResponseText(response);
     } catch (fetchError: unknown) {
       if (signal?.aborted) throw fetchError;
       const msg = fetchError instanceof Error ? fetchError.message : 'Network error fetching list page';
-      return { success: false, items: [], error: msg };
+      return {
+        success: false,
+        items: [],
+        error: `http/${transport} finalUrl=${safeUrlForLog(listUrl)}: ${msg}`,
+      };
     }
 
     if (!html || html.length < 500) {
@@ -168,33 +189,42 @@ export async function parseCanyin88(baseUrl: string, signal?: AbortSignal): Prom
  * Fetch canyin88 detail page using native fetch with proper Referer header.
  * Uses the same retry+headers strategy as the list page.
  */
-export async function fetchCanyin88Detail(url: string, signal?: AbortSignal): Promise<{ html: string } | null> {
+export async function fetchCanyin88Detail(
+  url: string,
+  signal?: AbortSignal,
+  maxRetries = MAX_RETRIES,
+): Promise<{ html: string; diagnostic?: FetchDiagnostic } | null> {
   try {
-    const response = await fetchWithRetry(url, {
+    const result = await fetchHtmlDetailed(url, {
       signal,
       headers: {
         ...BROWSER_HEADERS,
         'User-Agent': DESKTOP_UA,
         Referer: CANYIN88_REFERER,
       },
+      retries: maxRetries,
     });
 
-    if (!response.ok) {
-      console.error(`[fetchCanyin88Detail] HTTP ${response.status} for ${url}`);
-      return null;
+    if (!result.html || result.html.length < 200) {
+      const diagnostic: FetchDiagnostic = {
+        method: 'http',
+        transport: result.transport,
+        status: result.status,
+        finalUrl: result.finalUrl,
+        error: result.error || 'empty or too small response',
+      };
+      console.error(`[fetchCanyin88Detail] ${formatFetchDiagnostics([diagnostic])}`);
+      return { html: '', diagnostic };
     }
 
-    const html = await readResponseText(response);
-    if (!html || html.length < 200) {
-      console.error(`[fetchCanyin88Detail] Empty response for ${url}`);
-      return null;
-    }
-
-    return { html };
+    return { html: result.html };
   } catch (error: unknown) {
     if (signal?.aborted) throw error;
     const msg = error instanceof Error ? error.message : 'Unknown error';
     console.error(`[fetchCanyin88Detail] Failed for ${url}: ${msg}`);
-    return null;
+    return {
+      html: '',
+      diagnostic: { method: 'http', finalUrl: url, error: msg },
+    };
   }
 }

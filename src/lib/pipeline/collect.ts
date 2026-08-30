@@ -20,6 +20,7 @@ import {
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
 import { recordFailure, restoreBreakerIfElapsed } from '@/lib/pipeline/source-health';
 import { refreshArticleSearchIndex } from '@/lib/article-search-index';
+import { enrichDetailPublishedAt, sourceNeedsDetailPublishedAt } from '@/lib/parser-html';
 import type { CrawlItem, CrawlResult } from '@/contracts/crawl';
 import type { Article, Source } from '@prisma/client';
 
@@ -332,6 +333,20 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
     const existingByUrl = new Map(existingArticles.map((article) => [article.url, article]));
     const discardedUrlSet = new Set(discardedUrls.map((item) => item.url));
     const processedUrls = new Set<string>();
+
+    // 详情日期是可选补全：只对本次真正可能新建的 URL 执行一次，避免每轮列表抓取
+    // 都重新访问同一批历史详情页。正文阶段仍会为新文章抓一次详情并提取更精确日期。
+    if (sourceNeedsDetailPublishedAt(source.url, source.parserConfig)) {
+      const detailDateUrls = new Set<string>();
+      const detailDateItems = result.items.filter((item) => {
+        const normalizedUrl = normalizeUrl(item.url);
+        if (existingByUrl.has(normalizedUrl) || discardedUrlSet.has(normalizedUrl)) return false;
+        if (detailDateUrls.has(normalizedUrl)) return false;
+        detailDateUrls.add(normalizedUrl);
+        return true;
+      });
+      if (detailDateItems.length > 0) await enrichDetailPublishedAt(detailDateItems, signal);
+    }
 
     let createdCount = 0;
     let deduplicatedCount = 0;

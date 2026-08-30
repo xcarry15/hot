@@ -320,7 +320,19 @@ async function buildPublicArticleDetail(id: string): Promise<PublicArticleDetail
 
 export async function getPublicArticleDetail(id: string): Promise<PublicArticleDetailDto | null> {
   const existing = publicArticleDetailCache.get(id);
-  if (existing) return existing.value;
+  if (existing) {
+    // 详情正文可以短暂缓存，但公开资格属于访问门禁，必须以当前数据库状态为准。
+    // 这样来源关闭、人工隐藏或 Event 撤回后，不会继续返回缓存中的正文。
+    const eligible = await db.event.findFirst({
+      where: { ...publicEventWhere, id },
+      select: { id: true },
+    });
+    if (!eligible) {
+      publicArticleDetailCache.delete(id);
+      return null;
+    }
+    return existing.value;
+  }
   const value = buildPublicArticleDetail(id);
   publicArticleDetailCache.set(id, { value, expiresAt: Date.now() + PUBLIC_DETAIL_CACHE_TTL_MS });
   void value.catch(() => publicArticleDetailCache.delete(id));
