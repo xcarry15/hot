@@ -146,7 +146,7 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 
 ### 代理与测速
 
-设置页的“获取并测速全部”会从 [RelayGlass](https://github.com/relayglass/free-proxy-list)、[Proxifly](https://github.com/proxifly/free-proxy-list) 和 [TheSpeedX](https://github.com/TheSpeedX/PROXY-List) 的公开列表读取候选，服务端去重后最多测试 24 个节点、同时测试 6 个。列表缓存 5 分钟，刷新失败时沿用上次候选；单节点测试包含目标页面响应体读取并有 8 秒总超时。测速通过后再点击“使用最快”并保存。公开免费代理可能随时失效，禁止传输密钥、Webhook、登录态或其他敏感数据。
+设置页的“获取并测速全部”会优先保留此前验证过的 6 个历史兜底节点，再从 [RelayGlass](https://github.com/relayglass/free-proxy-list)、[Proxifly](https://github.com/proxifly/free-proxy-list) 和 [TheSpeedX](https://github.com/TheSpeedX/PROXY-List) 的公开列表补充候选，服务端去重后最多测试 24 个节点、同时测试 6 个。历史节点会随发布/重启保留，但每次仍需按当前目标重新测速；动态列表缓存 5 分钟，刷新失败时沿用上次候选。单节点测试包含目标页面响应体读取并有 8 秒总超时。测速通过后再点击“使用最快”并保存。公开免费代理可能随时失效，禁止传输密钥、Webhook、登录态或其他敏感数据。
 
 ### 配置 OpenCode Zen 免费模型
 

@@ -13,6 +13,18 @@ const PROXY_TEST_TARGET = 'https://news.winshang.com/list-12.html';
 const PROXY_TEST_TIMEOUT_MS = 8_000;
 const PROXY_TEST_MAX_RESPONSE_BYTES = 128 * 1024;
 
+// 这些节点曾经在本项目中实际访问赢商网成功。动态公开列表里的节点
+// 变化很快，不能因为发布/重启就把一组已验证过的兜底节点丢掉；它们仍需
+// 每次按当前目标重新测速，不能直接视为永久可用。
+const HISTORICAL_FREE_PROXY_CANDIDATES: ProxyCandidate[] = [
+  { url: 'http://112.64.135.45:8080', label: '历史可用节点 #1' },
+  { url: 'http://116.196.150.180:17981', label: '历史可用节点 #2' },
+  { url: 'http://120.232.115.170:17981', label: '历史可用节点 #3' },
+  { url: 'http://122.246.3.12:17981', label: '历史可用节点 #4' },
+  { url: 'http://122.246.4.6:17981', label: '历史可用节点 #5' },
+  { url: 'http://58.254.153.146:17981', label: '历史可用节点 #6' },
+];
+
 // 这些列表只作为候选来源，实际是否可用仍以本项目对目标站点的测速结果为准。
 // RelayGlass 和 Proxifly 的 HTTPS 文件优先；TheSpeedX 作为额外的 HTTP 兜底来源。
 const FREE_PROXY_SOURCES = [
@@ -126,17 +138,22 @@ export async function getFreeProxyCandidates(forceRefresh = false): Promise<Prox
       const successfulSources = sourceResults.filter((result) => result.candidates.length > 0);
       const seen = new Set<string>();
       const candidates: ProxyCandidate[] = [];
+      for (const candidate of HISTORICAL_FREE_PROXY_CANDIDATES) {
+        seen.add(candidate.url);
+        candidates.push(candidate);
+      }
       for (let index = 0; candidates.length < FREE_PROXY_CANDIDATE_LIMIT; index++) {
-        let added = false;
+        let hasSourceCandidate = false;
         for (const result of successfulSources) {
           const url = result.candidates[index];
-          if (!url || seen.has(url)) continue;
+          if (!url) continue;
+          hasSourceCandidate = true;
+          if (seen.has(url)) continue;
           seen.add(url);
           candidates.push({ url, label: `${result.source.label} #${index + 1}` });
-          added = true;
           if (candidates.length >= FREE_PROXY_CANDIDATE_LIMIT) break;
         }
-        if (!added) break;
+        if (!hasSourceCandidate) break;
       }
 
       return {
@@ -243,10 +260,17 @@ async function fetchProxySource(source: (typeof FREE_PROXY_SOURCES)[number]): Pr
       candidates,
       error: candidates.length === 0 ? `${source.label} 没有可用候选` : undefined,
     };
-  } catch {
+  } catch (error) {
     await cancelResponseBody(response);
-    return { source, candidates: [], error: `${source.label} 列表暂不可用` };
+    const message = error instanceof Error ? error.message : String(error);
+    return { source, candidates: [], error: `${source.label} 列表读取失败：${summarizeProxyError(message)}` };
   }
+}
+
+function summarizeProxyError(message: string): string {
+  if (/^HTTP \d{3}(?:\b|$)/i.test(message)) return message;
+  if (/timeout|timed out|aborted|aborterror/i.test(message)) return '请求超时';
+  return message.replace(/\s+/g, ' ').slice(0, 120) || '网络请求失败';
 }
 
 async function cancelResponseBody(response: Response | undefined): Promise<void> {

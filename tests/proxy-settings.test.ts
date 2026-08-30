@@ -74,9 +74,39 @@ describe('全局代理连通性测试', () => {
 
     const result = await testOutboundProxies();
 
-    expect(result.results).toHaveLength(6);
+    expect(result.results).toHaveLength(9);
     expect(result.results.every((item) => item.success)).toBe(true);
     expect(result.sourceCount).toBe(3);
+    expect(result.results.slice(0, 6).map((item) => item.label)).toEqual([
+      '历史可用节点 #1',
+      '历史可用节点 #2',
+      '历史可用节点 #3',
+      '历史可用节点 #4',
+      '历史可用节点 #5',
+      '历史可用节点 #6',
+    ]);
     expect(result.fastestUrl).toBe('http://120.232.115.170:17981');
+  });
+
+  it('动态列表全部失败时仍保留历史可用的六个兜底节点', async () => {
+    mocks.fetchSafe.mockImplementation(async (_url: string, options: { bypassProxy?: boolean }) => {
+      if (options.bypassProxy) throw new Error('列表源不可达');
+      return new Response('<html>winshang</html>', { status: 200 });
+    });
+    mocks.readResponseText.mockResolvedValue('<html>winshang</html>');
+
+    const result = await testOutboundProxies();
+
+    expect(result.results).toHaveLength(6);
+    expect(result.results.map((item) => item.url)).toEqual([
+      'http://112.64.135.45:8080',
+      'http://116.196.150.180:17981',
+      'http://120.232.115.170:17981',
+      'http://122.246.3.12:17981',
+      'http://122.246.4.6:17981',
+      'http://58.254.153.146:17981',
+    ]);
+    expect(result.sourceErrors).toHaveLength(3);
+    expect(result.sourceErrors[0]).toContain('列表源不可达');
   });
 });
