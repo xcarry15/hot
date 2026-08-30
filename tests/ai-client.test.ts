@@ -23,7 +23,7 @@ vi.mock('@/lib/settings', () => ({
   },
 }));
 
-import { AIClientError, createChatCompletion, getAISettings, invalidateAISettingsCache } from '@/lib/ai-client';
+import { AIClientError, createChatCompletion, getAISettings, invalidateAISettingsCache, testAIConnection } from '@/lib/ai-client';
 import { resetAIRateGateForTests } from '@/lib/ai-rate-gate';
 
 function collectComponentFiles(dir: string): string[] {
@@ -312,6 +312,20 @@ describe('createChatCompletion', () => {
     });
     await vi.advanceTimersByTimeAsync(60000);
     await assertion;
+  });
+
+  it('测试连接使用 15 秒交互超时且不自动重试', async () => {
+    global.fetch = vi.fn().mockImplementation((_url, options: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+
+    const assertion = expect(testAIConnection()).resolves.toMatchObject({
+      success: false,
+      error: '请求超时，请检查网络连接',
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await assertion;
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('OpenCode 网关不支持 response_format 时自动降级为客户端 JSON 校验', async () => {

@@ -104,6 +104,7 @@ const DEFAULT_WEIGHT_CONTENT = numericSettingDefault(SETTING_KEYS.AI_WEIGHT_CONT
 const DEFAULT_TEMPERATURE = numericSettingDefault(SETTING_KEYS.AI_TEMPERATURE, 0.3);
 const DEFAULT_MAX_TOKENS = numericSettingDefault(SETTING_KEYS.AI_MAX_TOKENS, 2048);
 const DEFAULT_STEP2_CONTENT_MAX_CHARS = numericSettingDefault(SETTING_KEYS.AI_STEP2_CONTENT_MAX_CHARS, 5000);
+const AI_CONNECTION_TEST_TIMEOUT_MS = 15_000;
 
 const settingsCache = createCache<AISettings>(30_000); // 30 seconds
 
@@ -247,7 +248,7 @@ export async function createChatCompletion(
 async function createOpenAICompatibleCompletion(
   settings: AISettings,
   messages: ChatMessage[],
-  options: { temperature: number; maxTokens: number; responseFormat?: ChatResponseFormat },
+  options: { temperature: number; maxTokens: number; responseFormat?: ChatResponseFormat; timeoutMs?: number },
   retries = 2,
   parentSignal?: AbortSignal,
 ): Promise<ChatCompletionResponse> {
@@ -284,11 +285,11 @@ async function createOpenAICompatibleCompletion(
 
   // 正文分析 prompt 较长；DeepSeek 和 OpenRouter 免费路由首 token 可能超过 15 秒。
   // 单篇超时由 AI pipeline 记录为当前文章失败，不能因为一篇慢文章暂停整批。
-  const timeoutMs = settings.provider === 'opencode'
+  const timeoutMs = options.timeoutMs ?? (settings.provider === 'opencode'
     || settings.provider === 'deepseek'
     || settings.provider === 'openrouter'
     ? 60_000
-    : 15_000;
+    : 15_000);
 
   console.log(`[ai-client] Calling ${settings.provider}: POST ${url} model=${settings.model}`);
 
@@ -504,7 +505,7 @@ export async function testAIConnection(overrides?: Partial<Pick<AISettings, 'pro
 
     const result = await createOpenAICompatibleCompletion(settings, [
       { role: 'user', content: '请回复"连接成功"' },
-    ], { temperature: 0.7, maxTokens: 100 });
+    ], { temperature: 0.7, maxTokens: 100, timeoutMs: AI_CONNECTION_TEST_TIMEOUT_MS }, 0);
 
     return {
       success: true,
@@ -516,7 +517,7 @@ export async function testAIConnection(overrides?: Partial<Pick<AISettings, 'pro
     let errorMsg = error instanceof Error ? error.message : 'Unknown error';
     if (/429/.test(errorMsg) || /too many requests/i.test(errorMsg)) {
       errorMsg = '请求频率超限，请稍后重试';
-    } else if (/timeout/i.test(errorMsg) || /ETIMEDOUT/i.test(errorMsg)) {
+    } else if (/timeout|超时/i.test(errorMsg) || /ETIMEDOUT/i.test(errorMsg)) {
       errorMsg = '请求超时，请检查网络连接';
     }
     return {
