@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:-/www/wwwroot/hot.kfxz.cn}"
 RELEASE_ARCHIVE="${RELEASE_ARCHIVE:?RELEASE_ARCHIVE is required}"
-APP_NAME="${APP_NAME:-h2-hot2}"
+APP_NAME="${APP_NAME:-hot}"
 SITE_URL="${SITE_URL:-https://hot.kfxz.cn}"
 BACKUP_ROOT="${BACKUP_ROOT:-/www/backup/h2-hot2}"
 RESET_PRODUCTION="${RESET_PRODUCTION:-NO}"

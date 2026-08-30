@@ -170,7 +170,7 @@ Write-Host ""
 Write-Host "  1. 将 ZIP 上传到 /tmp 等应用目录之外的位置。" -ForegroundColor Yellow
 Write-Host "  2. 全新服务器：正确解压并同步到项目根目录后执行 bash scripts/init-production.sh。" -ForegroundColor Yellow
 Write-Host "  3. 日常更新默认由 GitHub Actions 自动完成，无需手工上传 ZIP。" -ForegroundColor Yellow
-Write-Host "     手工更新时先停止 h2-hot2 并备份数据库，再用 rsync --delete 收敛同步。" -ForegroundColor Yellow
+Write-Host "     手工更新时先停止 hot 并备份数据库，再用 rsync --delete 收敛同步。" -ForegroundColor Yellow
 Write-Host "     不要直接在应用目录执行 unzip -o，避免已删除的旧代码残留。" -ForegroundColor Red
 Write-Host "  4. 日常手工更新只适用于当前 baseline 数据库；旧 migration 历史请备份后全新初始化。" -ForegroundColor Yellow
 Write-Host "  5. 顺序执行 migrate:deploy -> generate -> optimize -> build，再以单实例启动 PM2。" -ForegroundColor Yellow

@@ -10,7 +10,7 @@
 
 技术栈：Next.js 16、React 19、TypeScript、Prisma 6、SQLite、Vitest。
 
-> 对外产品名统一为“开发选址助手”。`hot2`、`h2-hot2` 仅保留为 npm 包、PM2 应用、部署文件等内部技术标识。
+> 对外产品名统一为“开发选址助手”。`hot2`、`hot`、`h2-hot2` 仅保留为 npm 包、PM2 应用、部署文件等内部技术标识。
 
 ## 产品入口
 
@@ -218,6 +218,6 @@ npm run db:cleanup-logs
 - 完整备份文件使用用户设置的保护密码加密可编辑密钥和 Webhook；密码丢失无法恢复，旧的明文 JSON 备份不再支持导入。关键词表格和文章 Excel 导出不包含这些敏感设置。
 - 生产禁止使用 `prisma db push`、`db:danger:reset`；`db:seed` 仅用于首次初始化或明确重建。
 - migration、重建和危险数据清理前先确认数据库备份有效。
-- PM2 仅运行一个 `h2-hot2` 实例，不使用 cluster 或 `-i max`；Job Runner 另有数据库租约，防止部署重叠或误起多进程时重复执行任务，但不把 SQLite 当作横向扩展方案。
+- PM2 仅运行一个 `hot` 实例，不使用 cluster 或 `-i max`；Job Runner 另有数据库租约，防止部署重叠或误起多进程时重复执行任务，但不把 SQLite 当作横向扩展方案。
 - Nginx 将 `/` 和 `/_next/` 代理到 `127.0.0.1:3011`；不要直接映射 `.next/static`。
 - 普通应用更新不清理服务器全局 Nginx 缓存，也不 reload Nginx。

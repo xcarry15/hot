@@ -5,7 +5,7 @@
 
 - 项目目录：`/www/wwwroot/hot.kfxz.cn`
 - Node 服务：`127.0.0.1:3011`
-- PM2 应用：`h2-hot2`，单实例
+- PM2 应用：`hot`，单实例
 - SQLite：`db/custom.db`，Prisma 配置值为 `file:../db/custom.db`
 - 备份目录：`/www/backup/h2-hot2`
 - 正式站点：`https://hot.kfxz.cn`
@@ -29,7 +29,7 @@
 1. 验证部署密钥、共享 `.env`、SQLite 和 release 中的完整 migration 集合。
 2. 将代码解压到版本化 release 目录，执行 `npm ci`、`db:generate` 和生产构建；此时 current 版本保持不变。
 3. 停止 PM2，普通部署用 SQLite `.backup` 创建可回滚备份，再执行 `db:migrate:deploy` 和 `db:optimize`。
-4. 原子切换 `current` 软链，保留最近 5 个 release，启动单实例 `h2-hot2`。
+4. 原子切换 `current` 软链，保留最近 5 个 release，启动单实例 `hot`。
 5. 检查 `/api/health`、公开首页和 CSS 资源；健康接口首次未稳定时会自动重启 PM2 一次并延长等待；普通部署仍失败会恢复数据库备份与旧 current，生产重置不自动回滚。
 
 正常部署失败会在备份可用时恢复数据库与旧 current；生产重置不提供自动回滚。手动运行 `Deploy production` 不会补跑 CI，只应用于已经确认过的提交。
@@ -106,8 +106,8 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
   test -f "$RELEASE_ROOT/scripts/init-production.sh"
   test -d "$RELEASE_ROOT/prisma/migrations"
 
-  pm2 stop h2-hot2 >/dev/null 2>&1 || true
-  pm2 delete h2-hot2 >/dev/null 2>&1 || true
+  pm2 stop hot >/dev/null 2>&1 || true
+  pm2 delete hot >/dev/null 2>&1 || true
 
   rsync -a --delete \
     --exclude='.env' \
@@ -166,7 +166,7 @@ bat/本地一键初始化.bat -CheckOnly
 
 ```bash
 pm2 status
-pm2 logs h2-hot2 --lines 100
+pm2 logs hot --lines 100
 curl --fail --silent --show-error http://127.0.0.1:3011/api/health
 curl --fail --silent --show-error https://hot.kfxz.cn/api/health
 
@@ -178,8 +178,8 @@ npm run db:migrate:status
 
 ```bash
 cd /www/wwwroot/hot.kfxz.cn
-pm2 delete h2-hot2 >/dev/null 2>&1 || true
-pm2 start npm --name h2-hot2 -- start
+pm2 delete hot >/dev/null 2>&1 || true
+pm2 start npm --name hot -- start
 pm2 save
 ```
 
@@ -196,5 +196,5 @@ nginx -t && nginx -s reload
 - 不提交或外传 `.env`、API Token、Webhook、SSH 私钥、SQLite、导出文件和部署包。
 - 生产禁止使用 `prisma db push`、`db:danger:reset`；`db:seed` 只用于首次初始化或明确重建。
 - migration、完全重建和危险数据清理前先确认备份文件有效。
-- PM2 只运行一个 `h2-hot2` 实例，不使用 cluster 或 `-i max`。
+- PM2 只运行一个 `hot` 实例，不使用 cluster 或 `-i max`。
 - 业务数据清理使用后台 `设置 → 数据`，不要用删除 SQLite 代替。

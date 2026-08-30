@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:-/www/wwwroot/hot.kfxz.cn}"
-APP_NAME="${APP_NAME:-h2-hot2}"
+APP_NAME="${APP_NAME:-hot}"
 SITE_URL="${SITE_URL:-https://hot.kfxz.cn}"
 LOCAL_HEALTH_URL="${LOCAL_HEALTH_URL:-http://127.0.0.1:3011/api/health}"
 BACKUP_ROOT="${BACKUP_ROOT:-/www/backup/h2-hot2}"

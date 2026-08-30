@@ -33,6 +33,7 @@ jobs:
       DEPLOY_USER: ${{ vars.DEPLOY_USER || secrets.DEPLOY_USER }}
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS || secrets.DEPLOY_KNOWN_HOSTS }}
+      APP_NAME: hot
       APP_DIR: /www/wwwroot/hot.kfxz.cn
     steps:
       - name: Validate deployment secrets
