@@ -8,6 +8,9 @@ import path from 'node:path';
 
 const mocks = vi.hoisted(() => ({
   readAllSettings: vi.fn(),
+  getAIProviderBackoff: vi.fn(),
+  noteAIProviderFailure: vi.fn(),
+  clearAIProviderBackoff: vi.fn(),
 }));
 
 vi.mock('@/lib/settings', () => ({
@@ -22,9 +25,16 @@ vi.mock('@/lib/settings', () => ({
     AI_STEP2_CONTENT_MAX_CHARS: 'ai_step2_content_max_chars',
   },
 }));
+vi.mock('@/lib/ai-provider-backoff', () => ({
+  getAIProviderBackoff: mocks.getAIProviderBackoff,
+  noteAIProviderFailure: mocks.noteAIProviderFailure,
+  clearAIProviderBackoff: mocks.clearAIProviderBackoff,
+  AI_PROVIDER_RETRY_DELAY_MS: 2 * 60 * 1000,
+  AI_RATE_LIMIT_RETRY_DELAY_MS: 5 * 60 * 1000,
+}));
 
-import { AIClientError, createChatCompletion, getAISettings, invalidateAISettingsCache, testAIConnection } from '@/lib/ai-client';
-import { resetAIRateGateForTests } from '@/lib/ai-rate-gate';
+import { AIClientError, createChatCompletion, getAISettings, invalidateAISettingsCache, testAIConnection, testSavedAIModel } from '@/lib/ai-client';
+import { OPENROUTER_FREE_REQUEST_INTERVAL_MS, resetAIRateGateForTests, waitForAIRequestSlot } from '@/lib/ai-rate-gate';
 
 function collectComponentFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -49,6 +59,9 @@ describe('createChatCompletion', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     invalidateAISettingsCache();
     resetAIRateGateForTests();
+    mocks.getAIProviderBackoff.mockResolvedValue(null);
+    mocks.noteAIProviderFailure.mockResolvedValue({ cooldownUntil: null });
+    mocks.clearAIProviderBackoff.mockResolvedValue(undefined);
     mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'opencode',
       opencode_api_key: 'test-key',
@@ -165,6 +178,10 @@ describe('createChatCompletion', () => {
     global.fetch = vi.fn().mockResolvedValueOnce(new Response('<html>gateway error</html>', { status: 200 }));
 
     await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).rejects.toThrow('API 返回无效 JSON');
+    expect(mocks.noteAIProviderFailure).toHaveBeenCalledWith('opencode', {
+      kind: 'provider',
+      status: 200,
+    });
   });
 
   it('HTTP 成功但响应为空时按 Provider 全局故障处理', async () => {
@@ -200,6 +217,20 @@ describe('createChatCompletion', () => {
       apiKey: '',
       baseUrl: 'https://opencode.ai/zen/v1',
       model: 'big-pickle',
+    });
+  });
+
+  it('OpenRouter 付费模型配置回退到免费路由，避免意外扣费', async () => {
+    mocks.readAllSettings.mockResolvedValueOnce({
+      ai_provider: 'openrouter',
+      openrouter_api_key: 'test-key',
+      openrouter_base_url: 'https://openrouter.ai/api/v1',
+      openrouter_model: 'vendor/paid-model',
+    });
+
+    await expect(getAISettings()).resolves.toMatchObject({
+      provider: 'openrouter',
+      model: 'openrouter/free',
     });
   });
 
@@ -276,6 +307,7 @@ describe('createChatCompletion', () => {
     await vi.advanceTimersByTimeAsync(30000);
     await assertion;
     expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(mocks.noteAIProviderFailure).toHaveBeenCalledWith('deepseek', { kind: 'network' });
   });
 
   it('OpenCode 长正文请求使用 60 秒超时，且超时只影响当前文章', async () => {
@@ -328,17 +360,178 @@ describe('createChatCompletion', () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('OpenCode 网关不支持 response_format 时自动降级为客户端 JSON 校验', async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce(new Response('response_format is not supported', { status: 400 }))
-      .mockResolvedValueOnce(makeOkResponse('{"ok":true}'));
+  it('切换 Provider 测试时只回退到目标 Provider 的已保存密钥', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      ai_provider: 'opencode',
+      opencode_api_key: 'opencode-key',
+      opencode_base_url: 'https://opencode.ai/zen/v1',
+      opencode_model: 'big-pickle',
+      openrouter_api_key: 'openrouter-key',
+      openrouter_base_url: 'https://openrouter.ai/api/v1',
+      openrouter_model: 'openrouter/free',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('ok'));
+
+    await expect(testAIConnection({
+      provider: 'openrouter',
+      apiKey: '',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      model: 'openrouter/free',
+    })).resolves.toMatchObject({ success: true, provider: 'openrouter' });
+
+    const requestInit = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit;
+    expect((requestInit.headers as Headers).get('authorization')).toBe('Bearer openrouter-key');
+  });
+
+  it('缺少 API Key 时直接返回配置错误，不发送无效请求', async () => {
+    mocks.readAllSettings.mockResolvedValueOnce({
+      ai_provider: 'opencode',
+      opencode_api_key: '',
+      opencode_base_url: 'https://opencode.ai/zen/v1',
+      opencode_model: 'big-pickle',
+    });
+    global.fetch = vi.fn();
+
+    await expect(testAIConnection()).resolves.toMatchObject({
+      success: false,
+      errorKind: 'configuration',
+      error: '未填写 API Key',
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('健康测试耗时不包含免费请求闸门的排队等待', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      ai_provider: 'openrouter',
+      openrouter_api_key: 'test-openrouter-key',
+      openrouter_base_url: 'https://openrouter.ai/api/v1',
+      openrouter_model: 'openrouter/free',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('ok'));
+
+    await waitForAIRequestSlot('openrouter', 'openrouter/free');
+    const pending = testSavedAIModel('openrouter', 'minimax/minimax-m3:free');
+    await vi.advanceTimersByTimeAsync(OPENROUTER_FREE_REQUEST_INTERVAL_MS);
+    const result = await pending;
+
+    expect(result.success).toBe(true);
+    expect(result.latencyMs).toBe(0);
+  });
+
+  it('免费模型健康测试读取指定 Provider 的已保存配置并返回耗时', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      ai_provider: 'openrouter',
+      openrouter_api_key: 'test-openrouter-key',
+      openrouter_base_url: 'https://openrouter.ai/api/v1',
+      openrouter_model: 'openrouter/free',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('ok'));
+
+    await expect(testSavedAIModel('openrouter', 'minimax/minimax-m3:free')).resolves.toMatchObject({
+      success: true,
+      provider: 'openrouter',
+      model: 'minimax/minimax-m3:free',
+      latencyMs: expect.any(Number),
+    });
+    const [requestUrl, requestInit] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [RequestInfo, RequestInit];
+    expect(String(requestUrl)).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect((requestInit.headers as Headers).get('authorization')).toBe('Bearer test-openrouter-key');
+    expect(JSON.parse(String(requestInit.body)).max_tokens).toBe(16);
+  });
+
+  it('候选模型 5xx 不写入生产 Provider 持久化冷却', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      ai_provider: 'openrouter',
+      openrouter_api_key: 'test-openrouter-key',
+      openrouter_base_url: 'https://openrouter.ai/api/v1',
+      openrouter_model: 'openrouter/free',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response('model unavailable', { status: 503 }));
+
+    await expect(testSavedAIModel('openrouter', 'minimax/minimax-m3:free')).resolves.toMatchObject({
+      success: false,
+      errorKind: 'provider',
+      status: 503,
+    });
+    expect(mocks.noteAIProviderFailure).not.toHaveBeenCalled();
+  });
+
+  it('免费模型健康测试拒绝非免费模型且不发送请求', async () => {
+    global.fetch = vi.fn();
+
+    await expect(testSavedAIModel('openrouter', 'paid-model')).resolves.toMatchObject({
+      success: false,
+      error: '仅允许测试免费模型',
+      errorKind: 'configuration',
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('免费模型健康测试遇到已有冷却时立即返回，不重复等待或发请求', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      ai_provider: 'openrouter',
+      openrouter_api_key: 'test-openrouter-key',
+      openrouter_base_url: 'https://openrouter.ai/api/v1',
+      openrouter_model: 'openrouter/free',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response('rate limit', { status: 429 }));
+
+    await expect(testSavedAIModel('openrouter', 'minimax/minimax-m3:free')).resolves.toMatchObject({
+      success: false,
+      errorKind: 'rate_limit',
+      status: 429,
+    });
+
+    (global.fetch as ReturnType<typeof vi.fn>).mockClear();
+    await expect(testSavedAIModel('openrouter', 'openrouter/free')).resolves.toMatchObject({
+      success: false,
+      errorKind: 'rate_limit',
+      status: 429,
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('结构化请求不发送 response_format，且只发起一次模型请求', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('{"ok":true}'));
 
     await expect(createChatCompletion([{ role: 'user', content: 'hi' }], { responseFormat: 'json_object' })).resolves.toMatchObject({
       content: '{"ok":true}',
     });
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    const secondBody = JSON.parse((global.fetch as ReturnType<typeof vi.fn>).mock.calls[1][1].body);
-    expect(secondBody.response_format).toBeUndefined();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const requestInit = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(String(requestInit.body));
+    expect(body.response_format).toBeUndefined();
+  });
+
+  it('持久化 Provider 冷却期间快速失败，不再次触发上游请求', async () => {
+    mocks.readAllSettings.mockResolvedValueOnce({
+      ai_provider: 'deepseek',
+      deepseek_api_key: 'test-key',
+      deepseek_base_url: 'https://api.deepseek.com',
+      deepseek_model: 'deepseek-v4-flash',
+      ai_temperature: '0.2',
+      ai_max_tokens: '10240',
+    });
+    const cooldownUntil = new Date(Date.now() + 120_000);
+    mocks.getAIProviderBackoff.mockResolvedValueOnce({
+      cooldownUntil,
+      lastErrorKind: 'provider',
+      lastStatus: 503,
+    });
+    global.fetch = vi.fn();
+
+    await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).rejects.toMatchObject({
+      kind: 'provider',
+      status: 503,
+      retryAfterMs: expect.any(Number),
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('401 直接抛出鉴权失败', async () => {

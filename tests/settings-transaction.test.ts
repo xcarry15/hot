@@ -265,6 +265,36 @@ describe('settings PUT 事务化', () => {
     expect(decryptSensitiveSetting(proxyUpsert.update.value)).toBe(proxyUrl);
   });
 
+  it('AI Provider API Key 保存为加密值', async () => {
+    const apiKey = 'sk-provider-secret';
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deepseek_api_key: apiKey }),
+    });
+
+    const res = await settingsPUT(req);
+
+    expect(res.status).toBe(200);
+    const keyUpsert = mocks.settingUpsert.mock.calls.find((call) => call[0].where.key === 'deepseek_api_key')?.[0];
+    expect(keyUpsert.update.value).toMatch(/^enc:v1:/);
+    expect(keyUpsert.update.value).not.toContain(apiKey);
+    expect(decryptSensitiveSetting(keyUpsert.update.value)).toBe(apiKey);
+  });
+
+  it('拒绝 OpenRouter 付费模型，避免绕过设置页产生费用', async () => {
+    const req = new Request('http://localhost/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ openrouter_model: 'vendor/paid-model' }),
+    });
+
+    const res = await settingsPUT(req);
+
+    expect(res.status).toBe(400);
+    expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+
   it('全局代理提交空值时明确关闭代理', async () => {
     mocks.settingFindMany.mockResolvedValue([
       { key: 'outbound_proxy_url', value: 'encrypted-existing-proxy' },

@@ -8,7 +8,7 @@ vi.mock('@/lib/db', () => ({
 
 import { EXPORTABLE_SETTING_KEYS } from '@/lib/settings';
 import { exportSettingsValues } from '@/lib/settings-service';
-import { encryptWebhookConfigsForStorage } from '@/lib/settings-crypto';
+import { encryptSensitiveSetting, encryptWebhookConfigsForStorage } from '@/lib/settings-crypto';
 
 describe('settings backup values', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -19,7 +19,7 @@ describe('settings backup values', () => {
     ]);
     mocks.settingFindMany.mockResolvedValue([
       { key: 'ai_provider', value: 'deepseek' },
-      { key: 'deepseek_api_key', value: 'sk-export-secret' },
+      { key: 'deepseek_api_key', value: encryptSensitiveSetting('sk-export-secret') },
       { key: 'feishu_webhook_url', value: encryptWebhookConfigsForStorage(webhook) },
     ]);
 

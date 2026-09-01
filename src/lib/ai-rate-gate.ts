@@ -1,5 +1,5 @@
 import { abortableDelay } from './shared/async';
-import { isOpenCodeFreeModel } from '@/contracts/ai-provider';
+import { isOpenCodeFreeModel, isOpenRouterFreeModel } from '@/contracts/ai-provider';
 
 /**
  * OpenCode / OpenRouter 免费模型的进程内请求闸门。
@@ -9,7 +9,8 @@ import { isOpenCodeFreeModel } from '@/contracts/ai-provider';
  * 单实例 PM2 / 单个开发进程内，同一 Provider 的免费请求共用一个时间序列，
  * 避免并发批次形成突发流量。
  */
-export const OPENROUTER_FREE_REQUEST_INTERVAL_MS = 4_000;
+// OpenRouter 免费层约 20 RPM；3 秒间隔贴近上限，同时保留统一串行队列。
+export const OPENROUTER_FREE_REQUEST_INTERVAL_MS = 3_000;
 export const OPENROUTER_FREE_COOLDOWN_MS = 60_000;
 export const OPENCODE_FREE_REQUEST_INTERVAL_MS = 4_000;
 export const OPENCODE_FREE_COOLDOWN_MS = 60_000;
@@ -34,14 +35,8 @@ function getState(provider: string): RateGateState {
   return state;
 }
 
-export function isOpenRouterFreeModel(provider: string, model: string): boolean {
-  const normalizedModel = model.trim().toLowerCase();
-  return provider === 'openrouter'
-    && (normalizedModel === 'openrouter/free' || normalizedModel.endsWith(':free'));
-}
-
 export function isFreeAIModel(provider: string, model: string): boolean {
-  return isOpenRouterFreeModel(provider, model)
+  return (provider === 'openrouter' && isOpenRouterFreeModel(model))
     || (provider === 'opencode' && isOpenCodeFreeModel(model));
 }
 
@@ -84,6 +79,13 @@ export function noteAIRateLimit(
   const cooldownMs = Math.max(defaultCooldownMs, retryAfterMs || 0);
   state.cooldownUntil = Math.max(state.cooldownUntil, Date.now() + cooldownMs);
   state.nextRequestAt = Math.max(state.nextRequestAt, state.cooldownUntil);
+}
+
+/** 返回免费模型当前剩余冷却时间；健康探测可据此快速失败，避免重复等待。 */
+export function getAIRateLimitCooldownRemainingMs(provider: string, model: string): number {
+  if (!isFreeAIModel(provider, model)) return 0;
+  const state = states.get(provider);
+  return state ? Math.max(0, state.cooldownUntil - Date.now()) : 0;
 }
 
 /** 仅供测试清理进程内状态。 */

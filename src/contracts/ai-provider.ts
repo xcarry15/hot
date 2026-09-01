@@ -23,6 +23,11 @@ export function isOpenCodeFreeModel(model: string): boolean {
   return normalizedModel === 'big-pickle' || normalizedModel.endsWith('-free');
 }
 
+export function isOpenRouterFreeModel(model: string): boolean {
+  const normalizedModel = model.trim().toLowerCase();
+  return normalizedModel === 'openrouter/free' || normalizedModel.endsWith(':free');
+}
+
 export function getOpenCodeModelProtocol(model: string): OpenCodeModelProtocol {
   const normalizedModel = model.trim().toLowerCase();
   return OPENCODE_RESPONSES_MODEL_IDS.some((id) => id === normalizedModel)

@@ -23,7 +23,8 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { fetchOpenCodeModels, fetchOpenRouterModels, testAiSettings, type AiTestResult } from '@/features/settings-api.client'
+import { fetchOpenCodeModels, fetchOpenRouterModels, testAiSettings, testSavedAiModel, type AiTestResult } from '@/features/settings-api.client'
+import { isRequestJsonError } from '@/lib/request-json.client'
 import {
   ProviderConfig,
   ProviderConfigs,
@@ -86,6 +87,46 @@ function cacheOpenRouterModels(models: string[]): void {
   }
 }
 
+type FreeAIProviderId = 'openrouter' | 'opencode'
+
+const SLOW_MODEL_LATENCY_MS = 8_000
+
+function getModelHealthKey(provider: FreeAIProviderId, model: string): string {
+  return `${provider}:${model}`
+}
+
+function getModelHealthStatus(result: AiTestResult | undefined, testing: boolean): { label: string; className: string } {
+  if (testing) return { label: '测试中', className: 'text-amber-600' }
+  if (!result) return { label: '未测试', className: 'text-muted-foreground' }
+  if (result.success) {
+    if (result.latencyMs !== undefined && result.latencyMs >= SLOW_MODEL_LATENCY_MS) {
+      return { label: '较慢', className: 'text-amber-600' }
+    }
+    return { label: '可用', className: 'text-emerald-600' }
+  }
+  return { label: '不可用', className: 'text-destructive' }
+}
+
+function getModelChipClass(result: AiTestResult | undefined, selected: boolean, testing: boolean): string {
+  const baseClass = 'border px-2 py-0.5 text-[11px] transition-colors'
+  const selectedClass = selected ? 'ring-2 ring-primary/40' : ''
+  if (testing) return `${baseClass} border-amber-300 bg-amber-50 text-amber-700 animate-pulse ${selectedClass}`
+  if (!result) {
+    return `${baseClass} ${selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted'}`
+  }
+  if (!result.success) return `${baseClass} border-red-300 bg-red-50 text-red-700 hover:bg-red-100 ${selectedClass}`
+  if (result.latencyMs !== undefined && result.latencyMs >= SLOW_MODEL_LATENCY_MS) {
+    return `${baseClass} border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 ${selectedClass}`
+  }
+  return `${baseClass} border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 ${selectedClass}`
+}
+
+function isSharedHealthFailure(result: AiTestResult): boolean {
+  return result.errorKind === 'configuration'
+    || result.errorKind === 'network'
+    || (result.retryAfterMs ?? 0) > 0
+}
+
 export default function AiModelTab({ settings, setSettings, providerConfigs, setProviderConfigs, sensitiveStatus, onRetrySensitive }: Props) {
   const [testingAI, setTestingAI] = useState(false)
   const [aiTestResult, setAiTestResult] = useState<AiTestResult | null>(null)
@@ -94,9 +135,25 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   const [loadingOpenCodeModels, setLoadingOpenCodeModels] = useState(false)
   const [openrouterModels, setOpenrouterModels] = useState<string[]>(() => [...AI_PROVIDERS.openrouter.models])
   const [loadingOpenRouterModels, setLoadingOpenRouterModels] = useState(false)
+  const [modelTestResults, setModelTestResults] = useState<Record<string, AiTestResult>>({})
+  const [testingModels, setTestingModels] = useState<Record<string, boolean>>({})
+  const [testingAllModels, setTestingAllModels] = useState(false)
+  const [testingProgress, setTestingProgress] = useState({ completed: 0, total: 0 })
 
   const currentProvider = AI_PROVIDERS[settings.ai_provider as AIProviderId] || AI_PROVIDERS.opencode
   const currentConfig = providerConfigs[currentProvider.id]
+  const currentHealthProvider: FreeAIProviderId | null = currentProvider.id === 'opencode' || currentProvider.id === 'openrouter'
+    ? currentProvider.id
+    : null
+  const discoveredModelCandidates = currentProvider.id === 'opencode'
+    ? opencodeModels
+    : currentProvider.id === 'openrouter'
+      ? openrouterModels
+      : currentProvider.models
+  const currentModelCandidates = [...new Set([
+    ...(currentConfig.model.trim() ? [currentConfig.model.trim()] : []),
+    ...discoveredModelCandidates,
+  ])]
 
   const loadOpenCodeModels = useCallback(async (showToast: boolean) => {
     setLoadingOpenCodeModels(true)
@@ -140,7 +197,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
     if (currentProvider.id !== 'opencode') return
     const cachedModels = readCachedOpencodeModels()
     if (cachedModels.length > 0) setOpencodeModels(cachedModels)
-    // 每次进入 AI 模型页后台同步一次最新列表；接口失败时保留上次成功结果。
+    // 切换到 OpenCode 时同步一次列表；接口失败时保留上次成功结果。
     void loadOpenCodeModels(false)
   }, [currentProvider.id, loadOpenCodeModels])
 
@@ -201,6 +258,105 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
       toast.error('AI 连接测试失败')
     } finally {
       setTestingAI(false)
+    }
+  }
+
+  const testModelAvailability = useCallback(async (
+    provider: FreeAIProviderId,
+    model: string,
+  ): Promise<AiTestResult> => {
+    const resultKey = getModelHealthKey(provider, model)
+    setTestingModels((current) => ({ ...current, [resultKey]: true }))
+    try {
+      const result = await testSavedAiModel(provider, model)
+      setModelTestResults((current) => ({ ...current, [resultKey]: result }))
+      return result
+    } catch (error) {
+      const status = isRequestJsonError(error) ? error.status : undefined
+      let errorKind: AiTestResult['errorKind'] = 'provider'
+      if (status === 429) errorKind = 'rate_limit'
+      else if (status === 401 || status === 403) errorKind = 'configuration'
+      else if (status === 0 || (status !== undefined && status >= 500)) errorKind = 'network'
+      const result: AiTestResult = {
+        success: false,
+        provider,
+        model,
+        error: error instanceof Error ? error.message : '测试请求失败',
+        errorKind,
+        status,
+      }
+      setModelTestResults((current) => ({ ...current, [resultKey]: result }))
+      return result
+    } finally {
+      setTestingModels((current) => ({ ...current, [resultKey]: false }))
+    }
+  }, [])
+
+  const handleTestAllModels = async () => {
+    if (!currentHealthProvider) return
+    const provider = currentHealthProvider
+    const models = currentModelCandidates
+      .slice()
+      .sort((left, right) => Number(right === currentConfig.model) - Number(left === currentConfig.model))
+      .map((model) => ({ provider, model }))
+    if (models.length === 0) {
+      toast.info(`${currentProvider.name} 暂未发现免费模型`)
+      return
+    }
+
+    setTestingAllModels(true)
+    setTestingProgress({ completed: 0, total: models.length })
+    let availableCount = 0
+    let slowCount = 0
+    let stoppedByRateLimit = false
+    let stoppedBySharedFailure = false
+    let sharedFailureWasCooldown = false
+    try {
+      for (const [index, item] of models.entries()) {
+        const result = await testModelAvailability(item.provider, item.model)
+        setTestingProgress({ completed: index + 1, total: models.length })
+        if (result.success) {
+          availableCount++
+          if (result.latencyMs !== undefined && result.latencyMs >= SLOW_MODEL_LATENCY_MS) slowCount++
+          continue
+        }
+
+        // Key、余额、网络等属于厂商级故障，继续逐模型请求只会浪费时间和额度。
+        if (isSharedHealthFailure(result)) {
+          stoppedBySharedFailure = true
+          sharedFailureWasCooldown = (result.retryAfterMs ?? 0) > 0
+          const skippedResult = `${result.error || '厂商配置不可用'}；其余模型未继续请求`
+          setModelTestResults((current) => {
+            const next = { ...current }
+            for (const remaining of models.slice(index + 1)) {
+              const key = getModelHealthKey(remaining.provider, remaining.model)
+              next[key] = { ...result, model: remaining.model, error: skippedResult }
+            }
+            return next
+          })
+          setTestingProgress({ completed: models.length, total: models.length })
+          break
+        }
+
+        // 429 往往会触发 Provider 冷却；本轮停止，避免后续请求排队等待一分钟。
+        if (result.errorKind === 'rate_limit' || result.status === 429) {
+          stoppedByRateLimit = true
+          break
+        }
+      }
+      if (stoppedBySharedFailure) {
+        if (sharedFailureWasCooldown) {
+          toast.warning(`${currentProvider.name} 正在冷却，已跳过剩余模型测试`)
+        } else {
+          toast.error(`${currentProvider.name} 配置或网络不可用，已跳过剩余模型测试`)
+        }
+      } else if (stoppedByRateLimit) {
+        toast.warning(`${currentProvider.name} 触发限流，已停止后续测试；剩余模型未测试`)
+      } else {
+        toast.success(`${currentProvider.name} 测试完成：${availableCount}/${models.length} 个模型可用${slowCount > 0 ? `，其中 ${slowCount} 个较慢` : ''}`)
+      }
+    } finally {
+      setTestingAllModels(false)
     }
   }
 
@@ -287,37 +443,49 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
 
         {/* Model name */}
         <div className="space-y-1">
-          <Label className="text-xs">模型名称</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label className="text-xs">模型名称</Label>
+            {currentHealthProvider && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-6 gap-1 px-2 text-[11px]"
+                disabled={testingAllModels || loadingOpenCodeModels || loadingOpenRouterModels}
+                title={`绿色=可用，黄色=较慢，红色=不可用；本次最多消耗 ${currentModelCandidates.length} 次免费调用`}
+                onClick={() => void handleTestAllModels()}
+              >
+                {testingAllModels ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                {testingAllModels ? `测试中 ${testingProgress.completed}/${testingProgress.total}` : '测试全部'}
+              </Button>
+            )}
+          </div>
           <Input
             value={currentConfig.model}
             onChange={(e) => updateProviderConfig(currentProvider.id, 'model', e.target.value)}
             className="h-8 font-mono text-xs"
             placeholder={currentProvider.defaultModel || '输入模型名称'}
           />
-          {(currentProvider.id === 'opencode'
-            ? opencodeModels
-            : currentProvider.id === 'openrouter'
-              ? openrouterModels
-              : currentProvider.models).length > 0 && (
+          {currentModelCandidates.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-1">
-              {(currentProvider.id === 'opencode'
-                ? opencodeModels
-                : currentProvider.id === 'openrouter'
-                  ? openrouterModels
-                  : currentProvider.models).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => updateProviderConfig(currentProvider.id, 'model', m)}
-                  className={`border px-2 py-0.5 text-[11px] transition-colors ${
-                    currentConfig.model === m
-                      ? 'bg-primary text-primary-foreground border-primary'
-                      : 'bg-muted/30 text-muted-foreground border-border hover:bg-muted'
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
+              {currentModelCandidates.map((m) => {
+                const resultKey = currentHealthProvider ? getModelHealthKey(currentHealthProvider, m) : ''
+                const result = resultKey ? modelTestResults[resultKey] : undefined
+                const testing = resultKey ? testingModels[resultKey] === true : false
+                const status = getModelHealthStatus(result, testing)
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => updateProviderConfig(currentProvider.id, 'model', m)}
+                    className={getModelChipClass(result, currentConfig.model === m, testing)}
+                    aria-label={`${m}：${status.label}`}
+                    title={`${m}：${status.label}${result?.success && result.latencyMs !== undefined ? `（${result.latencyMs}ms）` : result && !result.success && result.error ? `：${result.error}` : ''}`}
+                  >
+                    {m}
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
@@ -363,7 +531,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
               placeholder="1"
             />
             <p className="text-[11px] text-muted-foreground">
-              OpenCode / OpenRouter 免费模型会自动串行并间隔约 4 秒；其他服务商调高并发可缩短处理时间，但更容易触发限流。
+              OpenCode 免费请求约间隔 4 秒，OpenRouter 约间隔 3 秒并自动串行；其他服务商调高并发可缩短处理时间，但更容易触发限流。
             </p>
           </div>
         </div>

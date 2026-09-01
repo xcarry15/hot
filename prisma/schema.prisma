@@ -370,6 +370,20 @@ model Setting {
   @@map("settings")
 }
 
+// Provider 级 AI 限流、服务端与连接故障冷却；不保存响应正文、API Key 或其他敏感信息。
+model AiProviderState {
+  provider         String    @id
+  cooldownUntil    DateTime?
+  failureCount     Int       @default(0)
+  lastErrorKind    String    @default("")
+  lastStatus       Int?
+  lastRetryAfterMs Int?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("ai_provider_states")
+}
+
 model ToolDirectoryItem {
   id          String    @id @default(cuid())
   name        String

@@ -4,6 +4,7 @@
  * 涵盖：
  *   - settings 读写（GET /api/settings、PUT /api/settings、/api/settings/reveal 解密）
  *   - AI 模型测试（POST /api/settings/test-ai）
+ *   - AI 免费模型可用性测试（POST /api/settings/test-ai-model）
  *   - OpenCode / OpenRouter 免费模型列表
  *   - Webhook 测试（POST /api/settings/test-webhook）
  *   - 全局代理测试（POST /api/settings/test-proxy）
@@ -125,6 +126,10 @@ export interface AiTestResult {
   provider?: string;
   model?: string;
   error?: string;
+  errorKind?: 'configuration' | 'rate_limit' | 'provider' | 'network' | 'timeout' | 'content';
+  status?: number;
+  retryAfterMs?: number;
+  latencyMs?: number;
   responsePreview?: string;
 }
 
@@ -139,6 +144,17 @@ export interface AiTestInput {
 
 export async function testAiSettings(input: AiTestInput, signal?: AbortSignal): Promise<AiTestResult> {
   return requestJson<AiTestResult>('POST', '/api/settings/test-ai', { body: input, signal });
+}
+
+export async function testSavedAiModel(
+  provider: 'opencode' | 'openrouter',
+  model: string,
+  signal?: AbortSignal,
+): Promise<AiTestResult> {
+  return requestJson<AiTestResult>('POST', '/api/settings/test-ai-model', {
+    body: { provider, model },
+    signal,
+  });
 }
 
 export interface ScorePreviewInput { weightEvent: number; weightContent: number; keywordBonus: number }

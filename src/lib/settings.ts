@@ -8,6 +8,7 @@
 
 import { db } from './db';
 export {
+  AI_PROVIDER_API_KEY_KEYS,
   EXPORTABLE_SETTING_KEYS,
   WRITABLE_SETTING_KEYS,
   FRONTEND_SETTING_KEYS,
@@ -25,6 +26,7 @@ export type { SettingDefinition, SettingKey } from './settings-catalog';
 import {
   getSettingDefinition,
   getSettingDefaults,
+  AI_PROVIDER_API_KEY_KEYS,
   SETTING_DEFINITION_MAP,
   SETTING_KEYS,
 } from './settings-catalog';
@@ -44,7 +46,7 @@ export async function getSetting(key: string): Promise<string> {
 }
 
 function resolveSettingValue(key: string, value: string | null | undefined): string {
-  if (key === SETTING_KEYS.OUTBOUND_PROXY_URL) {
+  if (key === SETTING_KEYS.OUTBOUND_PROXY_URL || AI_PROVIDER_API_KEY_KEYS.has(key)) {
     return value ? decryptSensitiveSetting(value) : '';
   }
   if (key in DEFAULT_PROMPT_SETTINGS) {

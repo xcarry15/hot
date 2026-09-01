@@ -3,10 +3,10 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { invalidateAISettingsCache } from '@/lib/ai-client';
 import {
-  EXPORTABLE_SETTING_KEYS, WRITABLE_SETTING_KEYS, SETTING_DEFINITION_MAP, SENSITIVE_SETTING_KEYS, getSettingDefaults, getExportableSettingDefaults,
+  AI_PROVIDER_API_KEY_KEYS, EXPORTABLE_SETTING_KEYS, WRITABLE_SETTING_KEYS, SETTING_DEFINITION_MAP, SENSITIVE_SETTING_KEYS, getSettingDefaults, getExportableSettingDefaults,
 } from '@/lib/settings';
 import { SETTING_KEYS } from '@/lib/settings-catalog';
-import { isOpenCodeFreeModel, providerSettingKey } from '@/contracts/ai-provider';
+import { isOpenCodeFreeModel, isOpenRouterFreeModel, providerSettingKey } from '@/contracts/ai-provider';
 import { parseWebhookConfigsForServer, serializeWebhookConfigsForServer } from '@/contracts/webhook';
 import {
   decryptSensitiveSetting,
@@ -74,6 +74,9 @@ function validateSettingsInput(input: unknown, options: SettingsUpdateOptions = 
     if (key === providerSettingKey('opencode', 'model') && value.trim() && !isOpenCodeFreeModel(value)) {
       validationErrors.push(`${key}: OpenCode 仅允许免费模型`);
     }
+    if (key === providerSettingKey('openrouter', 'model') && value.trim() && !isOpenRouterFreeModel(value)) {
+      validationErrors.push(`${key}: OpenRouter 仅允许免费模型`);
+    }
     if (key === SETTING_KEYS.FEISHU_WEBHOOK_URL) {
       try {
         parseWebhookConfigsForServer(value);
@@ -118,7 +121,7 @@ export async function exportSettingsValues(): Promise<Record<string, string>> {
   for (const row of rows) {
     settings[row.key] = row.key === SETTING_KEYS.FEISHU_WEBHOOK_URL
       ? decryptWebhookConfigsForRuntime(row.value)
-      : row.key === SETTING_KEYS.OUTBOUND_PROXY_URL
+      : row.key === SETTING_KEYS.OUTBOUND_PROXY_URL || AI_PROVIDER_API_KEY_KEYS.has(row.key)
         ? decryptSensitiveSetting(row.value)
         : row.value;
   }
@@ -139,7 +142,7 @@ export async function revealSensitiveSettings(requestedKeys?: string[]) {
       key,
       key === SETTING_KEYS.FEISHU_WEBHOOK_URL
         ? (value ? decryptWebhookConfigsForRuntime(value) : '[]')
-        : key === SETTING_KEYS.OUTBOUND_PROXY_URL
+        : key === SETTING_KEYS.OUTBOUND_PROXY_URL || AI_PROVIDER_API_KEY_KEYS.has(key)
           ? (value ? decryptSensitiveSetting(value) : '')
         : value,
     ];
@@ -161,7 +164,7 @@ export async function updateSettingsInTransaction(
   let updates = Object.entries(normalizedData) as [string, string][];
   updates = updates.map(([key, value]) => key === SETTING_KEYS.FEISHU_WEBHOOK_URL
     ? [key, encryptWebhookConfigsForStorage(serializeWebhookConfigsForServer(parseWebhookConfigsForServer(value)))]
-    : key === SETTING_KEYS.OUTBOUND_PROXY_URL
+    : key === SETTING_KEYS.OUTBOUND_PROXY_URL || AI_PROVIDER_API_KEY_KEYS.has(key)
       ? [key, encryptSensitiveSetting(value)]
     : [key, value]);
   const keepKeys = updates.filter(([key]) => preserveRedactedSensitiveKeys.has(key)).map(([key]) => key);

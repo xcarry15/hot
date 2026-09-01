@@ -120,6 +120,11 @@ const providerSettingDefinitions: SettingDefinition[] = Object.values(AI_PROVIDE
   { key: providerSettingKey(provider.id, 'model'), defaultValue: provider.defaultModel, schema: text, sensitive: false, exportable: true, frontend: false, seed: false },
 ]);
 
+/** Provider API Key 使用通用 AES-GCM codec 加密保存。 */
+export const AI_PROVIDER_API_KEY_KEYS = new Set(
+  Object.values(AI_PROVIDERS).map((provider) => providerSettingKey(provider.id, 'api_key')),
+);
+
 const definitions: SettingDefinition[] = [
   {
     key: SETTING_KEYS.OUTBOUND_PROXY_URL,

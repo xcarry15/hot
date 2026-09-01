@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { db } from './db';
 import { AIClientError, createChatCompletion, getAISettings } from './ai-client';
+import { AI_PROVIDER_RETRY_DELAY_MS, AI_RATE_LIMIT_RETRY_DELAY_MS } from './ai-provider-backoff';
 import type { AISettings } from './ai-client';
 import type { ChatMessage } from './ai-client';
 import { fetchArticleDetail } from './detail-fetcher';
@@ -267,6 +268,8 @@ export type AIProcessResult = {
   retryable?: boolean;
   /** Provider 级暂停的可展示原因；不得包含请求正文或密钥。 */
   globalMessage?: string;
+  /** Provider 冷却剩余时间，供批处理统一延后未开始文章。 */
+  retryAfterMs?: number;
 };
 export function processWithAI(article: AiProcessArticle, signal?: AbortSignal): Promise<AIProcessResult>;
 export function processWithAI(article: MinimalAIProcessArticle, signal?: AbortSignal): Promise<AIProcessResult>;
@@ -304,7 +307,7 @@ export async function processWithAI(
 
   // Deep analysis: 一次性生成全部字段（复用已查询的 article 对象，无额外 DB 查询）
   let step2;
-  let aiFailure: { message: string; kind?: string; global?: boolean; retryable?: boolean } | null = null;
+  let aiFailure: { message: string; kind?: string; global?: boolean; retryable?: boolean; retryAfterMs?: number } | null = null;
   try {
     step2 = await deepAnalyze(article, settings, signal);
   } catch (error) {
@@ -312,7 +315,12 @@ export async function processWithAI(
     aiFailure = {
       message: error instanceof Error ? error.message : String(error),
       ...(error instanceof AIClientError
-        ? { kind: error.kind, global: error.global, retryable: error.retryable }
+        ? {
+            kind: error.kind,
+            global: error.global,
+            retryable: error.retryable,
+            retryAfterMs: error.retryAfterMs,
+          }
         : {}),
     };
   }
@@ -424,11 +432,12 @@ export async function processWithAI(
     // 由批处理统一暂停；文章超时/网络和请求体错误由 AIClientError 标为文章级，
     // 进入当前文章的有限重试，不得污染整条队列。
     if (aiFailure?.global) {
-      const retryDelayMs = aiFailure.kind === 'rate_limit'
-        ? 5 * 60 * 1000
-        : aiFailure.retryable
-          ? 2 * 60 * 1000
-          : 30 * 60 * 1000;
+      const retryDelayMs = aiFailure.retryAfterMs
+        || (aiFailure.kind === 'rate_limit'
+          ? AI_RATE_LIMIT_RETRY_DELAY_MS
+          : aiFailure.retryable
+            ? AI_PROVIDER_RETRY_DELAY_MS
+            : 30 * 60 * 1000);
       assertNotAborted(signal);
       await db.article.update({
         where: { id: articleId },
@@ -444,6 +453,7 @@ export async function processWithAI(
         globalError: true,
         retryable: aiFailure.retryable === true,
         globalMessage: aiFailure.message.slice(0, 1000),
+        retryAfterMs: aiFailure.retryAfterMs,
       };
     }
 

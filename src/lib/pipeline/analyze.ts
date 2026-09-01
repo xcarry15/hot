@@ -9,6 +9,7 @@
  *   - 逻辑原先内联在 `crawler.ts.analyzeAllPending`；B13 抽离后保留：
  *     · MAX_BATCH_SIZE=100、CONCURRENCY=ai_concurrency(默认1)/DELAY_MS=300、timeout=90_000
  *     · OpenCode / OpenRouter 免费模型由 ai-rate-gate 统一串行并限速
+ *     · Provider 级限流、服务端与连接故障冷却由 ai-provider-backoff 持久化，并沿用到队列退避
  *     · 退避 where：OR[ nextAiRetryAt=null, nextAiRetryAt <= now ]
  *     · Promise.allSettled 把 rejected 计入 errors
  */
@@ -20,6 +21,7 @@ import { isFreeAIModel } from '@/lib/ai-rate-gate';
 import { providerSettingKey } from '@/contracts/ai-provider';
 import { assertNotAborted } from '@/lib/worker-stop';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
+import { AI_PROVIDER_RETRY_DELAY_MS, AI_RATE_LIMIT_RETRY_DELAY_MS } from '@/lib/ai-provider-backoff';
 import {
   advanceJobProgress,
   startJobStage,
@@ -31,8 +33,6 @@ const DEFAULT_AI_CONCURRENCY = 1;
 const MIN_AI_CONCURRENCY = 1;
 const MAX_AI_CONCURRENCY = 10;
 const AI_DELAY_MS = 300;
-const AI_PROVIDER_RETRY_DELAY_MS = 2 * 60 * 1000;
-const AI_RATE_LIMIT_RETRY_DELAY_MS = 5 * 60 * 1000;
 
 function isTransientBatchError(reason: unknown): boolean {
   const message = reason instanceof Error ? reason.message : String(reason);
@@ -97,7 +97,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
       Math.min(MAX_AI_CONCURRENCY, Number.isFinite(rawConcurrency) ? rawConcurrency : DEFAULT_AI_CONCURRENCY),
     );
 
-  let providerPause: { retryable: boolean; errorKind?: string; message?: string } | null = null;
+  let providerPause: { retryable: boolean; errorKind?: string; message?: string; retryAfterMs?: number } | null = null;
   const attemptedArticleIds = new Set<string>();
   const getPendingRowsWhere = (): Prisma.ArticleWhereInput => ({
     ...pendingWhereBase,
@@ -179,6 +179,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
             retryable: r.value.retryable === true,
             errorKind: r.value.errorKind,
             message: r.value.globalMessage,
+            retryAfterMs: r.value.retryAfterMs,
           };
         }
       }
@@ -203,7 +204,10 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
       // 不再依赖开头预读的全部 ID；仅把此轮仍符合原待处理条件的文章统一延迟。
       // 已完成、已失败退避或已聚类的记录都不会被误改。
       const retryDelayMs = providerPause.retryable
-        ? (providerPause.errorKind === 'rate_limit' ? AI_RATE_LIMIT_RETRY_DELAY_MS : AI_PROVIDER_RETRY_DELAY_MS)
+        ? Math.max(
+            providerPause.errorKind === 'rate_limit' ? AI_RATE_LIMIT_RETRY_DELAY_MS : AI_PROVIDER_RETRY_DELAY_MS,
+            providerPause.retryAfterMs || 0,
+          )
         : 30 * 60 * 1000;
       const paused = await db.article.updateMany({
         where: {

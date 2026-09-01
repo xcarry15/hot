@@ -151,13 +151,15 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 
 ### 配置 OpenCode Zen 免费模型
 
-项目通过 OpenAI 兼容接口接入 OpenCode Zen，默认 API 地址为 `https://opencode.ai/zen/v1`。在后台进入 `设置 → AI 模型`，选择 `OpenCode (免费)` 并填写 API Key；模型列表会从官方 `GET /zen/v1/models` 动态读取，接口不可用时使用内置兜底。项目只允许 OpenCode 免费模型，免费模型请求会自动串行、间隔约 4 秒，收到 429 后尊重 `Retry-After` 并暂停后续请求，不自动重复发送。OpenCode 官方部分免费模型使用 `/chat/completions`，Contributor Free 使用 `/responses`，项目会按模型自动选择协议。免费模型为限时活动，且部分模型可能将请求内容用于改进模型，请勿提交敏感内容。API Key 由设置系统加密保存，不要写入 `.env`、代码或 Git。
+项目通过 OpenAI 兼容接口接入 OpenCode Zen，默认 API 地址为 `https://opencode.ai/zen/v1`。在后台进入 `设置 → AI 模型`，选择 `OpenCode (免费)` 并填写 API Key；模型列表会从官方 `GET /zen/v1/models` 动态读取，接口不可用时使用内置兜底。项目只允许 OpenCode 免费模型，免费模型请求会自动串行、间隔约 4 秒，收到 429 后尊重 `Retry-After` 并暂停后续请求，不自动重复发送。文章结构化结果由 Prompt 和客户端 Schema 校验完成，不发送 `response_format`，不会因格式兼容问题额外发起请求；429/5xx、连接故障、无效 JSON 和空响应的 Provider 冷却与退避会持久化到 SQLite，服务重启后仍会生效。OpenCode 官方部分免费模型使用 `/chat/completions`，Contributor Free 使用 `/responses`，项目会按模型自动选择协议。免费模型为限时活动，且部分模型可能将请求内容用于改进模型，请勿提交敏感内容。API Key 在保存时使用 `SETTINGS_ENCRYPTION_KEY` 加密；历史明文兼容读取，并会在下次保存时转为加密格式。不要把密钥写入 `.env`、代码或 Git。
+
+设置 → AI 模型的当前免费模型候选框旁提供“测试全部”；每次只测试当前选中的厂商，优先测试当前模型，并用最小请求逐个探测。结果直接用候选项颜色标记：绿色表示可用，黄色表示响应较慢，红色表示不可用；黄色只统计上游请求耗时，不包含本地限速排队。配置、网络故障或限流会提前停止本轮测试，避免浪费免费额度；诊断探测不会写入生产 Provider 冷却，测试结果也只保留在当前页面。
 
 模型列表与价格以 OpenCode 官方文档为准：<https://opencode.ai/docs/zh-cn/zen>；模型发现接口：<https://opencode.ai/zen/v1/models>。
 
 ### 配置 OpenRouter 免费模型
 
-项目通过 OpenAI 兼容接口接入 OpenRouter，不需要额外安装 SDK。在后台进入 `设置 → AI 模型`，选择 `OpenRouter (免费模型)`，填写你自己的 API Key；默认 API 地址为 `https://openrouter.ai/api/v1`，默认模型为 `openrouter/free`。模型按钮会从官方 `GET /api/v1/models` 动态读取文本输出、输入与输出价格均为 0 的免费模型，并保留 `openrouter/free` 作为兜底；OpenRouter 的免费模型列表会变化，可点击“刷新免费模型”。免费模型存在速率限制。项目会对 OpenRouter 免费请求自动串行、每次间隔约 4 秒，收到 429 后停止本次自动重试并进入冷却，避免突发请求反复消耗额度。API Key 由设置系统加密保存，不要写入 `.env`、代码或 Git。
+项目通过 OpenAI 兼容接口接入 OpenRouter，不需要额外安装 SDK。在后台进入 `设置 → AI 模型`，选择 `OpenRouter (免费模型)`，填写你自己的 API Key；默认 API 地址为 `https://openrouter.ai/api/v1`，默认模型为 `openrouter/free`。模型按钮会从官方 `GET /api/v1/models` 动态读取文本输出、输入与输出价格均为 0 的免费模型，并保留 `openrouter/free` 作为兜底；服务端也会拒绝非 `openrouter/free`、非 `:free` 模型，防止手工提交付费模型产生费用。OpenRouter 的免费模型列表会变化，可点击“刷新免费模型”。免费模型存在速率限制。项目会对 OpenRouter 免费请求自动串行、每次间隔约 3 秒，收到 429 后停止本次自动重试并进入冷却，避免突发请求反复消耗额度。文章结构化结果由 Prompt 和客户端 Schema 校验完成，不发送 `response_format`，不会因格式兼容问题额外发起请求；429/5xx、连接故障、无效 JSON 和空响应的 Provider 冷却与退避会持久化到 SQLite，服务重启后仍会生效。API Key 在保存时使用 `SETTINGS_ENCRYPTION_KEY` 加密；历史明文兼容读取，并会在下次保存时转为加密格式。不要把密钥写入 `.env`、代码或 Git。
 
 这类保护只能避免短时间突发，不能绕过 OpenRouter 的每日额度；官方 FAQ 当前说明免费账户通常为每天 50 次，购买至少 10 美元额度后为每天 1000 次。积压文章超过每日额度时，AI 队列会保留为待处理，等待后续恢复，不会继续盲目请求。
 
