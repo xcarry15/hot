@@ -25,20 +25,33 @@ const HISTORICAL_FREE_PROXY_CANDIDATES: ProxyCandidate[] = [
   { url: 'http://58.254.153.146:17981', label: '历史可用节点 #6' },
 ];
 
+// 2026-08-31 对赢商网目标页面连续两轮实测通过的中国出口。
+// 免费节点变化很快，仍需每次按当前目标重新测速，不能视为永久可用。
+const RECENTLY_VERIFIED_FREE_PROXY_CANDIDATES: ProxyCandidate[] = [
+  { url: 'http://27.185.218.213:17981', label: '近期验证节点 #1' },
+  { url: 'http://114.236.137.41:21000', label: '近期验证节点 #2' },
+  { url: 'http://101.132.170.8:7890', label: '近期验证节点 #3' },
+  { url: 'http://39.106.170.168:8080', label: '近期验证节点 #4' },
+  { url: 'http://39.106.165.196:8080', label: '近期验证节点 #5' },
+  { url: 'http://47.121.139.13:3128', label: '近期验证节点 #6' },
+  { url: 'http://123.121.131.112:8888', label: '近期验证节点 #7' },
+  { url: 'http://123.121.113.161:8888', label: '近期验证节点 #8' },
+  { url: 'http://114.248.179.223:8888', label: '近期验证节点 #9' },
+  { url: 'http://123.121.132.32:8888', label: '近期验证节点 #10' },
+  { url: 'http://123.112.220.78:8888', label: '近期验证节点 #11' },
+  { url: 'http://221.221.163.25:8888', label: '近期验证节点 #12' },
+];
+
 // 这些列表只作为候选来源，实际是否可用仍以本项目对目标站点的测速结果为准。
-// RelayGlass 和 Proxifly 的 HTTPS 文件优先；TheSpeedX 作为额外的 HTTP 兜底来源。
+// 优先使用中国出口，降低赢商网按海外出口/WAF 拦截导致的整体失败率。
 const FREE_PROXY_SOURCES = [
   {
-    label: 'RelayGlass HTTPS',
-    url: 'https://raw.githubusercontent.com/relayglass/free-proxy-list/main/protocol/https/https.txt',
+    label: 'HProxy 中国出口',
+    url: 'https://raw.githubusercontent.com/hproxy-com/free-proxy-list/main/by-country/CN.txt',
   },
   {
-    label: 'Proxifly HTTPS',
-    url: 'https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/https/data.txt',
-  },
-  {
-    label: 'TheSpeedX HTTP',
-    url: 'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt',
+    label: 'ProxyScrape 中国出口',
+    url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text&country=cn',
   },
 ] as const;
 
@@ -138,7 +151,10 @@ export async function getFreeProxyCandidates(forceRefresh = false): Promise<Prox
       const successfulSources = sourceResults.filter((result) => result.candidates.length > 0);
       const seen = new Set<string>();
       const candidates: ProxyCandidate[] = [];
-      for (const candidate of HISTORICAL_FREE_PROXY_CANDIDATES) {
+      for (const candidate of [
+        ...HISTORICAL_FREE_PROXY_CANDIDATES,
+        ...RECENTLY_VERIFIED_FREE_PROXY_CANDIDATES,
+      ]) {
         seen.add(candidate.url);
         candidates.push(candidate);
       }
