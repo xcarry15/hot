@@ -62,6 +62,15 @@
 - `reset_production=yes` deletes production SQLite without backup. Use it only after explicit approval to lose production data.
 - Routine application releases do not clear the server-wide Nginx cache or reload Nginx.
 
+## Formal Server Operations
+
+- 正式服务器已验证为 `root@150.158.18.181:22`，主机名 `VM-0-11-opencloudos`，正式域名为 `https://hot.kfxz.cn`。
+- 使用本机已授权的 `/root/.ssh/id_ed25519` 连接，并保留主机指纹校验：`ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 root@150.158.18.181`。只使用私钥进行认证，不读取、输出或复制私钥内容。
+- 正式应用目录为 `/www/wwwroot/hot.kfxz.cn`；当前 release 由 `current` 软链指向，SQLite 共享数据库为 `/www/wwwroot/hot.kfxz.cn/db/custom.db`。
+- 正式进程为 PM2 `hot` 单实例，Next 服务使用 3011 端口，Nginx 对外提供 80/443 并代理到 `127.0.0.1:3011`。
+- 审查线上状态时，优先只读检查 `pm2 status`、`pm2 describe hot`、`readlink -f /www/wwwroot/hot.kfxz.cn/current`、`curl https://hot.kfxz.cn/api/health`、`systemctl status pm2-root --no-pager`、SQLite `PRAGMA integrity_check` 与 migration status；不要把开发机 `VM-0-13-opencloudos` 的 PM2 状态当作正式状态。
+- 连接审查、发布核对和故障诊断均不得输出 `.env`、API Token、Webhook、数据库正文或 SSH 私钥内容。
+
 ## Commands
 
 - `npm run dev` — development server at `http://localhost:3011`.

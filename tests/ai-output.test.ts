@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAiAnalysisOutput } from '@/lib/ai-output';
+import { AI_SUMMARY_MAX_LENGTH, parseAiAnalysisOutput } from '@/lib/ai-output';
 
 const validOutput = {
   event_score: 80,
@@ -52,7 +52,7 @@ describe('parseAiAnalysisOutput', () => {
     expect(parsed.event_subjects).toEqual(['测试品牌']);
     expect(parsed.event_key).toBe('测试品牌/正式开店/上海首店');
     expect(parsed.event_key_confidence).toBe(91);
-    expect(parsed.summary.length).toBe(600);
+    expect(parsed.summary.length).toBe(AI_SUMMARY_MAX_LENGTH);
     expect(parsed.key_points).toHaveLength(1);
   });
 
@@ -97,7 +97,7 @@ describe('parseAiAnalysisOutput', () => {
       ad_probability: 85,
       event_action: '缴纳五险一金',
       event_object: '全职骑手快递小哥',
-      summary: '京东每年投入超百亿，为全职骑手和快递员缴纳五险一金并签署劳动合同。',
+      summary: validOutput.summary,
       key_points: ['京东为15万全职骑手缴纳五险一金'],
     }));
     expect(parsed.is_ad).toBe(false);
@@ -112,7 +112,7 @@ describe('parseAiAnalysisOutput', () => {
       ad_probability: 85,
       event_action: '捐赠救援',
       event_object: '品牌公益物资',
-      summary: '全文围绕品牌公益活动与品牌形象展开，缺少独立行业信息。',
+      summary: validOutput.summary,
       key_points: ['品牌发布捐赠活动宣传稿'],
     }));
     expect(parsed.is_ad).toBe(true);
@@ -121,6 +121,13 @@ describe('parseAiAnalysisOutput', () => {
 
   it('缺少核心评分字段时拒绝结果', () => {
     expect(() => parseAiAnalysisOutput(JSON.stringify({ summary: '没有评分' }))).toThrow();
+  });
+
+  it('摘要少于 111 字时拒绝结果', () => {
+    expect(() => parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      summary: '摘要过短',
+    }))).toThrow('111-222');
   });
 
   it('缺少完整事件身份时保留分析结果并清空身份，不触发重试', () => {

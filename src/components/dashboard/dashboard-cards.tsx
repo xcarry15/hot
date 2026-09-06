@@ -25,6 +25,7 @@ interface CrawlTimeCardProps {
 }
 
 function formatNumber(value: number): string { return value.toLocaleString() }
+function formatPercent(value: number): string { return `${Math.round(value * 100)}%` }
 const CHART_VIEWBOX_WIDTH = 640
 const CHART_HEIGHT = 160
 const CHART_PLOT_TOP = 12
@@ -188,6 +189,71 @@ export function TopViewedArticlesCard({
           </div>
         ) : (
           <div className="py-8 text-center text-xs text-muted-foreground">暂无公开文章浏览数据</div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function formatAiDuration(value: number): string {
+  if (value <= 0) return '—'
+  if (value < 1000) return `${Math.round(value)}ms`
+  return `${(value / 1000).toFixed(1)}s`
+}
+
+function aiProviderLabel(provider: string): string {
+  if (provider === 'opencode') return 'OpenCode'
+  if (provider === 'openrouter') return 'OpenRouter'
+  if (provider === 'deepseek') return 'DeepSeek'
+  return provider
+}
+
+function aiErrorKindLabel(kind: string): string {
+  if (kind === 'rate_limit') return '限流'
+  if (kind === 'timeout') return '超时'
+  if (kind === 'network') return '网络'
+  if (kind === 'provider') return '服务'
+  if (kind === 'configuration') return '配置'
+  if (kind === 'content') return '内容'
+  return kind
+}
+
+export function AiInvocationCard({
+  stats,
+}: {
+  stats: DashboardAnalytics['ai']
+}) {
+  return (
+    <Card className="rounded-none py-0 shadow-none">
+      <CardContent className="p-2">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">AI 调用</h3>
+          <span className="text-[10px] text-muted-foreground">真实上游请求</span>
+        </div>
+        <div className="grid grid-cols-2 gap-px border bg-border sm:grid-cols-4">
+          <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">调用</span><strong className="text-sm tabular-nums">{formatNumber(stats.total)}</strong></div>
+          <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">成功率</span><strong className={`text-sm tabular-nums ${stats.failed > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{formatPercent(stats.successRate)}</strong></div>
+          <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">失败</span><strong className={`text-sm tabular-nums ${stats.failed > 0 ? 'text-red-600' : ''}`}>{formatNumber(stats.failed)}</strong></div>
+          <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">平均耗时</span><strong className="text-sm tabular-nums">{formatAiDuration(stats.averageDurationMs)}</strong></div>
+        </div>
+        {stats.failuresByKind.length > 0 && (
+          <div className="mt-1 border px-2 py-1 text-[10px] text-muted-foreground">
+            失败类型：{stats.failuresByKind.map((item) => `${aiErrorKindLabel(item.kind)} ${formatNumber(item.count)}`).join(' · ')}
+          </div>
+        )}
+        {stats.byProvider.length > 0 ? (
+          <div className="mt-1 divide-y border text-[11px]">
+            {stats.byProvider.map((item) => (
+              <div key={`${item.provider}:${item.model}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5">
+                <span className="font-medium">{aiProviderLabel(item.provider)}</span>
+                <span className="min-w-0 flex-1 truncate text-muted-foreground" title={item.model}>{item.model}</span>
+                <span className="tabular-nums">{formatNumber(item.total)} 次</span>
+                <span className="text-muted-foreground tabular-nums">成功 {formatNumber(item.succeeded)} · 失败 {formatNumber(item.failed)} · {formatAiDuration(item.averageDurationMs)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="border border-t-0 py-2 text-center text-[11px] text-muted-foreground">当前范围暂无 AI 调用</div>
         )}
       </CardContent>
     </Card>

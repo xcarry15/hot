@@ -31,7 +31,6 @@ const mocks = vi.hoisted(() => ({
   keywordCandidateUpsert: vi.fn(),
   keywordHitDeleteMany: vi.fn(),
   keywordHitCreateMany: vi.fn(),
-  articleSearchUpsert: vi.fn(),
   transaction: vi.fn(),
   // detail-fetcher
   fetchArticleDetail: vi.fn(),
@@ -67,9 +66,6 @@ vi.mock('@/lib/db', () => ({
     keywordHit: {
       deleteMany: mocks.keywordHitDeleteMany,
       createMany: mocks.keywordHitCreateMany,
-    },
-    articleSearch: {
-      upsert: mocks.articleSearchUpsert,
     },
     keywordCandidate: {
       findMany: mocks.keywordCandidateFindMany,
@@ -129,7 +125,6 @@ beforeEach(() => {
   mocks.keywordCandidateUpsert.mockResolvedValue({});
   mocks.keywordHitDeleteMany.mockResolvedValue({ count: 0 });
   mocks.keywordHitCreateMany.mockResolvedValue({ count: 0 });
-  mocks.articleSearchUpsert.mockResolvedValue({});
   mocks.transaction.mockImplementation(async (writes: Array<Promise<unknown>>) => Promise.all(writes));
 });
 
@@ -175,13 +170,6 @@ describe('processAllPending 全文关键字匹配', () => {
     expect(mocks.keywordHitCreateMany).toHaveBeenCalledWith({
       data: [{ articleId: 'art-001', keywordId: 'kw-naixue' }],
     });
-    expect(mocks.articleSearchUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { articleId: 'art-001' },
-      create: expect.objectContaining({
-        articleId: 'art-001',
-        searchText: expect.stringContaining('奈雪'),
-      }),
-    }));
   });
 
   it('正文不命中关键字 → 文章删除 + DiscardedItem 写入 filter:keyword', async () => {
@@ -247,7 +235,6 @@ describe('processAllPending 全文关键字匹配', () => {
       where: { id: 'art-001' },
       data: { keywordMatched: false },
     });
-    expect(mocks.articleSearchUpsert).toHaveBeenCalled();
   });
 });
 

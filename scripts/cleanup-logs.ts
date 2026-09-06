@@ -1,7 +1,7 @@
 /**
  * 按固定保留周期清理历史日志。
  *
- * 只删除：过期 FetchLog、已完成全部推送 Article 的过期 PushLog、过期已结束 Job。
+ * 只删除：过期 FetchLog、已完成全部推送 Article 的过期 PushLog、过期已结束 Job、AI 调用指标。
  * 不删除 Article、Source、DiscardedItem，也不触碰 pending/running Job。
  *
  * 用法：npm run db:cleanup-logs
@@ -17,6 +17,7 @@ purgeExpiredLogs(db)
       fetchLogs: result.fetchLogs,
       pushLogs: result.pushLogs,
       completedJobs: result.completedJobs,
+      aiInvocations: result.aiInvocations,
       total: result.total,
     });
   })

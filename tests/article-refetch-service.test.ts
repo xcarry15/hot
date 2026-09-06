@@ -14,9 +14,6 @@ const mocks = db as unknown as {
     deleteMany: ReturnType<typeof vi.fn>;
     createMany: ReturnType<typeof vi.fn>;
   };
-  articleSearch: {
-    upsert: ReturnType<typeof vi.fn>;
-  };
 };
 
 vi.mock('@/lib/detail-fetcher', () => ({
@@ -34,7 +31,6 @@ describe('article-refetch-service', () => {
     mocks.keyword.findMany.mockResolvedValue([]);
     mocks.keywordHit.deleteMany.mockResolvedValue({ count: 0 });
     mocks.keywordHit.createMany.mockResolvedValue({ count: 0 });
-    mocks.articleSearch.upsert.mockResolvedValue({});
   });
 
   it('文章不存在时返回 null，不执行写入', async () => {
@@ -68,19 +64,11 @@ describe('article-refetch-service', () => {
       data: { keywordMatched: false },
     });
     expect(mocks.keywordHit.deleteMany).toHaveBeenCalledWith({ where: { articleId: 'a1' } });
-    expect(mocks.articleSearch.upsert).toHaveBeenCalled();
   });
 
   it('重新抓取没有获得有效正文时返回失败，供工作流中断后续阶段', async () => {
     mocks.article.findUnique
       .mockResolvedValueOnce({ id: 'a2' })
-      .mockResolvedValueOnce({
-        title: '旧标题',
-        cleanContent: '',
-        summary: '',
-        brand: '',
-        eventKey: '',
-      })
       .mockResolvedValueOnce({ fetchError: '来源正文页超时' });
     const { fetchArticleDetail } = await import('@/lib/detail-fetcher');
     vi.mocked(fetchArticleDetail).mockResolvedValueOnce('');

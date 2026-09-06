@@ -30,7 +30,6 @@ import {
   type ManualCalibrationValues,
 } from './article-calibration';
 import { parseAiAnalysisOutput } from './ai-output';
-import { refreshArticleSearchIndex } from './article-search-index';
 import {
   AI_STATUS_CODEC,
   FETCH_STATUS_CODEC,
@@ -38,8 +37,8 @@ import {
   type FetchStatusValue,
 } from '@/contracts/state';
 
-// v23：每篇文章只请求一次 AI；提示词压缩后保留事实、身份和可读洞察。
-const PROMPT_VERSION = 'v23';
+// v24：摘要统一为 111-222 字；每篇文章只请求一次 AI，保留事实、身份和可读洞察。
+const PROMPT_VERSION = 'v24';
 
 const MIN_VALUE_RELEVANCE = 60;
 const MIN_VALUE_CONTENT_SCORE = 40;
@@ -221,7 +220,11 @@ async function deepAnalyze(article: AiProcessArticle, settings: AISettings, sign
       { role: 'user', content: prompt },
     ];
 
-    const result = await createChatCompletion(messages, { responseFormat: 'json_object', signal });
+    const result = await createChatCompletion(messages, {
+      responseFormat: 'json_object',
+      signal,
+      invocation: { articleId: article.id },
+    });
     assertNotAborted(signal);
     // 每篇文章只进行一次 AI 请求。缺失或不完整的事件身份作为分析结果，
     // 后续按独立文章进入 Event，不触发第二次模型调用。
@@ -424,8 +427,6 @@ export async function processWithAI(
         skipReason: noValue ? '无价值' : null,
       },
     });
-    await refreshArticleSearchIndex(articleId);
-
     return { status: noValue ? 'skipped' : 'done' };
   } else {
     // 鉴权、余额、限流和服务端故障属于 Provider 级错误，保留为 pending 并

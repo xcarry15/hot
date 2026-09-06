@@ -320,7 +320,7 @@ export function buildStep2Prompt(
     '  "category": "<单一分类>",',
     '  "relevance": <0-100整数>,',
     '  "content_score": <0-100整数>,',
-    '  "summary": "<100-150字：一针见血、直指本质>",',
+    '  "summary": "<111-222字：一针见血、直指本质>",',
     '  "brand": ["<品牌1>", "<品牌2>"],',
     '  "event_subjects": ["<核心主体>"],',
     '  "event_action": "<一个动作词>",',

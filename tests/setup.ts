@@ -99,9 +99,6 @@ vi.mock('@/lib/db', () => ({
       deleteMany: vi.fn(),
       createMany: vi.fn(),
     },
-    articleSearch: {
-      upsert: vi.fn(),
-    },
     pushLog: {
       count: vi.fn(),
       create: vi.fn(),
@@ -130,6 +127,11 @@ vi.mock('@/lib/db', () => ({
       create: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    aiInvocation: {
+      create: vi.fn(),
+      groupBy: vi.fn(),
       deleteMany: vi.fn(),
     },
     pushTarget: {

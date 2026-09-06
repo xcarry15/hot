@@ -26,7 +26,7 @@ import {
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
 import { recordKeywordCandidates } from '@/lib/keyword-candidate-service';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
-import { refreshArticleSearchIndex, replaceArticleKeywordHits } from '@/lib/article-search-index';
+import { replaceArticleKeywordHits } from '@/lib/keyword-hit-service';
 
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_BATCH_SIZE = 500;
@@ -144,7 +144,6 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
           }
 
           processed++;
-          await refreshArticleSearchIndex(article.id);
         } catch (err) {
           if (signal?.aborted) throw err;
           errors++;

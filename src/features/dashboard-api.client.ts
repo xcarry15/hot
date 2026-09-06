@@ -2,6 +2,7 @@
  * Dashboard 客户端 API。
  */
 import { requestJson } from '@/lib/request-json.client';
+import type { JobStatus } from '@/contracts/crawl-log';
 
 export interface FeedbackSuggestion {
   id: string;
@@ -10,10 +11,6 @@ export interface FeedbackSuggestion {
   detail: string;
   payload: string;
   createdAt: string;
-}
-
-export async function fetchFeedbackSuggestions(signal?: AbortSignal): Promise<FeedbackSuggestion[]> {
-  return requestJson<FeedbackSuggestion[]>('GET', '/api/feedback', { signal });
 }
 
 export async function generateFeedbackSuggestions(signal?: AbortSignal): Promise<FeedbackSuggestion[]> {
@@ -27,7 +24,7 @@ export async function updateFeedbackSuggestion(id: string, action: 'apply' | 'di
 export type DashboardAnalyticsRange = 'all' | 'today' | '3d' | '7d' | '30d';
 
 export type DashboardCrawlTrigger = 'auto' | 'manual' | 'unknown';
-export type DashboardCrawlStatus = 'queued' | 'running' | 'cancel_requested' | 'succeeded' | 'completed' | 'failed' | 'cancelled';
+export type DashboardCrawlStatus = JobStatus;
 export type DashboardCrawlType = 'full' | 'collect';
 
 export interface DashboardCrawlQuery {
@@ -74,6 +71,22 @@ export interface DashboardAnalytics {
     views: number;
     originalClicks: number;
     clickRate: number;
+  };
+  ai: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    successRate: number;
+    averageDurationMs: number;
+    failuresByKind: Array<{ kind: string; count: number }>;
+    byProvider: Array<{
+      provider: string;
+      model: string;
+      total: number;
+      succeeded: number;
+      failed: number;
+      averageDurationMs: number;
+    }>;
   };
   sources: Array<{
     id: string;

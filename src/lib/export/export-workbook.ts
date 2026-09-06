@@ -112,7 +112,6 @@ const HEADER_LABELS: Record<string, string> = {
   rawContentLength: '原始抓取内容长度（含 HTML）',
   cleanContentLength: '清洗后保留文本长度',
   articleBodyLength: '提取正文 HTML 长度（含标签）',
-  searchIndexUpdatedAt: '全文搜索索引更新时间',
   eventId: '事件 ID（Event ID）',
   eventClusterReviewStatus: '事件聚类复核状态（原值）',
   eventClusterReviewStatusLabel: '事件聚类复核状态说明',
@@ -259,9 +258,7 @@ function formatExportFilter(filter: ExportFilter): string {
 const ARTICLE_HEADERS = [
   'articleId', 'sourceId', 'sourceName', 'sourceType', 'sourceEnabled', 'sourcePublicEnabled', 'sourceStatus', 'sourceStatusLabel',
   'url',
-  // 全文搜索索引的组成顺序：标题、摘要、品牌/主体、事件标识、清洗后正文。
-  // 前四项直接复用 Article 已有业务字段；当前精简白名单保留清洗后正文长度和索引更新时间。
-  'title', 'summary', 'brand', 'eventKey', 'searchIndexUpdatedAt',
+  'title', 'summary', 'brand', 'eventKey',
   'originalSource', 'contentHash',
   'rawContentLength', 'articleBodyLength', 'cleanContentLength',
   'eventId', 'eventClusterReviewStatus', 'eventClusterReviewStatusLabel', 'eventPublicStatus', 'eventPublicStatusLabel',
@@ -660,7 +657,6 @@ function deriveArticleExportDecision(article: ArticleExportDecisionInput): Artic
 function makeArticleRow(article: Prisma.ArticleGetPayload<{
   include: {
     source: true;
-    searchIndex: true;
     event: { select: {
       id: true;
       status: true;
@@ -705,7 +701,6 @@ function makeArticleRow(article: Prisma.ArticleGetPayload<{
     article.summary,
     article.brand,
     article.eventKey,
-    dateCell(article.searchIndex?.updatedAt),
     article.originalSource ?? '',
     article.contentHash,
     article.rawContent.length,
@@ -840,7 +835,6 @@ export async function buildExportWorkbook(
       where: articleWhere,
       include: {
         source: true,
-        searchIndex: true,
         event: { select: {
           id: true,
           status: true,

@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import type { JobStatus } from '@prisma/client';
 import { getPublicDateKey } from '@/lib/shared/public-date';
+import { getAIInvocationStats } from '@/lib/ai-invocation-service';
 
 export type DashboardAnalyticsRange = 'all' | 'today' | '3d' | '7d' | '30d';
 
@@ -240,6 +241,7 @@ async function buildDashboardAnalytics(
     interactionBySource,
     interactionByEvent,
     eventActivities,
+    ai,
   ] = await Promise.all([
     db.source.findMany({
       where: { deletedAt: null, ...(sourceId ? { id: sourceId } : {}) },
@@ -315,6 +317,7 @@ async function buildDashboardAnalytics(
         },
       },
     }),
+    getAIInvocationStats(window.startAt, window.endAt, sourceId),
   ]);
 
   const recentJobs = await db.job.findMany({
@@ -562,6 +565,7 @@ async function buildDashboardAnalytics(
       sourceCount: sources.length,
       ...toQualityStats(summaryStats),
     },
+    ai,
     sources: sourceRows,
     topViewedArticles,
     dailyNewArticles: dailyArticleKeys.map((date) => ({

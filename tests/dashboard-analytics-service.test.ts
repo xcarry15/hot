@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   jobFindMany: vi.fn(),
   eventFindMany: vi.fn(),
   interactionGroupBy: vi.fn(),
+  aiInvocationGroupBy: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -19,6 +20,7 @@ vi.mock('@/lib/db', () => ({
     job: { findMany: mocks.jobFindMany },
     event: { findMany: mocks.eventFindMany },
     eventInteractionDaily: { groupBy: mocks.interactionGroupBy },
+    aiInvocation: { groupBy: mocks.aiInvocationGroupBy },
   },
 }));
 
@@ -40,6 +42,7 @@ describe('运营统计时间与 Event 口径', () => {
     mocks.jobFindMany.mockResolvedValue([]);
     mocks.eventFindMany.mockResolvedValue([]);
     mocks.interactionGroupBy.mockResolvedValue([]);
+    mocks.aiInvocationGroupBy.mockResolvedValue([]);
     mocks.sourceFindMany.mockResolvedValue([{
       id: 'source-1',
       name: '测试源',

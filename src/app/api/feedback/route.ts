@@ -3,14 +3,6 @@ import { apiError } from '@/lib/api-helpers';
 import { applyTuningSuggestion, dismissTuningSuggestion, generateTuningSuggestions, listTuningSuggestions } from '@/lib/feedback-service';
 import { MutationConflictError, runExclusiveMutation } from '@/lib/mutation-guard';
 
-export async function GET() {
-  try {
-    return NextResponse.json(await listTuningSuggestions());
-  } catch (error: unknown) {
-    return apiError(error, 'Failed to fetch feedback suggestions');
-  }
-}
-
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;

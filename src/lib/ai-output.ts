@@ -7,6 +7,9 @@ const CATEGORIES = new Set([
   '消费者', '科技', '人事', '其他',
 ]);
 
+export const AI_SUMMARY_MIN_LENGTH = 111;
+export const AI_SUMMARY_MAX_LENGTH = 222;
+
 export interface AiAnalysisOutput {
   event_score: number;
   content_score: number;
@@ -213,9 +216,9 @@ function readEventIdentity(raw: Record<string, unknown>): {
 /**
  * 结构化 AI 分析结果的唯一入口。
  *
- * 模型输出的长度、数组格式和数字类型存在自然波动，不能把这些表达差异
- * 当成整篇分析失败。这里只对 JSON、核心字段和数值范围做保护，其余内容
- * 统一归一化后落库；真正没有可用 JSON/评分字段时才让上层进入失败重试。
+ * 模型输出的数组格式和数字类型存在自然波动，不能把这些表达差异当成整篇
+ * 分析失败。摘要长度是明确的落库契约：超出上限时截断，低于下限时让上层
+ * 进入失败重试；其余内容统一归一化后落库。
  */
 export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
   const raw = extractJsonObject(text);
@@ -229,9 +232,12 @@ export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
   const keyPoints = normalizeStringArray(raw.key_points ?? raw.keyPoints, 5, true);
   const summary = readText(raw.summary ?? raw.insight ?? raw.overview)
     .replace(/\s+/g, ' ')
-    .slice(0, 600)
-    || keyPoints.join('；').slice(0, 600);
+    .slice(0, AI_SUMMARY_MAX_LENGTH)
+    || keyPoints.join('；').slice(0, AI_SUMMARY_MAX_LENGTH);
   if (!summary) throw new Error('LLM 响应缺少可用洞察');
+  if (summary.length < AI_SUMMARY_MIN_LENGTH) {
+    throw new Error(`LLM 响应摘要长度必须在 ${AI_SUMMARY_MIN_LENGTH}-${AI_SUMMARY_MAX_LENGTH} 字之间，实际为 ${summary.length} 字`);
+  }
 
   const hasAdProbability = raw.ad_probability != null || raw.adProbability != null;
   const adProbability = clampScore(raw.ad_probability ?? raw.adProbability);

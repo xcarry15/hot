@@ -19,7 +19,6 @@ import {
 } from '@/lib/job-progress';
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
 import { recordFailure, restoreBreakerIfElapsed } from '@/lib/pipeline/source-health';
-import { refreshArticleSearchIndex } from '@/lib/article-search-index';
 import { enrichDetailPublishedAt, sourceNeedsDetailPublishedAt } from '@/lib/parser-html';
 import type { CrawlItem, CrawlResult } from '@/contracts/crawl';
 import type { Article, Source } from '@prisma/client';
@@ -89,7 +88,6 @@ export async function collectItem(
           ...(publishedAtChanged ? { publishedAt: nextPublishedAt } : {}),
         },
       });
-      await refreshArticleSearchIndex(existing.id);
       console.log(`[dedup] URL exact match, metadata updated: "${item.title}"`);
     } else {
       console.log(`[dedup] URL exact match, skipped: "${item.title}"`);
@@ -157,7 +155,7 @@ export async function collectItem(
   const articleBody = rawContent ? extractArticleBody(rawContent) : '';
 
   try {
-    const created = await db.article.create({
+    await db.article.create({
       data: {
         sourceId,
         url: normalizedUrl,
@@ -172,8 +170,6 @@ export async function collectItem(
         publishedAt: item.publishedAt ? parseChineseDate(item.publishedAt) : undefined,
       },
     });
-    if (fetchStatus === 'fetched') await refreshArticleSearchIndex(created.id);
-
     return 'created';
   } catch (err: unknown) {
     // P2002: 极少见 — 常规竞态已由 Step 1 URL 去重消除；极端并发下仍可能触发。

@@ -5,17 +5,32 @@
  * 收敛，避免各处手写字符串和退避条件。数据库基线重建时可直接把这些
  * 常量映射为 Prisma enum。
  */
-export const ARTICLE_FETCH_STATUSES = ['pending', 'fetched', 'failed'] as const
-export const ARTICLE_AI_STATUSES = ['pending', 'done', 'skipped', 'failed'] as const
-export const ARTICLE_CLUSTER_STATUSES = ['pending', 'clustered', 'failed', 'needs_review'] as const
-export const ARTICLE_PUBLIC_OVERRIDES = ['auto', 'public', 'hidden'] as const
-export const ARTICLE_PUBLIC_STATUSES = ['unpublished', 'published', 'revoked'] as const
+import {
+  AI_STATUS_VALUES,
+  CLUSTER_STATUS_VALUES,
+  FETCH_STATUS_VALUES,
+  PUBLIC_OVERRIDE_VALUES,
+  PUBLIC_STATUS_VALUES,
+} from '@/contracts/state'
+import type {
+  AIStatus,
+  ClusterStatus,
+  FetchStatusValue,
+  PublicOverride,
+  PublicStatus,
+} from '@/contracts/state'
 
-export type ArticleFetchStatus = (typeof ARTICLE_FETCH_STATUSES)[number]
-export type ArticleAiStatus = (typeof ARTICLE_AI_STATUSES)[number]
-export type ArticleClusterStatus = (typeof ARTICLE_CLUSTER_STATUSES)[number]
-export type ArticlePublicOverride = (typeof ARTICLE_PUBLIC_OVERRIDES)[number]
-export type ArticlePublicStatus = (typeof ARTICLE_PUBLIC_STATUSES)[number]
+export const ARTICLE_FETCH_STATUSES = FETCH_STATUS_VALUES
+export const ARTICLE_AI_STATUSES = AI_STATUS_VALUES
+export const ARTICLE_CLUSTER_STATUSES = CLUSTER_STATUS_VALUES
+export const ARTICLE_PUBLIC_OVERRIDES = PUBLIC_OVERRIDE_VALUES
+export const ARTICLE_PUBLIC_STATUSES = PUBLIC_STATUS_VALUES
+
+export type ArticleFetchStatus = FetchStatusValue
+export type ArticleAiStatus = AIStatus
+export type ArticleClusterStatus = ClusterStatus
+export type ArticlePublicOverride = PublicOverride
+export type ArticlePublicStatus = PublicStatus
 
 function isIn<T extends string>(values: readonly T[], value: string): value is T {
   return values.includes(value as T)

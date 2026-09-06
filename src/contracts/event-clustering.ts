@@ -80,8 +80,6 @@ export const EVENT_CLUSTER_LOOSE_CONTENT_OVERLAP = 0.65;
 export const EVENT_CLUSTER_LOOSE_CONTENT_JACCARD = 0.25;
 export const EVENT_CLUSTER_LOOSE_OBJECT_SIMILARITY = 0.35;
 
-export type ClusterStatus = 'pending' | 'clustered' | 'failed' | 'needs_review';
-
 export function normalizeEventText(value: string): string {
   return value
     .normalize('NFKC')

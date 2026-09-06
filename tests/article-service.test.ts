@@ -35,14 +35,16 @@ describe('article-service filters', () => {
     expect(where.AND).toHaveLength(2);
   });
 
-  it('全文搜索走派生搜索表，避免列表查询直接扫 Article 正文', () => {
+  it('全文搜索直接覆盖文章既有可搜索字段', () => {
     expect(buildArticleListWhere({ search: '肯德基' })).toEqual({
       AND: [{
-        searchIndex: {
-          is: {
-            searchText: { contains: '肯德基' },
-          },
-        },
+        OR: [
+          { title: { contains: '肯德基' } },
+          { cleanContent: { contains: '肯德基' } },
+          { summary: { contains: '肯德基' } },
+          { brand: { contains: '肯德基' } },
+          { eventKey: { contains: '肯德基' } },
+        ],
       }],
     });
   });

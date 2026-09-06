@@ -21,6 +21,8 @@ import { abortableDelay, withTimeout } from './shared/async';
 import { fetchSafe, readResponseText } from './http';
 import { getAIRateLimitCooldownRemainingMs, noteAIRateLimit, waitForAIRequestSlot, isFreeAIModel } from './ai-rate-gate';
 import { clearAIProviderBackoff, getAIProviderBackoff, noteAIProviderFailure } from './ai-provider-backoff';
+import { recordAIInvocation } from './ai-invocation-service';
+import { getCurrentJobId } from './job-context';
 import {
   AI_PROVIDERS,
   getOpenCodeModelProtocol,
@@ -66,6 +68,10 @@ export interface AIConnectionTestOptions {
   maxTokens?: number;
   timeoutMs?: number;
   failFastOnRateLimit?: boolean;
+}
+
+export interface AIInvocationContext {
+  articleId: string;
 }
 
 function isArticleRequestError(status: number, message: string): boolean {
@@ -275,7 +281,7 @@ function extractResponsesContent(data: unknown): string {
  */
 export async function createChatCompletion(
   messages: ChatMessage[],
-  options?: { temperature?: number; maxTokens?: number; responseFormat?: ChatResponseFormat; signal?: AbortSignal }
+  options?: { temperature?: number; maxTokens?: number; responseFormat?: ChatResponseFormat; signal?: AbortSignal; invocation?: AIInvocationContext }
 ): Promise<ChatCompletionResponse> {
   const settings = await getAISettings();
 
@@ -287,6 +293,7 @@ export async function createChatCompletion(
   return createOpenAICompatibleCompletion(settings, messages, {
     ...finalOptions,
     responseFormat: options?.responseFormat,
+    invocation: options?.invocation,
   }, 2, options?.signal);
 }
 
@@ -297,7 +304,7 @@ export async function createChatCompletion(
 async function createOpenAICompatibleCompletion(
   settings: AISettings,
   messages: ChatMessage[],
-  options: { temperature: number; maxTokens: number; responseFormat?: ChatResponseFormat; timeoutMs?: number; onRequestStart?: () => void; persistProviderFailures?: boolean },
+  options: { temperature: number; maxTokens: number; responseFormat?: ChatResponseFormat; timeoutMs?: number; onRequestStart?: () => void; persistProviderFailures?: boolean; invocation?: AIInvocationContext },
   retries = 2,
   parentSignal?: AbortSignal,
 ): Promise<ChatCompletionResponse> {
@@ -383,6 +390,25 @@ async function createOpenAICompatibleCompletion(
   console.log(`[ai-client] Calling ${settings.provider}: POST ${url} model=${settings.model}`);
 
   let lastError: { status: number; message: string; retryAfterMs?: number } | null = null;
+  let invocationStartedAt: number | undefined;
+
+  const reportInvocation = (outcome: 'success' | 'error', errorKind = '', statusCode?: number) => {
+    if (!options.invocation || invocationStartedAt === undefined) return;
+    const durationMs = Date.now() - invocationStartedAt;
+    invocationStartedAt = undefined;
+    void recordAIInvocation({
+      articleId: options.invocation.articleId,
+      jobId: getCurrentJobId(),
+      provider: settings.provider,
+      model: settings.model,
+      outcome,
+      errorKind,
+      statusCode,
+      durationMs,
+    }).catch((error: unknown) => {
+      console.error('[ai-client] 记录 AI 调用统计失败:', error);
+    });
+  };
 
   for (
     let attempt = 0;
@@ -394,6 +420,7 @@ async function createOpenAICompatibleCompletion(
       response = await withTimeout(async signal => {
         await waitForAIRequestSlot(settings.provider, settings.model, signal);
         options.onRequestStart?.();
+        invocationStartedAt = Date.now();
         const rawResponse = await fetchSafe(url, {
           method: 'POST',
           headers: {
@@ -407,8 +434,13 @@ async function createOpenAICompatibleCompletion(
         return { ok: rawResponse.ok, status: rawResponse.status, bodyText, headers: rawResponse.headers };
       }, timeoutMs, `${settings.provider} request timeout`, parentSignal);
     } catch (fetchError) {
-      if (parentSignal?.aborted) throw fetchError;
+      if (parentSignal?.aborted) {
+        reportInvocation('error', 'timeout');
+        throw fetchError;
+      }
       const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      const errorKind = /timeout|aborted|aborterror/i.test(errMsg) ? 'timeout' : 'network';
+      reportInvocation('error', errorKind);
 
       // 网络错误重试；超时不重复发送同一个长 prompt，避免单篇请求占满批处理
       // 的总时限。超时会作为当前文章的可重试失败返回给 AI pipeline。
@@ -445,6 +477,7 @@ async function createOpenAICompatibleCompletion(
       try {
         data = JSON.parse(response.bodyText || '{}') as unknown;
       } catch {
+        reportInvocation('error', 'provider', response.status);
         throw await buildProviderPayloadError(
           settings,
           response.status,
@@ -460,6 +493,7 @@ async function createOpenAICompatibleCompletion(
       const content = typeof rawContent === 'string' ? rawContent : '';
 
       if (!content) {
+        reportInvocation('error', 'provider', response.status);
         throw await buildProviderPayloadError(
           settings,
           response.status,
@@ -467,6 +501,8 @@ async function createOpenAICompatibleCompletion(
           options.persistProviderFailures !== false,
         );
       }
+
+      reportInvocation('success', '', response.status);
 
       if (options.persistProviderFailures !== false && (persistedBackoff?.failureCount || 0) > 0) {
         try {
@@ -485,6 +521,16 @@ async function createOpenAICompatibleCompletion(
     }
 
     const errorText = response.bodyText;
+    const errorKind: AIErrorKind = response.status === 429
+      ? 'rate_limit'
+      : response.status === 401 || response.status === 402 || response.status === 403
+        ? 'configuration'
+        : response.status >= 500
+          ? 'provider'
+          : isArticleRequestError(response.status, errorText)
+            ? 'content'
+            : 'provider';
+    reportInvocation('error', errorKind, response.status);
     console.error(`[ai-client] ${settings.provider} API error (${response.status}): ${errorText.substring(0, 500)}`);
 
     const retryAfterMs = response.status === 429 ? parseRetryAfterMs(response.headers) : undefined;

@@ -320,7 +320,6 @@ async function runSchedulerTickInternal(): Promise<void> {
   // sending 租约到期后结果无法确定，必须及时转为人工确认，不能只等进程重启。
   await cleanupExpiredSendingDeliveries();
   await cleanupExpiredExportJobs();
-  startExportWorker();
   const settings = await readAllSettings();
   await maybeEnqueueSettingsRebuild();
   await maybeEnqueueCrawl(settings);

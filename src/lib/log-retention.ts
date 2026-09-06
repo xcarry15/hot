@@ -10,9 +10,10 @@ export const LOG_RETENTION_DAYS = {
   fetchLogs: 30,
   pushLogs: 90,
   completedJobs: 30,
+  aiInvocations: 90,
 } as const;
 
-export type LogRetentionDb = Pick<PrismaClient, 'fetchLog' | 'pushLog' | 'job'>;
+export type LogRetentionDb = Pick<PrismaClient, 'fetchLog' | 'pushLog' | 'job' | 'aiInvocation'>;
 
 function beforeDays(now: Date, days: number): Date {
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
@@ -23,12 +24,13 @@ export function getLogRetentionCutoffs(now = new Date()) {
     fetchLogsBefore: beforeDays(now, LOG_RETENTION_DAYS.fetchLogs),
     pushLogsBefore: beforeDays(now, LOG_RETENTION_DAYS.pushLogs),
     completedJobsBefore: beforeDays(now, LOG_RETENTION_DAYS.completedJobs),
+    aiInvocationsBefore: beforeDays(now, LOG_RETENTION_DAYS.aiInvocations),
   };
 }
 
 export async function purgeExpiredLogs(db: LogRetentionDb, now = new Date()) {
   const cutoffs = getLogRetentionCutoffs(now);
-  const [fetchLogs, pushLogs, completedJobs] = await Promise.all([
+  const [fetchLogs, pushLogs, completedJobs, aiInvocations] = await Promise.all([
     db.fetchLog.deleteMany({
       where: { createdAt: { lt: cutoffs.fetchLogsBefore } },
     }),
@@ -45,13 +47,17 @@ export async function purgeExpiredLogs(db: LogRetentionDb, now = new Date()) {
         createdAt: { lt: cutoffs.completedJobsBefore },
       },
     }),
+    db.aiInvocation.deleteMany({
+      where: { createdAt: { lt: cutoffs.aiInvocationsBefore } },
+    }),
   ]);
 
   return {
     fetchLogs: fetchLogs.count,
     pushLogs: pushLogs.count,
     completedJobs: completedJobs.count,
-    total: fetchLogs.count + pushLogs.count + completedJobs.count,
+    aiInvocations: aiInvocations.count,
+    total: fetchLogs.count + pushLogs.count + completedJobs.count + aiInvocations.count,
     cutoffs,
   };
 }

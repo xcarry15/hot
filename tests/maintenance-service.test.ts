@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
-import { deleteLowQualityArticles, executeMaintenanceAction, getCleanupStats, resetAllAi, resetFailedAi } from '@/lib/maintenance-service';
+import { deleteLowQualityArticles, executeMaintenanceAction, getCleanupStats, resetAiBatch } from '@/lib/maintenance-service';
 
 const mocks = db as unknown as {
   article: { count: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
@@ -61,7 +61,7 @@ describe('maintenance-service', () => {
     await expect(executeMaintenanceAction('vacuum')).resolves.toEqual({ vacuumed: true, sizeBefore: 10, sizeAfter: 4, saved: 6 });
   });
 
-  it('重置全部 AI 时解除旧 Event 并重置聚类状态', async () => {
+  it('AI 重置批次解除旧 Event 并重置聚类状态', async () => {
     const article = {
       id: 'article-1', eventId: 'event-1', aiStatus: 'done', manualOverrides: '[]', manualCorrectedAt: null,
       relevance: 80, summary: '摘要', brand: '[]', category: '零售', eventSubjects: '[]', eventAction: '',
@@ -71,10 +71,10 @@ describe('maintenance-service', () => {
       article: { update: vi.fn().mockResolvedValue({}) },
       eventClusterAudit: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
     };
-    mocks.article.findMany.mockResolvedValueOnce([article]).mockResolvedValueOnce([]);
+    mocks.article.findMany.mockResolvedValueOnce([article]);
     (db.$transaction as ReturnType<typeof vi.fn>).mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
 
-    await expect(resetAllAi()).resolves.toEqual({ reset: 1 });
+    await expect(resetAiBatch('reset-ai')).resolves.toEqual({ processed: 1, nextCursor: 'article-1' });
     expect(tx.eventClusterAudit.deleteMany).toHaveBeenCalledWith({ where: { articleId: { in: ['article-1'] } } });
     expect(tx.article.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'article-1' },
@@ -83,7 +83,7 @@ describe('maintenance-service', () => {
     expect(recalculateEventsInTransaction).toHaveBeenCalledWith(tx, ['event-1']);
   });
 
-  it('重置失败 AI 不包含正常跳过文章', async () => {
+  it('失败 AI 重置批次不包含正常跳过文章', async () => {
     const tx = {
       article: { update: vi.fn() },
       eventClusterAudit: { deleteMany: vi.fn() },
@@ -91,7 +91,7 @@ describe('maintenance-service', () => {
     mocks.article.findMany.mockResolvedValue([]);
     (db.$transaction as ReturnType<typeof vi.fn>).mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
 
-    await expect(resetFailedAi()).resolves.toEqual({ reset: 0 });
+    await expect(resetAiBatch('reset-ai-failed')).resolves.toEqual({ processed: 0, nextCursor: null });
     expect(mocks.article.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         OR: [

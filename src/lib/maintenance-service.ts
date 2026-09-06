@@ -17,7 +17,6 @@ import { abortCurrentJob } from '@/lib/worker-stop';
 import { getDbFileSize, runVacuum } from '@/lib/maintenance/sqlite';
 import { deleteArticlesByIds } from '@/lib/article-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
-import { rebuildPublicPublicationSnapshotInBatches } from '@/lib/public-publication-service';
 import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
 import { recalculateEventsInTransaction } from '@/lib/event-service';
 import { deleteAllExportJobs } from '@/lib/export/export-service';
@@ -138,14 +137,12 @@ interface AutoCrawlGuard {
  * 不对外暴露为 action；调用方必须在事务结束后调用 `restoreAutoCrawl`。
  */
 async function pauseAutoCrawlForWindow(): Promise<AutoCrawlGuard> {
-  const AUTO_CRAWL_KEY = SETTING_KEYS.AUTO_CRAWL_ENABLED;
-  const prevAutoCrawl = await db.setting.findUnique({ where: { key: AUTO_CRAWL_KEY } });
+  const prevAutoCrawl = await db.setting.findUnique({ where: { key: SETTING_KEYS.AUTO_CRAWL_ENABLED } });
   // 不存在视为关闭，与新安装的 scheduler 默认行为一致。
   const prevWasEnabled = prevAutoCrawl?.value === 'true';
 
   // 事务内由调用方通过 ops 数组写入 pause 与时间戳；
   // 这里只做读，不发起事务。
-  void AUTO_CRAWL_KEY;
   return { prevWasEnabled };
 }
 
@@ -241,31 +238,6 @@ export async function resetAiBatch(
     processed: articles.length,
     nextCursor: articles[articles.length - 1]?.id ?? null,
   };
-}
-
-async function runAiResetImmediately(action: AiResetAction): Promise<{ reset: number }> {
-  let reset = 0;
-  let cursor: string | undefined;
-  while (true) {
-    const result = await resetAiBatch(action, cursor);
-    if (result.processed === 0) break;
-    reset += result.processed;
-    cursor = result.nextCursor ?? undefined;
-  }
-  if (reset > 0) {
-    await rebuildPublicPublicationSnapshotInBatches();
-    invalidatePublicArticleCache();
-  }
-  return { reset };
-}
-
-/** 保留服务层的同步入口，批处理语义与后台 Job 完全一致。 */
-export function resetAllAi(): Promise<{ reset: number }> {
-  return runAiResetImmediately('reset-ai');
-}
-
-export function resetFailedAi(): Promise<{ reset: number }> {
-  return runAiResetImmediately('reset-ai-failed');
 }
 
 // ── 清空日志类 ─────────────────────────────────────────────────
@@ -397,8 +369,6 @@ export type MaintenanceAction =
   | 'pushed-articles'
   | 'dedup-logs'
   | 'fetch-logs'
-  | 'reset-ai'
-  | 'reset-ai-failed'
   | 'vacuum';
 
 /** 调度入口：原 Route 的 switch 收敛到此处 */
@@ -418,10 +388,6 @@ export async function executeMaintenanceAction(
       return clearDedupLogs();
     case 'fetch-logs':
       return clearFetchLogs();
-    case 'reset-ai':
-      return resetAllAi();
-    case 'reset-ai-failed':
-      return resetFailedAi();
     case 'vacuum':
       return runVacuum();
   }

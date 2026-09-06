@@ -113,7 +113,6 @@ describe('Excel 导出工作簿', () => {
       createdAt: snapshotAt,
       updatedAt: snapshotAt,
       source,
-      searchIndex: { articleId: 'article-1', searchText: '测试文章 原文内容', updatedAt: snapshotAt },
       event: {
         id: event.id,
         status: event.status,
@@ -221,7 +220,7 @@ describe('Excel 导出工作簿', () => {
     expect(workbook.SheetNames).not.toContain('文章正文');
     expect(workbook.SheetNames).not.toContain('长文本分片');
     expect(meta.some((row) => row[0] === '导出任务 ID' && row[1] === 'export-1')).toBe(true);
-    expect(meta.some((row) => row[0] === '导出格式版本' && row[1] === 4)).toBe(true);
+    expect(meta.some((row) => row[0] === '导出格式版本' && row[1] === 5)).toBe(true);
     expect(meta.some((row) => row[0] === '错误数量' && row[1] === 0)).toBe(true);
     expect(meta.some((row) => String(row[0]).includes('ISO'))).toBe(false);
   });

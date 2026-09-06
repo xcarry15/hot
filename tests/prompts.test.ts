@@ -82,6 +82,12 @@ describe('buildStep2Prompt', () => {
     expect(prompt).toContain('仅因品牌知名、文章篇幅长、罗列多个案例或使用“重磅”等形容词，不得抬高分数。');
   });
 
+  it('JSON 输出约束摘要长度为 111-222 字', () => {
+    const prompt = buildStep2Prompt(blocks, '正文');
+    expect(prompt).toContain('"summary": "<111-222字：一针见血、直指本质>"');
+    expect(prompt).not.toContain('"summary": "<100-150字：一针见血、直指本质>"');
+  });
+
   it('洞察要求一针见血并保留默认人设', () => {
     const prompt = buildStep2Prompt(blocks, '正文');
     expect(prompt).toContain('【summary｜111~222字】');

@@ -47,7 +47,7 @@ import {
   serializeEventSubjects,
 } from '@/contracts/event-identity';
 import { clusterArticle, markClusterFailure } from '@/lib/event-clustering-service';
-import { buildArticleSearchWhere, refreshArticleSearchIndex } from '@/lib/article-search-index';
+import { buildArticleSearchWhere } from '@/lib/article-search';
 
 // ── 类型化筛选器 ────────────────────────────────────────────────
 
@@ -383,7 +383,6 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
       data,
     });
     if (updated.count !== 1) throw new ArticleRevisionConflictError();
-    await refreshArticleSearchIndex(id, tx);
     await refreshPublicPublication(id, tx, { contentChanged });
   });
   invalidatePublicArticleCache();

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   cleanupExpiredSendingDeliveries: vi.fn(),
   exportJobFindMany: vi.fn(),
+  startExportWorker: vi.fn(),
   resetOrphanedJobs: vi.fn(),
   resumeQueuedJob: vi.fn(),
   runJob: vi.fn(),
@@ -46,6 +47,11 @@ vi.mock('@/lib/push/delivery', () => ({
   cleanupExpiredSendingDeliveries: mocks.cleanupExpiredSendingDeliveries,
 }));
 
+vi.mock('@/lib/export/export-service', () => ({
+  cleanupExpiredExportJobs: vi.fn(),
+  startExportWorker: mocks.startExportWorker,
+}));
+
 vi.mock('@/lib/db', () => ({
   db: {
     job: { findUnique: mocks.jobFindUnique, findFirst: mocks.jobFindFirst },
@@ -85,6 +91,7 @@ describe('scheduler maintenance', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.cleanupExpiredSendingDeliveries.mockResolvedValue(0);
+    mocks.startExportWorker.mockReset();
     mocks.exportJobFindMany.mockResolvedValue([]);
     mocks.resetOrphanedJobs.mockResolvedValue(0);
     mocks.resumeQueuedJob.mockResolvedValue(null);
@@ -113,6 +120,7 @@ describe('scheduler maintenance', () => {
     expect(mocks.resetOrphanedJobs).toHaveBeenCalledTimes(1);
     expect(mocks.resumeQueuedJob).toHaveBeenCalledTimes(1);
     expect(mocks.cleanupExpiredSendingDeliveries).toHaveBeenCalledTimes(1);
+    expect(mocks.startExportWorker).not.toHaveBeenCalled();
     expect(mocks.readAllSettings).toHaveBeenCalledTimes(1);
     expect(mocks.runJob).not.toHaveBeenCalled();
   });

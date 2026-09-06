@@ -9,23 +9,16 @@
  * 并测试覆盖。
  */
 
-import type { FetchStatus } from '@prisma/client';
 import type { PushMode } from '@/contracts/push';
-import { isArticleAiStatus, isArticleClusterStatus } from '@/contracts/workflow';
+import type { StepStatus as CrawlLogStepStatus } from '@/contracts/crawl-log';
+import { isArticleAiStatus, isArticleClusterStatus, type ArticleFetchStatus } from '@/contracts/workflow';
 
-export type StepStatus =
-  | 'done'
-  | 'pending'
-  | 'failed'
-  | 'skipped'
-  | 'blocked'
-  | 'filtered'
-  | 'not_applicable';
+export type StepStatus = Exclude<CrawlLogStepStatus, 'running'>;
 
 export type ArticleStepKey = 'crawl' | 'process' | 'ai' | 'cluster' | 'push';
 
 /** 与前端 types.ts 兼容：'running' 仅用于 UI 动画层，DB 投影不带此状态。 */
-export type DisplayStepStatus = StepStatus | 'running';
+export type DisplayStepStatus = CrawlLogStepStatus;
 
 export interface PushThresholds {
   pushMode: PushMode;
@@ -40,7 +33,7 @@ export interface PushThresholds {
  * 故意只列投影必需字段；调用方在 DB 投影时只 select 这些列，避免把 articles 表全部 select。
  */
 export interface ArticleStepInput {
-  fetchStatus: FetchStatus;
+  fetchStatus: ArticleFetchStatus;
   clusterStatus: string;
   aiStatus: string;
   score: number;

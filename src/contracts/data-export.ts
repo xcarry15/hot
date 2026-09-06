@@ -1,6 +1,12 @@
 import { z } from 'zod';
+import {
+  AI_STATUS_CODEC,
+  CLUSTER_STATUS_CODEC,
+  FETCH_STATUS_CODEC,
+  PUBLIC_STATUS_CODEC,
+} from '@/contracts/state';
 
-export const EXPORT_FORMAT_VERSION = 4;
+export const EXPORT_FORMAT_VERSION = 5;
 export const EXPORT_DATE_FIELDS = ['createdAt', 'publishedAt', 'updatedAt'] as const;
 export const EXPORT_REPRESENTATIVE_FILTERS = ['all', 'yes', 'no'] as const;
 export const EXPORT_PUSH_FILTERS = ['all', 'yes', 'no'] as const;
@@ -13,10 +19,10 @@ export const exportFilterSchema = z.object({
   from: optionalDateText,
   to: optionalDateText,
   sourceIds: idList,
-  fetchStatuses: z.array(z.enum(['pending', 'fetched', 'failed'])).max(10).default([]),
-  aiStatuses: z.array(z.enum(['pending', 'done', 'skipped', 'failed'])).max(10).default([]),
-  clusterStatuses: z.array(z.enum(['pending', 'clustered', 'failed', 'needs_review'])).max(10).default([]),
-  publicStatuses: z.array(z.enum(['unpublished', 'published', 'revoked'])).max(10).default([]),
+  fetchStatuses: z.array(FETCH_STATUS_CODEC).max(10).default([]),
+  aiStatuses: z.array(AI_STATUS_CODEC).max(10).default([]),
+  clusterStatuses: z.array(CLUSTER_STATUS_CODEC).max(10).default([]),
+  publicStatuses: z.array(PUBLIC_STATUS_CODEC).max(10).default([]),
   representative: z.enum(EXPORT_REPRESENTATIVE_FILTERS).default('all'),
   pushed: z.enum(EXPORT_PUSH_FILTERS).default('all'),
   eventId: z.string().trim().max(100).default(''),

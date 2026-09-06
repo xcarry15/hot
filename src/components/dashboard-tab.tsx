@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
   fetchDashboardAnalytics,
-  fetchFeedbackSuggestions,
   generateFeedbackSuggestions,
   updateFeedbackSuggestion,
   type FeedbackSuggestion,
@@ -20,7 +19,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { CrawlTimeCard, DailyNewArticlesCard, DailyPublicArticlesCard, DailyPushedArticlesCard, TopViewedArticlesCard } from './dashboard/dashboard-cards'
+import { AiInvocationCard, CrawlTimeCard, DailyNewArticlesCard, DailyPublicArticlesCard, DailyPushedArticlesCard, TopViewedArticlesCard } from './dashboard/dashboard-cards'
 import { isRequestAborted } from '@/lib/request-json.client'
 
 type SourceSort = 'found' | 'totalArticles' | 'avgScore' | 'ingested' | 'processed' | 'analyzed' | 'pushed' | 'unmatched' | 'duplicates' | 'ads'
@@ -102,10 +101,11 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
   const [crawlSourceId, setCrawlSourceId] = useState('all')
   const [tooltipInfo, setTooltipInfo] = useState<{ field: string; x: number; y: number } | null>(null)
   const [suggestions, setSuggestions] = useState<FeedbackSuggestion[]>([])
+  const [generatingSuggestions, setGeneratingSuggestions] = useState(false)
   const intervalRef = useRef<number | null>(null)
   const analyticsRequestRef = useRef<AbortController | null>(null)
+  const feedbackRequestRef = useRef<AbortController | null>(null)
   const analyticsRequestVersionRef = useRef(0)
-  const feedbackGenerationAttemptedRef = useRef(false)
 
   const fetchData = useCallback(async () => {
     analyticsRequestRef.current?.abort()
@@ -113,24 +113,15 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
     analyticsRequestRef.current = controller
     const requestVersion = ++analyticsRequestVersionRef.current
     try {
-      const shouldGenerateFeedback = !feedbackGenerationAttemptedRef.current
-      feedbackGenerationAttemptedRef.current = true
-      const feedbackRequest = shouldGenerateFeedback
-        ? generateFeedbackSuggestions(controller.signal).catch(() => fetchFeedbackSuggestions(controller.signal))
-        : fetchFeedbackSuggestions(controller.signal)
-      const [analyticsJson, nextSuggestions] = await Promise.all([
-        fetchDashboardAnalytics(range, undefined, controller.signal, {
-          page: crawlPage,
-          trigger: crawlTrigger === 'all' ? undefined : crawlTrigger,
-          status: crawlStatus === 'all' ? undefined : crawlStatus,
-          type: crawlType === 'all' ? undefined : crawlType,
-          sourceId: crawlSourceId === 'all' ? undefined : crawlSourceId,
-        }),
-        feedbackRequest.catch(() => []),
-      ])
+      const analyticsJson = await fetchDashboardAnalytics(range, undefined, controller.signal, {
+        page: crawlPage,
+        trigger: crawlTrigger === 'all' ? undefined : crawlTrigger,
+        status: crawlStatus === 'all' ? undefined : crawlStatus,
+        type: crawlType === 'all' ? undefined : crawlType,
+        sourceId: crawlSourceId === 'all' ? undefined : crawlSourceId,
+      })
       if (controller.signal.aborted || requestVersion !== analyticsRequestVersionRef.current) return
       setAnalytics(analyticsJson)
-      setSuggestions(nextSuggestions)
     } catch (error) {
       if (controller.signal.aborted || isRequestAborted(error)) return
       if (requestVersion !== analyticsRequestVersionRef.current) return
@@ -145,6 +136,8 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
 
   useEffect(() => () => {
     analyticsRequestRef.current?.abort()
+    feedbackRequestRef.current?.abort()
+    feedbackRequestRef.current = null
   }, [])
 
   const handleSuggestion = async (id: string, action: 'apply' | 'dismiss') => {
@@ -154,6 +147,27 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
       toast.success(action === 'apply' ? '建议已应用' : '建议已忽略')
     } catch {
       toast.error('处理建议失败')
+    }
+  }
+
+  const handleGenerateSuggestions = async () => {
+    feedbackRequestRef.current?.abort()
+    const controller = new AbortController()
+    feedbackRequestRef.current = controller
+    setGeneratingSuggestions(true)
+    try {
+      const nextSuggestions = await generateFeedbackSuggestions(controller.signal)
+      if (controller.signal.aborted) return
+      setSuggestions(nextSuggestions)
+      toast.success(nextSuggestions.length > 0 ? '反馈建议已生成，请确认' : '已完成检查，暂无待确认建议')
+    } catch (error) {
+      if (isRequestAborted(error)) return
+      toast.error('生成反馈建议失败')
+    } finally {
+      if (feedbackRequestRef.current === controller) {
+        feedbackRequestRef.current = null
+        setGeneratingSuggestions(false)
+      }
     }
   }
 
@@ -478,6 +492,8 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
             </CardContent>
           </Card>
 
+          <AiInvocationCard stats={analytics.ai} />
+
           <div className="grid min-w-0 items-start gap-1 xl:grid-cols-2">
             <CrawlTimeCard
               records={analytics.crawlRecords}
@@ -506,7 +522,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
 
           </div>
 
-          {suggestions.length > 0 && <Card><CardContent className="p-2"><div className="mb-1 flex items-center gap-2"><span className="text-sm font-medium">人工反馈建议</span><Badge variant="secondary" className="rounded-none text-[10px]">需确认</Badge></div><div className="divide-y border-t">{suggestions.slice(0, 5).map((item) => <div key={item.id} className="py-1.5"><div className="flex items-center gap-2"><span className="text-xs font-medium">{item.title}</span><span className="ml-auto text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span></div><p className="mt-0.5 text-[11px] text-muted-foreground">{item.detail}</p><div className="mt-1 flex gap-1"><Button size="sm" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'apply')}>确认应用</Button><Button size="sm" variant="ghost" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'dismiss')}>忽略</Button></div></div>)}</div></CardContent></Card>}
+          <Card><CardContent className="p-2"><div className="mb-1 flex items-center gap-2"><span className="text-sm font-medium">人工反馈建议</span>{suggestions.length > 0 && <Badge variant="secondary" className="rounded-none text-[10px]">需确认</Badge>}<Button size="sm" variant="ghost" className="ml-auto h-6 rounded-none px-2 text-[11px]" disabled={generatingSuggestions} onClick={() => void handleGenerateSuggestions()}>{generatingSuggestions ? '生成中…' : '生成建议'}</Button></div>{suggestions.length > 0 ? <div className="divide-y border-t">{suggestions.slice(0, 5).map((item) => <div key={item.id} className="py-1.5"><div className="flex items-center gap-2"><span className="text-xs font-medium">{item.title}</span><span className="ml-auto text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span></div><p className="mt-0.5 text-[11px] text-muted-foreground">{item.detail}</p><div className="mt-1 flex gap-1"><Button size="sm" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'apply')}>确认应用</Button><Button size="sm" variant="ghost" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'dismiss')}>忽略</Button></div></div>)}</div> : <p className="border-t pt-1.5 text-[11px] text-muted-foreground">默认不自动分析人工修正记录，点击“生成建议”后才会检查。</p>}</CardContent></Card>
 
           {tooltipInfo && SOURCE_FIELD_HELP[tooltipInfo.field] && (
             <div

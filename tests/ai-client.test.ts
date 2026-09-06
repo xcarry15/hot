@@ -6,11 +6,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const mocks = vi.hoisted(() => ({
+  const mocks = vi.hoisted(() => ({
   readAllSettings: vi.fn(),
   getAIProviderBackoff: vi.fn(),
   noteAIProviderFailure: vi.fn(),
   clearAIProviderBackoff: vi.fn(),
+  recordAIInvocation: vi.fn(),
 }));
 
 vi.mock('@/lib/settings', () => ({
@@ -31,6 +32,9 @@ vi.mock('@/lib/ai-provider-backoff', () => ({
   clearAIProviderBackoff: mocks.clearAIProviderBackoff,
   AI_PROVIDER_RETRY_DELAY_MS: 2 * 60 * 1000,
   AI_RATE_LIMIT_RETRY_DELAY_MS: 5 * 60 * 1000,
+}));
+vi.mock('@/lib/ai-invocation-service', () => ({
+  recordAIInvocation: mocks.recordAIInvocation,
 }));
 
 import { AIClientError, createChatCompletion, getAISettings, invalidateAISettingsCache, testAIConnection, testSavedAIModel } from '@/lib/ai-client';
@@ -62,6 +66,7 @@ describe('createChatCompletion', () => {
     mocks.getAIProviderBackoff.mockResolvedValue(null);
     mocks.noteAIProviderFailure.mockResolvedValue({ cooldownUntil: null });
     mocks.clearAIProviderBackoff.mockResolvedValue(undefined);
+    mocks.recordAIInvocation.mockResolvedValue(undefined);
     mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'opencode',
       opencode_api_key: 'test-key',
@@ -97,6 +102,23 @@ describe('createChatCompletion', () => {
 
     const res = await createChatCompletion([{ role: 'user', content: 'hi' }]);
     expect(res.content).toBe('hello');
+  });
+
+  it('文章分析请求记录真实上游调用指标', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('hello'));
+
+    await createChatCompletion([{ role: 'user', content: 'hi' }], {
+      invocation: { articleId: 'article-1' },
+    });
+
+    expect(mocks.recordAIInvocation).toHaveBeenCalledWith(expect.objectContaining({
+      articleId: 'article-1',
+      provider: 'opencode',
+      model: 'big-pickle',
+      outcome: 'success',
+      statusCode: 200,
+      durationMs: expect.any(Number),
+    }));
   });
 
   it('OpenCode Responses 模型使用官方 responses 端点并解析 output_text', async () => {

@@ -110,8 +110,8 @@ model Article {
   event            Event?              @relation("EventArticles", fields: [eventId], references: [id])
   representedEvent Event?              @relation("EventRepresentative")
   clusterAudits    EventClusterAudit[]
-  searchIndex      ArticleSearch?
   keywordHits      KeywordHit[]
+  aiInvocations    AiInvocation[]
 
   @@unique([url])
   @@index([contentHash])
@@ -130,16 +130,6 @@ model Article {
   @@index([publicStatus, publishedAt])
   @@index([publicStatus, publicContentUpdatedAt])
   @@map("articles")
-}
-
-model ArticleSearch {
-  articleId  String   @id
-  searchText String
-  updatedAt  DateTime @updatedAt
-
-  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
-
-  @@map("article_search")
 }
 
 model Event {
@@ -382,6 +372,29 @@ model AiProviderState {
   updatedAt        DateTime  @updatedAt
 
   @@map("ai_provider_states")
+}
+
+/// 每次真实文章 AI 请求的最小运行指标；不保存提示词、正文或响应内容。
+model AiInvocation {
+  id         String   @id @default(cuid())
+  articleId  String?
+  jobId      String?
+  operation  String   @default("article_analysis")
+  provider   String
+  model      String
+  outcome    String   // success, error
+  errorKind  String   @default("")
+  statusCode Int?
+  durationMs Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  article Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([operation, createdAt])
+  @@index([provider, model, createdAt])
+  @@index([articleId, createdAt])
+  @@map("ai_invocations")
 }
 
 model ToolDirectoryItem {
