@@ -14,9 +14,12 @@
  *   ai_max_tokens  — Max tokens (1-65536; default from settings catalog)
  */
 
-import { createCache } from './cache';
-import { readAllSettings, SETTING_KEYS } from './settings';
-import { getSettingDefinition } from './settings-catalog';
+import { readSettings } from './settings';
+import {
+  getAIProviderSettingKeys,
+  getAISettings,
+} from './ai-settings';
+import type { AISettings } from './ai-settings';
 import { abortableDelay, withTimeout } from './shared/async';
 import { fetchSafe, readResponseText } from './http';
 import { getAIRateLimitCooldownRemainingMs, noteAIRateLimit, waitForAIRequestSlot, isFreeAIModel } from './ai-rate-gate';
@@ -25,9 +28,8 @@ import { recordAIInvocation } from './ai-invocation-service';
 import { getCurrentJobId } from './job-context';
 import {
   AI_PROVIDERS,
+  getAIModelValidationError,
   getOpenCodeModelProtocol,
-  isOpenCodeFreeModel,
-  isOpenRouterFreeModel,
   providerSettingKey,
 } from '@/contracts/ai-provider';
 import type { AIProviderId } from '@/contracts/ai-provider';
@@ -80,16 +82,6 @@ function isArticleRequestError(status: number, message: string): boolean {
   return /context length|maximum context|too many tokens|prompt.{0,20}(long|large)|messages?.{0,20}(long|large)|request.{0,20}too large/i.test(message);
 }
 
-/**
- * Clamp 打分权重字符串值到 [0,100] 整数,非法/空值用 fallback。
- */
-function clampWeight(raw: string | undefined, fallback: number): number {
-  if (!raw) return fallback;
-  const n = parseInt(raw);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(0, Math.min(100, n));
-}
-
 function parseRetryAfterMs(headers: Headers): number | undefined {
   const raw = headers.get('retry-after')?.trim();
   if (!raw) return undefined;
@@ -117,110 +109,10 @@ async function buildProviderPayloadError(
   return new AIClientError(message, 'provider', true, true, status, retryAfterMs);
 }
 
-// ── Settings cache ────────────────────────────────────────────────
-export interface AISettings {
-  provider: AIProviderId;
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  temperature: number;
-  maxTokens: number;
-  systemPrompt: string;
-  /** 单次分析评判块（块化组合，空串=用默认块） */
-  blockAd: string;
-  blockEventScore: string;
-  blockCategory: string;
-  blockRelevance: string;
-  blockContentScore: string;
-  blockKeyPoints: string;
-  blockSummary: string;
-  blockEventIdentity: string;
-  blockBrand: string;
-  /** 打分权重(动态可调) */
-  weightEvent: number;
-  weightContent: number;
-  keywordMatchBonus: number;
-  /** AI 正文最大字符数 */
-  step2ContentMaxChars: number;
-}
-
-// 默认打分权重：事件影响为主，内容可用性为辅。
-function numericSettingDefault(key: string, fallback: number): number {
-  const value = Number(getSettingDefinition(key)?.defaultValue);
-  return Number.isFinite(value) ? value : fallback;
-}
-
-// 默认值来自统一配置目录；fallback 只用于目录损坏时保持客户端可运行。
-const DEFAULT_WEIGHT_EVENT = numericSettingDefault(SETTING_KEYS.AI_WEIGHT_EVENT, 70);
-const DEFAULT_WEIGHT_CONTENT = numericSettingDefault(SETTING_KEYS.AI_WEIGHT_CONTENT, 30);
-const DEFAULT_TEMPERATURE = numericSettingDefault(SETTING_KEYS.AI_TEMPERATURE, 0.3);
-const DEFAULT_MAX_TOKENS = numericSettingDefault(SETTING_KEYS.AI_MAX_TOKENS, 2048);
-const DEFAULT_STEP2_CONTENT_MAX_CHARS = numericSettingDefault(SETTING_KEYS.AI_STEP2_CONTENT_MAX_CHARS, 5000);
 const AI_CONNECTION_TEST_TIMEOUT_MS = 15_000;
 const AI_HEALTH_TEST_TIMEOUT_MS = 12_000;
+export const AI_MODEL_TIMEOUT_MS = 5 * 60_000;
 const AI_HEALTH_TEST_MAX_TOKENS = 16;
-
-const settingsCache = createCache<AISettings>(30_000); // 30 seconds
-
-export async function getAISettings(): Promise<AISettings> {
-  const cached = settingsCache.get();
-  if (cached) return cached;
-
-  const map = await readAllSettings();
-
-  const requestedProvider = map[SETTING_KEYS.AI_PROVIDER];
-  const defaultProvider = Object.keys(AI_PROVIDERS)[0] as AIProviderId;
-  const provider: AIProviderId = requestedProvider && requestedProvider in AI_PROVIDERS
-    ? requestedProvider as AIProviderId
-    : defaultProvider;
-  const providerDef = AI_PROVIDERS[provider];
-  const rawTemperature = map[SETTING_KEYS.AI_TEMPERATURE]?.trim();
-  const parsedTemperature = rawTemperature ? Number(rawTemperature) : Number.NaN;
-  const temperature = Number.isFinite(parsedTemperature)
-    ? Math.max(0, Math.min(2, parsedTemperature))
-    : DEFAULT_TEMPERATURE;
-
-  const apiKey = map[providerSettingKey(provider, 'api_key')] ?? '';
-  const baseUrl = map[providerSettingKey(provider, 'base_url')] || providerDef.baseUrl;
-  const configuredModel = map[providerSettingKey(provider, 'model')]?.trim() || providerDef.defaultModel;
-  // 免费 Provider 只开放免费模型。防止旧数据库或手工写入的付费模型
-  // 绕过设置页校验后产生费用。
-  const model = (provider === 'opencode' && !isOpenCodeFreeModel(configuredModel))
-    || (provider === 'openrouter' && !isOpenRouterFreeModel(configuredModel))
-    ? providerDef.defaultModel
-    : configuredModel;
-
-  const resolved: AISettings = {
-    provider,
-    apiKey,
-    baseUrl,
-    model,
-    temperature,
-    maxTokens: Math.max(1, Math.min(65536, parseInt(map[SETTING_KEYS.AI_MAX_TOKENS]) || DEFAULT_MAX_TOKENS)),
-    systemPrompt: map[SETTING_KEYS.AI_SYSTEM_PROMPT],
-    blockAd: map.ai_block_ad,
-    blockEventScore: map.ai_block_event_score,
-    blockCategory: map.ai_block_category,
-    blockRelevance: map.ai_block_relevance,
-    blockContentScore: map.ai_block_content_score,
-    blockKeyPoints: map.ai_block_key_points,
-    blockSummary: map.ai_block_summary,
-    blockEventIdentity: map.ai_block_event_identity,
-    blockBrand: map.ai_block_brand,
-    weightEvent: clampWeight(map[SETTING_KEYS.AI_WEIGHT_EVENT], DEFAULT_WEIGHT_EVENT),
-    weightContent: clampWeight(map[SETTING_KEYS.AI_WEIGHT_CONTENT], DEFAULT_WEIGHT_CONTENT),
-    keywordMatchBonus: Math.max(0, Math.min(20, parseInt(map[SETTING_KEYS.AI_KEYWORD_MATCH_BONUS]) || 0)),
-    step2ContentMaxChars: Math.max(500, Math.min(10000, parseInt(map[SETTING_KEYS.AI_STEP2_CONTENT_MAX_CHARS]) || DEFAULT_STEP2_CONTENT_MAX_CHARS)),
-  };
-  settingsCache.set(resolved);
-
-  return resolved;
-}
-
-export function invalidateAISettingsCache(): void {
-  settingsCache.invalidate();
-}
-
 // ── Chat Completion Types ─────────────────────────────────────────
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -232,8 +124,6 @@ export interface ChatCompletionResponse {
   provider: AIProviderId;
   model: string;
 }
-
-export type ChatResponseFormat = 'json_object';
 
 function toOpenAIResponsesInput(messages: ChatMessage[]): Array<Record<string, unknown>> {
   return messages.map((message) => {
@@ -281,7 +171,7 @@ function extractResponsesContent(data: unknown): string {
  */
 export async function createChatCompletion(
   messages: ChatMessage[],
-  options?: { temperature?: number; maxTokens?: number; responseFormat?: ChatResponseFormat; signal?: AbortSignal; invocation?: AIInvocationContext }
+  options?: { temperature?: number; maxTokens?: number; signal?: AbortSignal; invocation?: AIInvocationContext }
 ): Promise<ChatCompletionResponse> {
   const settings = await getAISettings();
 
@@ -292,7 +182,6 @@ export async function createChatCompletion(
 
   return createOpenAICompatibleCompletion(settings, messages, {
     ...finalOptions,
-    responseFormat: options?.responseFormat,
     invocation: options?.invocation,
   }, 2, options?.signal);
 }
@@ -304,7 +193,7 @@ export async function createChatCompletion(
 async function createOpenAICompatibleCompletion(
   settings: AISettings,
   messages: ChatMessage[],
-  options: { temperature: number; maxTokens: number; responseFormat?: ChatResponseFormat; timeoutMs?: number; onRequestStart?: () => void; persistProviderFailures?: boolean; invocation?: AIInvocationContext },
+  options: { temperature: number; maxTokens: number; timeoutMs?: number; onRequestStart?: () => void; persistProviderFailures?: boolean; invocation?: AIInvocationContext },
   retries = 2,
   parentSignal?: AbortSignal,
 ): Promise<ChatCompletionResponse> {
@@ -327,11 +216,9 @@ async function createOpenAICompatibleCompletion(
     throw new AIClientError(`${settings.provider}: API 地址不能包含查询参数或片段`, 'configuration', true, false);
   }
   const baseUrl = parsedBaseUrl.toString().replace(/\/+$/, '');
-  if (settings.provider === 'opencode' && !isOpenCodeFreeModel(settings.model)) {
-    throw new AIClientError('opencode: 仅允许调用免费模型', 'configuration', true, false);
-  }
-  if (settings.provider === 'openrouter' && !isOpenRouterFreeModel(settings.model)) {
-    throw new AIClientError('openrouter: 仅允许调用免费模型', 'configuration', true, false);
+  const modelValidationError = getAIModelValidationError(settings.provider, settings.model);
+  if (modelValidationError) {
+    throw new AIClientError(modelValidationError, 'configuration', true, false);
   }
   const useResponses = settings.provider === 'opencode'
     && getOpenCodeModelProtocol(settings.model) === 'responses';
@@ -379,17 +266,13 @@ async function createOpenAICompatibleCompletion(
         // response_format。这样不会因格式兼容问题额外发起请求。
       };
 
-  // 正文分析 prompt 较长；DeepSeek 和 OpenRouter 免费路由首 token 可能超过 15 秒。
+  // 正文分析 prompt 较长，所有模型统一允许最多 5 分钟。
   // 单篇超时由 AI pipeline 记录为当前文章失败，不能因为一篇慢文章暂停整批。
-  const timeoutMs = options.timeoutMs ?? (settings.provider === 'opencode'
-    || settings.provider === 'deepseek'
-    || settings.provider === 'openrouter'
-    ? 60_000
-    : 15_000);
+  const timeoutMs = options.timeoutMs ?? AI_MODEL_TIMEOUT_MS;
 
   console.log(`[ai-client] Calling ${settings.provider}: POST ${url} model=${settings.model}`);
 
-  let lastError: { status: number; message: string; retryAfterMs?: number } | null = null;
+  let lastError: { status: number; kind: AIErrorKind; retryAfterMs?: number } | null = null;
   let invocationStartedAt: number | undefined;
 
   const reportInvocation = (outcome: 'success' | 'error', errorKind = '', statusCode?: number) => {
@@ -470,7 +353,7 @@ async function createOpenAICompatibleCompletion(
         }
         throw new AIClientError(`${settings.provider}: 无法连接 API 服务器`, 'network', true, true, undefined, retryAfterMs);
       }
-      throw new AIClientError(`${settings.provider}: 请求失败 - ${errMsg.substring(0, 200)}`, 'network', false, true);
+      throw new AIClientError(`${settings.provider}: 请求失败`, 'network', false, true);
     }
     if (response.ok) {
       let data: unknown;
@@ -502,6 +385,8 @@ async function createOpenAICompatibleCompletion(
         );
       }
 
+      // 这里的 success 是“上游返回了非空响应”的传输层结果；结构化 JSON
+      // 校验属于 ai.ts 的分析层，不能把两种语义混进同一个请求统计字段。
       reportInvocation('success', '', response.status);
 
       if (options.persistProviderFailures !== false && (persistedBackoff?.failureCount || 0) > 0) {
@@ -531,13 +416,13 @@ async function createOpenAICompatibleCompletion(
             ? 'content'
             : 'provider';
     reportInvocation('error', errorKind, response.status);
-    console.error(`[ai-client] ${settings.provider} API error (${response.status}): ${errorText.substring(0, 500)}`);
+    console.error(`[ai-client] ${settings.provider} API error (${response.status}), kind=${errorKind}`);
 
     const retryAfterMs = response.status === 429 ? parseRetryAfterMs(response.headers) : undefined;
     if (response.status === 429) {
       noteAIRateLimit(settings.provider, settings.model, retryAfterMs);
     }
-    lastError = { status: response.status, message: errorText.substring(0, 200), retryAfterMs };
+    lastError = { status: response.status, kind: errorKind, retryAfterMs };
 
     // 429 与 5xx 服务端错误：先完成本次调用的有限重试；最终失败后统一写入
     // Provider 冷却，避免把较长的持久化冷却塞进单篇请求超时。
@@ -605,9 +490,9 @@ async function createOpenAICompatibleCompletion(
     }
     // 请求体/上下文导致的 4xx 只影响当前文章。若误判为全局 Provider 故障，
     // 最老的一篇异常文章会在每次批处理开头暂停整个队列，使后续新文章饥饿。
-    if (isArticleRequestError(lastError.status, lastError.message)) {
+    if (lastError.kind === 'content') {
       throw new AIClientError(
-        `${settings.provider} API 错误 (${lastError.status}): ${lastError.message}`,
+        `${settings.provider} API 错误 (${lastError.status})`,
         'content',
         false,
         false,
@@ -615,7 +500,7 @@ async function createOpenAICompatibleCompletion(
       );
     }
     throw new AIClientError(
-      `${settings.provider} API 错误 (${lastError.status}): ${lastError.message}`,
+      `${settings.provider} API 错误 (${lastError.status})`,
       'provider',
       true,
       false,
@@ -635,18 +520,26 @@ export async function testAIConnection(
 ): Promise<AIConnectionTestResult> {
   const saved = await getAISettings();
   const requestedProvider = overrides?.provider ?? saved.provider;
-  let fallbackApiKey = saved.apiKey;
-  if (!overrides?.apiKey?.trim() && requestedProvider !== saved.provider) {
-    const allSettings = await readAllSettings();
-    fallbackApiKey = allSettings[providerSettingKey(requestedProvider, 'api_key')] || '';
-  }
+  const targetProviderSettings = requestedProvider !== saved.provider
+    ? await readSettings(getAIProviderSettingKeys(requestedProvider))
+    : {};
+  const targetProvider = AI_PROVIDERS[requestedProvider];
+  const savedApiKey = targetProviderSettings[providerSettingKey(requestedProvider, 'api_key')] || saved.apiKey;
+  const savedBaseUrl = targetProviderSettings[providerSettingKey(requestedProvider, 'base_url')]
+    || targetProvider.baseUrl;
+  const savedModel = targetProviderSettings[providerSettingKey(requestedProvider, 'model')]
+    || targetProvider.defaultModel;
   const settings = {
     ...saved,
+    ...(requestedProvider !== saved.provider ? {
+      baseUrl: savedBaseUrl,
+      model: savedModel,
+    } : {}),
     ...overrides,
     provider: requestedProvider,
     // 未获 reveal 权限时前端看见的是空串；测试应继续使用数据库中的现有密钥。
     // 切换 Provider 时只能读取目标 Provider 的已保存密钥，不能串用当前密钥。
-    apiKey: overrides?.apiKey?.trim() || fallbackApiKey,
+    apiKey: overrides?.apiKey?.trim() || savedApiKey,
   };
   const startedAt = Date.now();
   let requestStartedAt: number | undefined;
@@ -680,12 +573,13 @@ export async function testAIConnection(
         errorKind: 'configuration',
       };
     }
-    if (settings.provider === 'opencode' && !isOpenCodeFreeModel(settings.model)) {
+    const modelValidationError = getAIModelValidationError(settings.provider, settings.model);
+    if (modelValidationError) {
       return {
         success: false,
         provider: settings.provider,
         model: settings.model,
-        error: 'OpenCode 仅支持免费模型',
+        error: modelValidationError,
         errorKind: 'configuration',
       };
     }
@@ -757,7 +651,7 @@ export async function testSavedAIModel(
     };
   }
 
-  const allSettings = await readAllSettings();
+  const allSettings = await readSettings(getAIProviderSettingKeys(provider));
   const providerDefinition = AI_PROVIDERS[provider];
   const apiKey = allSettings[providerSettingKey(provider, 'api_key')]?.trim() || '';
   if (!apiKey) {

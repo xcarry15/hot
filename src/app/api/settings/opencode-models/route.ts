@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { fetchSafe, readResponseText } from '@/lib/http';
-import { withTimeout } from '@/lib/shared/async';
 import { isOpenCodeFreeModel } from '@/contracts/ai-provider';
+import { fetchModelCatalog } from '@/lib/model-discovery';
 
 const OPENCODE_MODELS_URL = 'https://opencode.ai/zen/v1/models';
 
@@ -50,20 +49,12 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const response = await withTimeout(
-      (signal) => fetchSafe(OPENCODE_MODELS_URL, {
-        cache: 'no-store',
-        headers: { Accept: 'application/json' },
-        signal,
-      }),
-      10_000,
-      'OpenCode 模型列表请求超时',
-    );
+    const response = await fetchModelCatalog(OPENCODE_MODELS_URL, 'OpenCode 模型列表请求超时');
     if (!response.ok) {
       return NextResponse.json({ error: `OpenCode 模型列表请求失败（${response.status}）` }, { status: 502 });
     }
 
-    const models = getFreeModelIds(JSON.parse(await readResponseText(response)));
+    const models = getFreeModelIds(response.payload);
     return NextResponse.json({ models }, {
       headers: { 'Cache-Control': 'no-store' },
     });

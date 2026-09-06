@@ -1,51 +1,11 @@
-import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import {
   AI_RESET_ARTICLE_SELECT,
   resetArticleAiAndEventState,
-} from '@/lib/maintenance-service';
+} from '@/lib/article-ai-reset';
+import { buildAiRecoveryWhere } from '@/lib/ai-queue-policy';
 
 const RECOVERY_BATCH_SIZE = 100;
-
-function buildAiRecoveryWhere(forceRetry: boolean, now: Date): Prisma.ArticleWhereInput {
-  const inconsistentState: Prisma.ArticleWhereInput = {
-    OR: [
-      { eventId: { not: null } },
-      { clusterStatus: { not: 'pending' } },
-    ],
-  };
-
-  return {
-    fetchStatus: 'fetched',
-    technicalIgnoredAt: null,
-    ...(forceRetry
-      ? {
-          OR: [
-            { aiStatus: 'failed' },
-            { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
-            {
-              aiStatus: 'pending',
-              OR: [
-                { nextAiRetryAt: { not: null } },
-                { eventId: { not: null } },
-                { clusterStatus: { not: 'pending' } },
-              ],
-            },
-          ],
-        }
-      : {
-          AND: [
-            inconsistentState,
-            {
-              OR: [
-                { aiStatus: 'failed', nextAiRetryAt: { lte: now } },
-                { aiStatus: 'pending', nextAiRetryAt: { lte: now } },
-              ],
-            },
-          ],
-        }),
-  };
-}
 
 /**
  * 把批量 AI 恢复对象收敛到与单篇 regenerate 相同的入口状态。

@@ -29,7 +29,7 @@ export function buildSystemContent(customSystem?: string): string {
 
 /**
  * 从 LLM 响应文本中提取首个 JSON 对象并解析。
- * 失败时抛标准化 Error(含原始片段),让调用方统一 catch。
+ * 失败时抛标准化 Error，让调用方统一 catch；原始响应不进入异常文本。
  *
  * 策略：
  * 1. 直接解析完整文本；
@@ -39,15 +39,13 @@ export function buildSystemContent(customSystem?: string): string {
 export function extractJsonObject(text: string): Record<string, unknown> {
   const candidate = extractFirstJson(text);
   if (!candidate) {
-    throw new Error(
-      `LLM 响应中未找到 JSON 片段,原文前 200 字: ${text.substring(0, 200)}`,
-    );
+    throw new Error('LLM 响应中未找到 JSON 片段');
   }
   try {
     return JSON.parse(candidate) as Record<string, unknown>;
   } catch (err) {
     throw new Error(
-      `LLM 响应 JSON 解析失败: ${err instanceof Error ? err.message : String(err)};片段前 200 字: ${candidate.substring(0, 200)}`,
+      `LLM 响应 JSON 解析失败: ${err instanceof Error ? err.message : '未知解析错误'}`,
     );
   }
 }
@@ -96,14 +94,4 @@ function extractFirstJson(text: string): string {
   }
 
   return '';
-}
-
-/**
- * 取字符串数组字段,裁剪到 maxItems 条,过滤非字符串。
- */
-export function pickStringArray(v: unknown, maxItems: number): string[] {
-  if (!Array.isArray(v)) return [];
-  return v
-    .filter((x): x is string => typeof x === 'string')
-    .slice(0, maxItems);
 }

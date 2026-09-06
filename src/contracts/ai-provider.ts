@@ -94,6 +94,31 @@ export const AI_PROVIDERS = {
 
 export type AIProviderId = keyof typeof AI_PROVIDERS;
 
+export function isAIProviderId(value: string): value is AIProviderId {
+  return Object.prototype.hasOwnProperty.call(AI_PROVIDERS, value);
+}
+
+export const FREE_AI_PROVIDER_IDS = ['opencode', 'openrouter'] as const;
+export type FreeAIProviderId = (typeof FREE_AI_PROVIDER_IDS)[number];
+
+/** Provider 的模型收费策略唯一事实源。 */
+export function isFreeAIModel(provider: string, model: string): boolean {
+  if (provider === 'opencode') return isOpenCodeFreeModel(model);
+  if (provider === 'openrouter') return isOpenRouterFreeModel(model);
+  return false;
+}
+
+export function isAIModelAllowed(provider: string, model: string): boolean {
+  if (!isAIProviderId(provider)) return false;
+  return provider === 'deepseek' || isFreeAIModel(provider, model);
+}
+
+export function getAIModelValidationError(provider: string, model: string): string | null {
+  if (isAIModelAllowed(provider, model)) return null;
+  const definition = isAIProviderId(provider) ? AI_PROVIDERS[provider] : undefined;
+  return definition ? `${definition.name} 仅允许免费模型` : '不支持的 AI Provider';
+}
+
 export function providerSettingKey(providerId: string, field: string): string {
   return `${providerId}_${field}`;
 }

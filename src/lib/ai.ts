@@ -1,8 +1,9 @@
 import type { Prisma } from '@prisma/client';
 import { db } from './db';
-import { AIClientError, createChatCompletion, getAISettings } from './ai-client';
+import { AIClientError, createChatCompletion } from './ai-client';
+import { getAIAnalysisPolicy } from './ai-settings';
 import { AI_PROVIDER_RETRY_DELAY_MS, AI_RATE_LIMIT_RETRY_DELAY_MS } from './ai-provider-backoff';
-import type { AISettings } from './ai-client';
+import type { AIAnalysisPolicy } from './ai-settings';
 import type { ChatMessage } from './ai-client';
 import { fetchArticleDetail } from './detail-fetcher';
 import { cleanContentMarkdown, meaningfulTextLength } from './cleaner';
@@ -30,6 +31,7 @@ import {
   type ManualCalibrationValues,
 } from './article-calibration';
 import { parseAiAnalysisOutput } from './ai-output';
+import { summarizeAIError } from './ai-error';
 import {
   AI_STATUS_CODEC,
   FETCH_STATUS_CODEC,
@@ -155,7 +157,7 @@ function normalizeAIProcessArticle(article: AiProcessArticle | MinimalAIProcessA
   };
 }
 
-async function deepAnalyze(article: AiProcessArticle, settings: AISettings, signal?: AbortSignal): Promise<{
+async function deepAnalyze(article: AiProcessArticle, settings: AIAnalysisPolicy, signal?: AbortSignal): Promise<{
   eventScore: number;
   isAd: boolean;
   relevance: number;
@@ -221,7 +223,6 @@ async function deepAnalyze(article: AiProcessArticle, settings: AISettings, sign
     ];
 
     const result = await createChatCompletion(messages, {
-      responseFormat: 'json_object',
       signal,
       invocation: { articleId: article.id },
     });
@@ -305,7 +306,7 @@ export async function processWithAI(
   // 开头统一跑，processWithAI 不再单独查。
 
   // 读取设置，获取动态权重（默认事件影响 75 / 内容可用性 25）。
-  const settings = await getAISettings();
+  const settings = await getAIAnalysisPolicy();
   const { weightEvent, weightContent, keywordMatchBonus } = settings;
 
   // Deep analysis: 一次性生成全部字段（复用已查询的 article 对象，无额外 DB 查询）
@@ -316,7 +317,7 @@ export async function processWithAI(
   } catch (error) {
     if (signal?.aborted) throw error;
     aiFailure = {
-      message: error instanceof Error ? error.message : String(error),
+      message: summarizeAIError(error),
       ...(error instanceof AIClientError
         ? {
             kind: error.kind,

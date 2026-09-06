@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { apiError } from '@/lib/api-helpers';
 import { testSavedAIModel } from '@/lib/ai-client';
+import { FREE_AI_PROVIDER_IDS } from '@/contracts/ai-provider';
 
 const schema = z.object({
-  provider: z.enum(['opencode', 'openrouter']),
+  provider: z.enum(FREE_AI_PROVIDER_IDS),
   model: z.string().trim().min(1, '模型名称不能为空').max(200, '模型名称过长'),
 });
 

@@ -15,6 +15,7 @@ import path from 'node:path';
 }));
 
 vi.mock('@/lib/settings', () => ({
+  readSettings: mocks.readAllSettings,
   readAllSettings: mocks.readAllSettings,
   SETTING_KEYS: {
     AI_PROVIDER: 'ai_provider',
@@ -23,6 +24,7 @@ vi.mock('@/lib/settings', () => ({
     AI_SYSTEM_PROMPT: 'ai_system_prompt',
     AI_WEIGHT_EVENT: 'ai_weight_event',
     AI_WEIGHT_CONTENT: 'ai_weight_content',
+    AI_KEYWORD_MATCH_BONUS: 'ai_keyword_match_bonus',
     AI_STEP2_CONTENT_MAX_CHARS: 'ai_step2_content_max_chars',
   },
 }));
@@ -37,7 +39,8 @@ vi.mock('@/lib/ai-invocation-service', () => ({
   recordAIInvocation: mocks.recordAIInvocation,
 }));
 
-import { AIClientError, createChatCompletion, getAISettings, invalidateAISettingsCache, testAIConnection, testSavedAIModel } from '@/lib/ai-client';
+import { AIClientError, createChatCompletion, testAIConnection, testSavedAIModel } from '@/lib/ai-client';
+import { getAIAnalysisPolicy, getAISettings, getAIScorePolicy, invalidateAISettingsCache } from '@/lib/ai-settings';
 import { OPENROUTER_FREE_REQUEST_INTERVAL_MS, resetAIRateGateForTests, waitForAIRequestSlot } from '@/lib/ai-rate-gate';
 
 function collectComponentFiles(dir: string): string[] {
@@ -122,7 +125,7 @@ describe('createChatCompletion', () => {
   });
 
   it('OpenCode Responses 模型使用官方 responses 端点并解析 output_text', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'opencode',
       opencode_api_key: 'test-key',
       opencode_base_url: 'https://opencode.ai/zen/v1',
@@ -153,7 +156,7 @@ describe('createChatCompletion', () => {
   });
 
   it('OpenRouter 使用 OpenAI 兼容接口和免费路由模型', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'openrouter',
       openrouter_api_key: 'test-key',
       openrouter_base_url: 'https://openrouter.ai/api/v1',
@@ -176,7 +179,7 @@ describe('createChatCompletion', () => {
   });
 
   it('OpenRouter 免费模型收到 429 时不重复发送重试请求', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'openrouter',
       openrouter_api_key: 'test-key',
       openrouter_base_url: 'https://openrouter.ai/api/v1',
@@ -213,12 +216,12 @@ describe('createChatCompletion', () => {
   });
 
   it('只读取当前 provider 配置，不再读取旧版全局配置', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'opencode',
       ai_api_key: 'legacy-key',
       ai_base_url: 'https://legacy.example/v1',
       ai_model: 'legacy-model',
-    });
+    }).mockResolvedValueOnce({});
     await expect(getAISettings()).resolves.toMatchObject({
       apiKey: '',
       baseUrl: 'https://opencode.ai/zen/v1',
@@ -226,7 +229,7 @@ describe('createChatCompletion', () => {
     });
 
     invalidateAISettingsCache();
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'opencode',
       opencode_api_key: '',
       opencode_base_url: '',
@@ -234,7 +237,7 @@ describe('createChatCompletion', () => {
       ai_api_key: 'legacy-key',
       ai_base_url: 'https://legacy.example/v1',
       ai_model: 'legacy-model',
-    });
+    }).mockResolvedValueOnce({});
     await expect(getAISettings()).resolves.toMatchObject({
       apiKey: '',
       baseUrl: 'https://opencode.ai/zen/v1',
@@ -242,8 +245,46 @@ describe('createChatCompletion', () => {
     });
   });
 
+  it('评分策略使用独立窄接口，不读取 Provider 凭据', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      ai_weight_event: '80',
+      ai_weight_content: '20',
+      ai_keyword_match_bonus: '7',
+      deepseek_api_key: 'must-not-be-needed',
+    });
+
+    await expect(getAIScorePolicy()).resolves.toEqual({
+      weightEvent: 80,
+      weightContent: 20,
+      keywordMatchBonus: 7,
+    });
+    expect(mocks.readAllSettings).toHaveBeenCalledWith([
+      'ai_weight_event',
+      'ai_weight_content',
+      'ai_keyword_match_bonus',
+    ]);
+  });
+
+  it('文章分析策略不读取 Provider 连接配置', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      ai_system_prompt: '自定义系统角色',
+      ai_block_summary: '自定义洞察规则',
+      ai_step2_content_max_chars: '9000',
+      opencode_api_key: 'must-not-be-read',
+    });
+
+    await expect(getAIAnalysisPolicy()).resolves.toMatchObject({
+      systemPrompt: '自定义系统角色',
+      blockSummary: '自定义洞察规则',
+      step2ContentMaxChars: 9000,
+    });
+    const [requestedKeys] = mocks.readAllSettings.mock.calls[0] as [string[]];
+    expect(requestedKeys).not.toContain('opencode_api_key');
+    expect(requestedKeys).not.toContain('ai_provider');
+  });
+
   it('OpenRouter 付费模型配置回退到免费路由，避免意外扣费', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'openrouter',
       openrouter_api_key: 'test-key',
       openrouter_base_url: 'https://openrouter.ai/api/v1',
@@ -270,7 +311,7 @@ describe('createChatCompletion', () => {
   });
 
   it('非免费 Provider 的 5xx 时重试并在仍失败后抛出服务端不可用', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'deepseek',
       deepseek_api_key: 'test-key',
       deepseek_base_url: 'https://api.deepseek.com',
@@ -289,7 +330,7 @@ describe('createChatCompletion', () => {
   });
 
   it('Provider 恢复后下一次调用直接重新探测，不受进程内旧故障状态阻塞', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'deepseek',
       deepseek_api_key: 'test-key',
       deepseek_base_url: 'https://api.deepseek.com',
@@ -314,7 +355,7 @@ describe('createChatCompletion', () => {
   });
 
   it('网络错误时重试并最终失败', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'deepseek',
       deepseek_api_key: 'test-key',
       deepseek_base_url: 'https://api.deepseek.com',
@@ -332,7 +373,7 @@ describe('createChatCompletion', () => {
     expect(mocks.noteAIProviderFailure).toHaveBeenCalledWith('deepseek', { kind: 'network' });
   });
 
-  it('OpenCode 长正文请求使用 60 秒超时，且超时只影响当前文章', async () => {
+  it('OpenCode 长正文请求使用 5 分钟超时，且超时只影响当前文章', async () => {
     global.fetch = vi.fn().mockImplementation((_url, options: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
       options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     }));
@@ -342,12 +383,12 @@ describe('createChatCompletion', () => {
       global: false,
       retryable: true,
     });
-    await vi.advanceTimersByTimeAsync(60000);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
     await assertion;
   });
 
-  it('DeepSeek 长正文请求使用 60 秒超时，且超时只影响当前文章', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+  it('DeepSeek 长正文请求使用 5 分钟超时，且超时只影响当前文章', async () => {
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'deepseek',
       deepseek_api_key: 'test-key',
       deepseek_base_url: 'https://api.deepseek.com',
@@ -364,7 +405,7 @@ describe('createChatCompletion', () => {
       global: false,
       retryable: true,
     });
-    await vi.advanceTimersByTimeAsync(60000);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
     await assertion;
   });
 
@@ -405,8 +446,29 @@ describe('createChatCompletion', () => {
     expect((requestInit.headers as Headers).get('authorization')).toBe('Bearer openrouter-key');
   });
 
+  it('只指定目标 Provider 时不会沿用当前 Provider 的地址和模型', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      ai_provider: 'opencode',
+      opencode_api_key: 'opencode-key',
+      opencode_base_url: 'https://opencode.ai/zen/v1',
+      opencode_model: 'big-pickle',
+      openrouter_api_key: 'openrouter-key',
+      openrouter_base_url: 'https://openrouter.ai/api/v1',
+      openrouter_model: 'openrouter/free',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('ok'));
+
+    await expect(testAIConnection({ provider: 'openrouter' })).resolves.toMatchObject({
+      success: true,
+      provider: 'openrouter',
+      model: 'openrouter/free',
+    });
+    const [requestUrl] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [RequestInfo, RequestInit];
+    expect(String(requestUrl)).toBe('https://openrouter.ai/api/v1/chat/completions');
+  });
+
   it('缺少 API Key 时直接返回配置错误，不发送无效请求', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'opencode',
       opencode_api_key: '',
       opencode_base_url: 'https://opencode.ai/zen/v1',
@@ -522,7 +584,7 @@ describe('createChatCompletion', () => {
   it('结构化请求不发送 response_format，且只发起一次模型请求', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('{"ok":true}'));
 
-    await expect(createChatCompletion([{ role: 'user', content: 'hi' }], { responseFormat: 'json_object' })).resolves.toMatchObject({
+    await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).resolves.toMatchObject({
       content: '{"ok":true}',
     });
     expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -532,7 +594,7 @@ describe('createChatCompletion', () => {
   });
 
   it('持久化 Provider 冷却期间快速失败，不再次触发上游请求', async () => {
-    mocks.readAllSettings.mockResolvedValueOnce({
+    mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'deepseek',
       deepseek_api_key: 'test-key',
       deepseek_base_url: 'https://api.deepseek.com',
@@ -569,6 +631,18 @@ describe('createChatCompletion', () => {
     global.fetch = vi.fn().mockResolvedValue(new Response('bad request', { status: 400 }));
 
     await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).rejects.toThrow('API 错误 (400)');
+  });
+
+  it('Provider 错误正文不会进入异常文案', async () => {
+    const secretBody = 'provider echoed article body and prompt details';
+    global.fetch = vi.fn().mockResolvedValue(new Response(secretBody, { status: 400 }));
+
+    const error = await createChatCompletion([{ role: 'user', content: 'hi' }])
+      .catch((value: unknown) => value as Error) as Error;
+
+    expect(error).toBeInstanceOf(AIClientError);
+    expect(error.message).toBe('opencode API 错误 (400)');
+    expect(error.message).not.toContain(secretBody);
   });
 
   it('文章级 400 不标记为全局 Provider 故障，避免暂停后续文章', async () => {

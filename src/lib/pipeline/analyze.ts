@@ -7,7 +7,7 @@
  *
  * 历史：
  *   - 逻辑原先内联在 `crawler.ts.analyzeAllPending`；B13 抽离后保留：
- *     · MAX_BATCH_SIZE=100、CONCURRENCY=ai_concurrency(默认1)/DELAY_MS=300、timeout=90_000
+ *     · MAX_BATCH_SIZE=100、CONCURRENCY=ai_concurrency(默认1)/DELAY_MS=300、timeout=300_000
  *     · OpenCode / OpenRouter 免费模型由 ai-rate-gate 统一串行并限速
  *     · Provider 级限流、服务端与连接故障冷却由 ai-provider-backoff 持久化，并沿用到队列退避
  *     · 退避 where：OR[ nextAiRetryAt=null, nextAiRetryAt <= now ]
@@ -16,18 +16,20 @@
 import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { aiProcessSelect, processWithAI, toAiProcessArticle } from '@/lib/ai';
+import { AI_MODEL_TIMEOUT_MS } from '@/lib/ai-client';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
 import { isFreeAIModel } from '@/lib/ai-rate-gate';
 import { providerSettingKey } from '@/contracts/ai-provider';
 import { assertNotAborted } from '@/lib/worker-stop';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
 import { AI_PROVIDER_RETRY_DELAY_MS, AI_RATE_LIMIT_RETRY_DELAY_MS } from '@/lib/ai-provider-backoff';
+import { summarizeAIError } from '@/lib/ai-error';
 import {
   advanceJobProgress,
   startJobStage,
 } from '@/lib/job-progress';
 
-const AI_TIMEOUT_MS = 90_000;
+const AI_TIMEOUT_MS = AI_MODEL_TIMEOUT_MS;
 const MAX_BATCH_SIZE = 100;
 const DEFAULT_AI_CONCURRENCY = 1;
 const MIN_AI_CONCURRENCY = 1;
@@ -143,14 +145,14 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
               data: retryCount >= 5
                 ? {
                     aiStatus: 'skipped',
-                    aiError: String(r.reason).slice(0, 1000),
+                    aiError: summarizeAIError(r.reason),
                     aiRetryCount: retryCount,
                     nextAiRetryAt: null,
                     skipReason: `AI 连续失败 ${retryCount} 次，已放弃`,
                   }
                 : {
                     aiStatus: 'failed',
-                    aiError: String(r.reason).slice(0, 1000),
+                    aiError: summarizeAIError(r.reason),
                     aiRetryCount: retryCount,
                     nextAiRetryAt: new Date(Date.now() + AI_PROVIDER_RETRY_DELAY_MS),
                   },

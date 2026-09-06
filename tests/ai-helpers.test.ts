@@ -6,7 +6,6 @@ import { describe, it, expect } from 'vitest';
 import {
   buildSystemContent,
   extractJsonObject,
-  pickStringArray,
 } from '@/lib/ai-helpers';
 import { DEFAULT_SYSTEM_PROMPT, JSON_SUFFIX } from '@/lib/prompts';
 
@@ -53,21 +52,24 @@ describe('extractJsonObject', () => {
   });
 
   it('无 JSON 时抛出标准化错误', () => {
-    expect(() => extractJsonObject('just plain text')).toThrow('LLM 响应中未找到 JSON 片段');
+    const articleText = 'just plain text that must not be persisted';
+    try {
+      extractJsonObject(articleText);
+      throw new Error('expected extractJsonObject to throw');
+    } catch (error) {
+      expect(error).toHaveProperty('message', 'LLM 响应中未找到 JSON 片段');
+      expect((error as Error).message).not.toContain(articleText);
+    }
   });
 
   it('非法 JSON 时抛出解析错误', () => {
-    expect(() => extractJsonObject('{invalid}')).toThrow('LLM 响应 JSON 解析失败');
+    const rawJson = '{"secret_article_content": must-not-leak}';
+    try {
+      extractJsonObject(rawJson);
+      throw new Error('expected extractJsonObject to throw');
+    } catch (error) {
+      expect((error as Error).message).toContain('LLM 响应 JSON 解析失败');
+      expect((error as Error).message).not.toContain('must-not-leak');
+    }
   });
 });
-
-describe('pickStringArray', () => {
-  it('过滤非字符串并裁剪', () => {
-    expect(pickStringArray(['a', 1, 'b', 'c'], 2)).toEqual(['a', 'b']);
-  });
-
-  it('非数组返回空', () => {
-    expect(pickStringArray('a', 2)).toEqual([]);
-  });
-});
-

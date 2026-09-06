@@ -26,7 +26,7 @@ import {
 } from '@/contracts/articles';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshEventPublicPublication, refreshPublicPublication } from '@/lib/public-publication-service';
-import { getAISettings } from '@/lib/ai-client';
+import { getAIScorePolicy } from '@/lib/ai-settings';
 import {
   buildEffectiveScoreUpdate,
   buildManualOverrideUpdate,
@@ -359,7 +359,7 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
   const nextAdProbability = typeof data.adProbability === 'number' ? data.adProbability : current.adProbability;
   const nextIsAd = typeof data.isAd === 'boolean' ? data.isAd : current.isAd;
   if (nextEventScore != null && nextContentScore != null && nextAdProbability != null) {
-    const { weightEvent, weightContent, keywordMatchBonus } = await getAISettings();
+    const { weightEvent, weightContent, keywordMatchBonus } = await getAIScorePolicy();
     Object.assign(data, buildEffectiveScoreUpdate({
       eventScore: nextEventScore,
       contentScore: nextContentScore,

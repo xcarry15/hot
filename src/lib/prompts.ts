@@ -97,31 +97,9 @@ export const DEFAULT_BLOCK_EVENT_IDENTITY = `【事件身份词｜4 个字以内
 // 块元数据(供前端校验 / 提示 / 渲染用)
 // ════════════════════════════════════════════════════════════════
 
-export type PromptBlockId =
-  | 'ad'
-  | 'eventScore'
-  | 'category'
-  | 'relevance'
-  | 'contentScore'
-  | 'keyPoints'
-  | 'summary'
-  | 'eventIdentity'
-  | 'brand';
-
 export interface PromptBlockMeta {
   /** Setting 表 key */
-  key:
-    | 'ai_block_ad'
-    | 'ai_block_event_score'
-    | 'ai_block_category'
-    | 'ai_block_relevance'
-    | 'ai_block_content_score'
-    | 'ai_block_key_points'
-    | 'ai_block_summary'
-    | 'ai_block_event_identity'
-    | 'ai_block_brand';
-  /** 块 id */
-  id: PromptBlockId;
+  key: string;
   /** 中文标签 */
   label: string;
   /** 默认块文本 */
@@ -130,113 +108,77 @@ export interface PromptBlockMeta {
   scoreHint: string;
 }
 
-export const PROMPT_BLOCK_META: Record<PromptBlockId, PromptBlockMeta> = {
+export const PROMPT_BLOCK_META = {
   ad: {
-    id: 'ad',
     key: 'ai_block_ad',
     label: '广告判定',
     defaultBlock: DEFAULT_BLOCK_AD,
     scoreHint: '独立判定广告概率，供本地评分策略扣分或封顶。',
   },
-  eventScore: {
-    id: 'eventScore',
-    key: 'ai_block_event_score',
-    label: '事件评分',
-    defaultBlock: DEFAULT_BLOCK_EVENT_SCORE,
-    scoreHint: '事件本身在连锁消费行业的影响力（0-100）。',
-  },
-  category: {
-    id: 'category',
-    key: 'ai_block_category',
-    label: '行业分类',
-    defaultBlock: DEFAULT_BLOCK_CATEGORY,
-    scoreHint: '只选核心事件对应的一个类别，用于文章归类。',
-  },
-  relevance: {
-    id: 'relevance',
-    key: 'ai_block_relevance',
-    label: '相关度',
-    defaultBlock: DEFAULT_BLOCK_RELEVANCE,
-    scoreHint: '与连锁消费行业的直接相关度（0-100），用于公开和推送门槛。',
-  },
-  contentScore: {
-    id: 'contentScore',
-    key: 'ai_block_content_score',
-    label: '内容评分',
-    defaultBlock: DEFAULT_BLOCK_CONTENT_SCORE,
-    scoreHint: '文章的信息密度、数据、信源和可验证性（0-100）。',
+  eventIdentity: {
+    key: 'ai_block_event_identity',
+    label: '事件身份',
+    defaultBlock: DEFAULT_BLOCK_EVENT_IDENTITY,
+    scoreHint: '提取主体/行为/具体事项三段式身份，程序据此生成规范事件键并用于后续聚类。',
   },
   keyPoints: {
-    id: 'keyPoints',
     key: 'ai_block_key_points',
     label: '要点提取',
     defaultBlock: DEFAULT_BLOCK_KEY_POINTS,
     scoreHint: '核心要点每条不超过 30 字，优先数据、动作和结果。',
   },
   summary: {
-    id: 'summary',
     key: 'ai_block_summary',
     label: '洞察',
     defaultBlock: DEFAULT_BLOCK_SUMMARY,
     scoreHint: '111~222 字，一针见血、直指本质，只认正文证据、不编动机。',
   },
-  eventIdentity: {
-    id: 'eventIdentity',
-    key: 'ai_block_event_identity',
-    label: '事件身份',
-    defaultBlock: DEFAULT_BLOCK_EVENT_IDENTITY,
-    scoreHint: '提取主体/行为/具体事项三段式身份，程序据此生成规范事件键并用于后续聚类。',
+  eventScore: {
+    key: 'ai_block_event_score',
+    label: '事件评分',
+    defaultBlock: DEFAULT_BLOCK_EVENT_SCORE,
+    scoreHint: '事件本身在连锁消费行业的影响力（0-100）。',
+  },
+  contentScore: {
+    key: 'ai_block_content_score',
+    label: '内容评分',
+    defaultBlock: DEFAULT_BLOCK_CONTENT_SCORE,
+    scoreHint: '文章的信息密度、数据、信源和可验证性（0-100）。',
+  },
+  category: {
+    key: 'ai_block_category',
+    label: '行业分类',
+    defaultBlock: DEFAULT_BLOCK_CATEGORY,
+    scoreHint: '只选核心事件对应的一个类别，用于文章归类。',
+  },
+  relevance: {
+    key: 'ai_block_relevance',
+    label: '相关度',
+    defaultBlock: DEFAULT_BLOCK_RELEVANCE,
+    scoreHint: '与连锁消费行业的直接相关度（0-100），用于公开和推送门槛。',
   },
   brand: {
-    id: 'brand',
     key: 'ai_block_brand',
     label: '品牌提取',
     defaultBlock: DEFAULT_BLOCK_BRAND,
     scoreHint: '提取文章涉及的品牌/公司名（最多 2 个 JSON 数组项），用于卡片和搜索过滤。无主体则输出空数组。',
   },
-};
+} as const satisfies Record<string, PromptBlockMeta>;
+
+export type PromptBlockId = keyof typeof PROMPT_BLOCK_META;
+export type PromptBlockKey = (typeof PROMPT_BLOCK_META)[PromptBlockId]['key'];
 
 /** 按显示顺序排列的块(打分组 + 内容组) */
-export const PROMPT_BLOCK_ORDER: PromptBlockId[] = [
-  'ad',
-  'eventIdentity',
-  'keyPoints',
-  'summary',
-  'eventScore',
-  'contentScore',
-  'category',
-  'relevance',
-  'brand',
-];
-
-/** Setting 表里所有 prompt 块相关的 key */
-export type PromptBlockKey =
-  | 'ai_block_ad'
-  | 'ai_block_event_score'
-  | 'ai_block_category'
-  | 'ai_block_relevance'
-  | 'ai_block_content_score'
-  | 'ai_block_key_points'
-  | 'ai_block_summary'
-  | 'ai_block_event_identity'
-  | 'ai_block_brand';
+export const PROMPT_BLOCK_ORDER = Object.keys(PROMPT_BLOCK_META) as PromptBlockId[];
 
 /** 可独立保存、载入的提示词字段；评分权重等运行参数不随版本切换。 */
-export const PROMPT_VERSION_KEYS = [
+export type PromptVersionKey = 'ai_system_prompt' | PromptBlockKey;
+export const PROMPT_VERSION_KEYS: readonly PromptVersionKey[] = [
   'ai_system_prompt',
-  'ai_block_ad',
-  'ai_block_event_score',
-  'ai_block_category',
-  'ai_block_relevance',
-  'ai_block_content_score',
-  'ai_block_key_points',
-  'ai_block_summary',
-  'ai_block_event_identity',
-  'ai_block_brand',
-] as const;
+  ...PROMPT_BLOCK_ORDER.map((id) => PROMPT_BLOCK_META[id].key),
+];
 
 export const PROMPT_VERSION_LIMIT = 20;
-export type PromptVersionKey = (typeof PROMPT_VERSION_KEYS)[number];
 export type PromptVersionSnapshot = Record<PromptVersionKey, string>;
 
 // ════════════════════════════════════════════════════════════════
@@ -246,21 +188,17 @@ export type PromptVersionSnapshot = Record<PromptVersionKey, string>;
 // ════════════════════════════════════════════════════════════════
 
 /** 9 个块的当前文本（DB 值或空串时使用默认值）。 */
-interface PromptBlockInput {
-  blockAd?: string;
-  blockEventScore?: string;
-  blockCategory?: string;
-  blockRelevance?: string;
-  blockContentScore?: string;
-  blockKeyPoints?: string;
-  blockSummary?: string;
-  blockEventIdentity?: string;
-  blockBrand?: string;
-}
+type PromptBlockProperty = `block${Capitalize<PromptBlockId>}`;
+type PromptBlockInput = Partial<Record<PromptBlockProperty, string>>;
 
 function pickBlock(custom: string | undefined, id: PromptBlockId): string {
   const meta = PROMPT_BLOCK_META[id];
   return custom && custom.trim() ? custom : meta.defaultBlock;
+}
+
+function getPromptBlock(blocks: PromptBlockInput, id: PromptBlockId): string {
+  const property = `block${id.charAt(0).toUpperCase()}${id.slice(1)}` as PromptBlockProperty;
+  return pickBlock(blocks[property], id);
 }
 
 /**
@@ -271,15 +209,15 @@ export function buildStep2Prompt(
   blocks: PromptBlockInput,
   content: string,
 ): string {
-  const adBlock = pickBlock(blocks.blockAd, 'ad');
-  const eventBlock = pickBlock(blocks.blockEventScore, 'eventScore');
-  const categoryBlock = pickBlock(blocks.blockCategory, 'category');
-  const relevanceBlock = pickBlock(blocks.blockRelevance, 'relevance');
-  const contentBlock = pickBlock(blocks.blockContentScore, 'contentScore');
-  const keyPointsBlock = pickBlock(blocks.blockKeyPoints, 'keyPoints');
-  const summaryBlock = pickBlock(blocks.blockSummary, 'summary');
-  const eventIdentityBlock = pickBlock(blocks.blockEventIdentity, 'eventIdentity');
-  const brandNameBlock = pickBlock(blocks.blockBrand, 'brand');
+  const adBlock = getPromptBlock(blocks, 'ad');
+  const eventBlock = getPromptBlock(blocks, 'eventScore');
+  const categoryBlock = getPromptBlock(blocks, 'category');
+  const relevanceBlock = getPromptBlock(blocks, 'relevance');
+  const contentBlock = getPromptBlock(blocks, 'contentScore');
+  const keyPointsBlock = getPromptBlock(blocks, 'keyPoints');
+  const summaryBlock = getPromptBlock(blocks, 'summary');
+  const eventIdentityBlock = getPromptBlock(blocks, 'eventIdentity');
+  const brandNameBlock = getPromptBlock(blocks, 'brand');
 
   return [
     '任务：将一篇文章转换为可审核的连锁消费行业情报。',
@@ -366,13 +304,5 @@ export type ScoreWeightKey = 'ai_weight_event' | 'ai_weight_content';
 
 export const DEFAULT_PROMPT_SETTINGS = {
   ai_system_prompt: DEFAULT_SYSTEM_PROMPT,
-  ai_block_ad: DEFAULT_BLOCK_AD,
-  ai_block_event_score: DEFAULT_BLOCK_EVENT_SCORE,
-  ai_block_category: DEFAULT_BLOCK_CATEGORY,
-  ai_block_relevance: DEFAULT_BLOCK_RELEVANCE,
-  ai_block_content_score: DEFAULT_BLOCK_CONTENT_SCORE,
-  ai_block_key_points: DEFAULT_BLOCK_KEY_POINTS,
-  ai_block_summary: DEFAULT_BLOCK_SUMMARY,
-  ai_block_event_identity: DEFAULT_BLOCK_EVENT_IDENTITY,
-  ai_block_brand: DEFAULT_BLOCK_BRAND,
-} as const;
+  ...Object.fromEntries(Object.values(PROMPT_BLOCK_META).map((meta) => [meta.key, meta.defaultBlock])),
+} as { ai_system_prompt: string } & Record<PromptBlockKey, string>;

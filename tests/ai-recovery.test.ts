@@ -15,7 +15,7 @@ vi.mock('@/lib/db', () => ({
     $transaction: mocks.transaction,
   },
 }));
-vi.mock('@/lib/maintenance-service', () => ({
+vi.mock('@/lib/article-ai-reset', () => ({
   AI_RESET_ARTICLE_SELECT: { id: true },
   resetArticleAiAndEventState: mocks.resetArticleAiAndEventState,
 }));

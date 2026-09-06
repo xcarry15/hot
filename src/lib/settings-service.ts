@@ -1,12 +1,16 @@
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { db } from '@/lib/db';
-import { invalidateAISettingsCache } from '@/lib/ai-client';
+import { invalidateAISettingsCache } from '@/lib/ai-settings';
 import {
   AI_PROVIDER_API_KEY_KEYS, EXPORTABLE_SETTING_KEYS, WRITABLE_SETTING_KEYS, SETTING_DEFINITION_MAP, SENSITIVE_SETTING_KEYS, getSettingDefaults, getExportableSettingDefaults,
 } from '@/lib/settings';
 import { SETTING_KEYS } from '@/lib/settings-catalog';
-import { isOpenCodeFreeModel, isOpenRouterFreeModel, providerSettingKey } from '@/contracts/ai-provider';
+import {
+  FREE_AI_PROVIDER_IDS,
+  getAIModelValidationError,
+  providerSettingKey,
+} from '@/contracts/ai-provider';
 import { parseWebhookConfigsForServer, serializeWebhookConfigsForServer } from '@/contracts/webhook';
 import {
   decryptSensitiveSetting,
@@ -71,11 +75,10 @@ function validateSettingsInput(input: unknown, options: SettingsUpdateOptions = 
     if (!definition) { validationErrors.push(`${key}: 不可写(未在配置目录中声明)`); continue; }
     const result = definition.schema.safeParse(value);
     if (!result.success) validationErrors.push(`${key}: ${result.error.issues[0].message}`);
-    if (key === providerSettingKey('opencode', 'model') && value.trim() && !isOpenCodeFreeModel(value)) {
-      validationErrors.push(`${key}: OpenCode 仅允许免费模型`);
-    }
-    if (key === providerSettingKey('openrouter', 'model') && value.trim() && !isOpenRouterFreeModel(value)) {
-      validationErrors.push(`${key}: OpenRouter 仅允许免费模型`);
+    const freeProvider = FREE_AI_PROVIDER_IDS.find((provider) => key === providerSettingKey(provider, 'model'));
+    if (freeProvider && value.trim()) {
+      const modelError = getAIModelValidationError(freeProvider, value);
+      if (modelError) validationErrors.push(`${key}: ${modelError}`);
     }
     if (key === SETTING_KEYS.FEISHU_WEBHOOK_URL) {
       try {

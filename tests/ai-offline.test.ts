@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   keywordFindMany: vi.fn(),
   articleFindUnique: vi.fn(),
   articleUpdate: vi.fn(),
-  getAISettings: vi.fn(),
+  getAIAnalysisPolicy: vi.fn(),
   buildStep2Prompt: vi.fn(),
   fetchArticleDetail: vi.fn(),
   cleanContentMarkdown: vi.fn(),
@@ -38,8 +38,12 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/ai-client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ai-client')>()),
-  getAISettings: mocks.getAISettings,
   createChatCompletion: mocks.createChatCompletion,
+}));
+
+vi.mock('@/lib/ai-settings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ai-settings')>()),
+  getAIAnalysisPolicy: mocks.getAIAnalysisPolicy,
 }));
 
 vi.mock('@/lib/detail-fetcher', () => ({
@@ -60,7 +64,6 @@ vi.mock('@/lib/prompts', async (importOriginal) => ({
 vi.mock('@/lib/ai-helpers', () => ({
   buildSystemContent: vi.fn().mockReturnValue('system'),
   extractJsonObject: vi.fn().mockImplementation((value: string) => JSON.parse(value)),
-  pickStringArray: vi.fn().mockReturnValue([]),
 }));
 
 vi.mock('@/lib/dedup', () => ({
@@ -76,7 +79,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
     mocks.articleUpdate.mockResolvedValue({});
     // 触发失败路径：deepAnalyze → createChatCompletion 抛错
     mocks.createChatCompletion.mockRejectedValue(new Error('mock ai failure'));
-    mocks.getAISettings.mockResolvedValue({
+    mocks.getAIAnalysisPolicy.mockResolvedValue({
       weightEvent: 60,
       weightContent: 40,
       keywordMatchBonus: 5,
@@ -115,7 +118,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
     expect(updateCall).toBeDefined();
     expect(updateCall![0].data.aiStatus).toBe('failed');
     expect(updateCall![0].data.summary).toBe('[AI 处理失败]');
-    expect(updateCall![0].data.aiError).toBe('mock ai failure');
+    expect(updateCall![0].data.aiError).toBe('AI 分析失败');
   });
 
   it('AI 失败时不伪装成 done（failed 不进推送池）', async () => {
@@ -190,7 +193,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
     const updateCall = mocks.articleUpdate.mock.calls.find(c => c[0]?.where?.id === 'provider-config-1');
     expect(updateCall?.[0].data).toMatchObject({
       aiStatus: 'pending',
-      aiError: 'opencode: API Key 无效或鉴权失败',
+      aiError: 'AI 配置错误',
       nextAiRetryAt: expect.any(Date),
     });
     expect(updateCall?.[0].data).not.toHaveProperty('aiRetryCount');

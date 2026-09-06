@@ -30,7 +30,7 @@ import {
   ProviderConfigs,
   Settings,
 } from './types'
-import { AI_PROVIDERS, type AIProviderId } from '@/contracts/ai-provider'
+import { AI_PROVIDERS, type AIProviderId, type FreeAIProviderId } from '@/contracts/ai-provider'
 
 interface Props {
   settings: Settings
@@ -41,8 +41,10 @@ interface Props {
   onRetrySensitive: () => void
 }
 
-const OPENCODE_MODELS_STORAGE_KEY = 'hot2:opencode-free-models:v1'
-const OPENROUTER_MODELS_STORAGE_KEY = 'hot2:openrouter-free-models:v1'
+const MODEL_CACHE_STORAGE_KEYS: Record<FreeAIProviderId, string> = {
+  opencode: 'hot2:opencode-free-models:v1',
+  openrouter: 'hot2:openrouter-free-models:v1',
+}
 const MAX_CACHED_MODELS = 50
 
 function normalizeModelIds(value: unknown): string[] {
@@ -53,41 +55,22 @@ function normalizeModelIds(value: unknown): string[] {
     .filter(Boolean))].slice(0, MAX_CACHED_MODELS)
 }
 
-function readCachedOpencodeModels(): string[] {
+function readCachedModels(provider: FreeAIProviderId): string[] {
   try {
-    const value = window.localStorage.getItem(OPENCODE_MODELS_STORAGE_KEY)
+    const value = window.localStorage.getItem(MODEL_CACHE_STORAGE_KEYS[provider])
     return normalizeModelIds(value ? JSON.parse(value) : null)
   } catch {
     return []
   }
 }
 
-function cacheOpencodeModels(models: string[]): void {
+function cacheModels(provider: FreeAIProviderId, models: string[]): void {
   try {
-    window.localStorage.setItem(OPENCODE_MODELS_STORAGE_KEY, JSON.stringify(normalizeModelIds(models)))
+    window.localStorage.setItem(MODEL_CACHE_STORAGE_KEYS[provider], JSON.stringify(normalizeModelIds(models)))
   } catch {
     // localStorage 不可用时仍保留当前页面内的模型列表。
   }
 }
-
-function readCachedOpenRouterModels(): string[] {
-  try {
-    const value = window.localStorage.getItem(OPENROUTER_MODELS_STORAGE_KEY)
-    return normalizeModelIds(value ? JSON.parse(value) : null)
-  } catch {
-    return []
-  }
-}
-
-function cacheOpenRouterModels(models: string[]): void {
-  try {
-    window.localStorage.setItem(OPENROUTER_MODELS_STORAGE_KEY, JSON.stringify(normalizeModelIds(models)))
-  } catch {
-    // localStorage 不可用时仍保留当前页面内的模型列表。
-  }
-}
-
-type FreeAIProviderId = 'openrouter' | 'opencode'
 
 const SLOW_MODEL_LATENCY_MS = 8_000
 
@@ -165,7 +148,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
       }
       const models = normalizeModelIds(result.models)
       setOpencodeModels(models)
-      cacheOpencodeModels(models)
+      cacheModels('opencode', models)
       if (showToast) toast.success(`已更新 ${models.length} 个免费模型`)
     } catch {
       if (showToast) toast.error('读取 OpenCode 免费模型失败，已保留当前推荐项')
@@ -184,7 +167,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
       }
       const models = normalizeModelIds(result.models)
       setOpenrouterModels(models)
-      cacheOpenRouterModels(models)
+      cacheModels('openrouter', models)
       if (showToast) toast.success(`已更新 ${models.length} 个 OpenRouter 免费模型`)
     } catch {
       if (showToast) toast.error('读取 OpenRouter 免费模型失败，已保留当前推荐项')
@@ -195,7 +178,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
 
   useEffect(() => {
     if (currentProvider.id !== 'opencode') return
-    const cachedModels = readCachedOpencodeModels()
+    const cachedModels = readCachedModels('opencode')
     if (cachedModels.length > 0) setOpencodeModels(cachedModels)
     // 切换到 OpenCode 时同步一次列表；接口失败时保留上次成功结果。
     void loadOpenCodeModels(false)
@@ -203,7 +186,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
 
   useEffect(() => {
     if (currentProvider.id !== 'openrouter') return
-    const cachedModels = readCachedOpenRouterModels()
+    const cachedModels = readCachedModels('openrouter')
     if (cachedModels.length > 0) setOpenrouterModels(cachedModels)
     void loadOpenRouterModels(false)
   }, [currentProvider.id, loadOpenRouterModels])

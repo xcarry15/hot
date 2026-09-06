@@ -17,47 +17,17 @@ import { abortCurrentJob } from '@/lib/worker-stop';
 import { getDbFileSize, runVacuum } from '@/lib/maintenance/sqlite';
 import { deleteArticlesByIds } from '@/lib/article-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
-import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
-import { recalculateEventsInTransaction } from '@/lib/event-service';
+import {
+  AI_RESET_ARTICLE_SELECT,
+  resetArticleAiAndEventState,
+} from '@/lib/article-ai-reset';
+import { buildAiResetWhere, type AiResetAction } from '@/lib/ai-queue-policy';
 import { deleteAllExportJobs } from '@/lib/export/export-service';
 import type { Prisma } from '@prisma/client';
 
-type MaintenanceTransaction = Prisma.TransactionClient;
-
 export const AI_RESET_BATCH_SIZE = 100;
-export const AI_RESET_ARTICLE_SELECT = {
-  id: true,
-  eventId: true,
-  manualOverrides: true,
-  manualCorrectedAt: true,
-  relevance: true,
-  summary: true,
-  brand: true,
-  category: true,
-  eventSubjects: true,
-  eventAction: true,
-  eventObject: true,
-  keyPoints: true,
-  eventScore: true,
-  contentScore: true,
-  adProbability: true,
-  isAd: true,
-} as const satisfies Prisma.ArticleSelect;
-
-type AiResetArticle = Prisma.ArticleGetPayload<{ select: typeof AI_RESET_ARTICLE_SELECT }>;
-
-export type AiResetAction = 'reset-ai' | 'reset-ai-failed';
-
-export function buildAiResetWhere(action: AiResetAction): Prisma.ArticleWhereInput {
-  return action === 'reset-ai'
-    ? { aiStatus: { not: 'pending' } }
-    : {
-        OR: [
-          { aiStatus: 'failed' },
-          { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
-        ],
-      };
-}
+export { buildAiResetWhere } from '@/lib/ai-queue-policy';
+export type { AiResetAction } from '@/lib/ai-queue-policy';
 
 // ── 只读：统计 ──────────────────────────────────────────────────
 
@@ -181,35 +151,6 @@ function pauseAndResetOps() {
 }
 
 // ── 重置 AI 状态 ────────────────────────────────────────────────
-
-export async function resetArticleAiAndEventState(
-  tx: MaintenanceTransaction,
-  articles: AiResetArticle[],
-): Promise<void> {
-  const articleIds = articles.map((article) => article.id);
-  if (articleIds.length === 0) return;
-
-  // 重新分析会生成全新的 Event 归属。先解除旧归属和聚类状态，避免
-  // analyzeAllPending 因 eventId 非空永远跳过这些文章。
-  await tx.eventClusterAudit.deleteMany({ where: { articleId: { in: articleIds } } });
-  for (const article of articles) {
-    await tx.article.update({
-      where: { id: article.id },
-      data: {
-        ...buildAiResetDataForArticle(article),
-        event: { disconnect: true },
-        clusterStatus: 'pending',
-        clusteredAt: null,
-        clusterError: null,
-        clusterRetryCount: 0,
-        nextClusterRetryAt: null,
-      } satisfies Prisma.ArticleUpdateInput,
-    });
-  }
-  // 旧 Event 可能含有未重置成员；重算会保留这些成员，并把空 Event 收口为 merged。
-  const eventIds = [...new Set(articles.map((article) => article.eventId).filter((id): id is string => Boolean(id)))];
-  await recalculateEventsInTransaction(tx, eventIds);
-}
 
 /**
  * 处理一批 AI 重置。游标按 Article id 前进，事务只覆盖当前批次，

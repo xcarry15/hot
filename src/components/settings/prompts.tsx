@@ -34,6 +34,7 @@ import {
 import { toast } from 'sonner'
 import {
   DEFAULT_SYSTEM_PROMPT,
+  DEFAULT_PROMPT_SETTINGS,
   PROMPT_BLOCK_META,
   PROMPT_BLOCK_ORDER,
   PROMPT_VERSION_KEYS,
@@ -170,16 +171,7 @@ export default function PromptsTab({ settings, setSettings }: Props) {
   const resetAllPrompts = () => {
     setSettings(prev => ({
       ...prev,
-      ai_system_prompt: DEFAULT_SYSTEM_PROMPT,
-      ai_block_ad: PROMPT_BLOCK_META.ad.defaultBlock,
-      ai_block_event_identity: PROMPT_BLOCK_META.eventIdentity.defaultBlock,
-      ai_block_key_points: PROMPT_BLOCK_META.keyPoints.defaultBlock,
-      ai_block_summary: PROMPT_BLOCK_META.summary.defaultBlock,
-      ai_block_event_score: PROMPT_BLOCK_META.eventScore.defaultBlock,
-      ai_block_content_score: PROMPT_BLOCK_META.contentScore.defaultBlock,
-      ai_block_category: PROMPT_BLOCK_META.category.defaultBlock,
-      ai_block_relevance: PROMPT_BLOCK_META.relevance.defaultBlock,
-      ai_block_brand: PROMPT_BLOCK_META.brand.defaultBlock,
+      ...DEFAULT_PROMPT_SETTINGS,
       ai_weight_event: String(SCORE_WEIGHT_META.event.defaultWeight),
       ai_weight_content: String(SCORE_WEIGHT_META.content.defaultWeight),
       ai_keyword_match_bonus: '5',

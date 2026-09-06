@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { AI_PROVIDERS } from '@/contracts/ai-provider';
-import { fetchSafe, readResponseText } from '@/lib/http';
-import { withTimeout } from '@/lib/shared/async';
+import { fetchModelCatalog } from '@/lib/model-discovery';
 
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models?output_modalities=text&max_price=0&max_output_price=0&sort=most-popular';
 
@@ -50,20 +49,12 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const response = await withTimeout(
-      (signal) => fetchSafe(OPENROUTER_MODELS_URL, {
-        cache: 'no-store',
-        headers: { Accept: 'application/json' },
-        signal,
-      }),
-      10_000,
-      'OpenRouter 模型列表请求超时',
-    );
+    const response = await fetchModelCatalog(OPENROUTER_MODELS_URL, 'OpenRouter 模型列表请求超时');
     if (!response.ok) {
       return NextResponse.json({ error: `OpenRouter 模型列表请求失败（${response.status}）` }, { status: 502 });
     }
 
-    const models = getFreeModelIds(JSON.parse(await readResponseText(response)));
+    const models = getFreeModelIds(response.payload);
     return NextResponse.json({ models }, {
       headers: { 'Cache-Control': 'no-store' },
     });

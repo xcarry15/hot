@@ -77,6 +77,25 @@ export async function readAllSettings(): Promise<Record<string, string>> {
   return map;
 }
 
+/**
+ * 按需读取设置，避免运行时为了一个配置解密整张 Setting 表中的敏感值。
+ *
+ * 这是服务端配置消费者的窄接口；需要全量导出或调度器配置时仍使用
+ * readAllSettings。传入空列表不会访问数据库。
+ */
+export async function readSettings(keys: readonly string[]): Promise<Record<string, string>> {
+  const requestedKeys = [...new Set(keys)].filter((key) => SETTING_DEFINITION_MAP.has(key));
+  if (requestedKeys.length === 0) return {};
+
+  const rows = await db.setting.findMany({ where: { key: { in: requestedKeys } } });
+  const rowMap = new Map(rows.map((row) => [row.key, row.value]));
+  const defaults = getSettingDefaults();
+  return Object.fromEntries(requestedKeys.map((key) => [
+    key,
+    resolveSettingValue(key, rowMap.get(key) ?? defaults[key]),
+  ]));
+}
+
 // ── Webhook 配置 ──────────────────────────────────────────────────
 //
 // Webhook 的纯 codec（结构、parse、两种 serialize）统一在 `@/contracts/webhook`。

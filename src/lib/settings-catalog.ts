@@ -12,15 +12,6 @@ import { PUSH_MODES } from '@/contracts/push';
 import { DEFAULT_QUIET_END, DEFAULT_QUIET_START } from './quiet-hours';
 import { proxyUrlSchema } from '@/contracts/proxy';
 import {
-  DEFAULT_BLOCK_AD,
-  DEFAULT_BLOCK_BRAND,
-  DEFAULT_BLOCK_CATEGORY,
-  DEFAULT_BLOCK_CONTENT_SCORE,
-  DEFAULT_BLOCK_EVENT_SCORE,
-  DEFAULT_BLOCK_EVENT_IDENTITY,
-  DEFAULT_BLOCK_KEY_POINTS,
-  DEFAULT_BLOCK_RELEVANCE,
-  DEFAULT_BLOCK_SUMMARY,
   DEFAULT_SYSTEM_PROMPT,
   PROMPT_BLOCK_META,
   PROMPT_BLOCK_ORDER,
@@ -111,6 +102,11 @@ const prompt = (key: string, defaultValue: string): SettingDefinition => ({
   seed: false,
 });
 
+const promptSettingDefinitions = PROMPT_BLOCK_ORDER.map((id) => {
+  const metadata = PROMPT_BLOCK_META[id];
+  return prompt(metadata.key, metadata.defaultBlock);
+});
+
 const AI_PROVIDER_IDS = Object.keys(AI_PROVIDERS) as [AIProviderId, ...AIProviderId[]];
 
 const providerSettingDefinitions: SettingDefinition[] = Object.values(AI_PROVIDERS).flatMap((provider) => [
@@ -165,15 +161,7 @@ const definitions: SettingDefinition[] = [
   { key: SETTING_KEYS.AI_SYSTEM_PROMPT, defaultValue: DEFAULT_SYSTEM_PROMPT, uiDefaultValue: '', schema: text, sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_STEP2_CONTENT_MAX_CHARS, defaultValue: '8000', schema: intRange(500, 10000, 'Step2正文最大字符数'), sensitive: false, exportable: true, frontend: true, seed: false },
 
-  prompt(SETTING_KEYS.AI_BLOCK_AD, DEFAULT_BLOCK_AD),
-  prompt(SETTING_KEYS.AI_BLOCK_EVENT_SCORE, DEFAULT_BLOCK_EVENT_SCORE),
-  prompt(SETTING_KEYS.AI_BLOCK_CATEGORY, DEFAULT_BLOCK_CATEGORY),
-  prompt(SETTING_KEYS.AI_BLOCK_RELEVANCE, DEFAULT_BLOCK_RELEVANCE),
-  prompt(SETTING_KEYS.AI_BLOCK_CONTENT_SCORE, DEFAULT_BLOCK_CONTENT_SCORE),
-  prompt(SETTING_KEYS.AI_BLOCK_KEY_POINTS, DEFAULT_BLOCK_KEY_POINTS),
-  prompt(SETTING_KEYS.AI_BLOCK_SUMMARY, DEFAULT_BLOCK_SUMMARY),
-  prompt(SETTING_KEYS.AI_BLOCK_EVENT_IDENTITY, DEFAULT_BLOCK_EVENT_IDENTITY),
-  prompt(SETTING_KEYS.AI_BLOCK_BRAND, DEFAULT_BLOCK_BRAND),
+  ...promptSettingDefinitions,
 
   { key: SETTING_KEYS.AI_WEIGHT_EVENT, defaultValue: String(SCORE_WEIGHT_META.event.defaultWeight), schema: intRange(0, 100, '事件权重'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_WEIGHT_CONTENT, defaultValue: String(SCORE_WEIGHT_META.content.defaultWeight), schema: intRange(0, 100, '内容权重'), sensitive: false, exportable: true, frontend: true, seed: false },

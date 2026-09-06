@@ -14,7 +14,7 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-import { getSetting, readAllSettings } from '@/lib/settings';
+import { getSetting, readAllSettings, readSettings } from '@/lib/settings';
 import { encryptSensitiveSetting } from '@/lib/settings-crypto';
 
 describe('AI Provider API Key 运行时读取', () => {
@@ -32,6 +32,21 @@ describe('AI Provider API Key 运行时读取', () => {
     await expect(readAllSettings()).resolves.toMatchObject({
       opencode_api_key: 'sk-encrypted',
       deepseek_api_key: 'sk-legacy-plaintext',
+    });
+  });
+
+  it('按需读取设置时只查询并解密请求的 key', async () => {
+    const encrypted = encryptSensitiveSetting('sk-current');
+    mocks.findMany.mockResolvedValue([
+      { key: 'opencode_api_key', value: encrypted },
+      { key: 'deepseek_api_key', value: 'sk-unrelated' },
+    ]);
+
+    await expect(readSettings(['opencode_api_key'])).resolves.toEqual({
+      opencode_api_key: 'sk-current',
+    });
+    expect(mocks.findMany).toHaveBeenCalledWith({
+      where: { key: { in: ['opencode_api_key'] } },
     });
   });
 });

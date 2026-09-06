@@ -31,10 +31,6 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-vi.mock('@/lib/ai-client', () => ({
-  invalidateAISettingsCache: vi.fn(),
-}));
-
 vi.mock('@/lib/event-service', () => ({
   recalculateEventById: vi.fn(),
 }));

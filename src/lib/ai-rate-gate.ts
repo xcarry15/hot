@@ -1,5 +1,5 @@
 import { abortableDelay } from './shared/async';
-import { isOpenCodeFreeModel, isOpenRouterFreeModel } from '@/contracts/ai-provider';
+import { isFreeAIModel as isProviderFreeAIModel } from '@/contracts/ai-provider';
 
 /**
  * OpenCode / OpenRouter 免费模型的进程内请求闸门。
@@ -36,8 +36,7 @@ function getState(provider: string): RateGateState {
 }
 
 export function isFreeAIModel(provider: string, model: string): boolean {
-  return (provider === 'openrouter' && isOpenRouterFreeModel(model))
-    || (provider === 'opencode' && isOpenCodeFreeModel(model));
+  return isProviderFreeAIModel(provider, model);
 }
 
 /** 等待免费模型的下一个请求时隙，并把并发调用排成单队列。 */

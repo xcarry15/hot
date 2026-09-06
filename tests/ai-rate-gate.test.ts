@@ -10,7 +10,12 @@ import {
   resetAIRateGateForTests,
   waitForAIRequestSlot,
 } from '@/lib/ai-rate-gate';
-import { isOpenRouterFreeModel } from '@/contracts/ai-provider';
+import {
+  getAIModelValidationError,
+  isAIModelAllowed,
+  isFreeAIModel as isProviderFreeAIModel,
+  isOpenRouterFreeModel,
+} from '@/contracts/ai-provider';
 
 describe('OpenRouter 免费模型请求闸门', () => {
   beforeEach(() => {
@@ -70,6 +75,17 @@ describe('OpenRouter 免费模型请求闸门', () => {
     expect(isFreeAIModel('opencode', 'big-pickle')).toBe(true);
     expect(isFreeAIModel('opencode', 'mimo-v2.5-free')).toBe(true);
     expect(isFreeAIModel('opencode', 'deepseek-v4')).toBe(false);
+  });
+
+  it('Provider 模型策略允许 DeepSeek，拒绝免费 Provider 的付费模型', () => {
+    expect(isAIModelAllowed('deepseek', 'deepseek-v4-flash')).toBe(true);
+    expect(isAIModelAllowed('openrouter', 'openai/gpt-4o')).toBe(false);
+    expect(isProviderFreeAIModel('openrouter', 'openrouter/free')).toBe(true);
+  });
+
+  it('拒绝对象原型名称，避免损坏 Provider 配置解析', () => {
+    expect(isAIModelAllowed('constructor', 'anything')).toBe(false);
+    expect(getAIModelValidationError('constructor', 'anything')).toBe('不支持的 AI Provider');
   });
 
   it('OpenCode 免费请求串行化，并在 429 后冷却 60 秒', async () => {
