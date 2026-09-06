@@ -17,6 +17,16 @@ const ARTICLE_BADGE_CLASS = 'shrink-0 px-1 text-[11px] font-medium leading-5 tex
 const ARTICLE_ACTION_CLASS = 'inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted'
 const ARTICLE_STEP_LIST_CLASS = 'flex shrink-0 flex-nowrap items-center gap-0.5 overflow-hidden whitespace-nowrap pb-0.5 group-hover:ring-1 group-hover:ring-blue-300 group-hover:ring-offset-1 [&>*]:shrink-0 sm:flex-none sm:overflow-visible sm:pb-0'
 
+const PUSH_BLOCK_LABELS = {
+  'retry-exhausted': '推送已停止',
+  'no-webhooks': '未配置推送',
+} as const
+
+const PUSH_BLOCK_TITLES = {
+  'retry-exhausted': '自动推送已达到重试上限，请打开文章工作台确认',
+  'no-webhooks': '当前没有启用的 Feishu Webhook，请检查推送设置',
+} as const
+
 function EventArticleCountBadge({ count }: { count: number }) {
   return (
     <Badge
@@ -96,7 +106,7 @@ export const ArticleRow = memo(function ArticleRow({
   const actionFor = (step: 'process' | 'cluster' | 'ai' | 'push') =>
     nextAction?.step === step && canRunNextAction ? handleNextAction : undefined
   const technicalReason = nextAction ? article.technicalErrorReasons[nextAction.step] : undefined
-  const isUnknownPushResult = article.technicalErrorReasons.push?.includes('投递结果未知') ?? false
+  const isUnknownPushResult = article.pushResultUnknown ?? (article.technicalErrorReasons.push?.includes('投递结果未知') ?? false)
 
   return (
     <div className={`${ARTICLE_ROW_CLASS} ${
@@ -137,7 +147,22 @@ export const ArticleRow = memo(function ArticleRow({
           <span className={`${ARTICLE_BADGE_CLASS} bg-amber-500`} title="业务识别：已归入同一事件，非当前代表文章">重复</span>
         )}
         {article.anomalyLabels?.includes('low-confidence') && (
-          <span className={`${ARTICLE_BADGE_CLASS} bg-violet-600`} title="AI 对文章分析结论的证据把握不足">低分析置信</span>
+          <span className={`${ARTICLE_BADGE_CLASS} bg-violet-600`} title="AI 对文章分析结论的证据把握不足">低置信</span>
+        )}
+        {article.pushBlockedReason && (
+          <>
+            <span className={`${ARTICLE_BADGE_CLASS} bg-amber-600`} title={PUSH_BLOCK_TITLES[article.pushBlockedReason]}>
+              {PUSH_BLOCK_LABELS[article.pushBlockedReason]}
+            </span>
+            <button
+              type="button"
+              onClick={() => onOpenArticle?.(article.id)}
+              className={ARTICLE_ACTION_CLASS}
+              title={PUSH_BLOCK_TITLES[article.pushBlockedReason]}
+            >
+              查看
+            </button>
+          </>
         )}
         {article.clusterStatus === 'needs_review' && (
           <>

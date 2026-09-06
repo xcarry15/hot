@@ -302,7 +302,7 @@ export default function DataExportPanel() {
         </div>
 
         <div className="flex flex-col gap-1.5 pt-1.5 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[11px] leading-4 text-muted-foreground">按条件导出文章及处理结果，文件保留 24 小时。</p>
+          <p className="text-[11px] leading-4 text-muted-foreground">按条件导出文章及处理结果，文件保留 24 小时；进行中的任务请先取消。</p>
           <Button size="sm" onClick={() => void handleCreate()} disabled={creating} className="h-8 shrink-0 gap-1.5 rounded-none px-3 text-xs">
             {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             创建 Excel 导出
@@ -329,7 +329,7 @@ export default function DataExportPanel() {
                   {(job.status === 'queued' || job.status === 'running') && <Button variant="ghost" size="sm" className="h-6 gap-1 rounded-none px-1.5 text-xs" disabled={actionId === job.id} onClick={() => void handleAction(job, 'cancel')}><X className="h-3 w-3" />取消</Button>}
                   {job.status === 'succeeded' && <Button variant="ghost" size="sm" className="h-6 gap-1 rounded-none px-1.5 text-xs" disabled={actionId === job.id} onClick={() => void handleAction(job, 'download')}><Download className="h-3 w-3" />下载</Button>}
                   {(job.status === 'failed' || job.status === 'cancelled' || job.status === 'expired') && <Button variant="ghost" size="sm" className="h-6 gap-1 rounded-none px-1.5 text-xs" disabled={actionId === job.id} onClick={() => void handleAction(job, 'retry')}><RotateCcw className="h-3 w-3" />重试</Button>}
-                  <Button variant="ghost" size="sm" className="h-6 w-6 rounded-none p-0 text-destructive hover:text-destructive" aria-label="删除导出任务" title="删除导出任务" disabled={actionId === job.id} onClick={() => void handleAction(job, 'delete')}><Trash2 className="h-3.5 w-3.5" /></Button>
+                  {job.status !== 'queued' && job.status !== 'running' && <Button variant="ghost" size="sm" className="h-6 w-6 rounded-none p-0 text-destructive hover:text-destructive" aria-label="删除导出任务" title="删除导出任务" disabled={actionId === job.id} onClick={() => void handleAction(job, 'delete')}><Trash2 className="h-3.5 w-3.5" /></Button>}
                 </div>
               </div>
             )

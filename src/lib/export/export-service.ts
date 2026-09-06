@@ -245,16 +245,29 @@ export async function deleteExportJob(id: string): Promise<void> {
   if (exportMaintenanceInProgress) throw new ExportJobConflictError('数据清理进行中，请稍后重试');
   const job = await getJobOrThrow(id);
   if (job.status === 'running') {
-    await db.exportJob.updateMany({
+    const requested = await db.exportJob.updateMany({
       where: { id, status: 'running' },
       data: { cancelRequestedAt: new Date() },
     });
+    if (requested.count !== 1) return deleteExportJob(id);
+    throw new ExportJobConflictError('导出任务正在取消，请在任务结束后删除');
   }
+
+  if (job.status === 'queued') {
+    const cancelled = await db.exportJob.updateMany({
+      where: { id, status: 'queued' },
+      data: { status: 'cancelled', completedAt: new Date(), error: '已取消' },
+    });
+    if (cancelled.count !== 1) return deleteExportJob(id);
+  }
+
   await removeFile(job.storageKey);
   await removeTempFile(job.storageKey);
   await removeSnapshotFile(job.storageKey);
-  const deleted = await db.exportJob.deleteMany({ where: { id } });
-  if (deleted.count !== 1) throw new ExportJobNotFoundError('导出任务不存在');
+  const deleted = await db.exportJob.deleteMany({
+    where: { id, status: job.status === 'queued' ? 'cancelled' : job.status },
+  });
+  if (deleted.count !== 1) return deleteExportJob(id);
 }
 
 export async function cancelExportJob(id: string): Promise<ExportJobDto> {

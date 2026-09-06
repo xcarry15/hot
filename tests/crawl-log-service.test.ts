@@ -505,6 +505,87 @@ describe('crawl-log-service', () => {
     expect(snapshot.sources[0].articles[0].technicalErrorReasons.push).toBe('推送失败：运营群：HTTP 502');
   });
 
+  it('推送重试耗尽时向工作台暴露明确的终止原因', async () => {
+    const record = {
+      id: 'a-push-exhausted', title: '推送停止文章', publishedAt: new Date(), sourceId: 's1',
+      fetchStatus: 'fetched', fetchError: null, clusterStatus: 'clustered', clusterError: null,
+      aiStatus: 'done', aiError: null, aiConfidence: 90, score: 90, isAd: false,
+      eventId: 'e1', event: {
+        articleCount: 1, pushedAt: null, nextPushRetryAt: null, pushRetryCount: 5,
+        status: 'active', clusterReviewStatus: 'confirmed', representativeArticleId: 'a-push-exhausted', publicStatus: 'published',
+      },
+      nextFetchRetryAt: null, nextClusterRetryAt: null, nextAiRetryAt: null,
+      relevance: 90, createdAt: new Date(), updatedAt: new Date(), summary: '', skipReason: null, technicalIgnoredAt: null,
+      source: { name: 'S' },
+    };
+    mocks.technicalQueue.mockResolvedValue([
+      { articleId: 'a-push-exhausted', issues: ['push_failed'], retryAvailableAt: null, state: 'manual' },
+    ]);
+    mocks.transaction.mockImplementation(async () => [[], [], [record], [], []]);
+
+    const snapshot = await getCrawlLogSnapshot();
+    expect(snapshot.sources[0].articles[0]).toMatchObject({
+      push: 'blocked',
+      pushBlockedReason: 'retry-exhausted',
+    });
+  });
+
+  it('投递结果未知时保留人工确认的失败状态，不显示重试耗尽', async () => {
+    const record = {
+      id: 'a-push-unknown', title: '未知推送文章', publishedAt: new Date(), sourceId: 's1',
+      fetchStatus: 'fetched', fetchError: null, clusterStatus: 'clustered', clusterError: null,
+      aiStatus: 'done', aiError: null, aiConfidence: 90, score: 90, isAd: false,
+      eventId: 'e1', event: {
+        articleCount: 1, pushedAt: null, nextPushRetryAt: null, pushRetryCount: 5,
+        representativeArticleId: 'a-push-unknown', publicStatus: 'published',
+      },
+      nextFetchRetryAt: null, nextClusterRetryAt: null, nextAiRetryAt: null,
+      relevance: 90, createdAt: new Date(), updatedAt: new Date(), summary: '', skipReason: null, technicalIgnoredAt: null,
+      source: { name: 'S' },
+    };
+    mocks.technicalQueue.mockResolvedValue([
+      { articleId: 'a-push-unknown', issues: ['push_failed'], retryAvailableAt: null, state: 'manual' },
+    ]);
+    mocks.pushTargetStates.mockResolvedValue(new Map([
+      ['e1', [
+        { latestStatus: 'failure', webhookRemark: '运营群', latestError: 'HTTP 502', webhookUrl: 'https://hook/a', latestCreatedAt: new Date() },
+        { latestStatus: 'unknown', webhookRemark: '确认群', latestError: '投递结果未知', webhookUrl: 'https://hook/b', latestCreatedAt: new Date() },
+      ]],
+    ]));
+    mocks.transaction.mockImplementation(async () => [[], [], [record], [], []]);
+
+    const snapshot = await getCrawlLogSnapshot();
+    expect(snapshot.sources[0].articles[0]).toMatchObject({
+      push: 'failed',
+      pushBlockedReason: null,
+      pushResultUnknown: true,
+    });
+    expect(snapshot.sources[0].articles[0].technicalErrorReasons.push).toContain('投递结果未知');
+  });
+
+  it('没有启用 Webhook 时向工作台暴露推送配置阻塞', async () => {
+    const record = {
+      id: 'a-no-webhook', title: '未配置推送文章', publishedAt: new Date(), sourceId: 's1',
+      fetchStatus: 'fetched', fetchError: null, clusterStatus: 'clustered', clusterError: null,
+      aiStatus: 'done', aiError: null, aiConfidence: 90, score: 90, isAd: false,
+      eventId: 'e1', event: {
+        articleCount: 1, pushedAt: null, nextPushRetryAt: null, pushRetryCount: 0,
+        status: 'active', clusterReviewStatus: 'confirmed', representativeArticleId: 'a-no-webhook', publicStatus: 'published',
+      },
+      nextFetchRetryAt: null, nextClusterRetryAt: null, nextAiRetryAt: null,
+      relevance: 90, createdAt: new Date(), updatedAt: new Date(), summary: '', skipReason: null, technicalIgnoredAt: null,
+      source: { name: 'S' },
+    };
+    mocks.pushTargetStates.mockResolvedValue(new Map([['e1', []]]));
+    mocks.transaction.mockImplementation(async () => [[], [], [record], [], []]);
+
+    const snapshot = await getCrawlLogSnapshot();
+    expect(snapshot.sources[0].articles[0]).toMatchObject({
+      push: 'blocked',
+      pushBlockedReason: 'no-webhooks',
+    });
+  });
+
   it('0 篇解析结果作为警告而不是失败源', async () => {
     const job = {
       id: 'collect', type: 'collect', status: 'succeeded', payload: '{}', error: '', currentStage: 'collect',

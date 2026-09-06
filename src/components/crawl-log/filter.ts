@@ -79,6 +79,7 @@ export function getArticleFilterBucket(article: ArticleProgress): ArticleFilterB
   if (article.technicalState === 'manual') return 'anomaly-manual'
   if (article.clusterStatus === 'needs_review') return 'anomaly-review'
   if (article.technicalState === 'auto_retry' || article.technicalState === 'waiting') return 'anomaly-retrying'
+  if (article.pushBlockedReason) return 'anomaly-manual'
   if (
     (article.technicalIssues?.length ?? 0) > 0
     || isArticleFailed(article)

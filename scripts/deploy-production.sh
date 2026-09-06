@@ -123,7 +123,7 @@ cleanup() {
     if [[ "$SERVICE_WAS_STOPPED" -eq 1 ]]; then
       restart_service || true
     fi
-    if [[ "$DATABASE_ROLLBACK_AVAILABLE" -eq 1 ]]; then
+    if [[ "$CURRENT_LINK_CHANGED" -eq 0 || "$DATABASE_ROLLBACK_AVAILABLE" -eq 1 ]]; then
       [[ -z "$RELEASE_DIR" ]] || rm -rf -- "$RELEASE_DIR"
     fi
   fi

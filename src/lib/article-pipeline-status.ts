@@ -9,8 +9,8 @@
  * 并测试覆盖。
  */
 
-import type { PushMode } from '@/contracts/push';
-import type { StepStatus as CrawlLogStepStatus } from '@/contracts/crawl-log';
+import { PUSH_MAX_RETRIES, type PushMode } from '@/contracts/push';
+import type { PushBlockedReason, StepStatus as CrawlLogStepStatus } from '@/contracts/crawl-log';
 import { isArticleAiStatus, isArticleClusterStatus, type ArticleFetchStatus } from '@/contracts/workflow';
 
 export type StepStatus = Exclude<CrawlLogStepStatus, 'running'>;
@@ -40,7 +40,12 @@ export interface ArticleStepInput {
   relevance: number;
   eventPushedAt: Date | null;
   eventNextRetryAt: Date | null;
+  eventPushRetryCount?: number;
+  /** 已读取到的启用 Webhook 数量是否大于 0；未提供时保持兼容的未知态。 */
+  pushTargetsConfigured?: boolean;
   pushFailed?: boolean;
+  /** unknown 投递可能已经成功，必须保留人工确认入口，不能误标为可安全重试耗尽。 */
+  pushResultUnknown?: boolean;
   pushApplicable?: boolean;
 }
 
@@ -50,6 +55,7 @@ export interface ArticleStepProjection {
   cluster: StepStatus;
   ai: StepStatus;
   push: StepStatus;
+  pushBlockedReason?: PushBlockedReason | null;
   /** push='failed' 时附带 retryAt，方便前端显示。其它情况为 null。 */
   pushRetryAt?: string | null;
   /** 该文章是否处于"进行中"——任一步骤尚未到终态且不是终态失败/跳过/过滤/不适用的语义。 */
@@ -70,6 +76,9 @@ export interface ArticleStepProjection {
  *   - AI 是 skipped/failed → not_applicable
  *   - push_mode='off' → not_applicable
  *   - AI 已完成但 score/relevance 低于阈值 → filtered
+ *   - 自动重试耗尽 → blocked，并返回原因
+ *   - 聚类待复核 → blocked；复核入口属于聚类步骤
+ *   - 没有启用 Webhook → blocked，并返回原因
  *   - nextRetryAt > now → failed（同时返回 retryAt）
  *   - 满足条件且未推送 → pending
  *
@@ -113,9 +122,15 @@ export function projectArticleSteps(
 
   let pushStatus: StepStatus = 'pending';
   let pushRetryAt: string | null = null;
+  let pushBlockedReason: PushBlockedReason | null = null;
 
   if (article.pushApplicable === false) {
     pushStatus = 'not_applicable';
+  } else if (article.pushResultUnknown) {
+    pushStatus = 'failed';
+  } else if (article.pushFailed && (article.eventPushRetryCount ?? 0) >= PUSH_MAX_RETRIES) {
+    pushStatus = 'blocked';
+    pushBlockedReason = 'retry-exhausted';
   } else if (article.pushFailed) {
     pushStatus = 'failed';
     pushRetryAt = article.eventNextRetryAt?.toISOString() ?? null;
@@ -123,6 +138,9 @@ export function projectArticleSteps(
     pushStatus = 'done';
   } else if (article.clusterStatus === 'needs_review') {
     pushStatus = 'blocked';
+  } else if ((article.eventPushRetryCount ?? 0) >= PUSH_MAX_RETRIES) {
+    pushStatus = 'blocked';
+    pushBlockedReason = 'retry-exhausted';
   } else if (ai === 'skipped' || ai === 'failed') {
     pushStatus = 'not_applicable';
   } else if (ai !== 'done' || cluster !== 'done') {
@@ -134,6 +152,9 @@ export function projectArticleSteps(
   } else if (article.eventNextRetryAt && article.eventNextRetryAt > push.now) {
     pushStatus = 'failed';
     pushRetryAt = article.eventNextRetryAt.toISOString();
+  } else if (article.pushTargetsConfigured === false) {
+    pushStatus = 'blocked';
+    pushBlockedReason = 'no-webhooks';
   } else {
     pushStatus = 'pending';
   }
@@ -141,10 +162,11 @@ export function projectArticleSteps(
   const isInProgress = (() => {
     const stepHasOpen = (s: StepStatus) =>
       s === 'pending' || s === 'blocked';
-    return stepHasOpen(process) || stepHasOpen(ai) || stepHasOpen(cluster) || stepHasOpen(pushStatus);
+    return stepHasOpen(process) || stepHasOpen(ai) || stepHasOpen(cluster)
+      || (stepHasOpen(pushStatus) && !pushBlockedReason);
   })();
 
-  return { crawl, process, cluster, ai, push: pushStatus, pushRetryAt, isInProgress };
+  return { crawl, process, cluster, ai, push: pushStatus, pushRetryAt, pushBlockedReason, isInProgress };
 }
 
 /**

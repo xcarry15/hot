@@ -43,6 +43,7 @@ jobs:
           test -n "$DEPLOY_HOST"
           test -n "$DEPLOY_USER"
           test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
 
       - name: Checkout verified revision
         uses: actions/checkout@v5
@@ -55,11 +56,7 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > ~/.ssh/known_hosts
-          fi
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: Create release archive
@@ -94,6 +91,11 @@ jobs:
           RESET_PRODUCTION="${{ github.event_name == 'workflow_dispatch' && inputs.reset_production || 'no' }}"
           RELEASE_ARCHIVE_NAME="h2-hot2-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tgz"
           SSH_OPTS=(
+            -i "$HOME/.ssh/id_ed25519"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
             -o ServerAliveInterval=15
             -o ServerAliveCountMax=20
             -o TCPKeepAlive=yes

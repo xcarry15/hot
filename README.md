@@ -54,7 +54,7 @@
 - AI Provider 冷却状态只持久化在 Article 的 `nextAiRetryAt`；人工运行全流程会立即归一化等待、失败及旧 Event/聚类残留，重新获取正文后再探测 AI，不使用进程内熔断状态阻塞恢复。
 - 长正文 AI 请求统一使用最多 5 分钟的模型请求超时；单篇超时或网络失败只进入该文章的有限重试，不暂停同批后续文章。鉴权、余额、限流和服务端 5xx 仍按 Provider 全局故障处理。
 - 技术失败经过有限自动重试后进入人工处理；不会通过删除 Article 来隐藏失败。
-- 工作台文章标签会显示软文、重复和低分析置信；推送步骤仍会按评分/相关性门槛过滤文章，但不再在文章行显示“未达门槛”徽标。
+- 工作台文章标签会显示软文、重复和低置信；推送步骤仍会按评分/相关性门槛过滤文章，但不再在文章行显示“未达门槛”徽标。聚类待复核继续在聚类步骤显示；未配置 Webhook 或自动推送重试耗尽时，推送步骤会显示阻塞原因并提供查看入口。
 - HTML 来源失败会保留实际 HTTP 状态、重定向后的最终 URL，以及实际使用的直连/代理路径和 ZAI page_reader 原因；可选的详情发布时间补全只访问本轮可能新建的 URL，不对历史文章重复抓取。
 - 正文详情请求由文章层统一负责退避；共享 HTTP 层不再与外层重复重试，单篇抓取期间 ZAI page_reader 最多调用一次，避免失败时放大请求量。
 - 设置页的“测试连接”使用独立的 15 秒单次超时且不自动重试，避免交互按钮复用后台长任务策略而长时间阻塞；正式文章分析仍使用 Provider 对应的长超时和重试规则。
@@ -76,7 +76,7 @@
 - 完整恢复先在浏览器使用保护密码解密并校验全部模块，再在同一数据库事务中覆盖配置；数据源运行状态重新初始化，关键词过滤临时结论失效，并统一安排评分或公开状态重建。备份不包含文章正文、运行日志和任务历史。
 - 关键词 XLSX 批量编辑与文章 Excel 归档也集中在 `设置 → 备份`；关键词 XLSX 与完整 JSON 共用正式关键词、候选词、出现次数和示例标题字段，候选词状态由工作表名称表达，不再重复保存“状态”列。前者是专项迁移格式，后者只读、不可用于恢复完整配置。
 - `设置 → 维护` 只负责日志清理、文章清理和数据库压缩，不再混放导入导出操作。
-- Excel 导出使用独立 `ExportJob`，创建任务时固化 SQLite 只读快照，文件位于 `db/exports` 并保留 24 小时。
+- Excel 导出使用独立 `ExportJob`，创建任务时固化 SQLite 只读快照，文件位于 `db/exports` 并保留 24 小时。运行中的任务只能先取消，Worker 结束后才可删除，避免与文件写入并发竞争。
 - 工作簿包含 8 类逻辑工作表：导出元数据、数据源、文章数据、未入库条目、关键词、候选关键词、抓取日志 ID、推送日志；超过 Excel 行数上限时按同类表追加编号分表。
 - 时间统一写为 `Asia/Shanghai` 的 Excel 日期值；超长单元格显式截断；敏感配置递归脱敏并按纯文本写入。
 - 导出实现集中在 `src/lib/export/`，前端只通过受保护 API 管理任务。
@@ -214,7 +214,7 @@ npm run db:cleanup-logs
 推送或合并 master → CI → CI 成功 → Deploy production → 健康检查并核对线上 Git revision
 ```
 
-`Deploy production` 作为 CI 的复用 Job，仅在质量检查、迁移冒烟、生产构建和 E2E 全部成功后执行；也可从 GitHub Actions 手动运行。部署所需的 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY` 及可选的 `DEPLOY_PORT`、`DEPLOY_KNOWN_HOSTS` 应配置在 `production` Environment 的 Secrets/Variables 中。
+`Deploy production` 作为 CI 的复用 Job，仅在质量检查、迁移冒烟、生产构建和 E2E 全部成功后执行；也可从 GitHub Actions 手动运行。部署所需的 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_KNOWN_HOSTS` 及可选的 `DEPLOY_PORT` 应配置在 `production` Environment 的 Secrets/Variables 中；`DEPLOY_KNOWN_HOSTS` 必须是经线下核验的目标主机 known_hosts 条目，工作流不会运行时扫描或接受新主机密钥。
 
 发布脚本会在版本化 release 目录安装依赖并构建，再校验 migration 历史兼容性（允许当前发布包中的待执行 migration，拒绝未知或未完成记录）、停止 PM2、备份 SQLite、应用 migration，最后原子切换 `current` 软链、启动单实例并检查包含 SQLite 可访问性的健康接口与 CSS 资源。GitHub Actions 随部署包写入目标 Git revision，并在外部健康检查后核对线上 revision。旧 release 默认保留 5 个，普通部署失败时会恢复数据库备份和旧版本；生产重置不提供自动回滚。
 

@@ -136,6 +136,16 @@ describe('matchStepChip 单谓词命中', () => {
     expect(matchStepChip(publicLowConfidence, 'anomaly-low-confidence')).toBe(true)
   })
 
+  it('推送被终止的未公开文章归入需人工处理，不落入普通处理中', () => {
+    const blocked = article({
+      isPublic: false,
+      push: 'blocked',
+      pushBlockedReason: 'retry-exhausted',
+    })
+    expect(matchStepChip(blocked, 'anomaly-manual')).toBe(true)
+    expect(matchStepChip(blocked, 'normal-push')).toBe(false)
+  })
+
   it('软文在异常分类中可筛选，公开文章不被异常子类反向纳入', () => {
     expect(matchStepChip(article({ anomalyLabels: ['ad'] }), 'anomaly-ad')).toBe(true)
     expect(matchStepChip(article({ isPublic: true, anomalyLabels: ['ad'] }), 'anomaly-ad')).toBe(false)

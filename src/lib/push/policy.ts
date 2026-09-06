@@ -4,13 +4,13 @@
  * pushable where、紧急度和 retry 资格收敛到本模块；只有读取运行时设置的
  * 推送模式和免打扰时段保留为异步门禁，避免组件或 Route Handler 各自复制口径。
  */
-import type { PushMode } from '@/contracts/push';
-import { parsePushMode } from '@/contracts/push';
+import { parsePushMode, PUSH_MAX_RETRIES, type PushMode } from '@/contracts/push';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
 import { DEFAULT_QUIET_END, DEFAULT_QUIET_START, isWithinQuietHours } from '@/lib/quiet-hours';
 
+export { PUSH_MAX_RETRIES } from '@/contracts/push';
+
 export const PUSH_RETRY_DELAY_MS = 6 * 60 * 60 * 1000; // 6h
-export const PUSH_MAX_RETRIES = 5;
 
 export interface PushSettings {
   pushMode: PushMode;

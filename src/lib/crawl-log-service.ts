@@ -66,7 +66,7 @@ const crawlLogArticleSelect = {
   score: true,
   isAd: true,
   eventId: true,
-  event: { select: { articleCount: true, pushedAt: true, nextPushRetryAt: true, representativeArticleId: true, publicStatus: true } },
+  event: { select: { articleCount: true, pushedAt: true, nextPushRetryAt: true, pushRetryCount: true, representativeArticleId: true, publicStatus: true } },
   nextAiRetryAt: true,
   relevance: true,
   createdAt: true,
@@ -438,8 +438,11 @@ export async function getCrawlLogSnapshot(
 
     const technicalItem = technicalByArticleId.get(a.id);
     const isRepresentative = a.event?.representativeArticleId === a.id;
+    const pushTargetStates = a.eventId ? pushStatesByEvent.get(a.eventId) : undefined;
+    const pushResultUnknown = isRepresentative && (pushTargetStates?.some((target) => target.latestStatus === 'unknown') ?? false);
     const pushFailureReason = isRepresentative && a.eventId
-      ? pushStatesByEvent.get(a.eventId)?.find((target) => target.latestStatus === 'failure' || target.latestStatus === 'unknown')
+      ? pushTargetStates?.find((target) => target.latestStatus === 'unknown')
+        ?? pushTargetStates?.find((target) => target.latestStatus === 'failure')
       : undefined;
     const stepInput: ArticleStepInput = {
       fetchStatus: a.fetchStatus,
@@ -449,7 +452,10 @@ export async function getCrawlLogSnapshot(
       relevance: a.relevance,
       eventPushedAt: isRepresentative ? (a.event?.pushedAt ?? null) : null,
       eventNextRetryAt: isRepresentative ? (a.event?.nextPushRetryAt ?? null) : null,
+      eventPushRetryCount: isRepresentative ? a.event?.pushRetryCount : undefined,
+      pushTargetsConfigured: isRepresentative && pushTargetStates ? pushTargetStates.length > 0 : undefined,
       pushFailed: technicalItem?.issues.includes('push_failed') ?? false,
+      pushResultUnknown,
       pushApplicable: isRepresentative,
     };
     const projection = projectArticleSteps(stepInput, push);
@@ -479,6 +485,8 @@ export async function getCrawlLogSnapshot(
         ...(projection.push === 'filtered' ? ['filtered' as const] : []),
       ],
       push: projection.push,
+      pushBlockedReason: projection.pushBlockedReason,
+      pushResultUnknown,
       skipReason,
       // 工作台时间列显示文章首次进入系统的采集入库时间；updatedAt 会被后续流水线/人工修改反复刷新。
       lastTime: a.createdAt.getTime(),

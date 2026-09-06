@@ -163,6 +163,52 @@ describe('article-pipeline-status — push', () => {
     const proj = projectArticleSteps(article(), push());
     expect(proj.push).toBe('pending');
   });
+  it('推送重试已耗尽 → blocked 且不再被误判为处理中', () => {
+    const proj = projectArticleSteps(article({ eventPushRetryCount: 5 }), push());
+    expect(proj).toMatchObject({
+      push: 'blocked',
+      pushBlockedReason: 'retry-exhausted',
+      isInProgress: false,
+    });
+  });
+  it('已知投递失败且重试耗尽 → blocked，不被技术失败状态遮蔽', () => {
+    const proj = projectArticleSteps(article({ eventPushRetryCount: 5, pushFailed: true }), push());
+    expect(proj).toMatchObject({
+      push: 'blocked',
+      pushBlockedReason: 'retry-exhausted',
+      isInProgress: false,
+    });
+  });
+  it('投递结果未知时保留人工确认的失败语义，不误标为重试耗尽', () => {
+    const proj = projectArticleSteps(article({ eventPushRetryCount: 5, pushFailed: true, pushResultUnknown: true }), push());
+    expect(proj).toMatchObject({
+      push: 'failed',
+      pushBlockedReason: null,
+    });
+  });
+  it('技术队列暂未标记失败时，未知投递仍优先于重试耗尽', () => {
+    const proj = projectArticleSteps(article({ eventPushRetryCount: 5, pushResultUnknown: true }), push());
+    expect(proj).toMatchObject({
+      push: 'failed',
+      pushBlockedReason: null,
+    });
+  });
+  it('聚类待复核 → push blocked，复核入口仍属于聚类步骤', () => {
+    const proj = projectArticleSteps(article({ clusterStatus: 'needs_review' }), push());
+    expect(proj).toMatchObject({
+      push: 'blocked',
+      pushBlockedReason: null,
+      isInProgress: true,
+    });
+  });
+  it('没有启用 Webhook → push blocked，不显示为普通待推送', () => {
+    const proj = projectArticleSteps(article({ pushTargetsConfigured: false }), push());
+    expect(proj).toMatchObject({
+      push: 'blocked',
+      pushBlockedReason: 'no-webhooks',
+      isInProgress: false,
+    });
+  });
 });
 
 describe('article-pipeline-status — isInProgress 聚合', () => {

@@ -67,6 +67,7 @@ test-run.*
 
 # Development database
 db/custom.db
+/.db-migration-backup.*/
 db/custom.db-wal
 db/custom.db-shm
 db/custom.db-journal

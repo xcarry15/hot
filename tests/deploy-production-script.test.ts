@@ -71,7 +71,7 @@ fi
 if [[ "$joined" == *"sqlite_master"* ]]; then
   echo 1
 elif [[ "$joined" == *"NOT IN"* ]]; then
-  echo 0
+  echo "\${FAKE_INVALID_MIGRATIONS:-0}"
 elif [[ "$joined" == *"migration_name ="* ]]; then
   echo 1
 else
@@ -102,7 +102,7 @@ function createReleaseArchive(): void {
   execFileSync('tar', ['-czf', ARCHIVE_PATH, '-C', source.replace(/\\/g, '/'), '.']);
 }
 
-function runDeploy(releaseId: string, failHealth = false): void {
+function runDeploy(releaseId: string, options: { failHealth?: boolean; invalidMigrations?: boolean } = {}): void {
   const pathSeparator = ':';
   try {
     execFileSync('bash', [bashPath(DEPLOY_SCRIPT)], {
@@ -121,7 +121,8 @@ function runDeploy(releaseId: string, failHealth = false): void {
       RESET_PRODUCTION: 'NO',
       SHARED_DIR: bashPath(path.join(APP_DIR, 'shared')),
       SITE_URL: 'https://example.test',
-        ...(failHealth ? { FAKE_CURL_FAIL: '1' } : { FAKE_CURL_FAIL: '0' }),
+        FAKE_CURL_FAIL: options.failHealth ? '1' : '0',
+        FAKE_INVALID_MIGRATIONS: options.invalidMigrations ? '1' : '0',
       },
       stdio: 'pipe',
     });
@@ -172,7 +173,7 @@ deployDescribe('production release deployment', () => {
 
   it('健康检查失败时恢复数据库备份和旧 current', () => {
     createReleaseArchive();
-    expect(() => runDeploy('release-two', true)).toThrow();
+    expect(() => runDeploy('release-two', { failHealth: true })).toThrow();
 
     const currentLink = path.join(APP_DIR, 'current');
     expect(normalizedPath(readlinkSync(currentLink))).toBe(
@@ -180,5 +181,16 @@ deployDescribe('production release deployment', () => {
     );
     expect(existsSync(path.join(APP_DIR, 'releases', 'release-two'))).toBe(false);
     expect(readFileSync(path.join(APP_DIR, 'shared', 'db', 'custom.db'), 'utf8')).toBe('before');
+  });
+
+  it('迁移历史不兼容时在切换前清理未激活 release', () => {
+    createReleaseArchive();
+
+    expect(() => runDeploy('release-invalid-history', { invalidMigrations: true })).toThrow();
+
+    expect(normalizedPath(readlinkSync(path.join(APP_DIR, 'current')))).toBe(
+      normalizedPath(path.join(APP_DIR, 'releases', 'release-one')),
+    );
+    expect(existsSync(path.join(APP_DIR, 'releases', 'release-invalid-history'))).toBe(false);
   });
 });

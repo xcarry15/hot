@@ -102,13 +102,15 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
   const targetByHash = new Map(targets.map((target) => [target.urlHash, target.id]));
 
   const targetIds = targets.map((target) => target.id);
-  if (targetIds.length === 0) return result;
   const deliveryWhere = { eventId: { in: uniqueEventIds }, targetId: { in: targetIds } };
   // 先在数据库按 event/target 聚合出最新 updatedAt，再回查少量完整行，
   // 避免把长期累积的整张 PushDelivery ledger 读入 Node 内存。
   // 轻量单测 mock 没有 groupBy 时保留 findMany 降级路径。
-  const deliveries = typeof db.pushDelivery.groupBy === 'function'
-    ? await db.$transaction(async (tx) => {
+  // PushTarget 在首次实际投递时才创建；已启用但从未投递的目标仍应展示为 never_attempted。
+  const deliveries = targetIds.length === 0
+    ? []
+    : typeof db.pushDelivery.groupBy === 'function'
+      ? await db.$transaction(async (tx) => {
         const latestKeys = await tx.pushDelivery.groupBy({
           by: ['eventId', 'targetId'],
           where: deliveryWhere,
@@ -127,7 +129,7 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
           select: { eventId: true, targetId: true, status: true, createdAt: true, updatedAt: true, leaseExpiresAt: true, lastError: true },
         });
       })
-    : await db.pushDelivery.findMany({
+      : await db.pushDelivery.findMany({
         where: deliveryWhere,
         orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
         select: { eventId: true, targetId: true, status: true, createdAt: true, updatedAt: true, leaseExpiresAt: true, lastError: true },

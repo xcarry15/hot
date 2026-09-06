@@ -47,19 +47,33 @@ describe('Excel 导出任务服务', () => {
     await expect(deleteExportJob('job-1')).resolves.toBeUndefined();
 
     expect(mocks.unlink).toHaveBeenCalledTimes(3);
-    expect(mocks.exportJobDeleteMany).toHaveBeenCalledWith({ where: { id: 'job-1' } });
+    expect(mocks.exportJobDeleteMany).toHaveBeenCalledWith({ where: { id: 'job-1', status: 'succeeded' } });
     expect(mocks.exportJobUpdateMany).not.toHaveBeenCalled();
   });
 
-  it('删除生成中的任务前先发出取消信号', async () => {
+  it('删除生成中的任务只请求取消，不与 Worker 并发删除文件或任务记录', async () => {
     mocks.exportJobFindUnique.mockResolvedValue({ ...succeededJob, status: 'running' });
 
-    await deleteExportJob('job-1');
+    await expect(deleteExportJob('job-1')).rejects.toThrow('导出任务正在取消，请在任务结束后删除');
 
     expect(mocks.exportJobUpdateMany).toHaveBeenCalledWith({
       where: { id: 'job-1', status: 'running' },
       data: { cancelRequestedAt: expect.any(Date) },
     });
-    expect(mocks.exportJobDeleteMany).toHaveBeenCalledWith({ where: { id: 'job-1' } });
+    expect(mocks.exportJobDeleteMany).not.toHaveBeenCalled();
+    expect(mocks.unlink).not.toHaveBeenCalled();
+  });
+
+  it('删除排队任务先原子取消，再清理已无法被 Worker 认领的文件', async () => {
+    mocks.exportJobFindUnique.mockResolvedValue({ ...succeededJob, status: 'queued' });
+
+    await expect(deleteExportJob('job-1')).resolves.toBeUndefined();
+
+    expect(mocks.exportJobUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'job-1', status: 'queued' },
+      data: { status: 'cancelled', completedAt: expect.any(Date), error: '已取消' },
+    });
+    expect(mocks.unlink).toHaveBeenCalledTimes(3);
+    expect(mocks.exportJobDeleteMany).toHaveBeenCalledWith({ where: { id: 'job-1', status: 'cancelled' } });
   });
 });

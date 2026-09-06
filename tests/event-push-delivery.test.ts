@@ -40,7 +40,7 @@ vi.mock('@/lib/settings', async (importOriginal) => {
 });
 vi.mock('@/lib/push/feishu-transport', () => ({ sendFeishuWebhook: mocks.sendWebhook }));
 
-import { pushArticleToFeishu, pushEventToFeishu } from '@/lib/push/delivery';
+import { getPushTargetStatesForEvents, pushArticleToFeishu, pushEventToFeishu } from '@/lib/push/delivery';
 
 function representative(overrides: Record<string, unknown> = {}) {
   return {
@@ -218,5 +218,14 @@ describe('Event 推送门禁', () => {
     });
     await expect(pushEventToFeishu('e1')).resolves.toMatchObject({ status: 'no_webhooks' });
     expect(mocks.pushLogCreate).not.toHaveBeenCalled();
+  });
+
+  it('已配置但从未投递的 Webhook 显示为 never_attempted，而非未配置', async () => {
+    mocks.webhookConfigs = [{ url: 'https://hook/new', remark: '新目标', enabled: true }];
+    mocks.pushTargetFindMany.mockResolvedValue([]);
+
+    await expect(getPushTargetStatesForEvents(['e1'])).resolves.toMatchObject(new Map([
+      ['e1', [{ webhookUrl: 'https://hook/new', latestStatus: 'never_attempted' }]],
+    ]));
   });
 });

@@ -49,7 +49,7 @@ export const ANOMALY_FILTER_CHIPS: readonly StepFilterChip[] = [
 export const ATTENTION_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'ignored', label: '已忽略', description: '已从技术待办中忽略的文章，可恢复' },
   { key: 'anomaly-review', label: '待复核', description: '聚类结果存在歧义，需要人工判断' },
-  { key: 'anomaly-low-confidence', label: '低分析置信', description: 'AI 分析证据把握不足，建议人工复核' },
+  { key: 'anomaly-low-confidence', label: '低置信', description: 'AI 分析证据把握不足，建议人工复核' },
 ] as const
 
 export const STEP_FILTER_CHIPS: readonly StepFilterChip[] = [

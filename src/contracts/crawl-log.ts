@@ -13,6 +13,8 @@ export type StepStatus =
   | 'not_applicable'
   | 'running';
 
+export type PushBlockedReason = 'retry-exhausted' | 'no-webhooks';
+
 /** 工作台只展示最近采集窗口，历史文章通过文章库服务端分页查询。 */
 export const CRAWL_LOG_DEFAULT_LIMIT = 400;
 export const CRAWL_LOG_MAX_LIMIT = 500;
@@ -32,6 +34,10 @@ export interface ArticleProgress {
   /** 仅用于列表标题后的轻量异常标签，不暴露 AI 分析明细。 */
   anomalyLabels: Array<'ad' | 'duplicate' | 'low-confidence' | 'filtered'>;
   push: StepStatus;
+  /** 推送不是普通待处理，而是重试终止或配置阻塞时的原因。 */
+  pushBlockedReason?: PushBlockedReason | null;
+  /** 任一启用目标的最近投递结果未知，必须由人工确认。 */
+  pushResultUnknown?: boolean;
   skipReason?: string;
   /** 工作台时间列使用文章首次采集入库时间（createdAt），而非会被流水线更新刷新的 updatedAt。 */
   lastTime: number;

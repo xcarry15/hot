@@ -5,6 +5,8 @@
  */
 export const PUSH_MODES = ['off', 'batch', 'realtime'] as const;
 
+export const PUSH_MAX_RETRIES = 5;
+
 export type PushMode = typeof PUSH_MODES[number];
 
 export function parsePushMode(raw: string | null | undefined): PushMode {
