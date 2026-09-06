@@ -10,6 +10,8 @@ import {
   projectArticleSteps,
   withRunningOverlay,
   deriveSkipReason,
+  getBusinessSkipLabel,
+  isBusinessSkipReason,
   isTechnicalSkipReason,
   type ArticleStepInput,
   type PushThresholds,
@@ -267,6 +269,23 @@ describe('deriveSkipReason', () => {
   it('aiStatus=done + 历史 skipReason → undefined', () => {
     expect(deriveSkipReason({ aiStatus: 'done', skipReason: '其他原因', summary: '' }))
       .toBeUndefined();
+  });
+
+  it('旧数据中的软文无价值原因归一化为软文', () => {
+    expect(deriveSkipReason({ aiStatus: 'skipped', skipReason: '无价值', summary: '', isAd: true }))
+      .toBe('软文');
+    expect(deriveSkipReason({ aiStatus: 'skipped', skipReason: '无价值', summary: '', isAd: false }))
+      .toBe('无价值');
+  });
+});
+
+describe('business skip labels', () => {
+  it('软文和无价值都是业务跳过，但标签互斥', () => {
+    expect(isBusinessSkipReason('软文')).toBe(true);
+    expect(isBusinessSkipReason('无价值')).toBe(true);
+    expect(getBusinessSkipLabel('无价值', true)).toBe('软文');
+    expect(getBusinessSkipLabel('无价值', false)).toBe('无价值');
+    expect(getBusinessSkipLabel('内容不足', true)).toBeNull();
   });
 });
 

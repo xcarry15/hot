@@ -40,8 +40,8 @@ export const ANOMALY_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'anomaly-retrying', label: '自动恢复', description: '技术异常正在等待或执行自动重试' },
   { key: 'anomaly-failure', label: '流程失败', description: '流程失败或技术性跳过' },
   { key: 'anomaly-filtered', label: '未达门槛', description: '评分或相关性未达到推送要求，未进入自动推送' },
-  { key: 'anomaly-no-value', label: '无价值', description: 'AI 已完成分析，但内容不具备保留价值' },
-  { key: 'anomaly-ad', label: '软文', description: 'AI 判定为广告或软文的文章' },
+  { key: 'anomaly-no-value', label: '无价值', description: '非软文，AI 判定相关性或信息量不足' },
+  { key: 'anomaly-ad', label: '软文', description: '因广告或推广性质被 AI 跳过' },
   { key: 'anomaly-duplicate', label: '重复', description: '同一事件中的非代表报道' },
 ] as const
 

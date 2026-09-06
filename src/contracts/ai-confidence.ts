@@ -3,7 +3,7 @@ export const AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD = 70;
 
 /**
  * 低分析置信只描述“AI 已完成，但证据把握不足”的文章。
- * 业务跳过（例如无价值）属于独立结论，不应混入该队列。
+ * 业务跳过（例如软文、无价值）属于独立结论，不应混入该队列。
  */
 export const LOW_ANALYSIS_CONFIDENCE_FILTER = {
   aiStatus: 'done' as const,

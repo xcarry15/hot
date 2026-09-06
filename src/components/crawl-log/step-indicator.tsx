@@ -1,6 +1,7 @@
 import { Check, XCircle, Loader2, Circle, Play } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { StepStatus } from './types'
+import { isBusinessSkipReason } from '@/lib/article-pipeline-status'
 
 // ========== Step Indicator ==========
 
@@ -126,16 +127,17 @@ export function StepIndicator({
 function shortSkipLabel(reason: string): string {
   if (reason.startsWith('[AI 处理失败]')) return 'AI 失败'
   if (reason === '内容不足') return '内容不足'
+  if (reason === '软文') return '软文'
   if (reason === '无价值') return '无价值'
   // 未知形态：截断防溢出。
   return reason.length > 8 ? `${reason.slice(0, 8)}…` : reason
 }
 
 export function SkipBadge({ reason }: { reason: string }) {
-  const isNoValue = reason === '无价值'
+  const isBusinessSkip = isBusinessSkipReason(reason)
   return (
     <span
-      className={`max-w-[120px] shrink-0 truncate px-1.5 py-0.5 text-xs font-medium text-white ${isNoValue ? 'bg-slate-600' : 'bg-red-600'}`}
+      className={`max-w-[120px] shrink-0 truncate px-1.5 py-0.5 text-xs font-medium text-white ${isBusinessSkip ? 'bg-slate-600' : 'bg-red-600'}`}
       title={reason}
     >
       {shortSkipLabel(reason)}

@@ -203,20 +203,46 @@ export function withRunningOverlay(
  * 列表用的 skipReason 派生——把 aiStatus=skipped 翻译为可显示原因。
  * 仅在 status route 的最终组装里调用，不属于核心投影规则。
  */
+export type BusinessSkipReason = '软文' | '无价值';
+
+/**
+ * 兼容早期文章：旧数据把软文和无价值都保存为“无价值”。
+ * 新数据由 AI 直接写入“软文”，这里仅负责把旧投影归一化，不改数据库。
+ */
+export function normalizeBusinessSkipReason(
+  reason: string | null | undefined,
+  isAd = false,
+): string | undefined {
+  if (!reason) return undefined;
+  return reason === '无价值' && isAd ? '软文' : reason;
+}
+
+export function getBusinessSkipLabel(
+  reason: string | null | undefined,
+  isAd = false,
+): BusinessSkipReason | null {
+  const normalized = normalizeBusinessSkipReason(reason, isAd);
+  return isBusinessSkipReason(normalized) ? normalized : null;
+}
+
 export function deriveSkipReason(article: {
   aiStatus: string;
   skipReason: string | null;
   summary: string;
+  isAd?: boolean;
 }): string | undefined {
   if (article.aiStatus === 'skipped') {
-    return article.skipReason || article.summary || '内容不足';
+    return normalizeBusinessSkipReason(
+      article.skipReason || article.summary || '内容不足',
+      article.isAd,
+    );
   }
   return undefined;
 }
 
-/** AI 已完成分析，但内容不具备保留价值。 */
-export function isBusinessSkipReason(reason: string | null | undefined): boolean {
-  return reason === '无价值';
+/** AI 已完成分析，但内容因业务规则未进入后续流程。 */
+export function isBusinessSkipReason(reason: string | null | undefined): reason is BusinessSkipReason {
+  return reason === '无价值' || reason === '软文';
 }
 
 export function isTechnicalSkipReason(reason: string | null | undefined): boolean {

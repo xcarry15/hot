@@ -86,6 +86,22 @@ describe('matchStepChip 单谓词命中', () => {
     expect(matchStepChip(skipped, 'normal-processing')).toBe(false)
   })
 
+  it('软文与无价值互斥筛选，旧软文记录也归入软文', () => {
+    const soft = article({
+      ai: 'skipped',
+      cluster: 'not_applicable',
+      push: 'not_applicable',
+      anomalyLabels: ['ad'],
+      skipReason: '软文',
+    })
+    expect(matchStepChip(soft, 'anomaly-ad')).toBe(true)
+    expect(matchStepChip(soft, 'anomaly-no-value')).toBe(false)
+
+    const legacySoft = { ...soft, skipReason: '无价值' }
+    expect(matchStepChip(legacySoft, 'anomaly-ad')).toBe(true)
+    expect(matchStepChip(legacySoft, 'anomaly-no-value')).toBe(false)
+  })
+
   it('未达推送门槛归入异常，推送关闭保持正常', () => {
     const filtered = article({ ai: 'done', cluster: 'done', push: 'filtered' })
     expect(matchStepChip(filtered, 'anomaly-filtered')).toBe(true)

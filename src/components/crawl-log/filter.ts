@@ -8,7 +8,7 @@ import {
   ALL_STEP_FILTER_KEYS, EMPTY_FILTER_STATE, isArticleFailed,
 } from './types'
 import { URL_PARAM_CHIPS, URL_PARAM_SRC, URL_PARAM_DISC, URL_PARAM_TODAY } from './constants'
-import { isTechnicalSkipReason } from '@/lib/article-pipeline-status'
+import { getBusinessSkipLabel, isTechnicalSkipReason } from '@/lib/article-pipeline-status'
 import { getTodayPublicDateKey, isPublicDate } from './helpers'
 
 export type ArticleFilterBucket =
@@ -48,8 +48,18 @@ function isFilteredArticle(article: ArticleProgress): boolean {
   return article.push === 'filtered' && article.ai === 'done' && article.cluster === 'done'
 }
 
+function hasAdLabel(article: ArticleProgress): boolean {
+  return article.anomalyLabels?.includes('ad') ?? false
+}
+
+function getArticleBusinessSkipLabel(article: ArticleProgress) {
+  return getBusinessSkipLabel(article.skipReason, hasAdLabel(article))
+}
+
 function hasBusinessAnomaly(article: ArticleProgress): boolean {
-  return article.anomalyLabels?.some(label => label === 'ad' || label === 'duplicate') ?? false
+  return hasAdLabel(article)
+    || (article.anomalyLabels?.includes('duplicate') ?? false)
+    || getArticleBusinessSkipLabel(article) === '软文'
 }
 
 function isPendingPushArticle(article: ArticleProgress): boolean {
@@ -70,7 +80,7 @@ export function isOperationalAnomalyArticle(article: ArticleProgress): boolean {
     || article.technicalState === 'waiting'
     || isArticleFailed(article)
     || isFilteredArticle(article)
-    || article.skipReason === '无价值'
+    || getArticleBusinessSkipLabel(article) !== null
     || hasBusinessAnomaly(article)
 }
 
@@ -89,7 +99,8 @@ export function getArticleFilterBucket(article: ArticleProgress): ArticleFilterB
   // 一级“正常”以公开端事实为准。公开文章即使有业务提示标签，也应计入
   // 已公开总数；软文/重复/低置信等标签仍由对应的二级筛选独立展示。
   if (article.isPublic) return 'normal-public'
-  if (article.skipReason === '无价值') return 'anomaly-no-value'
+  if (getArticleBusinessSkipLabel(article) === '无价值') return 'anomaly-no-value'
+  if (getArticleBusinessSkipLabel(article) === '软文') return 'anomaly-business'
   if ((article.anomalyLabels?.length ?? 0) > 0) return 'anomaly-business'
   if (article.push === 'filtered' && article.ai === 'done' && article.cluster === 'done') return 'anomaly-filtered'
   if (article.push === 'not_applicable' && article.ai === 'done' && article.cluster === 'done') return 'normal-not-push'
@@ -124,7 +135,7 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
         || bucket === 'anomaly-review'
         || (article.anomalyLabels?.includes('low-confidence') ?? false)
     case 'anomaly-ad':
-      return !article.isPublic && (article.anomalyLabels?.includes('ad') ?? false)
+      return !article.isPublic && (hasAdLabel(article) || getArticleBusinessSkipLabel(article) === '软文')
     case 'anomaly-duplicate':
       return !article.isPublic && (article.anomalyLabels?.includes('duplicate') ?? false)
     case 'anomaly-low-confidence':
@@ -132,7 +143,7 @@ export function matchStepChip(article: ArticleProgress, key: StepFilterKey): boo
     case 'anomaly-review':
       return article.clusterStatus === 'needs_review'
     case 'anomaly-no-value':
-      return !article.isPublic && article.skipReason === '无价值'
+      return !article.isPublic && getArticleBusinessSkipLabel(article) === '无价值'
     case 'anomaly-filtered':
       return !article.isPublic && isFilteredArticle(article)
     case 'normal-public':

@@ -7,7 +7,7 @@ import { StepIndicator, SkipBadge } from './step-indicator'
 import type { ArticleProgress } from './types'
 import type { ArticleWorkspacePanel } from '@/components/article-workspace'
 import { preloadArticleWorkspace } from '@/components/article-workspace-drawer'
-import { isBusinessSkipReason } from '@/lib/article-pipeline-status'
+import { getBusinessSkipLabel } from '@/lib/article-pipeline-status'
 import { CRAWL_LOG_ROW_HOVER_CLASS } from './styles'
 
 // ========== Article Row ==========
@@ -92,8 +92,11 @@ export const ArticleRow = memo(function ArticleRow({
   const clusterLoading = onStepActionLoading?.(article.id, 'cluster') ?? false
   const aiLoading = onStepActionLoading?.(article.id, 'ai') ?? false
   const pushLoading = onStepActionLoading?.(article.id, 'push') ?? false
-  const businessAiSkipped = article.ai === 'skipped' && isBusinessSkipReason(article.skipReason)
-  const businessAiSkipLabel = '无价值'
+  const businessAiSkipLabel = getBusinessSkipLabel(
+    article.skipReason,
+    article.anomalyLabels?.includes('ad') ?? false,
+  )
+  const businessAiSkipped = article.ai === 'skipped' && businessAiSkipLabel !== null
   const loadingByStep = { process: processLoading, cluster: clusterLoading, ai: aiLoading, push: pushLoading }
   const nextActionLoading = nextAction ? loadingByStep[nextAction.step] : false
   const retryAt = nextAction?.step === 'process' ? article.processRetryAt
@@ -140,7 +143,7 @@ export const ArticleRow = memo(function ArticleRow({
       </div>
       <div className="order-2 grid box-border w-full max-w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 overflow-hidden sm:contents">
         <div className="order-2 flex min-w-0 items-center gap-0.5 overflow-hidden whitespace-nowrap sm:contents">
-        {article.anomalyLabels?.includes('ad') && (
+        {article.anomalyLabels?.includes('ad') && businessAiSkipLabel !== '软文' && (
           <span className={`${ARTICLE_BADGE_CLASS} bg-slate-500`} title="业务识别：AI 判定为广告或软文">软文</span>
         )}
         {article.anomalyLabels?.includes('duplicate') && (
@@ -234,7 +237,9 @@ export const ArticleRow = memo(function ArticleRow({
               onClick={actionFor('ai')}
               forceLabel={nextAction?.step === 'ai' ? (retryWaiting ? '等待' : '重试') : undefined}
               title={businessAiSkipped
-                ? 'AI 分析已完成，但内容不具备保留价值'
+                ? businessAiSkipLabel === '软文'
+                  ? '因广告或推广性质跳过'
+                  : '相关性或信息量不足，未保留'
                 : article.technicalErrorReasons.ai || (article.ai === 'failed' ? '点击重试 AI 分析' : article.aiRetryAt ? `AI 将于 ${new Date(article.aiRetryAt).toLocaleString('zh-CN')} 后自动重试` : undefined)}
             />
           <StepIndicator

@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import type { JobStatus } from '@prisma/client';
 import { getPublicDateKey } from '@/lib/shared/public-date';
 import { getAIInvocationStats } from '@/lib/ai-invocation-service';
+import { getBusinessSkipLabel } from '@/lib/article-pipeline-status';
 
 export type DashboardAnalyticsRange = 'all' | 'today' | '3d' | '7d' | '30d';
 
@@ -355,7 +356,7 @@ async function buildDashboardAnalytics(
     }
 
     const businessSkipAnalyzed = row.aiStatus === 'skipped'
-      && row.skipReason === '无价值'
+      && getBusinessSkipLabel(row.skipReason, row.isAd) !== null
       && row.aiSnapshot !== '{}';
     const isAnalyzed = row.fetchStatus === 'fetched'
       && (row.aiStatus === 'done' || businessSkipAnalyzed);

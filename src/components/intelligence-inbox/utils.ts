@@ -1,6 +1,6 @@
 import type { ArticleListItemDto, ArticlePushLogDto } from "@/contracts/articles";
 import type { EventAudit, EventDetail, PushTargetSummary, WorkspaceStatusTone } from "./types";
-import { isBusinessSkipReason } from "@/lib/article-pipeline-status";
+import { getBusinessSkipLabel } from "@/lib/article-pipeline-status";
 
 const EVENT_CLASSIFICATION_ACTIONS = new Set([
   "create",
@@ -30,7 +30,7 @@ function timeLabel(value: string): string {
 function processingLabel(
   item: Pick<
     ArticleListItemDto,
-    "aiStatus" | "fetchStatus" | "skipReason" | "clusterStatus"
+    "aiStatus" | "fetchStatus" | "skipReason" | "isAd" | "clusterStatus"
   >,
 ): string {
   if (item.fetchStatus === "failed") return "抓取失败";
@@ -39,8 +39,9 @@ function processingLabel(
   if (item.aiStatus === "failed") return "AI失败";
   if (item.aiStatus === "skipped" && item.skipReason?.includes("内容不足"))
     return "正文不足";
-  if (item.aiStatus === "skipped" && isBusinessSkipReason(item.skipReason))
-    return "分析完成（无价值）";
+  const businessSkipLabel = getBusinessSkipLabel(item.skipReason, item.isAd);
+  if (item.aiStatus === "skipped" && businessSkipLabel)
+    return `分析完成（${businessSkipLabel}）`;
   if (item.aiStatus === "skipped") return "已跳过";
   if (item.aiStatus === "pending") return "分析中";
   if (item.clusterStatus === "failed") return "聚类失败";

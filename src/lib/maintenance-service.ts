@@ -195,7 +195,7 @@ export async function clearFetchLogs(): Promise<{ deleted: number }> {
 
 export async function deleteLowQualityArticles() {
   const lowQuality = await db.article.findMany({
-    // “无价值”是正常业务分类结果，不是低质量技术垃圾。
+    // “软文/无价值”是正常业务分类结果，不是低质量技术垃圾。
     // AI 技术失败也应进入恢复队列，不应被“低质量清理”直接删除。
     where: {
       score: { lt: 40 },

@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScoreBadge } from '@/components/ui/score-badge';
 import type { ArticleDetailDto } from '@/contracts/articles';
-import { isBusinessSkipReason } from '@/lib/article-pipeline-status';
+import { getBusinessSkipLabel } from '@/lib/article-pipeline-status';
 import type { ManualOverrideField } from '@/lib/shared/article-calibration';
 import type { WorkspaceStatusTone } from './types';
 import { InlineMetric, MetaRow, StatusPill } from './workspace-primitives';
@@ -49,12 +49,14 @@ export const ArticleWorkspaceHeader = memo(function ArticleWorkspaceHeader({
   const processingFailed = detail.fetchStatus === 'failed'
     || detail.aiStatus === 'failed'
     || detail.clusterStatus === 'failed';
+  const businessSkipLabel = getBusinessSkipLabel(detail.skipReason, detail.isAd);
+  const displaySkipReason = businessSkipLabel ?? detail.skipReason;
   const issueMessages = [
     detail.fetchError ? ['正文处理', detail.fetchError] : null,
     detail.aiError ? ['AI 分析', detail.aiError] : null,
     detail.clusterError ? ['事件聚类', detail.clusterError] : null,
-    detail.skipReason
-      ? [isBusinessSkipReason(detail.skipReason) ? '分析结果' : '跳过原因', detail.skipReason]
+    displaySkipReason
+      ? [businessSkipLabel ? '分析结果' : '跳过原因', displaySkipReason]
       : null,
   ].filter((item): item is [string, string] => item !== null);
   const hasProcessingError = Boolean(detail.fetchError || detail.aiError || detail.clusterError);

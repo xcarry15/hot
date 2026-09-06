@@ -425,7 +425,8 @@ export async function processWithAI(
         aiSnapshot: buildArticleAiSnapshot(aiSnapshot),
         aiRetryCount: 0,
         nextAiRetryAt: null,
-        skipReason: noValue ? '无价值' : null,
+        // 软文与其它价值门槛分开记录，避免工作台把同一原因显示成两个标签。
+        skipReason: noValue ? (effective.isAd ? '软文' : '无价值') : null,
       },
     });
     return { status: noValue ? 'skipped' : 'done' };

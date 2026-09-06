@@ -3,7 +3,7 @@ import {
   AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD,
   isLowAnalysisConfidence,
 } from "@/contracts/ai-confidence";
-import { isBusinessSkipReason } from "@/lib/article-pipeline-status";
+import { getBusinessSkipLabel } from "@/lib/article-pipeline-status";
 import { parseManualOverrides, type ManualOverrideField } from "@/lib/shared/article-calibration";
 import { parseJsonArray, splitBrands, stripHtml } from "@/lib/shared/article-codecs";
 import type {
@@ -91,8 +91,9 @@ export function createArticleWorkspaceViewModel(
     || detail.aiStatus === "failed"
     || detail.clusterStatus === "failed";
   const lowAnalysisConfidence = isLowAnalysisConfidence(detail);
-  const businessSkipConclusion = detail.aiStatus === "skipped" && isBusinessSkipReason(detail.skipReason)
-    ? "分析完成 · 无价值"
+  const businessSkipLabel = getBusinessSkipLabel(detail.skipReason, detail.isAd);
+  const businessSkipConclusion = detail.aiStatus === "skipped" && businessSkipLabel
+    ? `分析完成 · ${businessSkipLabel}`
     : null;
   const releaseGateMessage = releaseStatus === "published"
     ? "已通过公开门禁"

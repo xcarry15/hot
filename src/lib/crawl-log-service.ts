@@ -463,6 +463,7 @@ export async function getCrawlLogSnapshot(
       aiStatus: a.aiStatus,
       skipReason: a.skipReason,
       summary: a.summary,
+      isAd: a.isAd,
     });
     const businessAiSkipped = a.aiStatus === 'skipped' && isBusinessSkipReason(skipReason);
     // P0-4: 不再应用全局阶段 overlay——没有 currentItemId 时伪造转圈会失真
