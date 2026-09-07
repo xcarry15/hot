@@ -13,7 +13,6 @@ import type {
   FilterState, StepFilterKey,
 } from './crawl-log/types'
 import {
-  CRAWL_LOG_DEFAULT_LIMIT,
   type JobSnapshot,
   type SourceProgress,
 } from '@/contracts/crawl-log'
@@ -768,12 +767,6 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           secondaryFilterChips={secondaryFilterChips}
           filterCounts={filterCounts}
         />
-
-        {(snapshot?.hasMoreArticles || snapshot?.hasMoreDiscarded) && (
-          <div className="px-1 text-[11px] text-muted-foreground">
-            工作台显示最近采集窗口（文章最多 {CRAWL_LOG_DEFAULT_LIMIT} 条）；历史文章请点击“搜索”，技术待办会始终保留。
-          </div>
-        )}
 
         <TaskStatusPanels
           activeTaskView={activeTaskView}
