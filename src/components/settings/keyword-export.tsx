@@ -31,7 +31,7 @@ export default function KeywordExportCard() {
     setKeywordBusy('import')
     try {
       const result = await importKeywordsXlsx(file)
-      toast.success(`已导入 ${result.imported} 个关键词，候选词状态已同步`)
+      toast.success(`已导入 ${result.imported} 个关键词并重算命中数，候选词状态已同步`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '导入失败，请检查 XLSX 工作簿格式')
     } finally {

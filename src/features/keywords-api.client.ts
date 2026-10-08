@@ -80,6 +80,10 @@ export async function bulkClearKeywords(signal?: AbortSignal): Promise<{ deleted
   return requestJson<{ deleted: number }>('PUT', '/api/keywords', { body: { action: 'clear-all' }, signal });
 }
 
+export async function rebuildKeywordHitCounts(signal?: AbortSignal): Promise<{ rebuiltHits: number }> {
+  return requestJson<{ rebuiltHits: number }>('POST', '/api/keywords', { body: { action: 'rebuild-hit-counts' }, signal });
+}
+
 export async function bulkAddKeywords(
   text: string,
   category?: string,
@@ -91,7 +95,7 @@ export async function bulkAddKeywords(
 export async function importKeywordsXlsx(
   file: Blob,
   signal?: AbortSignal,
-): Promise<{ imported: number; skipped: number; importedCandidates: number; skippedCandidates: number; restored: number; processQueued: boolean }> {
+): Promise<{ imported: number; skipped: number; importedCandidates: number; skippedCandidates: number; restored: number; rebuiltHits: number; processQueued: boolean }> {
   const res = await fetch('/api/keywords', {
     method: 'POST',
     body: file,
@@ -102,7 +106,7 @@ export async function importKeywordsXlsx(
   });
   const body = await res.json().catch(() => ({})) as { error?: string };
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-  return body as { imported: number; skipped: number; importedCandidates: number; skippedCandidates: number; restored: number; processQueued: boolean };
+  return body as { imported: number; skipped: number; importedCandidates: number; skippedCandidates: number; restored: number; rebuiltHits: number; processQueued: boolean };
 }
 
 export async function exportKeywordsXlsxBlob(signal?: AbortSignal): Promise<Blob> {

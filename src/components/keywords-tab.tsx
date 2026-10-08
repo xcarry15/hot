@@ -30,6 +30,7 @@ import {
   Loader2,
   Tag,
   Search,
+  RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -44,6 +45,7 @@ import {
   deleteKeywordCandidate,
   fetchKeywords,
   fetchKeywordCandidates,
+  rebuildKeywordHitCounts,
   dismissKeywordCandidates,
   updateKeywordCandidate,
   type KeywordCandidate,
@@ -74,6 +76,7 @@ export default function KeywordsTab() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [clearAllDialogOpen, setClearAllDialogOpen] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [rebuildingHits, setRebuildingHits] = useState(false)
   const [bulkText, setBulkText] = useState('')
   const [bulkCategory, setBulkCategory] = useState<string>(KEYWORD_DEFAULT_CATEGORY)
   const [search, setSearch] = useState('')
@@ -100,6 +103,7 @@ export default function KeywordsTab() {
   }, [])
 
   const handleCandidate = async (candidate: KeywordCandidate, action: 'approve-candidate' | 'dismiss-candidate') => {
+    if (bulkLoading || rebuildingHits) return
     try {
       const result = await updateKeywordCandidate(candidate.id, action)
       await loadKeywords()
@@ -115,6 +119,7 @@ export default function KeywordsTab() {
   }, [loadKeywords])
 
   const handleDelete = async (id: string) => {
+    if (bulkLoading || rebuildingHits) return
     try {
       await deleteKeyword(id)
       toast.success('关键词已删除')
@@ -127,6 +132,7 @@ export default function KeywordsTab() {
   const handleSearch = () => setSearch(searchInput.trim())
 
   const handleDeleteCandidate = async (candidate: KeywordCandidate) => {
+    if (bulkLoading || rebuildingHits) return
     try {
       await deleteKeywordCandidate(candidate.id)
       toast.success('处理后的关键词已删除')
@@ -153,8 +159,22 @@ export default function KeywordsTab() {
 
   const handleClearAll = () => runBulkAction('clear-all')
 
+  const handleRebuildHitCounts = async () => {
+    if (rebuildingHits || bulkLoading) return
+    setRebuildingHits(true)
+    try {
+      const result = await rebuildKeywordHitCounts()
+      await loadKeywords()
+      toast.success(`已重算命中数量，恢复 ${result.rebuiltHits} 条命中明细`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '重算关键词命中数量失败')
+    } finally {
+      setRebuildingHits(false)
+    }
+  }
+
   const handleBulkAdd = async () => {
-    if (!bulkText.trim()) return
+    if (!bulkText.trim() || bulkLoading || rebuildingHits) return
     setBulkLoading(true)
     try {
       const data = await bulkAddKeywords(bulkText, bulkCategory)
@@ -204,7 +224,7 @@ export default function KeywordsTab() {
   const reviewedCandidates = candidates.filter(candidate => candidate.status !== 'pending')
 
   const handleDismissAllCandidates = async () => {
-    if (pendingCandidates.length === 0 || bulkLoading) return
+    if (pendingCandidates.length === 0 || bulkLoading || rebuildingHits) return
     setBulkLoading(true)
     try {
       const result = await dismissKeywordCandidates(pendingCandidates.map((candidate) => candidate.id))
@@ -269,6 +289,7 @@ export default function KeywordsTab() {
         <button
           type="button"
           onClick={handleItemDelete}
+          disabled={bulkLoading || rebuildingHits}
           className="min-w-0 max-w-full truncate text-left text-[11px] hover:text-destructive hover:underline"
           aria-label={`删除${groupLabel}关键词 ${word}`}
           title={`点击删除「${word}」`}
@@ -295,6 +316,7 @@ export default function KeywordsTab() {
         size="sm"
         className="h-5 min-h-5 shrink-0 px-1 text-[10px] leading-none"
         onClick={() => void handleCandidate(candidate, 'approve-candidate')}
+        disabled={bulkLoading || rebuildingHits}
         aria-label="采用并恢复"
         title="采用并恢复"
       >
@@ -305,6 +327,7 @@ export default function KeywordsTab() {
         variant="ghost"
         className="h-5 min-h-5 shrink-0 px-1 text-[10px] leading-none"
         onClick={() => void handleCandidate(candidate, 'dismiss-candidate')}
+        disabled={bulkLoading || rebuildingHits}
         aria-label="永久忽略"
         title="永久忽略"
       >
@@ -352,9 +375,20 @@ export default function KeywordsTab() {
             <Button
               size="sm"
               variant="outline"
+              className="h-6 gap-1 px-1.5 text-[11px]"
+              onClick={() => void handleRebuildHitCounts()}
+              disabled={keywords.length === 0 || bulkLoading || rebuildingHits}
+              title="按当前词库重算近 90 天已抓取文章的白名单命中数"
+            >
+              {rebuildingHits ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              <span>重算命中</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
               className="h-6 gap-1 px-1.5 text-[11px] text-destructive hover:text-destructive"
               onClick={() => setClearAllDialogOpen(true)}
-              disabled={keywords.length === 0 || bulkLoading}
+              disabled={keywords.length === 0 || bulkLoading || rebuildingHits}
             >
               <Trash2 className="h-3 w-3" />
               <span className="hidden sm:inline">清空</span>
@@ -400,7 +434,7 @@ export default function KeywordsTab() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button size="sm" variant="outline" onClick={handleBulkAdd} disabled={!bulkText.trim() || bulkLoading} className="h-8 shrink-0 gap-1 px-2 text-xs">
+              <Button size="sm" variant="outline" onClick={handleBulkAdd} disabled={!bulkText.trim() || bulkLoading || rebuildingHits} className="h-8 shrink-0 gap-1 px-2 text-xs">
                 {bulkLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                 添加
               </Button>
@@ -441,7 +475,7 @@ export default function KeywordsTab() {
                   variant="ghost"
                   className="ml-auto h-5 min-h-5 shrink-0 px-1 text-[10px] leading-none"
                   onClick={() => void handleDismissAllCandidates()}
-                  disabled={bulkLoading}
+                  disabled={bulkLoading || rebuildingHits}
                 >
                   {bulkLoading ? <Loader2 className="mr-0.5 h-3 w-3 animate-spin" /> : null}
                   一键忽略

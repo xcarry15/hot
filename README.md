@@ -37,7 +37,7 @@
 
 公开读取和发布规则集中在 `src/lib/public-article-service.ts`、`src/lib/public-publication-service.ts` 和 `src/lib/event-release-policy.ts`。Route Handler 只处理鉴权、参数与响应转换。
 
-文章历史搜索直接查询 Article 的标题、正文、摘要、品牌和事件标识，不维护额外的派生搜索表；关键词命中明细由独立的关键词模块维护。
+文章历史搜索直接查询 Article 的标题、正文、摘要、品牌和事件标识，不维护额外的派生搜索表；关键词命中明细由独立的关键词模块维护。关键词 XLSX 导入会按当前词库重算近 90 天已抓取文章的白名单命中明细，关键词管理页也可手动重算。
 
 ### 流水线与恢复
 

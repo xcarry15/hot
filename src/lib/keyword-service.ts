@@ -8,15 +8,21 @@ import {
   type ImportedKeywordCandidate,
   type KeywordCandidateExportRow,
 } from '@/lib/keyword-candidate-service';
+import { KEYWORD_HIT_COUNT_WINDOW_DAYS, rebuildRecentArticleKeywordHits } from '@/lib/keyword-hit-service';
 import { KEYWORD_BLACKLIST_CATEGORY, KEYWORD_DEFAULT_CATEGORY } from '@/contracts/keywords';
 
 const DEFAULT_CATEGORY = KEYWORD_DEFAULT_CATEGORY;
-const KEYWORD_HIT_COUNT_WINDOW_DAYS = 90;
 const keywordHitCountCache = createCache<Map<string, number>>(15_000);
 
 export function invalidateKeywordRuntimeCaches(): void {
   keywordHitCountCache.invalidate();
   invalidateKeywordCache();
+}
+
+export async function rebuildKeywordHitCounts(): Promise<number> {
+  const rebuiltHits = await rebuildRecentArticleKeywordHits();
+  keywordHitCountCache.invalidate();
+  return rebuiltHits;
 }
 
 async function loadKeywordHitCounts(rows: Array<{ id: string; word: string }>) {
@@ -26,7 +32,7 @@ async function loadKeywordHitCounts(rows: Array<{ id: string; word: string }>) {
   // SQLite 的 DateTime 列存储为毫秒时间戳；使用数值避免和 ISO 字符串比较时全部落空。
   const cutoff = Date.now() - KEYWORD_HIT_COUNT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   // keywordMatched 只表示文章在当时命中过任一白名单词，并不记录具体命中的词。
-  // 新数据在 process 阶段写入 keyword_hits；设置页直接按命中明细计数。
+  // process 阶段写入 keyword_hits；关键词重导入或手动重算会按当前词库恢复近 90 天命中明细。
   // 黑名单文章不会进入 Article，仍从明确记录 matchedKeyword 的拦截审计统计。
   const [articleHitRows, blacklistHitRows] = await Promise.all([
     db.$queryRaw<Array<{ id: string; hitCount: number | bigint }>>`
