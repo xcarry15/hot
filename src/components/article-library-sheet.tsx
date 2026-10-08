@@ -57,6 +57,7 @@ export default function ArticleLibrarySheet({
   const [bulkLoading, setBulkLoading] = useState(false)
   const [error, setError] = useState('')
   const requestIdRef = useRef(0)
+  const latestLoadRef = useRef<() => Promise<void>>(async () => undefined)
   const previousOpenRef = useRef(open)
 
   useEffect(() => {
@@ -78,7 +79,6 @@ export default function ArticleLibrarySheet({
     const requestId = ++requestIdRef.current
     setLoading(true)
     setError('')
-    setData(null)
     try {
       const result = await fetchArticleList({
         page,
@@ -111,8 +111,9 @@ export default function ArticleLibrarySheet({
   }, [])
 
   useEffect(() => {
+    latestLoadRef.current = load
     void load()
-  }, [load])
+  }, [load, counts?.total, counts?.clusterReview, counts?.lowConfidence])
 
   const submitSearch = () => {
     setPage(1)
@@ -121,7 +122,7 @@ export default function ArticleLibrarySheet({
 
   const regenerateCurrentPage = async () => {
     const items = data?.items ?? []
-    if (view !== 'low_confidence' || items.length === 0 || bulkLoading) return
+    if (view !== 'low_confidence' || items.length === 0 || bulkLoading || loading || error) return
     if (typeof window !== 'undefined' && !window.confirm(
       `确认重跑当前页 ${items.length} 篇低分析置信文章？\n\n将重新调用 AI 并重新聚类，不会自动推送。`,
     )) return
@@ -131,7 +132,7 @@ export default function ArticleLibrarySheet({
       const result = await triggerBatchArticleRegeneration(items.map((item) => item.id))
       if (!result.queued) throw new Error(result.reason || '批量重跑未能启动')
       toast.success(`已提交 ${items.length} 篇文章重跑 AI，可在任务中心查看进度`)
-      await load()
+      await latestLoadRef.current()
     } catch (loadError) {
       toast.error(loadError instanceof Error ? loadError.message : '批量重跑失败')
     } finally {
@@ -146,7 +147,7 @@ export default function ArticleLibrarySheet({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <SheetTitle className="text-base">全部文章</SheetTitle>
-              <SheetDescription>搜索历史文章或进入异常处理队列</SheetDescription>
+              <SheetDescription>搜索历史文章；分类计数统计全库人工关注项</SheetDescription>
             </div>
             {view === 'low_confidence' && data?.items.length ? (
               <Button
@@ -154,7 +155,7 @@ export default function ArticleLibrarySheet({
                 size="sm"
                 variant="outline"
                 className="h-8 shrink-0 px-2 text-xs"
-                disabled={bulkLoading || loading}
+                disabled={bulkLoading || loading || !!error}
                 onClick={() => void regenerateCurrentPage()}
                 title="重新调用 AI 并重新聚类，不会自动推送"
               >
@@ -176,11 +177,12 @@ export default function ArticleLibrarySheet({
             <Button size="sm" variant="outline" className="h-8 rounded-none px-2 text-xs" onClick={submitSearch}>
               <Search className="h-3.5 w-3.5" />搜索
             </Button>
+            {(searchInput || search) && <Button size="sm" variant="ghost" onClick={() => { setSearchInput(''); setSearch(''); setPage(1) }}>清空</Button>}
           </div>
           <div className="flex gap-1 overflow-x-auto">
             {([
               ['all', '全部文章', null],
-              ['attention', '全部异常', counts?.total],
+              ['attention', '人工关注', counts?.total],
               ['cluster_review', '聚类复核', counts?.clusterReview],
               ['low_confidence', '低分析置信度', counts?.lowConfidence],
             ] as const).map(([key, label, count]) => (
@@ -195,8 +197,9 @@ export default function ArticleLibrarySheet({
             ))}
           </div>
         </div>
-        <ScrollArea className="min-h-0 flex-1">
-          {loading ? (
+        <ScrollArea key={`${view}:${search}:${data?.page ?? 1}`} className="min-h-0 flex-1">
+          {loading && data && <p className="px-3 py-1 text-xs text-muted-foreground" role="status">更新中…</p>}
+          {loading && !data ? (
             <div className="flex h-40 items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />加载中</div>
           ) : error ? (
             <div className="space-y-3 p-6 text-center text-sm text-destructive"><p>{error}</p><Button size="sm" variant="outline" onClick={() => void load()}>重试</Button></div>
@@ -211,6 +214,7 @@ export default function ArticleLibrarySheet({
                   onMouseLeave={() => cancelArticleDetailPrefetch(item.id)}
                   onFocus={() => { preloadArticleWorkspace(); prefetchArticleDetail(item.id) }}
                   onBlur={() => cancelArticleDetailPrefetch(item.id)}
+                  disabled={loading || !!error}
                   onClick={() => onOpenArticle(item.id)}
                   className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-muted/60"
                 >
@@ -227,9 +231,9 @@ export default function ArticleLibrarySheet({
             <div className="p-8 text-center text-sm text-muted-foreground">暂无符合条件的文章</div>
           )}
         </ScrollArea>
-        {data && data.totalPages > 1 && (
+        {data && (
           <div className="flex items-center gap-2 border-t px-3 py-2 text-xs">
-            <span className="mr-auto text-muted-foreground">共 {data.total} 篇 · 第 {data.page}/{data.totalPages} 页</span>
+            <span className="mr-auto text-muted-foreground">共 {data.total} 篇 · 第 {data.page}/{Math.max(1, data.totalPages)} 页</span>
             <Button size="sm" variant="outline" className="h-7 px-2" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button>
             <Button size="sm" variant="outline" className="h-7 px-2" disabled={page >= data.totalPages || loading} onClick={() => setPage((value) => value + 1)}><ChevronRight className="h-3.5 w-3.5" /></Button>
           </div>

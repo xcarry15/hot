@@ -117,17 +117,23 @@ export async function getPushTargetStatesForEvents(eventIds: string[]): Promise<
           _max: { updatedAt: true },
         });
         if (latestKeys.length === 0) return [];
-        return tx.pushDelivery.findMany({
-          where: {
-            OR: latestKeys.map((key) => ({
-              eventId: key.eventId,
-              targetId: key.targetId,
-              updatedAt: key._max.updatedAt!,
-            })),
-          },
-          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
-          select: { eventId: true, targetId: true, status: true, createdAt: true, updatedAt: true, leaseExpiresAt: true, lastError: true },
-        });
+        const deliveries = [];
+        for (let offset = 0; offset < latestKeys.length; offset += 100) {
+          const keys = latestKeys.slice(offset, offset + 100);
+          const rows = await tx.pushDelivery.findMany({
+            where: {
+              OR: keys.map((key) => ({
+                eventId: key.eventId,
+                targetId: key.targetId,
+                updatedAt: key._max.updatedAt!,
+              })),
+            },
+            orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+            select: { eventId: true, targetId: true, status: true, createdAt: true, updatedAt: true, leaseExpiresAt: true, lastError: true },
+          });
+          deliveries.push(...rows);
+        }
+        return deliveries.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || b.createdAt.getTime() - a.createdAt.getTime());
       })
       : await db.pushDelivery.findMany({
         where: deliveryWhere,

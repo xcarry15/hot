@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CRAWL_LOG_DEFAULT_LIMIT, type CrawlLogSnapshot } from '@/contracts/crawl-log'
 import { fetchCrawlLogJobStatus, fetchCrawlLogSnapshot } from '@/features/crawl-log-api.client'
+import { fetchWorkQueueSummary } from '@/features/work-queue-api.client'
 import { isRequestAborted } from '@/lib/request-json.client'
 
 const ATTENTION_REFRESH_MIN_INTERVAL_MS = 1_000
@@ -98,6 +99,7 @@ export function useCrawlLogSnapshot(
         lastSnapshotSyncedAtRef.current = syncedAt
         setLastSyncedAt(syncedAt)
         setError(null)
+        void fetchWorkQueueSummary().catch(() => undefined)
         return true
       } catch (err: unknown) {
         if (unmountedRef.current || isRequestAborted(err)) return false
@@ -160,15 +162,13 @@ export function useCrawlLogSnapshot(
                 const jobChanged = jobs.activeJob?.id !== current.activeJob.id
                 const stageChanged = jobs.activeJob?.currentStage !== current.activeJob.currentStage
                 const jobFinished = !jobs.activeJob
-                if (jobChanged || stageChanged || jobFinished) {
+                const articlesStale = Date.now() - lastSnapshotSyncedAtRef.current >= 15_000
+                if (jobChanged || stageChanged || jobFinished || articlesStale) {
                   await refreshSnapshotRefForPolling.current()
                 } else {
                   const next = { ...current, activeJob: jobs.activeJob, latestJob: jobs.latestJob, fetchedAt: jobs.fetchedAt }
                   snapshotRef.current = next
                   setSnapshot(next)
-                  const syncedAt = Date.now()
-                  lastSnapshotSyncedAtRef.current = syncedAt
-                  setLastSyncedAt(syncedAt)
                 }
               }
             } catch {

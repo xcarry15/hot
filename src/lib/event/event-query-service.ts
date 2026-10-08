@@ -44,11 +44,12 @@ export async function getEventArticles(eventId: string, articleId?: string) {
       firstSeenAt: true,
       lastSeenAt: true,
       articles: {
-        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         take: MAX_EVENT_DETAIL_ARTICLES,
         select: eventArticleSelect,
       },
       assignedAudits: {
+        ...(articleId ? { where: { articleId } } : {}),
         orderBy: { createdAt: 'desc' },
         take: 20,
         select: {
@@ -87,13 +88,14 @@ export async function getEventArticles(eventId: string, articleId?: string) {
   });
   if (!event) return null;
   let articles = event.articles;
-  // 成员列表有上限，但详情抽屉打开的目标文章不能因排序靠后而丢失。
-  if (articleId && !articles.some((article) => article.id === articleId)) {
-    const focusedArticle = await db.article.findFirst({
-      where: { id: articleId, eventId },
+  // 截断列表始终补齐打开文章和代表文章，不能让旧代表在排序后消失。
+  for (const pinnedId of new Set([articleId, event.representativeArticleId])) {
+    if (!pinnedId || articles.some((article) => article.id === pinnedId)) continue;
+    const pinnedArticle = await db.article.findFirst({
+      where: { id: pinnedId, eventId },
       select: eventArticleSelect,
     });
-    if (focusedArticle) articles = [...articles, focusedArticle];
+    if (pinnedArticle) articles = [...articles, pinnedArticle];
   }
   const eventData = event;
   const articlePushStatuses = new Map<string, ArticlePushStatus>();
@@ -143,6 +145,7 @@ export async function getEventArticles(eventId: string, articleId?: string) {
   const candidateTitles = new Map(candidateEvents.map((candidate) => [candidate.id, candidate.representativeArticle?.title ?? '']));
   return {
     ...eventData,
+    hasMoreArticles: event.articleCount > articles.length,
     pushedAt: event.pushedAt?.toISOString() ?? null,
     firstSeenAt: event.firstSeenAt.toISOString(),
     lastSeenAt: event.lastSeenAt.toISOString(),

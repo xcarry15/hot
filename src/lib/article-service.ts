@@ -13,7 +13,7 @@
  *   - 不建立通用 Repository；与 maintenance-service 各保留本地事务 helper。
  */
 import { Prisma, type FetchStatus } from '@prisma/client';
-import { LOW_ANALYSIS_CONFIDENCE_FILTER } from '@/contracts/ai-confidence';
+import { HUMAN_ATTENTION_FILTER } from '@/lib/article-attention';
 import { db } from '@/lib/db';
 import {
   ARTICLE_DETAIL_SELECT,
@@ -89,7 +89,7 @@ const ARTICLE_LIST_ORDER: Record<ArticleListSort, Prisma.ArticleOrderByWithRelat
 };
 
 export function buildArticleListOrder(sort?: ArticleListSort): Prisma.ArticleOrderByWithRelationInput[] {
-  return ARTICLE_LIST_ORDER[sort ?? 'newest'];
+  return [...ARTICLE_LIST_ORDER[sort ?? 'newest'], { id: 'desc' }];
 }
 
 export function buildArticleListWhere(filter: ArticleListFilter): Prisma.ArticleWhereInput {
@@ -106,10 +106,7 @@ export function buildArticleListWhere(filter: ArticleListFilter): Prisma.Article
   if (filter.sourceId) where.sourceId = filter.sourceId;
   if (filter.fetchStatus) where.fetchStatus = filter.fetchStatus;
   if (filter.anomaly === 'needs_attention') {
-    where.OR = [
-      { clusterStatus: 'needs_review' },
-      LOW_ANALYSIS_CONFIDENCE_FILTER,
-    ];
+    where.OR = HUMAN_ATTENTION_FILTER.OR;
   }
   if (filter.anomaly === 'technical') {
     where.technicalIgnoredAt = null;
@@ -184,7 +181,7 @@ export async function listArticles(
   const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, params.pageSize ?? DEFAULT_PAGE_SIZE));
   const where = buildArticleListWhere(params.filter ?? {});
 
-  const [items, total] = await Promise.all([
+  const [items, total] = await db.$transaction([
     db.article.findMany({
       where,
       select: {

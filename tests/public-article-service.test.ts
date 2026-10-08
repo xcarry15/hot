@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   eventFindMany: vi.fn(),
+  eventRevisionFindMany: vi.fn(),
+  transaction: vi.fn(),
   eventGroupBy: vi.fn(),
   eventCount: vi.fn(),
   eventFindFirst: vi.fn(),
@@ -14,18 +16,26 @@ const interactionMocks = vi.hoisted(() => ({
   recordOriginalClick: vi.fn(),
 }));
 
-vi.mock('@/lib/db', () => ({
-  db: {
-    event: { findMany: mocks.eventFindMany, findFirst: mocks.eventFindFirst, count: mocks.eventCount, groupBy: mocks.eventGroupBy },
+vi.mock('@/lib/db', () => {
+  const findMany = (args: { select?: { publicSortAt?: boolean; representativeArticle?: { select?: { title?: boolean } } } }) => (
+    args.select?.publicSortAt && !args.select.representativeArticle?.select?.title
+      ? mocks.eventRevisionFindMany(args)
+      : mocks.eventFindMany(args)
+  );
+  const event = { findMany, findFirst: mocks.eventFindFirst, count: mocks.eventCount, groupBy: mocks.eventGroupBy };
+  mocks.transaction.mockImplementation((fn: (tx: unknown) => unknown) => fn({ event }));
+  return { db: {
+    event,
+    $transaction: mocks.transaction,
     article: { findMany: mocks.articleFindMany, findUnique: mocks.articleFindUnique },
-  },
-}));
+  } };
+});
 vi.mock('@/lib/public-view-service', () => ({
   recordPublicEventView: interactionMocks.recordView,
   recordPublicEventOriginalClick: interactionMocks.recordOriginalClick,
 }));
 
-import { getPublicArticleDetail, listPublicArticleIds, listPublicArticles, recordOriginalClick } from '@/lib/public-article-service';
+import { getPublicArticleFeedRevision, getPublicArticleDetail, listPublicArticleIds, listPublicArticles, recordOriginalClick } from '@/lib/public-article-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 
 function eventRow(id: string, publishedAt: string, sourceCount = 1) {
@@ -60,6 +70,7 @@ describe('public-article-service Event 门禁', () => {
     vi.clearAllMocks();
     invalidatePublicArticleCache();
     mocks.eventFindMany.mockResolvedValue([]);
+    mocks.eventRevisionFindMany.mockResolvedValue([]);
     mocks.eventGroupBy.mockResolvedValue([]);
     mocks.eventFindFirst.mockResolvedValue(null);
     mocks.eventCount.mockResolvedValue(0);
@@ -86,6 +97,15 @@ describe('public-article-service Event 门禁', () => {
     const result = await listPublicArticles();
     expect(result.groups.flatMap((group) => group.items)).toHaveLength(1);
     expect(result.groups[0].items[0]).toMatchObject({ id: 'e1', sourceCount: 3, title: '文章 e1' });
+  });
+
+  it('首屏内容与修订指纹在同一事务内读取', async () => {
+    mocks.eventFindMany.mockResolvedValueOnce([eventRow('e1', '2026-07-15T01:00:00Z')]);
+    mocks.eventRevisionFindMany.mockResolvedValueOnce([{ id: 'e1', representativeArticleId: 'a1' }]);
+    const result = await listPublicArticles();
+    expect(result.total).toBe(1);
+    expect(result.revision).toMatch(/^[a-f0-9]{64}$/);
+    expect(mocks.transaction).toHaveBeenCalledTimes(1);
   });
 
   it('详情使用 Event.id，并列出同事件与同品牌的近期文章', async () => {
@@ -128,5 +148,42 @@ describe('public-article-service Event 门禁', () => {
     mocks.eventFindFirst.mockResolvedValue({ id: 'e1', representativeArticle: { sourceId: 's1' } });
     await expect(recordOriginalClick('e1')).resolves.toBe(true);
     expect(interactionMocks.recordOriginalClick).toHaveBeenCalledWith('e1', 's1');
+  });
+});
+
+
+describe('公开资讯修订探针', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    invalidatePublicArticleCache();
+    mocks.eventRevisionFindMany.mockResolvedValue([]);
+  });
+
+  it('总数不变时，旧文章修订、代表切换和成员替换仍改变指纹', async () => {
+    const initial = { id: 'e1', articleCount: 1, representativeArticleId: 'a1', representativeArticle: { publicContentUpdatedAt: new Date('2026-10-01') } };
+    mocks.eventRevisionFindMany.mockResolvedValue([initial]);
+    const before = await getPublicArticleFeedRevision();
+    for (const changed of [
+      { ...initial, representativeArticle: { publicContentUpdatedAt: new Date('2026-10-02') } },
+      { ...initial, representativeArticleId: 'a2' },
+      { ...initial, id: 'e2' },
+    ]) {
+      invalidatePublicArticleCache();
+      mocks.eventRevisionFindMany.mockResolvedValue([changed]);
+      const after = await getPublicArticleFeedRevision();
+      expect(after.total).toBe(before.total);
+      expect(after.revision).not.toBe(before.revision);
+    }
+  });
+
+  it('并发探针共享请求，公开变更后失效，并限制投影和批次', async () => {
+    await Promise.all([getPublicArticleFeedRevision(), getPublicArticleFeedRevision()]);
+    expect(mocks.eventRevisionFindMany).toHaveBeenCalledTimes(1);
+    expect(mocks.eventRevisionFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 500 }));
+    const query = mocks.eventRevisionFindMany.mock.calls[0][0];
+    expect(query.select.representativeArticle.select).not.toHaveProperty('cleanContent');
+    invalidatePublicArticleCache();
+    await getPublicArticleFeedRevision();
+    expect(mocks.eventRevisionFindMany).toHaveBeenCalledTimes(2);
   });
 });

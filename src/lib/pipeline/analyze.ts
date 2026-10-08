@@ -1,3 +1,4 @@
+import { AUTOMATIC_ARTICLE_SOURCE_FILTER } from '@/lib/pipeline/eligibility';
 /**
  * Pipeline / analyze 阶段应用服务。
  *
@@ -58,6 +59,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   assertNotAborted(signal);
 
   const pendingWhereBase: Prisma.ArticleWhereInput = {
+    ...AUTOMATIC_ARTICLE_SOURCE_FILTER,
     aiStatus: { in: ['pending', 'failed'] },
     fetchStatus: 'fetched',
     technicalIgnoredAt: null,

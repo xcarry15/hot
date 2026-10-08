@@ -118,7 +118,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   const [articleDetailOpen, setArticleDetailOpen] = useState(false)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [libraryView, setLibraryView] = useState<'all' | 'attention' | 'cluster_review' | 'low_confidence'>('all')
-  const [humanQueue, setHumanQueue] = useState({ total: 0, clusterReview: 0, lowConfidence: 0 })
+  const [humanQueue, setHumanQueue] = useState<{ total: number; clusterReview: number; lowConfidence: number } | undefined>(undefined)
 
   useEffect(() => {
     if (!active) return
@@ -584,6 +584,7 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
   }, [openArticleWorkspace])
 
   const openLibrary = useCallback((view: typeof libraryView = 'all') => {
+    void fetchWorkQueueSummary().catch(() => undefined)
     setLibraryView(view)
     setLibraryOpen(true)
   }, [])
@@ -769,8 +770,12 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
           setFilterState={setFilterState}
           activePrimaryFilter={activePrimaryFilter}
           secondaryFilterChips={secondaryFilterChips}
-          filterCounts={filterCounts}
+          filterCounts={{ ...filterCounts, 'attention-all': humanQueue?.total, 'anomaly-review': humanQueue?.clusterReview, 'anomaly-low-confidence': humanQueue?.lowConfidence }}
+          onOpenHumanQueue={openLibrary}
         />
+        <p className="text-[10px] leading-4 text-muted-foreground">
+          运行记录为近期窗口；人工关注按全库分页，技术待办完整保留。
+        </p>
 
         <TaskStatusPanels
           activeTaskView={activeTaskView}

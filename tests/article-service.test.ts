@@ -49,6 +49,17 @@ describe('article-service filters', () => {
     });
   });
 
+  it('原样搜索保留全角字形、大小写和内部空白', () => {
+    const where = buildArticleListWhere({ search: '  Ａ品牌  ２０２６  ' });
+    expect(where.AND).toEqual([{ OR: [
+      { title: { contains: 'Ａ品牌  ２０２６' } },
+      { cleanContent: { contains: 'Ａ品牌  ２０２６' } },
+      { summary: { contains: 'Ａ品牌  ２０２６' } },
+      { brand: { contains: 'Ａ品牌  ２０２６' } },
+      { eventKey: { contains: 'Ａ品牌  ２０２６' } },
+    ] }]);
+  });
+
   it('删除筛选保持明确字段', () => {
     expect(buildArticleDeleteWhere({ aiStatus: 'failed', category: '餐饮', maxScore: 40 })).toEqual({
       aiStatus: 'failed',
@@ -61,10 +72,12 @@ describe('article-service filters', () => {
     expect(buildArticleListOrder('event_desc')).toEqual([
       { eventScore: { sort: 'desc', nulls: 'last' } },
       { createdAt: 'desc' },
+      { id: 'desc' },
     ]);
     expect(buildArticleListOrder()).toEqual([
       { publishedAt: 'desc' },
       { createdAt: 'desc' },
+      { id: 'desc' },
     ]);
   });
 });

@@ -1,3 +1,4 @@
+import { AUTOMATIC_ARTICLE_SOURCE_FILTER } from '@/lib/pipeline/eligibility';
 import { Prisma } from '@prisma/client';
 import { EVENT_CLUSTER_MAX_RETRIES } from '@/contracts/event-clustering';
 import { db } from '@/lib/db';
@@ -10,6 +11,7 @@ const MAX_CLUSTER_BATCH = 200;
 
 export function buildClusterPendingWhere(now = new Date(), forceRetry = false): Prisma.ArticleWhereInput {
   return {
+    ...AUTOMATIC_ARTICLE_SOURCE_FILTER,
     fetchStatus: 'fetched',
     aiStatus: 'done',
     technicalIgnoredAt: null,

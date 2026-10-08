@@ -58,6 +58,16 @@ describe('analyzeAllPending Provider 全局异常', () => {
     mocks.advanceJobProgress.mockResolvedValue(undefined);
   });
 
+  it('自动 AI 待办排除软删除来源，但不排除仅禁用来源', async () => {
+    mocks.articleFindMany.mockResolvedValueOnce([]);
+    await analyzeAllPending();
+    const query = mocks.articleFindMany.mock.calls[0][0];
+    expect(query.where.source).toEqual({ is: { deletedAt: null } });
+    expect(mocks.articleCount).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ source: { is: { deletedAt: null } } }),
+    }));
+  });
+
   it('限流时暂停剩余文章，不批量标失败或消耗重试次数', async () => {
     const articles = [
       { id: 'article-1', title: '文章 1' },

@@ -36,6 +36,8 @@ import {
 interface EventCalibrationPanelProps {
   detail: ArticleDetailDto;
   eventDetail: EventDetail | null;
+  eventLoadError: boolean;
+  onRetryEvent: () => void;
   eventSourceCount: number;
   eventMemberModels: EventArticleRowModel[];
   recommendedEventModels: EventArticleRowModel[];
@@ -60,6 +62,8 @@ interface EventCalibrationPanelProps {
 export const EventCalibrationPanel = memo(function EventCalibrationPanel({
   detail,
   eventDetail,
+  eventLoadError,
+  onRetryEvent,
   eventSourceCount,
   eventMemberModels,
   recommendedEventModels,
@@ -80,6 +84,13 @@ export const EventCalibrationPanel = memo(function EventCalibrationPanel({
   onMergeTargetChange,
   onMergeCurrentEvent,
 }: EventCalibrationPanelProps) {
+  if (!eventDetail && detail.eventId) {
+    return <section className={WORKSPACE_SURFACE_CLASS}>
+      <SectionHeader title="事件校准" meta={eventLoadError ? "加载失败" : "加载中"} />
+      <p className="text-xs text-muted-foreground">{eventLoadError ? "事件详情暂不可用，请重试。" : "正在加载事件详情…"}</p>
+      {eventLoadError && <Button size="sm" variant="outline" onClick={onRetryEvent}>重试</Button>}
+    </section>;
+  }
   if (!eventDetail) {
     const canAutoCluster = detail.fetchStatus === 'fetched' && detail.aiStatus === 'done';
     return (
@@ -188,6 +199,7 @@ export const EventCalibrationPanel = memo(function EventCalibrationPanel({
           )}
         >
           <EventArticleList rows={eventMemberModels} />
+          {eventDetail.hasMoreArticles && <p className="mt-2 text-xs text-muted-foreground">仅展示近期成员及当前、代表文章，共 {eventDetail.articleCount} 篇。</p>}
         </EventCalibrationGroup>
 
         <EventCalibrationGroup title="候选关联" count={recommendedEventModels.length}>

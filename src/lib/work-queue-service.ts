@@ -1,24 +1,21 @@
 import {
-  AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD,
   LOW_ANALYSIS_CONFIDENCE_FILTER,
 } from '@/contracts/ai-confidence';
+import { CLUSTER_REVIEW_FILTER, HUMAN_ATTENTION_FILTER } from '@/lib/article-attention';
 import { db } from '@/lib/db';
 import { getTechnicalWorkQueue } from '@/lib/technical-work-queue-service';
 
 export async function getWorkQueueSummary() {
-  const [technicalItems, failedSources, humanTotalRows, clusterReview, lowConfidence] = await Promise.all([
+  const [technicalItems, failedSources, humanCounts] = await Promise.all([
     getTechnicalWorkQueue(),
     db.source.count({ where: { enabled: true, deletedAt: null, OR: [{ status: 'warning' }, { status: 'breaker' }] } }),
-    db.$queryRaw<Array<{ total: bigint | number }>>`
-      SELECT COUNT(DISTINCT "id") AS "total"
-      FROM "articles"
-      WHERE "clusterStatus" = 'needs_review'
-         OR ("aiStatus" = 'done' AND "aiConfidence" < ${AI_ANALYSIS_REVIEW_CONFIDENCE_THRESHOLD})
-    `,
-    db.article.count({ where: { clusterStatus: 'needs_review' } }),
-    db.article.count({ where: LOW_ANALYSIS_CONFIDENCE_FILTER }),
+    db.$transaction([
+      db.article.count({ where: HUMAN_ATTENTION_FILTER }),
+      db.article.count({ where: CLUSTER_REVIEW_FILTER }),
+      db.article.count({ where: LOW_ANALYSIS_CONFIDENCE_FILTER }),
+    ]),
   ]);
-  const humanTotal = Number(humanTotalRows[0]?.total ?? 0);
+  const [humanTotal, clusterReview, lowConfidence] = humanCounts;
   const manualTechnicalItems = technicalItems.filter((item) => item.state === 'manual');
   return {
     technical: {

@@ -63,6 +63,7 @@ export interface PublicArticleDateGroupDto {
 }
 
 export interface PublicArticleListResponseDto {
+  revision?: string;
   total: number;
   groups: PublicArticleDateGroupDto[];
   displayedArticleCount: number;
@@ -73,4 +74,5 @@ export interface PublicArticleListResponseDto {
 
 export interface PublicArticleFeedRevisionDto {
   total: number;
+  revision: string;
 }

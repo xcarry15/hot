@@ -19,7 +19,7 @@ export const PRIMARY_FILTER_CHIPS: readonly StepFilterChip[] = [
   { key: 'processing-all', label: '处理中', description: '仍在正文、AI、聚类或推送环节等待完成' },
   { key: 'normal-all', label: '正常', description: '已经公开的 Event 代表文章；公开是正常状态的唯一事实口径' },
   { key: 'anomaly-all', label: '异常', description: '尚未公开且存在流程失败、自动恢复、未达门槛或无价值等问题' },
-  { key: 'attention-all', label: '待操作', description: '人工关注快捷入口，可与正常或异常状态重叠' },
+  { key: 'attention-all', label: '人工关注', description: '查看全库聚类复核与低置信文章，按页加载' },
 ] as const
 
 /** 处理中只保留真正有下一步流水线动作的阶段。 */
@@ -36,6 +36,7 @@ export const NORMAL_FILTER_CHIPS: readonly StepFilterChip[] = [
 ] as const
 
 export const ANOMALY_FILTER_CHIPS: readonly StepFilterChip[] = [
+  { key: 'ignored', label: '已忽略', description: '已从技术待办中忽略的文章，可恢复' },
   { key: 'anomaly-manual', label: '需人工处理', description: '自动重试耗尽，需要人工处理' },
   { key: 'anomaly-retrying', label: '自动恢复', description: '技术异常正在等待或执行自动重试' },
   { key: 'anomaly-failure', label: '流程失败', description: '流程失败或技术性跳过' },
@@ -47,9 +48,8 @@ export const ANOMALY_FILTER_CHIPS: readonly StepFilterChip[] = [
 
 /** 人工关注是独立维度，允许与“正常/异常”重叠。 */
 export const ATTENTION_FILTER_CHIPS: readonly StepFilterChip[] = [
-  { key: 'ignored', label: '已忽略', description: '已从技术待办中忽略的文章，可恢复' },
-  { key: 'anomaly-review', label: '待复核', description: '聚类结果存在歧义，需要人工判断' },
-  { key: 'anomaly-low-confidence', label: '低置信', description: 'AI 分析证据把握不足，建议人工复核' },
+  { key: 'anomaly-review', label: '待复核', description: '查看全库聚类复核文章' },
+  { key: 'anomaly-low-confidence', label: '低置信', description: '查看全库低置信文章' },
 ] as const
 
 export const STEP_FILTER_CHIPS: readonly StepFilterChip[] = [
@@ -69,7 +69,7 @@ export function getPrimaryFilterKey(key?: FilterChipKey): FilterChipKey {
   if (key === 'normal-all' || key === 'normal-public' || key === 'normal-not-push' || key === 'normal-pushed') {
     return 'normal-all'
   }
-  if (key === 'attention-all' || key === 'anomaly-review' || key === 'anomaly-low-confidence' || key === 'ignored') {
+  if (key === 'attention-all' || key === 'anomaly-review' || key === 'anomaly-low-confidence') {
     return 'attention-all'
   }
   return 'anomaly-all'

@@ -1,3 +1,4 @@
+import { AUTOMATIC_ARTICLE_SOURCE_FILTER } from '@/lib/pipeline/eligibility';
 /**
  * Pipeline / process 阶段应用服务。
  *
@@ -45,7 +46,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
 
   // 重置"已抓取但正文为空"的文章，让它们重新进详情页流程。
   await db.article.updateMany({
-    where: { cleanContent: '', fetchStatus: 'fetched', technicalIgnoredAt: null },
+    where: { ...AUTOMATIC_ARTICLE_SOURCE_FILTER, cleanContent: '', fetchStatus: 'fetched', technicalIgnoredAt: null },
     data: { fetchStatus: 'pending', fetchError: null },
   });
 
@@ -53,6 +54,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
   // 达到上限的文章保留 failed 终态，等待人工重试或忽略。
   await db.article.updateMany({
     where: {
+      ...AUTOMATIC_ARTICLE_SOURCE_FILTER,
       fetchStatus: 'failed',
       fetchRetryCount: { lt: PROCESS_MAX_RETRIES },
       technicalIgnoredAt: null,
@@ -61,7 +63,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
     data: { fetchStatus: 'pending' },
   });
 
-  const pendingWhere = { fetchStatus: 'pending' as const, technicalIgnoredAt: null };
+  const pendingWhere = { ...AUTOMATIC_ARTICLE_SOURCE_FILTER, fetchStatus: 'pending' as const, technicalIgnoredAt: null };
   const total = await db.article.count({ where: pendingWhere });
   if (jobId) await startJobStage(jobId, { stage: 'process', total });
   let processed = 0;
@@ -190,6 +192,7 @@ export async function repairPublishedDates(signal?: AbortSignal): Promise<void> 
       assertNotAborted(signal);
       const page: Array<Pick<Article, 'id' | 'title' | 'rawContent' | 'publishedAt' | 'createdAt'>> = await db.article.findMany({
         where: {
+          ...AUTOMATIC_ARTICLE_SOURCE_FILTER,
           fetchStatus: 'fetched',
           rawContent: { not: '' },
           createdAt: { gte: sevenDaysAgo },

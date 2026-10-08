@@ -86,6 +86,7 @@ export interface EventPushTargetStateDto {
 }
 
 export interface EventDetailDto {
+  hasMoreArticles?: boolean;
   id: string;
   status: string;
   clusterReviewStatus: string;

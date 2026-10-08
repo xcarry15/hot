@@ -8,7 +8,6 @@ import type {
 } from '@/contracts/public-articles'
 import {
   createPublicFeedState,
-  mergeLatestPublicFeedState,
   mergePublicArticleGroups,
 } from '@/components/public-feed-state'
 
@@ -48,10 +47,16 @@ export default function PublicArticleFeed({
   const [hasNewArticles, setHasNewArticles] = useState(false)
   const feedIdentity = search
   const previousIdentity = useRef(feedIdentity)
+  const requestEpoch = useRef(0)
+  const currentRevision = useRef(initialData.revision)
   useEffect(() => {
     if (previousIdentity.current === feedIdentity) return
     previousIdentity.current = feedIdentity
+    requestEpoch.current += 1
+    setLoading(false)
+    setRefreshing(false)
     setState(initialData)
+    currentRevision.current = initialData.revision
     setLoadError(false)
     setHasNewArticles(false)
   }, [feedIdentity, initialData])
@@ -61,14 +66,19 @@ export default function PublicArticleFeed({
 
     async function checkForNewArticles() {
       if (document.visibilityState === 'hidden') return
+      const epoch = requestEpoch.current
+      const baselineRevision = currentRevision.current
       try {
         const response = await fetch(buildFeedUrl({ search, probe: true }), {
           cache: 'no-store',
         })
-        if (!response.ok || cancelled) return
-        const revision = await response.json() as { total?: number }
-        if (typeof revision.total === 'number' && revision.total > state.total) {
+        if (!response.ok || cancelled || epoch !== requestEpoch.current) return
+        const revision = await response.json() as { total?: number; revision?: string }
+        if (cancelled || epoch !== requestEpoch.current || baselineRevision !== currentRevision.current) return
+        if ((revision.revision && currentRevision.current && revision.revision !== currentRevision.current) || (typeof revision.total === 'number' && revision.total !== state.total)) {
           setHasNewArticles(true)
+        } else if (!currentRevision.current && revision.revision) {
+          currentRevision.current = revision.revision
         }
       } catch {
         // 轮询失败不打断当前阅读，下一轮继续检查。
@@ -83,7 +93,8 @@ export default function PublicArticleFeed({
   }, [feedIdentity, search, state.total])
 
   async function loadMore() {
-    if (loading || !state.hasMore || !state.nextCursor) return
+    if (loading || refreshing || !state.hasMore || !state.nextCursor) return
+    const epoch = requestEpoch.current
     setLoading(true)
     setLoadError(false)
     try {
@@ -91,30 +102,35 @@ export default function PublicArticleFeed({
         search,
         cursor: state.nextCursor,
       }))
+      if (epoch !== requestEpoch.current) return
       setState((current) => createPublicFeedState(
         data,
         mergePublicArticleGroups(current.groups, data.groups),
       ))
     } catch {
-      setLoadError(true)
+      if (epoch === requestEpoch.current) setLoadError(true)
     } finally {
-      setLoading(false)
+      if (epoch === requestEpoch.current) setLoading(false)
     }
   }
 
   async function refreshLatest() {
-    if (refreshing) return
+    if (refreshing || loading) return
+    const epoch = ++requestEpoch.current
     setRefreshing(true)
     try {
       const data = await requestFeed(buildFeedUrl({
         search,
       }))
-      setState((current) => mergeLatestPublicFeedState(current, data))
+      if (epoch !== requestEpoch.current) return
+      setState(data)
+      currentRevision.current = data.revision
+      setLoadError(false)
       setHasNewArticles(false)
     } catch {
-      setLoadError(true)
+      if (epoch === requestEpoch.current) setLoadError(true)
     } finally {
-      setRefreshing(false)
+      if (epoch === requestEpoch.current) setRefreshing(false)
     }
   }
 
@@ -139,9 +155,9 @@ export default function PublicArticleFeed({
 
       {hasNewArticles && (
         <div className="public-notice-enter mb-5 flex items-center justify-between gap-3 border border-[var(--public-primary)] bg-[var(--public-surface-soft)] px-4 py-3 text-sm text-[var(--public-primary)]" role="status">
-          <span>有新文章可查看</span>
+          <span>资讯有更新</span>
           <button type="button" onClick={refreshLatest} disabled={refreshing} className="public-pressable shrink-0 font-medium underline underline-offset-4 disabled:opacity-60">
-            {refreshing ? '刷新中…' : '刷新最新文章'}
+            {refreshing ? '刷新中…' : '刷新资讯'}
           </button>
         </div>
       )}

@@ -1,5 +1,6 @@
 'use client'
 
+import { useJobWriteGuard } from '@/components/use-job-write-guard'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -105,6 +106,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
+  const jobBusy = useJobWriteGuard(active)
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('dashboard')
   const settingsBaselineRef = useRef<string | null>(null)
@@ -529,11 +531,11 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         <div className="flex shrink-0 items-center gap-2 border-t bg-background px-3 py-2">
           <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
             <Info className="h-3.5 w-3.5" />
-            有未保存的设置变更
+            {jobBusy ? '任务运行中，暂不可保存；可在工作台停止任务' : '有未保存的设置变更'}
           </span>
           <Button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || jobBusy}
             className="ml-auto h-7 gap-1.5 px-3 text-xs"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

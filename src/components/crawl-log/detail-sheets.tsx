@@ -12,7 +12,7 @@ interface CrawlLogDetailSheetsProps {
   onDetailOpenChange: (open: boolean) => void
   libraryOpen: boolean
   libraryView: 'all' | 'attention' | 'cluster_review' | 'low_confidence'
-  humanQueue: { total: number; clusterReview: number; lowConfidence: number }
+  humanQueue: { total: number; clusterReview: number; lowConfidence: number } | undefined
   onLibraryOpenChange: (open: boolean) => void
   onOpenArticle: (articleId: string) => void
   articleDetailId: string | null

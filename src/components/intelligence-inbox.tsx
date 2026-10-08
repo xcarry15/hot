@@ -39,6 +39,7 @@ import { ArticleComparisonDialog } from "./intelligence-inbox/workspace-primitiv
 import { ArticleWorkspaceHeader } from "./intelligence-inbox/article-workspace-header";
 import { ArticleReviewPanel } from "./intelligence-inbox/article-review-panel";
 import { ArticleWorkspaceSupportPanels } from "./intelligence-inbox/article-workspace-support-panels";
+import { useJobWriteGuard } from "@/components/use-job-write-guard";
 import { EventCalibrationPanel } from "./intelligence-inbox/event-calibration-panel";
 import { createArticleWorkspaceViewModel } from "./intelligence-inbox/workspace-view-model";
 import {
@@ -85,6 +86,7 @@ export default function IntelligenceInbox({
   onArticleChange,
   onChanged,
 }: IntelligenceInboxProps) {
+  const jobBusy = useJobWriteGuard(open);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ArticleDetailDto | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -96,6 +98,7 @@ export default function IntelligenceInbox({
   const [showFullContent, setShowFullContent] = useState(false);
   const [requestedPanel, setRequestedPanel] = useState<DetailPanel | null>(null);
   const [eventDetail, setEventDetail] = useState<EventDetail | null>(null);
+  const [eventLoadError, setEventLoadError] = useState(false);
   const [eventAction, setEventAction] = useState<string | null>(null);
   const [selectedSplitIds, setSelectedSplitIds] = useState<Set<string>>(() => new Set());
   const [mergeTargetId, setMergeTargetId] = useState("");
@@ -119,6 +122,7 @@ export default function IntelligenceInbox({
 
   useEffect(() => {
     const currentId = selectedIdRef.current;
+    if (articleId === currentId) return;
     if (
       articleId !== currentId
       && currentId
@@ -136,6 +140,7 @@ export default function IntelligenceInbox({
     eventDetailRequestRef.current += 1;
     eventSearchRequestRef.current += 1;
     setEventDetail(null);
+    setEventLoadError(false);
     setEventOptions([]);
     setEventSearch("");
     setMergeTargetId("");
@@ -205,6 +210,7 @@ export default function IntelligenceInbox({
   const loadEventDetail = useCallback(
     async (eventId: string | null | undefined, signal?: AbortSignal) => {
       const requestId = ++eventDetailRequestRef.current;
+      setEventLoadError(false);
       if (!eventId) {
         setEventDetail(null);
         return;
@@ -212,6 +218,7 @@ export default function IntelligenceInbox({
       try {
         const result = await fetchEventDetail(eventId, detailIdForEvent, signal);
         if (signal?.aborted || requestId !== eventDetailRequestRef.current) return;
+        if (!result) throw new Error("事件不存在或已不可用");
         setEventDetail(result);
       } catch (error) {
         if (
@@ -221,6 +228,7 @@ export default function IntelligenceInbox({
         )
           return;
         setEventDetail(null);
+        setEventLoadError(true);
         toast.error(errorMessage(error, "事件详情加载失败"));
       }
     },
@@ -245,6 +253,9 @@ export default function IntelligenceInbox({
 
   useEffect(() => {
     const controller = new AbortController();
+    setEventDetail(null);
+    setSelectedSplitIds(new Set());
+    setMergeTargetId("");
     void loadEventDetail(detail?.eventId, controller.signal);
     return () => controller.abort();
   }, [detail?.eventId, detail?.id, loadEventDetail]);
@@ -531,7 +542,7 @@ export default function IntelligenceInbox({
       eventMembers: workspace?.eventMembers ?? [],
       brandCandidates,
       selectedSplitIds,
-      interactionPending: detailAction !== null || rowSavingId !== null || eventAction !== null || editing,
+      interactionPending: jobBusy || detailAction !== null || rowSavingId !== null || eventAction !== null || editing,
       recommendedEventId,
       recommendedEvent,
       recommendedAudit,
@@ -548,6 +559,7 @@ export default function IntelligenceInbox({
       brandCandidates,
       detail,
       detailAction,
+      jobBusy,
       eventAction,
       editing,
       eventDetail,
@@ -568,7 +580,7 @@ export default function IntelligenceInbox({
     ],
   );
   const { brandCandidateModels, eventMemberModels, recommendedEventModels } = eventArticleModels;
-  const reviewInteractionPending = detailAction !== null || rowSavingId !== null || eventAction !== null || editing;
+  const reviewInteractionPending = jobBusy || detailAction !== null || rowSavingId !== null || eventAction !== null || editing;
   const detailWorkspace = detailLoading ? (
     <div className="space-y-2 p-3 lg:p-4">
       <Skeleton className="h-28 w-full rounded-none" />
@@ -580,6 +592,7 @@ export default function IntelligenceInbox({
   ) : detail && workspace ? (
     <ScrollArea className={WORKSPACE_SCROLL_CLASS}>
       <div className={WORKSPACE_CANVAS_CLASS}>
+        {jobBusy && <p className="text-xs text-muted-foreground">任务运行中，暂不可保存；可在工作台停止任务。草稿会保留。</p>}
         <ArticleWorkspaceHeader
           detail={detail}
           brands={workspace.brands}
@@ -605,7 +618,7 @@ export default function IntelligenceInbox({
               canForcePush={workspace.canForcePush}
               eventPushedAt={eventDetail?.pushedAt}
               rowSaving={rowSavingId === detail.id}
-              eventActionPending={eventAction !== null}
+              eventActionPending={jobBusy || eventAction !== null}
               detailAction={detailAction}
               editing={editing}
               draft={draft}
@@ -621,6 +634,8 @@ export default function IntelligenceInbox({
             <EventCalibrationPanel
               detail={detail}
               eventDetail={eventDetail}
+              eventLoadError={eventLoadError}
+              onRetryEvent={() => void loadEventDetail(detail.eventId)}
               eventSourceCount={workspace.eventSourceCount}
               eventMemberModels={eventMemberModels}
               recommendedEventModels={recommendedEventModels}

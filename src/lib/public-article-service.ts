@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { db } from '@/lib/db';
 import type { Prisma } from '@prisma/client';
 import { parseJsonArray, stripHtml } from '@/lib/shared/article-codecs';
@@ -5,8 +6,8 @@ import { getPublicDateKey } from '@/lib/shared/public-date';
 import { recordPublicEventOriginalClick, recordPublicEventView } from '@/lib/public-view-service';
 import { getRelatedArticles } from '@/lib/article-related-service';
 import {
-  publicArticleCountCache,
   publicArticleDetailCache,
+  publicArticleRevisionCache,
   publicArticleListCache,
 } from '@/lib/public-article-cache';
 import type {
@@ -155,22 +156,11 @@ function buildSearchWhere(search: string) {
   } : {};
 }
 
-async function countPublicArticles(search: string): Promise<number> {
-  const key = search;
-  const existing = publicArticleCountCache.get(key);
-  if (existing) return existing.value;
-  const value = db.event.count({
-    where: {
-      ...publicEventWhere,
-      ...buildSearchWhere(search),
-    },
-  });
-  publicArticleCountCache.set(key, { value, expiresAt: Date.now() + PUBLIC_CACHE_TTL_MS });
-  void value.catch(() => publicArticleCountCache.delete(key));
-  return value;
+async function buildList(params: PublicArticleListParams): Promise<PublicArticleListResponseDto> {
+  return db.$transaction((tx) => buildListInTransaction(tx, params));
 }
 
-async function buildList(params: PublicArticleListParams): Promise<PublicArticleListResponseDto> {
+async function buildListInTransaction(tx: Prisma.TransactionClient, params: PublicArticleListParams): Promise<PublicArticleListResponseDto> {
   const search = normalizeText(params.search, 100);
   const cursor = decodeCursor(params.cursor);
   const searchWhere = buildSearchWhere(search);
@@ -184,7 +174,7 @@ async function buildList(params: PublicArticleListParams): Promise<PublicArticle
     } : {}),
     ...searchWhere,
   };
-  const rows = await db.event.findMany({
+  const rows = await tx.event.findMany({
     where: feedWhere,
     select: {
       id: true,
@@ -211,10 +201,12 @@ async function buildList(params: PublicArticleListParams): Promise<PublicArticle
     count: dateRows.length,
     items: dateRows.map((row) => serializeEvent(row)),
   }));
-  const total = await countPublicArticles(search);
+  const revision = await readPublicFeedRevision(tx, search);
+  const total = revision.total;
   const lastRow = eligible.at(-1);
   return {
     total,
+    revision: revision.revision,
     groups,
     displayedArticleCount: groups.reduce((count, group) => count + group.items.length, 0),
     displayedDateCount: groups.length,
@@ -223,9 +215,42 @@ async function buildList(params: PublicArticleListParams): Promise<PublicArticle
   };
 }
 
+async function readPublicFeedRevision(tx: Prisma.TransactionClient, search: string): Promise<PublicArticleFeedRevisionDto> {
+  // 每批只读轻量修订字段；固定内存哈希覆盖撤回、代表切换和旧文章修改。
+  const hash = createHash('sha256');
+  let cursor: string | undefined;
+  let total = 0;
+  while (true) {
+    const rows = await tx.event.findMany({
+      where: { ...publicEventWhere, ...buildSearchWhere(search), ...(cursor ? { id: { gt: cursor } } : {}) },
+      orderBy: { id: 'asc' },
+      take: 500,
+      select: {
+        id: true,
+        articleCount: true,
+        publicSortAt: true,
+        representativeArticleId: true,
+        representativeArticle: { select: { publicContentUpdatedAt: true, source: { select: { name: true, type: true } } } },
+      },
+    });
+    for (const row of rows) hash.update(JSON.stringify(row) + '\n');
+    total += rows.length;
+    if (rows.length < 500) break;
+    cursor = rows[rows.length - 1].id;
+  }
+  return { total, revision: hash.digest('hex') };
+}
+
 export async function getPublicArticleFeedRevision(params: Pick<PublicArticleListParams, 'search'> = {}): Promise<PublicArticleFeedRevisionDto> {
   const search = normalizeText(params.search, 100);
-  return { total: await countPublicArticles(search) };
+  const cached = publicArticleRevisionCache.get(search);
+  if (cached) return cached.value;
+  const value = db.$transaction((tx) => readPublicFeedRevision(tx, search));
+  publicArticleRevisionCache.set(search, { value, expiresAt: Date.now() + 15_000 });
+  void value.catch(() => {
+    if (publicArticleRevisionCache.get(search)?.value === value) publicArticleRevisionCache.delete(search);
+  });
+  return value;
 }
 
 export async function listPublicArticles(params: PublicArticleListParams = {}): Promise<PublicArticleListResponseDto> {

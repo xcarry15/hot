@@ -1,4 +1,4 @@
-import type { PublicArticleDetailDto, PublicArticleListResponseDto } from '@/contracts/public-articles';
+import type { PublicArticleDetailDto, PublicArticleFeedRevisionDto, PublicArticleListResponseDto } from '@/contracts/public-articles';
 
 export type PublicArticleCacheEntry<T> = {
   expiresAt: number;
@@ -7,7 +7,6 @@ export type PublicArticleCacheEntry<T> = {
 
 const MAX_PUBLIC_ARTICLE_CACHE_ENTRIES = 50;
 const MAX_PUBLIC_ARTICLE_DETAIL_CACHE_ENTRIES = 100;
-const MAX_PUBLIC_ARTICLE_COUNT_CACHE_ENTRIES = 20;
 
 class BoundedPublicArticleCache<T> extends Map<string, PublicArticleCacheEntry<T>> {
   constructor(private readonly maxEntries: number) {
@@ -39,12 +38,13 @@ class BoundedPublicArticleCache<T> extends Map<string, PublicArticleCacheEntry<T
   }
 }
 
+export const publicArticleRevisionCache = new BoundedPublicArticleCache<PublicArticleFeedRevisionDto>(20);
+
 export const publicArticleListCache = new BoundedPublicArticleCache<PublicArticleListResponseDto>(MAX_PUBLIC_ARTICLE_CACHE_ENTRIES);
 export const publicArticleDetailCache = new BoundedPublicArticleCache<PublicArticleDetailDto | null>(MAX_PUBLIC_ARTICLE_DETAIL_CACHE_ENTRIES);
-export const publicArticleCountCache = new BoundedPublicArticleCache<number>(MAX_PUBLIC_ARTICLE_COUNT_CACHE_ENTRIES);
 
 export function invalidatePublicArticleCache(): void {
+  publicArticleRevisionCache.clear();
   publicArticleListCache.clear();
   publicArticleDetailCache.clear();
-  publicArticleCountCache.clear();
 }

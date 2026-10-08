@@ -2,9 +2,6 @@ import type { Prisma } from '@prisma/client';
 
 function normalizeSearchText(value: string): string {
   return value
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 24_000);
 }

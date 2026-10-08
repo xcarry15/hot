@@ -14,6 +14,7 @@ interface CrawlLogFiltersProps {
   setFilterState: Dispatch<SetStateAction<FilterState>>
   activePrimaryFilter: FilterChipKey
   secondaryFilterChips: readonly FilterChip[]
+  onOpenHumanQueue: (view: 'attention' | 'cluster_review' | 'low_confidence') => void
   filterCounts: Partial<Record<FilterChipKey, number>>
 }
 
@@ -23,6 +24,7 @@ export function CrawlLogFilters({
   activePrimaryFilter,
   secondaryFilterChips,
   filterCounts,
+  onOpenHumanQueue,
 }: CrawlLogFiltersProps) {
   return (
     <div className="flex min-w-0 w-full flex-col gap-1">
@@ -35,13 +37,13 @@ export function CrawlLogFilters({
           const isAllChip = chip.key === 'all'
           const statusKey = chip.key as StepFilterKey
           const active = activePrimaryFilter === chip.key
-          const count = filterCounts[chip.key] ?? 0
+          const count = filterCounts[chip.key]
 
           return (
             <button
               key={chip.key}
               type="button"
-              onClick={() => setFilterState(prev => ({
+              onClick={() => chip.key === 'attention-all' ? onOpenHumanQueue('attention') : setFilterState(prev => ({
                 ...prev,
                 chips: isAllChip ? new Set() : new Set([statusKey]),
               }))}
@@ -54,7 +56,7 @@ export function CrawlLogFilters({
             >
               <span>{chip.label}</span>
               <span className={`text-[11px] tabular-nums ${active ? 'opacity-80' : 'text-muted-foreground/70'}`}>
-                ({count})
+                ({count ?? '…'})
               </span>
             </button>
           )
@@ -78,7 +80,11 @@ export function CrawlLogFilters({
                 role="radio"
                 aria-checked={active}
                 title={chip.description}
-                onClick={() => setFilterState(prev => ({ ...prev, chips: new Set([statusKey]) }))}
+                onClick={() => {
+                  if (chip.key === 'anomaly-review') onOpenHumanQueue('cluster_review')
+                  else if (chip.key === 'anomaly-low-confidence') onOpenHumanQueue('low_confidence')
+                  else setFilterState(prev => ({ ...prev, chips: new Set([statusKey]) }))
+                }}
                 className={`${SECONDARY_FILTER_CLASS} ${active
                   ? 'border-primary bg-primary text-primary-foreground'
                   : 'border-border bg-background text-muted-foreground hover:text-foreground'}`}

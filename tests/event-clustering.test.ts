@@ -175,6 +175,7 @@ describe('轻量事件聚类规则', () => {
   it('达到最大重试次数的聚类失败文章不会再次进入批次', () => {
     const now = new Date('2026-07-18T00:00:00Z');
     expect(buildClusterPendingWhere(now)).toEqual({
+      source: { is: { deletedAt: null } },
       fetchStatus: 'fetched',
       aiStatus: 'done',
       eventId: null,
