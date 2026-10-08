@@ -22,10 +22,12 @@ interface Props {
 export default function PublicTab({ settings, setSettings }: Props) {
   const [sources, setSources] = useState<SourceDto[]>([])
   const [loadingSources, setLoadingSources] = useState(true)
+  const [sourceLoadError, setSourceLoadError] = useState<string | null>(null)
   const [updatingSourceId, setUpdatingSourceId] = useState<string | null>(null)
   const [preview, setPreview] = useState<PublicPreviewResult | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const initialPreviewLoaded = useRef(false)
+  const sourceLoadRequestRef = useRef(0)
 
   const publicSourceCount = useMemo(
     () => sources.filter((source) => source.publicEnabled).length,
@@ -55,12 +57,27 @@ export default function PublicTab({ settings, setSettings }: Props) {
     }
   }, [settings.public_hide_ads, settings.public_min_relevance, settings.public_min_score])
 
-  useEffect(() => {
-    fetchSources()
-      .then(setSources)
-      .catch(() => toast.error('获取数据源公开状态失败'))
-      .finally(() => setLoadingSources(false))
+  const loadSources = useCallback(async () => {
+    const requestId = ++sourceLoadRequestRef.current
+    setLoadingSources(true)
+    setSourceLoadError(null)
+    try {
+      const nextSources = await fetchSources()
+      if (requestId !== sourceLoadRequestRef.current) return
+      setSources(nextSources)
+    } catch (error) {
+      if (requestId !== sourceLoadRequestRef.current) return
+      const message = error instanceof Error && error.message ? error.message : '获取数据源公开状态失败'
+      setSourceLoadError(message)
+      toast.error(message)
+    } finally {
+      if (requestId === sourceLoadRequestRef.current) setLoadingSources(false)
+    }
   }, [])
+
+  useEffect(() => {
+    void loadSources()
+  }, [loadSources])
 
   // 页面打开即展示当前规则的影响范围；阈值编辑后仍由“刷新预览”显式确认，
   // 避免用户输入过程中频繁请求后端。
@@ -205,6 +222,13 @@ export default function PublicTab({ settings, setSettings }: Props) {
             <div className="space-y-px bg-border">
               <Skeleton className="h-12 w-full rounded-none" />
               <Skeleton className="h-12 w-full rounded-none" />
+            </div>
+          ) : sourceLoadError ? (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-2 px-3 py-4 text-xs">
+              <span className="text-destructive">数据源公开状态加载失败：{sourceLoadError}</span>
+              <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void loadSources()} disabled={loadingSources}>
+                {loadingSources ? '读取中…' : '重新读取'}
+              </Button>
             </div>
           ) : sources.length === 0 ? (
             <p className="px-3 py-5 text-xs text-muted-foreground">暂无数据源，请先在“源管理”中添加。</p>

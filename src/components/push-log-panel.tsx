@@ -12,10 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchPushLog, fetchPushLogStats } from '@/features/push-log-api.client'
 import { isRequestAborted, isRequestJsonError } from '@/lib/request-json.client'
+import { EmptyState } from '@/components/ui/empty-state'
 
 interface PushLog {
   id: string
@@ -87,6 +88,7 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
   const [data, setData] = useState<PushLogResponse | null>(null)
   const [stats, setStats] = useState<PushLogStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState('all')
   const [sourceFilter, setSourceFilter] = useState('all')
@@ -97,7 +99,10 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
     logRequestRef.current?.abort()
     const controller = new AbortController()
     logRequestRef.current = controller
-    if (!background) setLoading(true)
+    if (!background) {
+      setLoading(true)
+      setLoadError(null)
+    }
 
     const params = {
       page,
@@ -121,10 +126,17 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
         if (controller.signal.aborted) return
         result = await fetchPushLog(params, controller.signal)
       }
-      if (!controller.signal.aborted) setData(result as unknown as PushLogResponse)
+      if (!controller.signal.aborted) {
+        setData(result as unknown as PushLogResponse)
+        if (!background) setLoadError(null)
+      }
     } catch (error) {
       if (isRequestAborted(error) || controller.signal.aborted) return
-      toast.error('推送记录加载失败')
+      if (!background) {
+        const message = error instanceof Error && error.message ? error.message : '推送记录加载失败'
+        setLoadError(message)
+        toast.error(message)
+      }
       console.error('[push-log-panel] fetchLogs failed:', error)
     } finally {
       if (logRequestRef.current === controller) {
@@ -205,8 +217,29 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
           </Select>
         </div>
 
+        {loadError && data && (
+          <div role="alert" className="mb-1.5 flex items-center justify-between gap-2 border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+            <span>推送记录刷新失败，当前显示上次成功读取的结果。</span>
+            <Button size="sm" variant="outline" onClick={() => void fetchLogs()} disabled={loading} className="h-6 shrink-0 px-2 text-[11px]">
+              {loading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+              重试
+            </Button>
+          </div>
+        )}
+
         {loading ? (
           <LoadingList count={6} />
+        ) : loadError && !data ? (
+          <EmptyState
+            title="推送记录加载失败"
+            description={loadError}
+            action={
+              <Button size="sm" variant="outline" onClick={() => void fetchLogs()} disabled={loading}>
+                {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                重新加载
+              </Button>
+            }
+          />
         ) : data && data.items.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[680px] whitespace-nowrap border-collapse text-[11px]">

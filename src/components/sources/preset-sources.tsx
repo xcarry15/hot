@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -26,17 +26,26 @@ import {
 export function PresetSourcesManagement() {
   const [presets, setPresets] = useState<PresetSourceItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState(false)
+  const loadRequestRef = useRef(0)
 
   const loadPresets = useCallback(async () => {
+    const requestId = ++loadRequestRef.current
+    setLoadError(null)
+    setLoading(true)
     try {
       const data = await fetchPresetSources()
+      if (requestId !== loadRequestRef.current) return
       setPresets(data as unknown as PresetSourceItem[])
-    } catch {
-      toast.error('获取预设源失败')
+    } catch (error) {
+      if (requestId !== loadRequestRef.current) return
+      const message = error instanceof Error && error.message ? error.message : '获取预设源失败'
+      setLoadError(message)
+      toast.error(message)
     } finally {
-      setLoading(false)
+      if (requestId === loadRequestRef.current) setLoading(false)
     }
   }, [])
 
@@ -134,8 +143,23 @@ export function PresetSourcesManagement() {
   const addedCount = presets.filter(p => p.isAdded).length
   const availableCount = presets.filter(p => !p.isAdded).length
 
-  if (loading) {
+  if (loading && presets.length === 0) {
     return <LoadingList count={5} />
+  }
+
+  if (loadError && presets.length === 0) {
+    return (
+      <EmptyState
+        title="预设源加载失败"
+        description={loadError}
+        action={
+          <Button size="sm" variant="outline" onClick={() => void loadPresets()} disabled={loading}>
+            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+            重新加载
+          </Button>
+        }
+      />
+    )
   }
 
   return (
@@ -198,6 +222,16 @@ export function PresetSourcesManagement() {
           )}
         </div>
       </div>
+
+      {loadError && presets.length > 0 && (
+        <div role="alert" className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+          <span>预设源刷新失败，当前显示上次成功读取的结果。</span>
+          <Button size="sm" variant="outline" onClick={() => void loadPresets()} disabled={loading} className="h-6 shrink-0 px-2 text-[11px]">
+            {loading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+            重试
+          </Button>
+        </div>
+      )}
 
       {/* Preset List */}
       <ScrollArea className="flex-1 h-full">

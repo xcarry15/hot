@@ -21,6 +21,7 @@ import {
 import { toast } from 'sonner'
 import { AiInvocationCard, CrawlTimeCard, DailyNewArticlesCard, DailyPublicArticlesCard, DailyPushedArticlesCard, TopViewedArticlesCard } from './dashboard/dashboard-cards'
 import { isRequestAborted } from '@/lib/request-json.client'
+import { EmptyState } from '@/components/ui/empty-state'
 
 type SourceSort = 'found' | 'totalArticles' | 'avgScore' | 'ingested' | 'processed' | 'analyzed' | 'pushed' | 'unmatched' | 'duplicates' | 'ads'
 
@@ -92,6 +93,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
   const [range, setRange] = useState<DashboardAnalyticsRange>('7d')
   const [sourceSort, setSourceSort] = useState<SourceSort>('analyzed')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [refreshToken, setRefreshToken] = useState(0)
   const [crawlPage, setCrawlPage] = useState(1)
@@ -104,6 +106,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
   const [generatingSuggestions, setGeneratingSuggestions] = useState(false)
   const intervalRef = useRef<number | null>(null)
   const analyticsRequestRef = useRef<AbortController | null>(null)
+  const analyticsRef = useRef<DashboardAnalytics | null>(null)
   const feedbackRequestRef = useRef<AbortController | null>(null)
   const analyticsRequestVersionRef = useRef(0)
 
@@ -112,6 +115,8 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
     const controller = new AbortController()
     analyticsRequestRef.current = controller
     const requestVersion = ++analyticsRequestVersionRef.current
+    if (!analyticsRef.current) setLoading(true)
+    setLoadError(null)
     try {
       const analyticsJson = await fetchDashboardAnalytics(range, undefined, controller.signal, {
         page: crawlPage,
@@ -122,10 +127,13 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
       })
       if (controller.signal.aborted || requestVersion !== analyticsRequestVersionRef.current) return
       setAnalytics(analyticsJson)
+      analyticsRef.current = analyticsJson
     } catch (error) {
       if (controller.signal.aborted || isRequestAborted(error)) return
       if (requestVersion !== analyticsRequestVersionRef.current) return
-      toast.error('获取概览数据失败')
+      const message = error instanceof Error && error.message ? error.message : '获取概览数据失败'
+      setLoadError(message)
+      toast.error(message)
     } finally {
       if (analyticsRequestRef.current === controller) {
         analyticsRequestRef.current = null
@@ -236,11 +244,33 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
     )
   }
 
-  if (!analytics) return null
+  if (!analytics) {
+    return (
+      <EmptyState
+        title="概览加载失败"
+        description={loadError || '请重新加载概览数据。'}
+        action={
+          <Button size="sm" variant="outline" onClick={() => void fetchData()} disabled={loading}>
+            {loading ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+            重新加载
+          </Button>
+        }
+      />
+    )
+  }
 
   const summary = analytics.summary
   return (
     <div className="space-y-1 pt-0 [&_[data-slot=card]]:rounded-none [&_[data-slot=card]]:shadow-none">
+      {loadError && (
+        <div role="alert" className="flex items-center justify-between gap-2 border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+          <span>概览刷新失败，当前显示上次成功读取的数据。</span>
+          <Button size="sm" variant="outline" onClick={() => void fetchData()} disabled={loading} className="h-6 shrink-0 px-2 text-[11px]">
+            {loading ? <RefreshCw className="mr-1 h-3 w-3 animate-spin" /> : null}
+            重试
+          </Button>
+        </div>
+      )}
       <div className="flex min-h-10 flex-wrap items-stretch border bg-border">
         <div className="flex items-center gap-1 bg-background px-1.5">
           <h2 className="text-sm font-semibold">概览</h2>

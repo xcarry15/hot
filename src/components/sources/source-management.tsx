@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -48,7 +48,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatRelativeTime } from '@/lib/shared/date'
-import { EmptyData } from '@/components/ui/empty-state'
+import { EmptyData, EmptyState } from '@/components/ui/empty-state'
 import { StatusLight } from './status-light'
 import { DEFAULT_PARSER_CONFIGS } from './constants'
 import type { Source, TestResult } from './types'
@@ -67,6 +67,7 @@ import {
 export function SourceManagement() {
   const [sources, setSources] = useState<Source[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [showAddDialog, setShowAddDialog] = useState(false)
@@ -79,22 +80,33 @@ export function SourceManagement() {
   const [retrying, setRetrying] = useState<string | null>(null)
   const [batchToggling, setBatchToggling] = useState(false)
   const [batchToggleTarget, setBatchToggleTarget] = useState<boolean | null>(null)
+  const [saving, setSaving] = useState(false)
+  const loadRequestRef = useRef(0)
 
   // Form state
   const [formName, setFormName] = useState('')
   const [formType, setFormType] = useState('html')
   const [formUrl, setFormUrl] = useState('')
-  const [formParserConfig, setFormParserConfig] = useState(DEFAULT_PARSER_CONFIGS.html)
+  const [formParserConfigs, setFormParserConfigs] = useState<Record<string, string>>({ ...DEFAULT_PARSER_CONFIGS })
   const [formEnabled, setFormEnabled] = useState(true)
 
+  const formParserConfig = formParserConfigs[formType] || DEFAULT_PARSER_CONFIGS[formType] || '{}'
+
   const loadSources = useCallback(async () => {
+    const requestId = ++loadRequestRef.current
+    setLoadError(null)
+    setLoading(true)
     try {
       const data = await fetchSources()
+      if (requestId !== loadRequestRef.current) return
       setSources(data)
-    } catch {
-      toast.error('获取数据源失败')
+    } catch (error) {
+      if (requestId !== loadRequestRef.current) return
+      const message = error instanceof Error && error.message ? error.message : '获取数据源失败'
+      setLoadError(message)
+      toast.error(message)
     } finally {
-      setLoading(false)
+      if (requestId === loadRequestRef.current) setLoading(false)
     }
   }, [])
 
@@ -107,7 +119,7 @@ export function SourceManagement() {
     setFormName('')
     setFormType('html')
     setFormUrl('')
-    setFormParserConfig(DEFAULT_PARSER_CONFIGS.html)
+    setFormParserConfigs({ ...DEFAULT_PARSER_CONFIGS })
     setFormEnabled(true)
     setTestResult(null)
   }
@@ -123,7 +135,10 @@ export function SourceManagement() {
     setFormName(source.name)
     setFormType(source.type)
     setFormUrl(source.url)
-    setFormParserConfig(source.parserConfig || '{}')
+    setFormParserConfigs({
+      ...DEFAULT_PARSER_CONFIGS,
+      [source.type]: source.parserConfig || DEFAULT_PARSER_CONFIGS[source.type] || '{}',
+    })
     setFormEnabled(source.enabled)
     setTestResult(null)
     setShowAddDialog(true)
@@ -153,16 +168,18 @@ export function SourceManagement() {
   }
 
   const handleSave = async () => {
-    if (!formName || !formUrl) {
+    if (saving || testing) return
+    if (!formName.trim() || !formUrl.trim()) {
       toast.error('名称和URL为必填项')
       return
     }
 
+    setSaving(true)
     try {
       const baseInput = {
-        name: formName,
+        name: formName.trim(),
         type: formType,
-        url: formUrl,
+        url: formUrl.trim(),
         parserConfig: formParserConfig,
         enabled: formEnabled,
       }
@@ -174,9 +191,11 @@ export function SourceManagement() {
         toast.success('数据源已创建')
       }
       setShowAddDialog(false)
-      loadSources()
-    } catch {
-      toast.error('保存失败')
+      await loadSources()
+    } catch (error) {
+      toast.error(error instanceof Error && error.message ? error.message : '保存失败')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -239,8 +258,23 @@ export function SourceManagement() {
     return true
   })
 
-  if (loading) {
+  if (loading && sources.length === 0) {
     return <LoadingList count={5} />
+  }
+
+  if (loadError && sources.length === 0) {
+    return (
+      <EmptyState
+        title="数据源加载失败"
+        description={loadError}
+        action={
+          <Button size="sm" variant="outline" onClick={() => void loadSources()} disabled={loading}>
+            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+            重新加载
+          </Button>
+        }
+      />
+    )
   }
 
   return (
@@ -295,10 +329,32 @@ export function SourceManagement() {
         </div>
       </div>
 
+      {loadError && sources.length > 0 && (
+        <div role="alert" className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+          <span>数据源刷新失败，当前显示上次成功读取的结果。</span>
+          <Button size="sm" variant="outline" onClick={() => void loadSources()} disabled={loading} className="h-6 shrink-0 px-2 text-[11px]">
+            {loading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+            重试
+          </Button>
+        </div>
+      )}
+
       {/* Source List */}
       <ScrollArea className="flex-1 h-full">
         {filteredSources.length === 0 ? (
-          <EmptyData message="暂无数据源" />
+          searchQuery || statusFilter !== 'all' ? (
+            <EmptyState
+              title="没有匹配的数据源"
+              description="可以清除搜索或状态筛选后重试。"
+              action={
+                <Button size="sm" variant="outline" onClick={() => { setSearchQuery(''); setStatusFilter('all') }}>
+                  清除筛选
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyData message="暂无数据源" />
+          )
         ) : (
           <div className="space-y-px p-2">
             {filteredSources.map((source) => (
@@ -344,7 +400,10 @@ export function SourceManagement() {
                     onClick={() => {
                       setFormType(source.type)
                       setFormUrl(source.url)
-                      setFormParserConfig(source.parserConfig || '{}')
+                      setFormParserConfigs({
+                        ...DEFAULT_PARSER_CONFIGS,
+                        [source.type]: source.parserConfig || DEFAULT_PARSER_CONFIGS[source.type] || '{}',
+                      })
                       setTestResult(null)
                       setShowTestDialog(true)
                     }}
@@ -417,7 +476,7 @@ export function SourceManagement() {
               </div>
               <div className="space-y-1.5">
                 <Label className="text-sm">类型</Label>
-                <Select value={formType} onValueChange={(v) => { setFormType(v); setFormParserConfig(DEFAULT_PARSER_CONFIGS[v] || '{}') }}>
+                <Select value={formType} onValueChange={setFormType}>
                   <SelectTrigger className="h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
@@ -438,7 +497,7 @@ export function SourceManagement() {
               <Label className="text-sm">解析配置 (JSON)</Label>
               <Textarea
                 value={formParserConfig}
-                onChange={(e) => setFormParserConfig(e.target.value)}
+                onChange={(e) => setFormParserConfigs((current) => ({ ...current, [formType]: e.target.value }))}
                 className="text-sm font-mono min-h-[120px]"
                 placeholder="{}"
               />
@@ -476,11 +535,14 @@ export function SourceManagement() {
             )}
           </div>
           <DialogFooter className="gap-2">
-            <Button size="sm" variant="outline" onClick={handleTest} disabled={testing} className="gap-1.5">
+            <Button size="sm" variant="outline" onClick={handleTest} disabled={testing || saving} className="gap-1.5">
               {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
               测试抓取
             </Button>
-            <Button size="sm" onClick={handleSave}>保存</Button>
+            <Button size="sm" onClick={handleSave} disabled={saving || testing}>
+              {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+              {saving ? '保存中' : '保存'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
@@ -71,22 +71,31 @@ export default function KeywordsTab() {
   const [keywords, setKeywords] = useState<Keyword[]>([])
   const [candidates, setCandidates] = useState<KeywordCandidate[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [clearAllDialogOpen, setClearAllDialogOpen] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkText, setBulkText] = useState('')
   const [bulkCategory, setBulkCategory] = useState<string>(KEYWORD_DEFAULT_CATEGORY)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
+  const loadRequestRef = useRef(0)
 
   const loadKeywords = useCallback(async () => {
+    const requestId = ++loadRequestRef.current
+    setLoadError(null)
+    setLoading(true)
     try {
       const [data, candidateData] = await Promise.all([fetchKeywords(), fetchKeywordCandidates()])
+      if (requestId !== loadRequestRef.current) return
       setKeywords(data)
       setCandidates(candidateData)
-    } catch {
-      toast.error('获取关键词失败')
+    } catch (error) {
+      if (requestId !== loadRequestRef.current) return
+      const message = error instanceof Error && error.message ? error.message : '获取关键词失败'
+      setLoadError(message)
+      toast.error(message)
     } finally {
-      setLoading(false)
+      if (requestId === loadRequestRef.current) setLoading(false)
     }
   }, [])
 
@@ -304,13 +313,28 @@ export default function KeywordsTab() {
     </div>
   )
 
-  if (loading) {
+  if (loading && keywords.length === 0 && candidates.length === 0) {
     return (
       <div className="space-y-2 p-3">
         {Array.from({ length: 4 }).map((_, i) => (
           <Skeleton key={i} className="h-16 w-full" />
         ))}
       </div>
+    )
+  }
+
+  if (loadError && keywords.length === 0 && candidates.length === 0) {
+    return (
+      <EmptyState
+        title="关键词加载失败"
+        description={loadError}
+        action={
+          <Button size="sm" variant="outline" onClick={() => void loadKeywords()} disabled={loading}>
+            {loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+            重新加载
+          </Button>
+        }
+      />
     )
   }
 
@@ -338,6 +362,16 @@ export default function KeywordsTab() {
           </div>
         </div>
       </div>
+
+      {loadError && (keywords.length > 0 || candidates.length > 0) && (
+        <div role="alert" className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+          <span>关键词刷新失败，当前显示上次成功读取的结果。</span>
+          <Button size="sm" variant="outline" onClick={() => void loadKeywords()} disabled={loading} className="h-6 shrink-0 px-2 text-[11px]">
+            {loading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+            重试
+          </Button>
+        </div>
+      )}
 
       <ScrollArea className="flex-1 min-h-0">
         <div className="flex min-h-full flex-col gap-1.5 p-1.5">

@@ -69,6 +69,10 @@ import {
   type WorkflowAction,
 } from './crawl-log/workflow'
 
+function actionErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message : fallback
+}
+
 // ========== Main Component ==========
 
 export default function CrawlLogTab({ active = true }: { active?: boolean }) {
@@ -426,9 +430,9 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       .then(() => {
         autoCrawlPersistedRef.current = next
       })
-      .catch(() => {
+      .catch((error) => {
         setAutoCrawl(previous ?? !next)
-        toast.error('设置保存失败')
+        toast.error(actionErrorMessage(error, '设置保存失败'))
       })
       .finally(() => {
         autoCrawlSavingRef.current = false
@@ -502,8 +506,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       } else {
         toast.info(res.reason || res.error || '已有相同任务在执行')
       }
-    } catch {
-      toast.error('触发失败')
+    } catch (error) {
+      toast.error(actionErrorMessage(error, '触发失败'))
     } finally {
       operationRequestLockRef.current = false
       setStageRequestLoading(prev => ({ ...prev, [stage]: false }))
@@ -517,8 +521,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       await stopWorker()
       toast.info('已发送停止请求，当前阶段完成后将中断', { duration: 3000 })
       void refreshSnapshot()
-    } catch {
-      toast.error('停止请求失败')
+    } catch (error) {
+      toast.error(actionErrorMessage(error, '停止请求失败'))
     } finally {
       setStopLoading(false)
     }
@@ -550,8 +554,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       scheduleWorkQueueSummaryRefresh()
       await refreshSnapshot()
       return true
-    } catch {
-      toast.error('操作失败')
+    } catch (error) {
+      toast.error(actionErrorMessage(error, '操作失败'))
       return false
     } finally {
       operationRequestLockRef.current = false
@@ -566,8 +570,8 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
       toast.success(action === 'ignore' ? '已从技术待办中忽略' : '已恢复技术待办')
       scheduleWorkQueueSummaryRefresh()
       await refreshSnapshot()
-    } catch {
-      toast.error('操作失败')
+    } catch (error) {
+      toast.error(actionErrorMessage(error, '操作失败'))
     }
   }, [isOperationBusy, refreshSnapshot])
 
