@@ -60,5 +60,5 @@ export async function rebuildRecentArticleKeywordHits(): Promise<number> {
         AND k.category <> ${KEYWORD_BLACKLIST_CATEGORY}
         AND instr(lower(a.title || ' ' || a.cleanContent), lower(k.word)) > 0
     `;
-  });
+  }, { maxWait: 10_000, timeout: 30_000 });
 }

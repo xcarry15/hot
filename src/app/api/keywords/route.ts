@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     if (error instanceof Error && error.message.includes('Unique constraint')) {
       return NextResponse.json({ error: '关键词已存在' }, { status: 409 });
     }
-    return apiError(error, 'Failed to add keywords');
+    return apiError(error, '关键词操作失败');
   }
 }
 
