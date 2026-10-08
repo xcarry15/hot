@@ -41,6 +41,7 @@ vi.mock('@/lib/settings', async (importOriginal) => {
 vi.mock('@/lib/push/feishu-transport', () => ({ sendFeishuWebhook: mocks.sendWebhook }));
 
 import { getPushTargetStatesForEvents, pushArticleToFeishu, pushEventToFeishu } from '@/lib/push/delivery';
+import { pushableWhere } from '@/lib/push/policy';
 
 function representative(overrides: Record<string, unknown> = {}) {
   return {
@@ -83,6 +84,39 @@ describe('Event 推送门禁', () => {
     mocks.settingFindUnique.mockImplementation(({ where }: { where: { key: string } }) => Promise.resolve({
       value: where.key === 'push_mode' ? 'realtime' : '50',
     }));
+  });
+
+  it.each(['normal', 'retry_failed'] as const)('有硬事实的软文不能通过%s自动投递', async (mode) => {
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0, nextPushRetryAt: null,
+      representativeArticle: representative({ isAd: true, score: 100 }),
+    });
+    await expect(pushEventToFeishu('e1', mode)).resolves.toMatchObject({
+      status: 'failed', message: '软文不参与自动推送，可人工确认后强制推送',
+    });
+    expect(mocks.sendWebhook).not.toHaveBeenCalled();
+  });
+
+  it('自动推送队列在查询时排除软文，不消耗重试次数', () => {
+    expect(pushableWhere({ pushMode: 'realtime', minScore: 0, minRelevance: 0 }))
+      .toMatchObject({ representativeArticle: { is: { isAd: false } } });
+  });
+
+  it('人工明确强制推送仍可投递已完成AI和聚类的软文', async () => {
+    mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0, nextPushRetryAt: null,
+      representativeArticle: representative({ isAd: true, score: 40 }),
+    });
+    mocks.pushDeliveryFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        eventId: 'e1', targetId: `t-${computeUrlHash('https://hook/a').slice(0, 8)}`,
+        status: 'succeeded', createdAt: new Date(), updatedAt: new Date(),
+      }]);
+    await pushEventToFeishu('e1', 'manual_force');
+    expect(mocks.sendWebhook).toHaveBeenCalledTimes(1);
   });
 
   it('没有 Event 的 Article 不能直接推送', async () => {

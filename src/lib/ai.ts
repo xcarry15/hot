@@ -39,8 +39,8 @@ import {
   type FetchStatusValue,
 } from '@/contracts/state';
 
-// v24：摘要统一为 111-222 字；每篇文章只请求一次 AI，保留事实、身份和可读洞察。
-const PROMPT_VERSION = 'v24';
+// v25：保留有用宣传中的事件事实，并强化原文证据与评分分档约束。
+const PROMPT_VERSION = 'v25';
 
 const MIN_VALUE_RELEVANCE = 60;
 const MIN_VALUE_CONTENT_SCORE = 40;
@@ -49,15 +49,22 @@ function isNoValueAnalysis(input: {
   hasCompleteEventIdentity: boolean;
   isAd: boolean;
   relevance: number;
+  eventScore: number;
   contentScore: number;
 }): boolean {
+  if (input.isAd) {
+    // 广告性质与事实价值分开；只保留身份完整、行业相关且证据充足的情报。
+    return !input.hasCompleteEventIdentity
+      || input.relevance < MIN_VALUE_RELEVANCE
+      || input.eventScore < 65
+      || input.contentScore < 65;
+  }
   // 有清晰事实的低影响事件仍保留，后续由评分/公开门禁决定是否展示。
-  if (input.hasCompleteEventIdentity) return input.isAd;
+  if (input.hasCompleteEventIdentity) return false;
   // 没有可归属事件时，缺少行业相关性或信息密度才归为无价值；
   // 有价值但无法提取单一事件身份的文章由聚类阶段自动建立独立 Event，
   // 不再把内容理解结果转成事件校准待办。
-  return input.isAd
-    || input.relevance < MIN_VALUE_RELEVANCE
+  return input.relevance < MIN_VALUE_RELEVANCE
     || input.contentScore < MIN_VALUE_CONTENT_SCORE;
 }
 
@@ -390,6 +397,7 @@ export async function processWithAI(
       hasCompleteEventIdentity,
       isAd: effective.isAd,
       relevance: effective.relevance,
+      eventScore: effective.eventScore,
       contentScore: effective.contentScore,
     });
     assertNotAborted(signal);

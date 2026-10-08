@@ -97,7 +97,7 @@ describe('Event 人工纠错', () => {
       .mockResolvedValueOnce({ representativeArticleId: 'a1' });
     mocks.articleFindMany
       .mockResolvedValueOnce([{ id: 'a1', publishedAt: pushedAt, createdAt: pushedAt }])
-      .mockResolvedValueOnce([{ id: 'a1', clusterStatus: 'clustered', aiStatus: 'done', score: 90, relevance: 90, cleanContent: '正文', publishedAt: pushedAt, createdAt: pushedAt, source: { publicEnabled: true, deletedAt: null } }]);
+      .mockResolvedValueOnce([{ id: 'a1', clusterStatus: 'clustered', aiStatus: 'done', isAd: false, score: 90, relevance: 90, cleanContent: '正文', publishedAt: pushedAt, createdAt: pushedAt, source: { publicEnabled: true, deletedAt: null } }]);
     await expect(mergeEvents('source', 'target')).resolves.toBe(true);
     // P0-5: 不再复制 pushedAt
     expect(mocks.eventUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ pushedAt: expect.anything() }) }));
@@ -109,8 +109,8 @@ describe('Event 人工纠错', () => {
   it('自动代表文章优先选择可发布成员而不是待复核高分成员', () => {
     const now = new Date();
     const selected = selectRepresentativeCandidate([
-      { id: 'review', clusterStatus: 'needs_review', aiStatus: 'done', score: 100, relevance: 100, cleanContent: '更长正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
-      { id: 'ready', clusterStatus: 'clustered', aiStatus: 'done', score: 60, relevance: 60, cleanContent: '正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
+      { id: 'review', clusterStatus: 'needs_review', aiStatus: 'done', isAd: false, score: 100, relevance: 100, cleanContent: '更长正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
+      { id: 'ready', clusterStatus: 'clustered', aiStatus: 'done', isAd: false, score: 60, relevance: 60, cleanContent: '正文', publishedAt: now, createdAt: now, source: { publicEnabled: true, deletedAt: null } },
     ]);
     expect(selected).toBe('ready');
   });
@@ -119,10 +119,20 @@ describe('Event 人工纠错', () => {
     const early = new Date('2026-07-17T08:00:00Z');
     const late = new Date('2026-07-17T09:00:00Z');
     const selected = selectRepresentativeCandidate([
-      { id: 'late-high-score', clusterStatus: 'clustered', aiStatus: 'done', score: 100, relevance: 100, cleanContent: '更长正文', publishedAt: late, createdAt: late, source: { publicEnabled: true, deletedAt: null } },
-      { id: 'early-low-score', clusterStatus: 'clustered', aiStatus: 'done', score: 60, relevance: 60, cleanContent: '正文', publishedAt: early, createdAt: early, source: { publicEnabled: true, deletedAt: null } },
+      { id: 'late-high-score', clusterStatus: 'clustered', aiStatus: 'done', isAd: false, score: 100, relevance: 100, cleanContent: '更长正文', publishedAt: late, createdAt: late, source: { publicEnabled: true, deletedAt: null } },
+      { id: 'early-low-score', clusterStatus: 'clustered', aiStatus: 'done', isAd: false, score: 60, relevance: 60, cleanContent: '正文', publishedAt: early, createdAt: early, source: { publicEnabled: true, deletedAt: null } },
     ]);
     expect(selected).toBe('early-low-score');
+  });
+
+  it('保留的宣传稿不抢占正常报道的自动代表，只有宣传稿时仍允许人工处理', () => {
+    const early = new Date('2026-07-17T08:00:00Z');
+    const base = { clusterStatus: 'clustered', aiStatus: 'done', score: 70, relevance: 90,
+      cleanContent: '事实正文', publishedAt: early, createdAt: early, source: { publicEnabled: true, deletedAt: null } };
+    const ad = { ...base, id: 'ad', isAd: true };
+    const news = { ...base, id: 'news', isAd: false, publishedAt: new Date('2026-07-18T08:00:00Z') };
+    expect(selectRepresentativeCandidate([ad, news])).toBe('news');
+    expect(selectRepresentativeCandidate([ad])).toBe('ad');
   });
 
   it('从已推送 Event 拆分时新 Event 保持未推送', async () => {
@@ -136,9 +146,9 @@ describe('Event 人工纠错', () => {
     mocks.articleFindMany
       .mockResolvedValueOnce([{ id: 'split', publishedAt: articleDate, createdAt: articleDate, aiStatus: 'done' }])
       .mockResolvedValueOnce([{ id: 'remaining', publishedAt: articleDate, createdAt: articleDate }])
-      .mockResolvedValueOnce([{ id: 'remaining', clusterStatus: 'clustered', aiStatus: 'done', score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }])
+      .mockResolvedValueOnce([{ id: 'remaining', clusterStatus: 'clustered', aiStatus: 'done', isAd: false, score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }])
       .mockResolvedValueOnce([{ id: 'split', publishedAt: articleDate, createdAt: articleDate }])
-      .mockResolvedValueOnce([{ id: 'split', clusterStatus: 'clustered', aiStatus: 'done', score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }]);
+      .mockResolvedValueOnce([{ id: 'split', clusterStatus: 'clustered', aiStatus: 'done', isAd: false, score: 50, relevance: 50, cleanContent: '正文', publishedAt: articleDate, createdAt: articleDate, source: { publicEnabled: true, deletedAt: null } }]);
     mocks.articleCount.mockResolvedValue(2);
     mocks.eventCreate.mockResolvedValue({ id: 'new-event' });
     await expect(splitEventArticles('source', ['split'])).resolves.toBe('new-event');

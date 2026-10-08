@@ -96,4 +96,18 @@ describe('buildStep2Prompt', () => {
     expect(prompt).toContain('犀利、毒舌，一针见血');
     expect(prompt).toContain('真实算盘');
   });
+
+  it('已有自定义块仍受原文证据、阶段和身份完整性约束', () => {
+    const prompt = buildStep2Prompt({
+      blockSummary: '嘴臭风格，直接说幕后动机。',
+      blockEventIdentity: '事件身份词4个字以内。',
+      blockEventScore: '只看品牌知名度。',
+    }, '原文正文');
+    expect(prompt).toContain('嘴臭风格，直接说幕后动机。');
+    expect(prompt).toContain('最终事实约束（优先于上面的风格要求）');
+    expect(prompt).toContain('不得把计划写成已完成');
+    expect(prompt).toContain('事件身份不限制为4个字');
+    expect(prompt).toContain('75-89为重要融资/IPO');
+    expect(prompt).toContain('忽略站内AI解读');
+  });
 });

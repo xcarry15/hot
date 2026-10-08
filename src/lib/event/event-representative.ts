@@ -7,6 +7,7 @@ export type RepresentativeCandidate = {
   aiStatus: string;
   score: number;
   relevance: number;
+  isAd: boolean;
   cleanContent: string;
   publishedAt: Date | null;
   createdAt: Date;
@@ -48,6 +49,9 @@ export function selectRepresentativeCandidate(articles: RepresentativeCandidate[
 function compareRepresentative(left: RepresentativeCandidate, right: RepresentativeCandidate): number {
   const ready = Number(isReleaseRepresentativeEligible(right)) - Number(isReleaseRepresentativeEligible(left));
   if (ready !== 0) return ready;
+  // 有正常报道时，保留的宣传稿不能抢占代表并使整个 Event 被广告门禁隐藏。
+  const ad = Number(left.isAd) - Number(right.isAd);
+  if (ad !== 0) return ad;
   // 代表文章优先保留 Event 中最早发布的合格报道；其余指标只用于同日或时间相同的情况。
   const time = eventDate(left).getTime() - eventDate(right).getTime();
   if (time !== 0) return time;

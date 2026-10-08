@@ -8,88 +8,56 @@
  * 3. meaningfulTextLength() → 有意义文本字符数（去标签+去空白）
  */
 
-/**
- * Extract the article body from a full page HTML.
- *
- * page_reader returns the ENTIRE page HTML (head, nav, footer, etc.).
- * This function isolates just the article content area using common
- * CSS class / tag patterns. Falls back to <body> or the full HTML.
- */
-export function extractArticleBody(fullHtml: string): string {
+import * as cheerio from 'cheerio';
+
+// 按实际正文容器取 DOM 子树，不能从开始标签一直取到整页末尾。
+const ARTICLE_BODY_SELECTORS = [
+  '.content-editor', '.cd_content .con_text', '.cd_content', '.post-text', '.win-news-content',
+  '.article-content', '.post-content', '.post-body', '.article-body',
+  '.entry-content', '.news_content', '.detail_content', '.art_content',
+  '.cont_text', '.rich_media_content', 'article', '.content',
+];
+
+const HTML_NOISE_SELECTOR = [
+  'script', 'style', 'nav', 'footer', 'aside', 'header',
+  '.extra', '.module_body', '.instructions', '.share_box', '.share-box',
+  '.win-news-links', '.win-new-list1', '.post-header', '.read-content',
+  '.ai-article-content', '.article-faq-panel',
+  '[class*="comment"]', '[class*="sidebar"]', '[class*="related"]',
+  '[class*="recommend"]', '[class*="copyright"]',
+].join(', ');
+
+/** 保留来源指定容器；仅对已知宽容器收缩到明确的原文子树。 */
+export function extractArticleBody(fullHtml: string, contentSelector?: string): string {
   if (!fullHtml) return '';
-
-  // Ordered by specificity — first match wins
-  const bodyPatterns: Array<{ name: string; re: RegExp }> = [
-    // ── canyin88 specific ──
-    { name: 'content-editor', re: /class=["'][^"']*content-editor[^"']*["'][^>]*>([\s\S]+)$/i },
-    { name: 'cd_content',     re: /class=["'][^"']*cd_content[^"']*["'][^>]*>([\s\S]+)$/i },
-    // ── Common CMS patterns ──
-    { name: 'article-content',  re: /class=["'][^"']*article-content[^"']*["'][^>]*>([\s\S]+)$/i },
-    { name: 'post-content',     re: /class=["'][^"']*post-content[^"']*["'][^>]*>([\s\S]+)$/i },
-    { name: 'post-body',        re: /class=["'][^"']*post-body[^"']*["'][^>]*>([\s\S]+)$/i },
-    { name: 'article-body',     re: /class=["'][^"']*article-body[^"']*["'][^>]*>([\s\S]+)$/i },
-    { name: 'entry-content',    re: /class=["'][^"']*entry-content[^"']*["'][^>]*>([\s\S]+)$/i },
-    { name: 'news_content',     re: /class=["'][^"']*news_content[^"']*["'][^>]*>([\s\S]+)$/i },
-    { name: 'win-news-content', re: /class=["'][^"']*win-news-content[^"']*["'][^>]*>([\s\S]+)$/i },
-    { name: 'detail_content',   re: /class=["'][^"']*detail_content[^"']*["'][^>]*>([\s\S]+)$/i },
-    { name: 'art_content',      re: /class=["'][^"']*art_content[^"']*["'][^>]*>([\s\S]+)$/i },
-    { name: 'cont_text',        re: /class=["'][^"']*cont_text[^"']*["'][^>]*>([\s\S]+)$/i },
-    // ── WeChat / winshang rich media content ──
-    { name: 'rich_media_content', re: /class=["'][^"']*rich_media_content[^"']*["'][^>]*>([\s\S]+?)<\/div>\s*<!--/i },
-    // ── Semantic HTML ──
-    { name: '<article> tag',    re: /<article[^>]*>([\s\S]+?)<\/article>/i },
-    // ── Generic class="content" inside a main/section (match content as a class token) ──
-    // 原正则 `class=["']content["']` 只匹配 class 属性恰好等于 "content" 的元素，
-    // 实际生产中绝大多数站点（如 linkshop.com 用 `class="container content clearfix"`）
-    // 都会失败 → 落到 <body> fallback，cleaner 不做任何截断，所有站级 boilerplate
-    // 全量进入 dedup 输入。修：用 \bcontent\b 作为词边界匹配，支持多类名。
-    { name: 'class=content',    re: /class=["'][^"']*\bcontent\b[^"']*["'][^>]*>([\s\S]+)$/i },
-  ];
-
-  for (const { re } of bodyPatterns) {
-    const match = fullHtml.match(re);
-    if (match && match[1] && match[1].length > 200) {
-      // We matched from the opening tag to end of string.
-      // Now we need to find where the content div actually ends.
-      // Strategy: strip trailing noise (footer, sidebar, scripts) rather than
-      // trying to find the exact closing </div> (which is unreliable with regex).
-      let body = match[1];
-
-      // Remove everything after the last useful paragraph — cut at known noise markers
-      const noiseMarkers = [
-        /<div[^>]*class=["'][^"']*(?:comment|sidebar|related|recommend|share-box|reward|hot-list|column|footer-links|copyright|share|instructions|extra|module)[^"']*["']/i,
-        /<section[^>]*class=["'][^"']*(?:comment|sidebar|related|recommend|extra|module|share)[^"']*["']/i,
-        /<!--\s*(?:相关|推荐|评论|分享|打赏|版权|footer|可能会喜欢)/i,
-      ];
-      let cutIdx = body.length;
-      for (const marker of noiseMarkers) {
-        const m = body.match(marker);
-        if (m && m.index && m.index < cutIdx && m.index > 100) {
-          cutIdx = m.index;
-        }
+  const $ = cheerio.load(fullHtml);
+  const root = $.root();
+  let scope: ReturnType<typeof $> = root;
+  if (contentSelector?.trim()) {
+    try {
+      const selected = $(contentSelector).first();
+      if (selected.length) {
+        const original = selected.is('section.article-content-module')
+          ? selected.find('.post-text').first()
+          : selected.is('.cd_content') ? selected.find('.con_text').first() : selected;
+        scope = original.length ? original : selected;
+        scope.find(HTML_NOISE_SELECTOR).remove();
+        return scope.html() || '';
       }
-      body = body.substring(0, cutIdx);
-
-      if (body.length > 100) {
-        return body;
-      }
+    } catch {
+      // 无效选择器回退通用提取；已找到但正文不足的容器不能用整页噪声补足。
     }
   }
-
-  // Fallback 1: extract <body> content
-  const bodyTagMatch = fullHtml.match(/<body[^>]*>([\s\S]+?)<\/body>/i);
-  if (bodyTagMatch && bodyTagMatch[1].length > 200) {
-    return bodyTagMatch[1];
+  for (const selector of ARTICLE_BODY_SELECTORS) {
+    const body = scope.is(selector) ? scope : scope.find(selector).first();
+    if (!body.length) continue;
+    body.find(HTML_NOISE_SELECTOR).remove();
+    return body.html() || '';
   }
-
-  // Fallback 2: return everything after <body>
-  const bodyStartMatch = fullHtml.match(/<body[^>]*>([\s\S]+)$/i);
-  if (bodyStartMatch && bodyStartMatch[1].length > 200) {
-    return bodyStartMatch[1];
-  }
-
-  // Last resort: return the full HTML
-  return fullHtml;
+  const body: ReturnType<typeof $> = scope.is('html') || scope.is('body') || scope === root
+    ? $('body') : scope;
+  body.find(HTML_NOISE_SELECTOR).remove();
+  return body.html() || '';
 }
 
 const NOISE_PATTERNS = [
@@ -107,8 +75,8 @@ const NOISE_PATTERNS = [
   /点击阅读原文[\s\S]*?(?=\n)/gi,
   /更多精彩[\s\S]*?(?=\n)/gi,
   /微信扫一扫[\s\S]*?(?=\n)/gi,
-  /举报[\s\S]*?(?=\n)/gi,
-  /广告[\s\S]*?(?=\n)/gi,
+  /^\s*举报\s*$/gm,
+  /^\s*广告\s*$/gm,
   /写个文章不容易[\s\S]*?(?=\n)/gi,
   /查看更多[\s\S]*?(?=\n)/gi,
   /返回顶部[\s\S]*?(?=\n)/gi,
@@ -125,7 +93,7 @@ const NOISE_PATTERNS = [
   // ── Site-wide boilerplate (e.g. linkshop.com) ──
   // 这些块在所有站内文章中完全相同，跨文章 LCS 会凑出 500+ 字符
   // 共享，污染去重判定。下面几行在 text-cleaning 阶段是第二道防线，
-  // 主防线在 extractArticleBody 的 class-based cut。
+  // 主防线在 extractArticleBody 的 DOM 容器提取。
   /你可能会喜欢：?[\s\S]*?(?=\n)/gi,
   /\d+小时关注榜[\s\S]*?(?=\n)/gi,
   /发表评论[\s\S]*?(?=\n)/gi,
@@ -136,45 +104,12 @@ const NOISE_PATTERNS = [
   /本站所有[\s\S]*?(?=\n)/gi,
 ];
 
-const HTML_NOISE_PATTERNS = [
-  /<script[\s\S]*?<\/script>/gi,
-  /<style[\s\S]*?<\/style>/gi,
-  /<nav[\s\S]*?<\/nav>/gi,
-  /<footer[\s\S]*?<\/footer>/gi,
-  /<aside[\s\S]*?<\/aside>/gi,
-  /<header[\s\S]*?<\/header>/gi,
-  // ── 站级 boilerplate 块（按 class 名剥整段，包括 <section> 和 <div>）──
-  // linkshop.com 等站会在文章正文后面接整块「你可能会喜欢」「数据」
-  // 「48小时关注榜」等 section，所有站内文章这些 section 跨文章完全相同。
-  // 若不剥，dedup 的 LCS 会被 500+ 字符的跨文章完全相同内容污染。
-  // 模式：class 含目标关键词 → 删到匹配的 </div> 或 </section> 边界
-  /class=["'][^"']*\bextra\b[^"']*["'][^>]*>[\s\S]*?<\/(?:div|section)>/gi,
-  /class=["'][^"']*module[-_]?body[^"']*["'][^>]*>[\s\S]*?<\/(?:div|section)>/gi,
-  /class=["'][^"']*comment[-_]?(?:box|bar|list)[^"']*["'][^>]*>[\s\S]*?<\/(?:div|section)>/gi,
-  /class=["'][^"']*share[-_]?box[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*instructions[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*share[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*comment[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*sidebar[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*related[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*recommend[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*reward[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*hot-list[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*column[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*search[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*breadcrumb[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-  /class=["'][^"']*pagination[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
-];
-
-/**
- * Remove HTML noise blocks from content
- */
+/** DOM 删除噪声块，保留嵌套正文及段落结束边界。 */
 function removeHtmlNoise(html: string): string {
-  let content = html;
-  for (const pattern of HTML_NOISE_PATTERNS) {
-    content = content.replace(pattern, '');
-  }
-  return content;
+  if (!/<[a-z][a-z0-9:-]*(?:\s|\/?>)/i.test(html)) return html;
+  const $ = cheerio.load(html, {}, false);
+  $(HTML_NOISE_SELECTOR).remove();
+  return $.html();
 }
 
 /**

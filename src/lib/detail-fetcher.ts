@@ -76,8 +76,7 @@ function extractArticleBodyForSource(html: string, parserConfig?: string): strin
         ? (parsed as { content: string }).content.trim()
         : '';
       if (contentSelector) {
-        const selected = cheerio.load(html)(contentSelector).first().html();
-        if (selected && selected.length > 100) return selected;
+        return extractArticleBody(html, contentSelector);
       }
     } catch {
       // 来源配置错误时回退通用正文提取，不能中断正文流水线。

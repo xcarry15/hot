@@ -61,6 +61,7 @@ export function pushableWhere(settings: PushSettings) {
       is: {
         score: { gte: settings.minScore },
         relevance: { gte: settings.minRelevance },
+        isAd: false,
         aiStatus: 'done' as const,
         clusterStatus: 'clustered' as const,
         technicalIgnoredAt: null,

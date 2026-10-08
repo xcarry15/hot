@@ -36,6 +36,7 @@ function article(overrides: Partial<ArticleStepInput> = {}): ArticleStepInput {
     aiStatus: 'done',
     score: 70,
     relevance: 7,
+    isAd: false,
     eventPushedAt: null,
     eventNextRetryAt: null,
     ...overrides,
@@ -43,6 +44,11 @@ function article(overrides: Partial<ArticleStepInput> = {}): ArticleStepInput {
 }
 
 describe('article-pipeline-status — crawl', () => {
+  it('保留事实的软文完成聚类后显示为推送过滤，不产生持续待推状态', () => {
+    const projection = projectArticleSteps(article({ isAd: true, score: 95, relevance: 95 }), push());
+    expect(projection.push).toBe('filtered');
+    expect(projection.isInProgress).toBe(false);
+  });
   it('Article 行存在 → crawl=done', () => {
     const proj = projectArticleSteps(article(), push());
     expect(proj.crawl).toBe('done');

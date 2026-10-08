@@ -286,7 +286,7 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
   }
 
   const multiTopic = isMultiTopicTitle(article.title);
-  if (multiTopic || !article.eventKey) {
+  if (multiTopic) {
     assertNotAborted(signal);
     const eventId = await commitClusterMutation((tx) => createEventForArticle(tx, article, {
       action: 'create',
@@ -296,9 +296,7 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
         eventKey: article.eventKey,
         multiTopic,
         standalone: true,
-        reason: multiTopic
-          ? '标题包含多个独立主体与动作，不强行归入其中一个子事件，自动按单篇建立独立 Event'
-          : '未提取到完整事件身份，自动按单篇建立独立 Event',
+        reason: '标题包含多个独立主体与动作，不强行归入其中一个子事件，自动按单篇建立独立 Event',
         ...buildRuleCandidateAuditEvidence([], null),
       },
     }));
@@ -340,7 +338,11 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
           some: {
             clusterStatus: { in: ['clustered', 'needs_review'] },
             aiStatus: 'done',
-            eventKey: article.eventKey,
+            OR: [
+              ...(article.eventKey ? [{ eventKey: article.eventKey }] : []),
+              ...(article.contentHash ? [{ contentHash: article.contentHash }] : []),
+              { title: article.title },
+            ],
           },
         },
       },

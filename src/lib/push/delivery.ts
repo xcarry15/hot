@@ -252,6 +252,9 @@ async function pushEventToFeishuInternal(
   }
 
   if (mode === 'normal' || mode === 'retry_failed') {
+    if (article.isAd) {
+      return emptyPushResult(mode, 'failed', '软文不参与自动推送，可人工确认后强制推送');
+    }
     const settings = await readPushSettings();
     if (settings.pushMode === 'off') {
       return emptyPushResult(mode, 'failed', '当前推送模式已关闭');

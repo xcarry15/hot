@@ -36,6 +36,7 @@ async function chooseRepresentative(client: EventTransaction, eventId: string): 
       aiStatus: true,
       score: true,
       relevance: true,
+      isAd: true,
       cleanContent: true,
       publishedAt: true,
       createdAt: true,

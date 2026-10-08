@@ -88,6 +88,34 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
     mocks.buildStep2Prompt.mockReturnValue('prompt');
   });
 
+  it.each([
+    { label: '有明确门店事实的软文', eventScore: 85, contentScore: 85, relevance: 95, object: '中国2000家门店', expected: 'done' },
+    { label: '纯宣传且内容证据不足', eventScore: 85, contentScore: 30, relevance: 95, object: '中国2000家门店', expected: 'skipped' },
+    { label: '低相关宣传', eventScore: 85, contentScore: 85, relevance: 25, object: '中国2000家门店', expected: 'skipped' },
+    { label: '没有完整事件身份的宣传', eventScore: 85, contentScore: 85, relevance: 95, object: '', expected: 'skipped' },
+  ])('$label保留正确的分析状态和广告标记', async ({ eventScore, contentScore, relevance, object, expected }) => {
+    mocks.createChatCompletion.mockResolvedValue({
+      content: JSON.stringify({
+        event_score: eventScore, content_score: contentScore, relevance,
+        is_ad: true, ad_probability: 85, confidence: 85, category: '餐饮',
+        summary: '品牌披露了中国门店数量和后续扩张计划，计划兑现仍需观察。'.repeat(5),
+        brand: ['DQ'], event_subjects: ['DQ'], event_action: '门店突破',
+        event_object: object, event_key_confidence: 90, key_points: ['DQ中国门店达到2000家'],
+      }), model: 'test-model', provider: 'openrouter',
+    });
+    const result = await aiModule.processWithAI({
+      id: 'factual-ad', title: 'DQ中国门店突破2000家', aiStatus: 'pending',
+      cleanContent: '中国门店达到2000家，计划2031年达到3000家。'.repeat(10),
+      summary: null, publishedAt: null,
+    });
+    expect(result.status).toBe(expected);
+    const data = mocks.articleUpdate.mock.calls.at(-1)?.[0].data;
+    expect(data.isAd).toBe(true);
+    expect(data.skipReason).toBe(expected === 'done' ? null : '软文');
+    expect(data.eventKey).toBe(expected === 'done' ? 'DQ/门店突破/中国2000家门店' : '');
+    expect(mocks.createChatCompletion).toHaveBeenCalledTimes(1);
+  });
+
   it('AI 失败 → 写 aiStatus=failed，不读品牌字典（offlineClassify 已删）', async () => {
     mocks.keywordFindMany.mockResolvedValue([
       { word: '测试品牌A' },

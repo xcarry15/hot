@@ -543,7 +543,7 @@ function buildDiscardedWhere(filter: ExportFilter, snapshotAt: Date): Prisma.Dis
   return where;
 }
 
-interface ArticleExportDecisionInput extends Pick<ArticleStepInput, 'fetchStatus' | 'clusterStatus' | 'aiStatus' | 'score' | 'relevance'> {
+interface ArticleExportDecisionInput extends Pick<ArticleStepInput, 'fetchStatus' | 'clusterStatus' | 'aiStatus' | 'score' | 'relevance' | 'isAd'> {
   nextFetchRetryAt: Date | null;
   nextAiRetryAt: Date | null;
   nextClusterRetryAt: Date | null;
@@ -568,6 +568,7 @@ function deriveArticleExportDecision(article: ArticleExportDecisionInput): Artic
     aiStatus: article.aiStatus,
     score: article.score,
     relevance: article.relevance,
+    isAd: article.isAd,
     eventPushedAt: article.event?.pushedAt ?? null,
     eventNextRetryAt: null,
     pushApplicable: false,
@@ -678,6 +679,7 @@ function makeArticleRow(article: Prisma.ArticleGetPayload<{
     aiStatus: article.aiStatus,
     score: article.score,
     relevance: article.relevance,
+    isAd: article.isAd,
     nextFetchRetryAt: article.nextFetchRetryAt,
     nextAiRetryAt: article.nextAiRetryAt,
     nextClusterRetryAt: article.nextClusterRetryAt,

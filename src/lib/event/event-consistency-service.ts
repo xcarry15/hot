@@ -5,6 +5,7 @@ import { refreshEventPublicPublication } from '@/lib/public-publication-service'
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import type { Prisma } from '@prisma/client';
 import { assertNotAborted } from '@/lib/worker-stop';
+import { EVENT_CLUSTER_RULE_VERSION } from '@/contracts/event-clustering';
 
 const EVENT_REPAIR_BATCH_SIZE = 100;
 export const EVENT_CONSISTENCY_REPAIR_PHASES = ['attached', 'duplicate-key', 'candidate-review'] as const;
@@ -281,7 +282,7 @@ export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BAT
               decisionSource: 'rule',
               confidence: null,
               evidence: JSON.stringify({
-                ruleVersion: 'event-cluster-v11',
+                ruleVersion: EVENT_CLUSTER_RULE_VERSION,
                 eventKey: target.eventKey,
                 selectedCandidateEventId: target.candidateEventId,
                 reason: '历史数据存在相同 eventKey 的多个 Event，自动降级为待复核，阻断公开/推送',

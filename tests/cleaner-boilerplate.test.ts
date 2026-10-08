@@ -7,8 +7,78 @@
  * 污染，导致无关系列被误判。
  */
 import { describe, it, expect } from 'vitest';
-import { cleanContent, extractArticleBody } from '../src/lib/cleaner';
+import { cleanContent, cleanContentMarkdown, extractArticleBody } from '../src/lib/cleaner';
 import { computeContentFingerprint } from '../src/lib/content-fingerprint';
+
+describe('正文容器边界回归', () => {
+  const facts = '品牌宣布新增上海门店，现有门店2000家，计划2031年达到3000家。'.repeat(8);
+
+  it('赢商正文结束后不采入上一篇、下一篇和推荐标题', () => {
+    const html = `<div class="win-news-wrap"><div class="win-news-content"><p>${facts}</p></div>
+      <div class="win-news-links"><p>无关烘焙品牌重组开业</p></div>
+      <div class="win-new-list1">无关品牌融资</div></div>`;
+    const body = extractArticleBody(html);
+    expect(cleanContentMarkdown(body)).toContain('现有门店2000家');
+    expect(body).not.toContain('无关');
+  });
+
+  it('餐饮88宽容器只取con_text，不采入同级栏目和关联文章', () => {
+    const html = `<div class="pt139 cd_content"><div id="content" class="con_texts"><div class="con_text"><div class="con_text_h5"><p>${facts}</p><p>最后事实：新增供应链投入。</p></div></div></div><div class="columns"><div class="correlation">其它品牌无关报道</div></div></div>`;
+    for (const selector of [undefined, '.cd_content']) {
+      const body = cleanContent(extractArticleBody(html, selector));
+      expect(body).toContain('新增供应链投入');
+      expect(body).not.toContain('其它品牌无关报道');
+    }
+  });
+
+  it('亿邦的宽容器只取post-text，不把页头AI生成解读当作原文', () => {
+    const html = `<section class="article-content-module"><div class="post-header">
+      <section class="read-content hide"><div class="ai-article-content">AI生成：品牌即将破产。${'错误解读'.repeat(100)}</div></section></div>
+      <div class="post-text"><p>${facts}</p><div><p>供应链仍有不确定性。</p></div><p>计划不等于已完成。</p></div>
+      <div class="article-recommend-panel">无关品牌融资</div></section>`;
+    const body = extractArticleBody(html, 'section.article-content-module');
+    expect(cleanContent(body)).toContain('计划不等于已完成');
+    expect(body).not.toContain('AI生成');
+    expect(body).not.toContain('无关');
+  });
+
+  it('嵌套div、正文中的推荐措辞和合法链接不会截断正文', () => {
+    const html = `<div class="article-content"><div><p>${facts}</p></div>
+      <p>该品牌推荐消费者查阅<a href="https://example.com/report">原始报告</a>。</p>
+      <div><p>最后一段：营收增长12%。</p></div></div><aside>站外噪声</aside>`;
+    const body = extractArticleBody(html);
+    expect(cleanContent(body)).toContain('营收增长12%');
+    expect(cleanContent(body)).toContain('原始报告');
+    expect(body).not.toContain('站外噪声');
+  });
+
+  it('广告营收、消费者举报等事实不能按噪声关键词删除', () => {
+    const html = '<p>公司广告收入增长12%，消费者举报后门店停业整改。</p><p>后续进展仍待观察。</p>';
+    expect(cleanContent(html)).toContain('广告收入增长12%');
+    expect(cleanContentMarkdown(html)).toContain('消费者举报后门店停业整改');
+  });
+
+  it('匹配到的正文不足时不把外层导航当成有效正文', () => {
+    const html = `<nav>${facts}</nav><div class="article-content"><p>正文暂不可用。</p></div>`;
+    expect(cleanContent(extractArticleBody(html))).toBe('正文暂不可用。');
+  });
+
+  it('精确来源选择器不被内部通用content图片说明覆盖', () => {
+    const html = `<div id="article-body"><p>${facts}</p><div class="content">图片说明</div><p>最终事实：门店尚未开业。</p></div>`;
+    const body = cleanContent(extractArticleBody(html, '#article-body'));
+    expect(body).toContain('现有门店2000家');
+    expect(body).toContain('门店尚未开业');
+  });
+
+  it('无效或未命中的来源选择器仍可使用通用正文容器', () => {
+    const html = `<div class="win-news-content"><p>${facts}</p></div><div>站外噪声</div>`;
+    for (const selector of ['.missing', '[']) {
+      const body = extractArticleBody(html, selector);
+      expect(cleanContent(body)).toContain('现有门店2000家');
+      expect(body).not.toContain('站外噪声');
+    }
+  });
+});
 
 // linkshop.com 真实页脚结构（从 茉莉奶白 LV 案文章提取的 DOM 简化版）
 const LINKSHOP_DATA_LIST = '数据\n2026年中国超市Top100发布：沃尔玛居首，盒马第二\n耐克大中华区2026财年营收下降11％\n鲜制零食全景图：6类玩家和34个品牌盘点\n胖东来2026年累计销售139.5亿，同比增长24.23％\n巴奴更新招股书，2025年经调整利润增长88.7％\n2025年商业零售TOP100企业发布：京东居首\n拆解近三年中国连锁百强榜，看到了这些惊人变化\n2026年5月社会消费品零售总额同比下降0.6％\n2026年中国连锁Top100发布：沃尔玛居首，盒马第二';

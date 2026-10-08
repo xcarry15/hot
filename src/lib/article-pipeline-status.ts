@@ -38,6 +38,7 @@ export interface ArticleStepInput {
   aiStatus: string;
   score: number;
   relevance: number;
+  isAd: boolean;
   eventPushedAt: Date | null;
   eventNextRetryAt: Date | null;
   eventPushRetryCount?: number;
@@ -75,7 +76,7 @@ export interface ArticleStepProjection {
  *   - process/AI 尚未完成 → blocked
  *   - AI 是 skipped/failed → not_applicable
  *   - push_mode='off' → not_applicable
- *   - AI 已完成但 score/relevance 低于阈值 → filtered
+ *   - 软文或 score/relevance 低于阈值 → filtered
  *   - 自动重试耗尽 → blocked，并返回原因
  *   - 聚类待复核 → blocked；复核入口属于聚类步骤
  *   - 没有启用 Webhook → blocked，并返回原因
@@ -147,7 +148,7 @@ export function projectArticleSteps(
     pushStatus = 'blocked';
   } else if (push.pushMode === 'off') {
     pushStatus = 'not_applicable';
-  } else if (article.score < push.minScore || article.relevance < push.minRelevance) {
+  } else if (article.isAd || article.score < push.minScore || article.relevance < push.minRelevance) {
     pushStatus = 'filtered';
   } else if (article.eventNextRetryAt && article.eventNextRetryAt > push.now) {
     pushStatus = 'failed';

@@ -195,6 +195,95 @@ describe('轻量事件聚类规则', () => {
 });
 
 describe('规则归并对抗样例', () => {
+  it('低置信同标题的不同季度不能被正文或标题相似度强行合并', () => {
+    const base = { title: '瑞幸咖啡发布季度财报', eventSubjects: '["瑞幸咖啡"]',
+      eventAction: '发布业绩', eventKeyConfidence: 50 };
+    const first = makeClusterArticle({ ...base, eventObject: '2026年第一季度业绩', eventKey: '瑞幸咖啡/发布业绩/2026年第一季度业绩' });
+    const second = makeClusterArticle({ ...base, eventObject: '2026年第二季度业绩', eventKey: '瑞幸咖啡/发布业绩/2026年第二季度业绩' });
+    const decision = pairEvidence(first, second).decision;
+    expect(['exact', 'strong']).not.toContain(decision);
+  });
+
+  it('相同论坛名称的年份前缀差异仍能正常归并', () => {
+    const base = { title: '中国餐饮营销发展论坛在广州举办', eventAction: '举办', eventObject: '广州广交会展馆' };
+    const first = makeClusterArticle({ ...base, eventSubjects: '["2026中国餐饮营销发展论坛"]', eventKey: '2026中国餐饮营销发展论坛/举办/广州广交会展馆' });
+    const second = makeClusterArticle({ ...base, eventSubjects: '["中国餐饮营销发展论坛"]', eventKey: '中国餐饮营销发展论坛/举办/广州广交会展馆' });
+    expect(['exact', 'strong']).toContain(pairEvidence(first, second).decision);
+  });
+  it.each(['同稿哈希', '近全文转载'])('活动简称差异不阻断%s', (kind) => {
+    const base = { title: '中国餐饮产业大会在广州举办', eventAction: '举办', eventObject: '广州会展中心',
+      cleanContent: '中国餐饮产业大会在广州举行，多家企业共同讨论供应链建设和门店经营。'.repeat(20),
+      contentHash: kind === '同稿哈希' ? 'same-manuscript' : '' };
+    const first = makeClusterArticle({ ...base, eventSubjects: '["中国餐饮产业大会"]', eventKey: '中国餐饮产业大会/举办/广州会展中心' });
+    const second = makeClusterArticle({ ...base, eventSubjects: '["餐饮产业大会"]', eventKey: '餐饮产业大会/举办/广州会展中心' });
+    expect(['exact', 'strong']).toContain(pairEvidence(first, second).decision);
+  });
+
+  it.each([
+    ['2026中国餐饮产业大会', '2025中国餐饮产业大会'],
+    ['第三届中国餐饮产业大会', '第四届中国餐饮产业大会'],
+  ])('主体的年份或届次冲突不能被场馆相同覆盖：%s / %s', (left, right) => {
+    const base = { title: '中国餐饮产业大会在广州举办', cleanContent: '', eventAction: '举办', eventObject: '广州会展中心' };
+    const first = makeClusterArticle({ ...base, eventSubjects: JSON.stringify([left]), eventKey: `${left}/举办/广州会展中心` });
+    const second = makeClusterArticle({ ...base, eventSubjects: JSON.stringify([right]), eventKey: `${right}/举办/广州会展中心` });
+    expect(['exact', 'strong']).not.toContain(pairEvidence(first, second).decision);
+  });
+
+  it.each([['第三届', '第3届'], ['第十届', '第10届'], ['第十一届', '第11届']])('相同届次不同数字写法仍能归并：%s / %s', (left, right) => {
+    const base = { eventSubjects: '["中国餐饮产业大会"]', eventAction: '举办',
+      eventObject: '广州会展中心', eventKey: '中国餐饮产业大会/举办/广州会展中心' };
+    const first = makeClusterArticle({ ...base, title: `${left}中国餐饮产业大会在广州举办` });
+    const second = makeClusterArticle({ ...base, title: `${right}中国餐饮产业大会在广州举办` });
+    expect(['exact', 'strong']).toContain(pairEvidence(first, second).decision);
+  });
+
+  it('同稿标题的背景与目标年份差异不是事件年份冲突', () => {
+    const base = { contentHash: 'same-manuscript', eventSubjects: '["品牌A"]', eventAction: '突破门店数量',
+      eventObject: '中国门店突破3000家', eventKey: '品牌A/突破门店数量/中国门店突破3000家' };
+    const first = makeClusterArticle({ ...base, title: '品牌A中国门店突破3000家：2030年目标6000家' });
+    const second = makeClusterArticle({ ...base, title: '品牌A中国门店突破3000家，2025年营收同比增长10%' });
+    expect(pairEvidence(first, second).decision).toBe('exact');
+  });
+
+  it('标题明确的不同届次不能被AI遗漏限定词覆盖', () => {
+    const base = { cleanContent: '', eventSubjects: '["中国餐饮产业大会"]', eventAction: '举办',
+      eventObject: '广州会展中心', eventKey: '中国餐饮产业大会/举办/广州会展中心' };
+    const first = makeClusterArticle({ ...base, title: '第三届中国餐饮产业大会在广州举办' });
+    const second = makeClusterArticle({ ...base, title: '第四届中国餐饮产业大会在广州举办' });
+    expect(['exact', 'strong']).not.toContain(pairEvidence(first, second).decision);
+  });
+
+  it('泛行业主体和餐饮、集体等词不能把资本运营与月饼业务合并', () => {
+    const article = makeClusterArticle({
+      title: '餐饮品牌，集体“撤离”月饼市场？',
+      cleanContent: '餐饮品牌缩减月饼业务，今年月饼销售下降，减少中秋礼盒。',
+      eventSubjects: '["餐饮品牌"]', eventAction: '缩减月饼业务', eventObject: '月饼市场',
+      eventKey: '餐饮品牌/缩减月饼业务/月饼市场', eventKeyConfidence: 50,
+    });
+    const member = makeClusterArticle({
+      title: '外资餐饮品牌集体“改姓中”？给中餐出海也上了一课',
+      cleanContent: '外资餐饮品牌引入本土资本，由中国投资者取得经营权。',
+      eventSubjects: '["外资餐饮品牌"]', eventAction: '启动合作', eventObject: '中国市场运营权',
+      eventKey: '外资餐饮品牌/启动合作/中国市场运营权', eventKeyConfidence: 55,
+    });
+    expect(pairEvidence(article, member).decision).toBe('reject');
+    expect(sharedEventAnchors(article.title, member.title)).toEqual([]);
+  });
+
+  it('不同子论坛不能仅凭举办动作、相似名称和相同场馆合并', () => {
+    const article = makeClusterArticle({
+      title: '共话餐饮增长新势能，2026中国餐饮营销发展论坛在广州成功举办',
+      eventSubjects: '["2026中国餐饮营销发展论坛"]', eventAction: '举办', eventObject: '广州广交会展馆',
+      eventKey: '2026中国餐饮营销发展论坛/举办/广州广交会展馆',
+    });
+    const member = makeClusterArticle({
+      title: '共探品牌扩张新逻辑，2026中国餐饮品招发展论坛在广州成功举办',
+      eventSubjects: '["2026中国餐饮品招发展论坛"]', eventAction: '举办', eventObject: '广州广交会展馆',
+      eventKey: '2026中国餐饮品招发展论坛/举办/广州广交会展馆',
+    });
+    expect(pairEvidence(article, member).decision).not.toBe('strong');
+  });
+
   it('动作和事项改写但标题锚点稳定时自动归并', () => {
     const article = makeClusterArticle({
       id: 'loose-new',

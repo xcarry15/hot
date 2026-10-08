@@ -341,7 +341,16 @@ function compareIdentity(left: IdentityArticle, right: IdentityArticle) {
     right.eventKeyConfidence ?? 0,
   );
   const identityScore = subjectOverlap * 0.45 + actionOverlap * 0.25 + objectOverlap * 0.3;
-  const qualifierConflict = hasEventIdentityQualifierConflict(left.eventObject, right.eventObject);
+  // 不同子论坛的名字和举办场馆通常高度相似；场馆不能抹掉活动名称的差异。
+  const namedEvents = (subjects: string) => parseEventSubjects(subjects)
+    .filter((subject) => /论坛|峰会|大会|博览会|展览会/u.test(subject))
+    .map((subject) => normalizeEventText(subject).replace(/^(?:\d{4}年?|第[\d一二三四五六七八九十百]+届)+/u, ''));
+  const leftEvents = namedEvents(left.eventSubjects);
+  const rightEvents = namedEvents(right.eventSubjects);
+  const namedEventConflict = leftEvents.length > 0 && rightEvents.length > 0
+    && !leftEvents.some((subject) => rightEvents.includes(subject));
+  const qualifierConflict = hasEventIdentityQualifierConflict(left.eventObject, right.eventObject)
+    || hasEventIdentityQualifierConflict(left.eventSubjects, right.eventSubjects);
   return {
     subjectOverlap,
     subjectContainment,
@@ -350,8 +359,10 @@ function compareIdentity(left: IdentityArticle, right: IdentityArticle) {
     identityScore,
     identityConfidence,
     qualifierConflict,
-    identityConflict: identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
-      && (subjectOverlap < 0.35 || qualifierConflict),
+    namedEventConflict,
+    subjectConflict: identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE && subjectOverlap < 0.35,
+    identityConflict: namedEventConflict || (identityConfidence >= EVENT_CLUSTER_MIN_KEY_CONFIDENCE
+      && (subjectOverlap < 0.35 || qualifierConflict)),
   };
 }
 
@@ -376,6 +387,8 @@ function isLooseSameEventMatch(evidence: {
     || evidence.phaseConflict
     || evidence.qualifierConflict
     || evidence.qualifierConflictOnPair) return false;
+  // 宽松标题/正文证据不能把不同动作拼成一个事件。近全文转载另有专用路径。
+  if (evidence.actionSimilarity < 0.45) return false;
 
   const titleAnchorsMatch = evidence.daysApart <= EVENT_CLUSTER_WINDOW_DAYS
     && evidence.sharedAnchors.length >= EVENT_CLUSTER_LOOSE_ANCHOR_COUNT
@@ -501,30 +514,34 @@ function computePairEvidence(
   const multiTopic = isMultiTopicTitle(article.title) || isMultiTopicTitle(member.title);
 
   const qualifierConflictOnPair = hasEventIdentityQualifierConflict(
-    article.eventObject, member.eventObject,
+    // 标题可能同时描述历史业绩与未来目标，任意年份不是主事件年份。
+    // 事件年份由结构化主体/事项判断；标题只补足明确季度和届次。
+    article.title.replace(/20\d{2}年?/gu, ''), member.title.replace(/20\d{2}年?/gu, ''),
   );
 
   // P0-2: 每个 pair 独立决策
   let decision: PairEvidence['decision'] = 'reject';
 
-  const isExact = fingerprintMatch || (
-    exactTitle
-    && daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS
+  const isExact = daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS
     && !phaseConflict
-    && !identity.identityConflict
-    && (eventKeyMatch || identity.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE)
-  );
+    && !identity.qualifierConflict
+    && !qualifierConflictOnPair
+    && (fingerprintMatch || (
+      exactTitle
+      && !identity.identityConflict
+      && (eventKeyMatch || identity.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE)
+    ));
   if (isExact) {
     decision = 'exact';
   } else if (!multiTopic) {
     // 不同媒体转载时常只删改署名、图片说明或个别句子。标题完全一致且正文
     // token 几乎重合时，这是比单次 AI 事件身份更稳定的“同一稿件”证据。
-    const nearExactReprint = isNearExactReprint({
+    const nearExactReprint = daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS && isNearExactReprint({
       exactTitle,
       tokenContentOverlap: contentSimilarity.tokenOverlap,
       tokenContentJaccard: contentSimilarity.tokenJaccard,
       phaseConflict,
-      identityConflict: identity.identityConflict,
+      identityConflict: identity.subjectConflict || identity.qualifierConflict || qualifierConflictOnPair,
       multiTopic,
     });
     const keyConfirmed = isStrongEventKeyDuplicate({
@@ -569,9 +586,9 @@ function computePairEvidence(
 
     // 正文高度相似本身不足以证明同一事件：同品牌页面常有相同模板、简介或背景。
     // 它只能作为 nearExactReprint 或 identityConfirmed 的补强证据，不能单独自动归并。
-    const standardRuleMatch = !phaseConflict && !identity.identityConflict
-      && (nearExactReprint || keyConfirmed || identityConfirmed || titleConfirmed);
-    const looseRuleMatch = isLooseSameEventMatch({
+    const standardRuleMatch = !phaseConflict && !identity.qualifierConflict && !qualifierConflictOnPair
+      && (nearExactReprint || (!identity.identityConflict && (keyConfirmed || identityConfirmed || titleConfirmed)));
+    const looseRuleMatch = !identity.namedEventConflict && isLooseSameEventMatch({
       daysApart,
       phaseConflict,
       qualifierConflict: identity.qualifierConflict,
@@ -588,7 +605,7 @@ function computePairEvidence(
       tokenContentJaccard: contentSimilarity.tokenJaccard,
       sharedQuantifiedFacts: sharedFacts,
     });
-    const subjectExpansionMatch = isSubjectExpansionSameEventMatch({
+    const subjectExpansionMatch = !identity.namedEventConflict && isSubjectExpansionSameEventMatch({
       daysApart,
       phaseConflict,
       qualifierConflict: identity.qualifierConflict,
@@ -620,7 +637,7 @@ function computePairEvidence(
       tokenContentOverlap: contentSimilarity.tokenOverlap,
       tokenContentJaccard: contentSimilarity.tokenJaccard,
       phaseConflict,
-      identityConflict: identity.identityConflict,
+      identityConflict: identity.subjectConflict || identity.qualifierConflict || qualifierConflictOnPair,
       multiTopic,
     })) {
       decision = 'ambiguous';

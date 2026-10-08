@@ -450,6 +450,7 @@ export async function getCrawlLogSnapshot(
       aiStatus: a.aiStatus,
       score: a.score,
       relevance: a.relevance,
+      isAd: a.isAd,
       eventPushedAt: isRepresentative ? (a.event?.pushedAt ?? null) : null,
       eventNextRetryAt: isRepresentative ? (a.event?.nextPushRetryAt ?? null) : null,
       eventPushRetryCount: isRepresentative ? a.event?.pushRetryCount : undefined,

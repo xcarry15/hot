@@ -5,7 +5,7 @@ export const EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES = 120;
 export const EVENT_CLUSTER_MAX_CANDIDATES = 15;
 export const EVENT_CLUSTER_MAX_MEMBER_ARTICLES = 12;
 export const EVENT_CLUSTER_MAX_RETRIES = 5;
-export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v11';
+export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v12';
 /** 高置信结构化身份可直接驱动自动归并，无需再请求 AI。 */
 export const EVENT_CLUSTER_AUTO_MERGE_CONFIDENCE = 85;
 export const EVENT_CLUSTER_AUTO_MERGE_IDENTITY_SCORE = 0.86;
@@ -147,6 +147,7 @@ export function isMultiTopicTitle(value: string): boolean {
 const EVENT_GENERIC_TOKENS = new Set([
   '品牌', '战略', '合作', '首次', '中国', '探索', '模型', '首店', '落地', '正式', '亮相',
   '启幕', '开业', '发布', '增长', '荣获', '年度', '门店', '超市', '便利', '百货', '项目',
+  '餐饮', '零售', '行业', '集体', '发展', '论坛', '成功', '举办', '市场',
 ]);
 
 const EVENT_GENERIC_IDENTITY_VALUES = new Set([
@@ -199,6 +200,26 @@ export function sharedEventAnchors(left: string, right: string): string[] {
   return [...a].filter((token) => b.has(token));
 }
 
+/** 届次的“三 / 3”“十一 / 11”属于同一个限定词。 */
+function normalizeOrdinal(value: string): string {
+  if (/^\d+$/u.test(value)) return String(Number(value));
+  const digits: Record<string, number> = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  const units: Record<string, number> = { 十: 10, 百: 100, 千: 1000 };
+  let total = 0;
+  let digit = 0;
+  for (const character of value) {
+    if (units[character]) {
+      total += (digit || 1) * units[character];
+      digit = 0;
+    } else if (character in digits) {
+      digit = digits[character]!;
+    } else {
+      return value;
+    }
+  }
+  return String(total + digit);
+}
+
 function eventQualifiers(value: string): Map<string, Set<string>> {
   const normalized = value.normalize('NFKC').toLowerCase();
   const result = new Map<string, Set<string>>();
@@ -213,8 +234,8 @@ function eventQualifiers(value: string): Map<string, Set<string>> {
     const quarter = match[1] ?? match[2];
     if (quarter) add('quarter', quarterMap[quarter] ?? quarter);
   }
-  for (const match of normalized.matchAll(/第([一二三四五六七八九十\d]+)(期|届|批)/gu)) {
-    if (match[1] && match[2]) add(match[2], match[1]);
+  for (const match of normalized.matchAll(/第([零一二两三四五六七八九十百千\d]+)(期|届|批)/gu)) {
+    if (match[1] && match[2]) add(match[2], normalizeOrdinal(match[1]));
   }
   return result;
 }
