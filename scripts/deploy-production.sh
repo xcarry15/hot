@@ -198,7 +198,8 @@ EXPECTED_MIGRATION_SQL="${EXPECTED_MIGRATION_SQL%,}"
 link_release_state "$RELEASE_STAGING_DIR" "$STATE_ENV" "$STATE_DB_DIR"
 cd "$RELEASE_STAGING_DIR"
 echo "[deploy] installing release dependencies: $RELEASE_ID"
-npm ci
+npm ci --no-audit --no-fund
+[[ -x node_modules/.bin/prisma ]] || { echo 'Prisma CLI is missing after npm ci.' >&2; exit 1; }
 echo "[deploy] generating Prisma Client"
 npm run db:generate
 echo "[deploy] building release: $RELEASE_ID"
