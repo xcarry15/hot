@@ -30,8 +30,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm install --global npm@10.9.8 --no-audit --no-fund
-      - run: npm ci --no-audit --no-fund
-      - run: test -x node_modules/.bin/prisma
+      - run: bash scripts/install-dependencies.sh
       - run: npm run db:generate
       - run: npm run lint
       - run: npm run typecheck
@@ -50,8 +49,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm install --global npm@10.9.8 --no-audit --no-fund
-      - run: npm ci --no-audit --no-fund
-      - run: test -x node_modules/.bin/prisma
+      - run: bash scripts/install-dependencies.sh
       - run: npm run db:generate
       - run: npm run test:migrations
 
@@ -71,8 +69,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm install --global npm@10.9.8 --no-audit --no-fund
-      - run: npm ci --no-audit --no-fund
-      - run: test -x node_modules/.bin/prisma
+      - run: bash scripts/install-dependencies.sh
       - run: npm run db:generate
       - run: npm run db:migrate:deploy
       - run: npm run db:seed
