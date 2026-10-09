@@ -34,8 +34,7 @@ import {
   type ManualOverrideField,
 } from '@/lib/article-calibration';
 import {
-  recalculateArticleEvent,
-  recalculateEventById,
+  recalculateEventsInTransaction,
   reconcileEventAfterArticleDeletionInTransaction,
 } from '@/lib/event-service';
 import { splitBrands } from '@/lib/shared/article-codecs';
@@ -380,12 +379,16 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
       data,
     });
     if (updated.count !== 1) throw new ArticleRevisionConflictError();
-    await refreshPublicPublication(id, tx, { contentChanged });
-  });
+    if (current.eventId) {
+      await recalculateEventsInTransaction(tx, [current.eventId]);
+      await refreshEventPublicPublication(current.eventId, tx);
+    }
+    // 解除归属的文章已不在旧 Event 快照中；内容修正的更新时间也只属于当前文章。
+    if (identityChanged || !current.eventId || contentChanged) {
+      await refreshPublicPublication(id, tx, { contentChanged });
+    }
+  }, { maxWait: 10_000, timeout: 10_000 });
   invalidatePublicArticleCache();
-  if (identityChanged || touched.includes('brand')) {
-    if (current.eventId) await recalculateEventById(current.eventId);
-  }
   if (identityChanged) {
     if (current.aiStatus === 'done') {
       try {
@@ -394,8 +397,6 @@ export async function updateArticleEditorial(id: string, input: UpdateArticleEdi
         await markClusterFailure(id, error);
       }
     }
-  } else if (!touched.includes('brand')) {
-    await recalculateArticleEvent(id);
   }
   return getArticleDetail(id);
 }

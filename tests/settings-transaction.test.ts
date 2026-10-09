@@ -31,10 +31,6 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-vi.mock('@/lib/event-service', () => ({
-  recalculateEventById: vi.fn(),
-}));
-
 vi.mock('@/lib/execution', () => ({
   runJob: mocks.runJob,
 }));

@@ -3,6 +3,7 @@ import type { SearchFunctionArgs } from 'z-ai-web-dev-sdk';
 import type { CrawlResult } from '@/contracts/crawl';
 import { assertNotAborted } from './worker-stop';
 import { abortableDelay } from './shared/async';
+import { isHttpUrl } from './url-utils';
 
 interface WebSearchConfig {
   queries?: string[];      // Search queries to run
@@ -29,15 +30,6 @@ function normalizeQueries(value: unknown, fallback: string[]): string[] {
     .map((query) => query.trim().slice(0, 120))
     .filter(Boolean))]
     .slice(0, MAX_QUERIES);
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 function toSearchItems(results: unknown, snippetAsSummary: boolean): CrawlResult['items'] {

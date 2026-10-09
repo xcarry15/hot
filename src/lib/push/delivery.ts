@@ -11,6 +11,7 @@
 import { createHash } from 'node:crypto';
 import { db } from '@/lib/db';
 import { assertNotAborted } from '@/lib/worker-stop';
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 import { getRelatedArticles } from '@/lib/article-related-service';
 import { getWebhookConfigs, type WebhookConfig } from '@/lib/settings';
 import { findRecentPushedEventDuplicate } from '@/lib/event-clustering-service';
@@ -51,17 +52,13 @@ function computeUrlHash(url: string): string {
 async function resolvePushTarget(config: WebhookConfig): Promise<{ id: string; name: string; urlHash: string }> {
   const urlHash = computeUrlHash(config.url);
   const targetName = config.remark.trim() || maskWebhookTarget(config.url);
-  const existing = await db.pushTarget.findUnique({ where: { urlHash }, select: { id: true, name: true, urlHash: true } });
-  if (existing) {
-    if (existing.name !== targetName) {
-      await db.pushTarget.update({ where: { id: existing.id }, data: { name: targetName } });
-    }
-    return existing;
-  }
-  return db.pushTarget.create({
-    data: { name: targetName, urlHash },
+  const target = await db.pushTarget.upsert({
+    where: { urlHash },
+    create: { name: targetName, urlHash },
+    update: { name: targetName },
     select: { id: true, name: true, urlHash: true },
   });
+  return target;
 }
 
 function contentVersion(article: {
@@ -285,6 +282,7 @@ async function pushEventToFeishuInternal(
   if (mode === 'normal' && !event.pushedAt) {
     const duplicate = await findRecentPushedEventDuplicate(article.id, eventId);
     if (duplicate) {
+      await assertWorkerCanWrite(signal);
       await db.event.update({
         where: { id: eventId },
         data: { pushRetryCount: PUSH_MAX_RETRIES, nextPushRetryAt: null },
@@ -331,7 +329,7 @@ async function pushEventToFeishuInternal(
   }
 
   const urgency = getPushUrgency(article);
-  const relatedArticles = (await getRelatedArticles(article.id, undefined, { onlyPushed: true })) ?? [];
+  const relatedArticles = (await getRelatedArticles(article.id, undefined, { visibility: 'pushed' })) ?? [];
   const card = buildFeishuCard(
     { ...article, publicEventId: eventId },
     urgency,
@@ -340,7 +338,7 @@ async function pushEventToFeishuInternal(
 
   let attemptSucceeded = 0;
   for (const config of enabled) {
-    assertNotAborted(signal);
+    await assertWorkerCanWrite(signal);
     if (!selectedUrls.has(config.url)) continue;
 
     const target = targetByUrl.get(config.url);
@@ -366,6 +364,7 @@ async function pushEventToFeishuInternal(
       );
   const failedCount = selectedUrls.size - attemptSucceeded;
   const skipped = enabled.length - selectedUrls.size;
+  await assertWorkerCanWrite(signal);
 
   if (allSucceeded) {
     await db.event.update({
@@ -470,6 +469,20 @@ async function pushToSingleTarget(
 
   // Send to webhook
   let result: SingleWebhookPushResult;
+  try {
+    await assertWorkerCanWrite(signal);
+  } catch (error) {
+    // 尚未发起外部请求，不应记成远端结果未知；只释放本轮领取的记录。
+    try {
+      await db.pushDelivery.updateMany({
+        where: { idempotencyKey, status: 'sending', leaseOwner },
+        data: { status: 'pending', leaseOwner: '', leaseExpiresAt: null, completedAt: null },
+      });
+    } catch (releaseError) {
+      console.error('[push] failed to release unsent delivery:', releaseError);
+    }
+    throw error;
+  }
   try {
     result = await sendFeishuWebhook(config, card, signal);
   } catch (error) {

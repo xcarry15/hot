@@ -18,6 +18,8 @@ import {
   serializeEventSubjects,
 } from '@/contracts/event-identity';
 import { assertNotAborted } from './worker-stop';
+import { assertWorkerCanWrite } from './execution-write-guard';
+import { JobLeaseLostError } from './job-context';
 import { advanceJobProgress, startJobStage } from './job-progress';
 import { applyScorePolicy } from './score-policy';
 import { createHash } from 'node:crypto';
@@ -290,7 +292,7 @@ export async function processWithAI(
 ): Promise<AIProcessResult> {
   const article = normalizeAIProcessArticle(input);
   const { id: articleId } = article;
-  assertNotAborted(signal);
+  await assertWorkerCanWrite(signal);
 
   // 已完成 → 不再处理
   if (article.aiStatus === 'done') return { status: 'done' };
@@ -322,7 +324,7 @@ export async function processWithAI(
   try {
     step2 = await deepAnalyze(article, settings, signal);
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (signal?.aborted || error instanceof JobLeaseLostError) throw error;
     aiFailure = {
       message: summarizeAIError(error),
       ...(error instanceof AIClientError
@@ -335,7 +337,7 @@ export async function processWithAI(
         : {}),
     };
   }
-  assertNotAborted(signal);
+  await assertWorkerCanWrite(signal);
 
   if (step2) {
     // 原始事件分与内容分由 AI 独立产出，本地策略再统一应用权重和广告封顶。

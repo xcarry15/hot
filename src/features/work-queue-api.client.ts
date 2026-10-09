@@ -66,13 +66,6 @@ export function fetchWorkQueueSummary(): Promise<WorkQueueSummary> {
   return request;
 }
 
-export function invalidateWorkQueueCache(): void {
-  cachedData = null;
-  lastFetchAt = 0;
-  cacheRevision += 1;
-  refreshScheduled = false;
-}
-
 /**
  * 写操作后的统一刷新入口：失效旧摘要，并把连续操作合并成一次尾部刷新。
  * 请求在飞时不立即追加请求；定时器到期后再补一次，避免旧响应覆盖新状态。

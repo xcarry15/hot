@@ -6,6 +6,7 @@ import { applyScorePolicy, buildScorePolicySnapshot } from '@/lib/score-policy';
 import { recalculateEventsInTransaction } from '@/lib/event-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { rebuildPublicPublicationSnapshotInBatches } from '@/lib/public-publication-service';
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 
 export const SETTINGS_REBUILD_KEY = '__runtime_settings_rebuild__';
 
@@ -84,10 +85,11 @@ async function getScorePolicyConfig(): Promise<ScorePolicyConfig> {
   };
 }
 
-async function rebuildScorePolicy(config: ScorePolicyConfig): Promise<number> {
+async function rebuildScorePolicy(config: ScorePolicyConfig, signal?: AbortSignal): Promise<number> {
   let cursor: string | undefined;
   let recomputed = 0;
   while (true) {
+    await assertWorkerCanWrite(signal);
     const articles = await db.article.findMany({
       where: {
         eventScore: { not: null },
@@ -107,8 +109,10 @@ async function rebuildScorePolicy(config: ScorePolicyConfig): Promise<number> {
       },
     });
     if (articles.length === 0) break;
+    await assertWorkerCanWrite(signal);
 
     await db.$transaction(async (tx) => {
+      await assertWorkerCanWrite(signal);
       const affectedEventIds = new Set<string>();
       for (const article of articles) {
         const result = applyScorePolicy(
@@ -138,8 +142,10 @@ async function rebuildScorePolicy(config: ScorePolicyConfig): Promise<number> {
         if (article.eventId) affectedEventIds.add(article.eventId);
       }
       await recalculateEventsInTransaction(tx, [...affectedEventIds]);
+      await assertWorkerCanWrite(signal);
     }, { maxWait: 10_000, timeout: 10_000 });
 
+    invalidatePublicArticleCache();
     recomputed += articles.length;
     cursor = articles[articles.length - 1]!.id;
   }
@@ -150,12 +156,13 @@ async function rebuildScorePolicy(config: ScorePolicyConfig): Promise<number> {
  * 处理当前设置派生状态。使用 token compare-and-swap 清除标记：重算期间的
  * 新设置会保留新的 marker，随后自动再跑一轮，不会被旧 worker 覆盖。
  */
-export async function rebuildPendingSettings(): Promise<{
+export async function rebuildPendingSettings(signal?: AbortSignal): Promise<{
   ran: boolean;
   recomputed: number;
   publicationRebuilt: number;
   superseded: boolean;
 }> {
+  await assertWorkerCanWrite(signal);
   const marker = await db.setting.findUnique({
     where: { key: SETTINGS_REBUILD_KEY },
     select: { value: true },
@@ -167,10 +174,11 @@ export async function rebuildPendingSettings(): Promise<{
   }
 
   const scoreConfig = plan.score ? await getScorePolicyConfig() : null;
-  const recomputed = scoreConfig ? await rebuildScorePolicy(scoreConfig) : 0;
+  const recomputed = scoreConfig ? await rebuildScorePolicy(scoreConfig, signal) : 0;
   const publicationRebuilt = plan.publication
-    ? await rebuildPublicPublicationSnapshotInBatches({ contentChanged: plan.score })
+    ? await rebuildPublicPublicationSnapshotInBatches({ contentChanged: plan.score }, signal)
     : 0;
+  await assertWorkerCanWrite(signal);
   const cleared = await db.setting.updateMany({
     where: { key: SETTINGS_REBUILD_KEY, value: rawPlan },
     data: { value: '' },

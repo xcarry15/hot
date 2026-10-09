@@ -1,24 +1,18 @@
 import { db } from '@/lib/db';
-import { recalculateEventById } from '@/lib/event/event-recalculation-service';
 import { recalculateEvent } from '@/lib/event/event-recalculation-service';
-import { refreshEventPublicPublication } from '@/lib/public-publication-service';
+import { refreshEventPublicPublication, refreshPublicPublication } from '@/lib/public-publication-service';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import type { Prisma } from '@prisma/client';
-import { assertNotAborted } from '@/lib/worker-stop';
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 import { EVENT_CLUSTER_RULE_VERSION } from '@/contracts/event-clustering';
 
 const EVENT_REPAIR_BATCH_SIZE = 100;
 export const EVENT_CONSISTENCY_REPAIR_PHASES = ['attached', 'duplicate-key', 'candidate-review'] as const;
 export type EventConsistencyRepairPhase = (typeof EVENT_CONSISTENCY_REPAIR_PHASES)[number];
 
-export interface ConsistencyViolation {
-  eventId: string;
-  issue: string;
-  severity: 'error' | 'warning';
-}
 /**
- * 事件归属的基础事实必须在同一事务内提交；此表只记录事务后公开快照刷新失败、
- * 或旧版本留下的待修复状态，供受控的后台恢复使用。
+ * 事件归属的基础事实必须在同一事务内提交；此表记录公开快照刷新失败、
+ * 来源删除后的代表恢复或旧版本留下的待修复状态，由独立维护 Job 消费。
  */
 type EventDirtyWriter = Pick<Prisma.TransactionClient, 'eventDirty'>;
 
@@ -36,32 +30,91 @@ export async function markEventDirty(
   });
 }
 
-async function refreshDirtyEvent(eventId: string): Promise<boolean> {
-  const event = await db.event.findUnique({ where: { id: eventId }, select: { id: true } });
-  if (!event) {
-    await db.eventDirty.deleteMany({ where: { eventId } });
-    return false;
-  }
-  await recalculateEventById(eventId);
-  await db.eventDirty.deleteMany({ where: { eventId } });
-  return true;
+/** 在来源状态事务中登记受影响的代表事件，不加载全部文章或 Event ID。 */
+export async function markSourceRepresentativesDirty(
+  client: Pick<Prisma.TransactionClient, '$executeRaw'>,
+  sourceId: string,
+  reason: string,
+): Promise<void> {
+  const now = new Date();
+  await client.$executeRaw`
+    INSERT INTO event_dirty (id, eventId, reason, createdAt)
+    SELECT lower(hex(randomblob(16))), e.id, ${reason.slice(0, 500)}, ${now}
+    FROM events e INNER JOIN articles a ON a.id = e.representativeArticleId
+    WHERE e.status = 'active' AND a.sourceId = ${sourceId}
+    ON CONFLICT(eventId) DO UPDATE SET reason = excluded.reason, createdAt = excluded.createdAt
+  `;
+}
+
+/** 删除来源时原子撤回不合格代表，后续候选选择交给既有有界修复队列。 */
+export async function releaseSourceRepresentatives(
+  client: Pick<Prisma.TransactionClient, 'article' | 'event' | '$executeRaw'>,
+  sourceId: string,
+): Promise<void> {
+  const now = new Date();
+  await markSourceRepresentativesDirty(client, sourceId, 'source-deleted');
+  // 只撤回当前代表的文章投影，不在来源事务内重建该来源的全部文章。
+  await client.article.updateMany({
+    where: { sourceId, representedEvent: { is: { status: 'active' } } },
+    data: {
+      publicStatus: 'unpublished', publicPublishedAt: null, publicRevokedAt: null,
+      publicPublicationReason: 'not-event-representative',
+      publicPublicationEvaluatedAt: now, publicContentUpdatedAt: null,
+    },
+  });
+  const where: Prisma.EventWhereInput = { status: 'active', representativeArticle: { is: { sourceId } } };
+  const release = { representativeArticleId: null, representativeManual: false, publicDateKey: '', publicSortAt: null };
+  await client.event.updateMany({
+    where: { ...where, publicStatus: 'published' },
+    data: { ...release, publicStatus: 'revoked', publicRevokedAt: now },
+  });
+  await client.event.updateMany({ where, data: release });
+}
+
+/** 一个修复单元共用提交、执行权与缓存边界，避免阶段各自遗漏收尾。 */
+async function runEventRepairTransaction(
+  operation: (client: Prisma.TransactionClient) => Promise<boolean>,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  await assertWorkerCanWrite(signal);
+  const repaired = await db.$transaction(async (tx) => {
+    await assertWorkerCanWrite(signal);
+    const changed = await operation(tx);
+    await assertWorkerCanWrite(signal);
+    return changed;
+  }, { maxWait: 10_000, timeout: 10_000 });
+  if (repaired) invalidatePublicArticleCache();
+  return repaired;
+}
+
+async function refreshDirtyEvent(eventId: string, signal?: AbortSignal): Promise<boolean> {
+  return runEventRepairTransaction(async (tx) => {
+    const event = await tx.event.findUnique({ where: { id: eventId }, select: { id: true } });
+    if (event) {
+      await recalculateEvent(tx, eventId);
+      await refreshEventPublicPublication(eventId, tx);
+    }
+    // 同一事务清理已恢复的待办，失败或提交前取消时保留完整恢复边界。
+    await tx.eventDirty.deleteMany({ where: { eventId } });
+    return Boolean(event);
+  }, signal);
 }
 
 /** 只修复被明确标记的 Event，避免每分钟扫描整张 Event 表。 */
 export async function repairDirtyEvents(limit = EVENT_REPAIR_BATCH_SIZE, signal?: AbortSignal): Promise<number> {
-  assertNotAborted(signal);
+  await assertWorkerCanWrite(signal);
   const rows = await db.eventDirty.findMany({
     take: Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)),
     select: { eventId: true },
   });
   const eventIds = [...new Set(rows.map((row) => row.eventId).filter(Boolean))];
+  await assertWorkerCanWrite(signal);
   let repaired = 0;
   for (const eventId of eventIds) {
     try {
-      assertNotAborted(signal);
-      if (await refreshDirtyEvent(eventId)) repaired++;
+      if (await refreshDirtyEvent(eventId, signal)) repaired++;
     } catch (error) {
-      if (signal?.aborted) throw error;
+      await assertWorkerCanWrite(signal);
       console.error(`[event-consistency] dirty Event repair failed event=${eventId}:`, error);
     }
   }
@@ -75,10 +128,10 @@ export async function hasDirtyEvents(): Promise<boolean> {
 /**
  * 旧实现曾在归属事务提交后才重算 Event，极端中断时可能留下
  * `eventId != null && clusterStatus = failed`，或尚未完成 AI 就被挂入 Event。
- * 这些状态都不能进入普通流水线，因此在批处理开始时主动收敛回基础事实。
+ * 这些状态都不能进入普通流水线，由历史维护任务或单篇失败恢复收敛回基础事实。
  */
-export async function repairAttachedClusterArticle(articleId: string): Promise<boolean> {
-  const result = await db.$transaction(async (tx) => {
+export async function repairAttachedClusterArticle(articleId: string, signal?: AbortSignal): Promise<boolean> {
+  return runEventRepairTransaction(async (tx) => {
     const article = await tx.article.findUnique({
       where: { id: articleId },
       select: { id: true, eventId: true, clusterStatus: true, aiStatus: true },
@@ -101,6 +154,7 @@ export async function repairAttachedClusterArticle(articleId: string): Promise<b
           nextClusterRetryAt: null,
         },
       });
+      await refreshPublicPublication(article.id, tx);
       return true;
     }
 
@@ -119,6 +173,8 @@ export async function repairAttachedClusterArticle(articleId: string): Promise<b
         },
       });
       await recalculateEvent(tx, event.id);
+      await refreshEventPublicPublication(event.id, tx);
+      await refreshPublicPublication(article.id, tx);
       return true;
     }
 
@@ -134,12 +190,13 @@ export async function repairAttachedClusterArticle(articleId: string): Promise<b
       });
     }
     await recalculateEvent(tx, event.id);
+    await refreshEventPublicPublication(event.id, tx);
     return true;
-  });
-  return result;
+  }, signal);
 }
 
-export async function repairAttachedClusterFailures(limit = EVENT_REPAIR_BATCH_SIZE, cursor?: string): Promise<number> {
+export async function repairAttachedClusterFailures(limit = EVENT_REPAIR_BATCH_SIZE, cursor?: string, signal?: AbortSignal): Promise<number> {
+  await assertWorkerCanWrite(signal);
   const articles = await db.article.findMany({
     where: {
       ...(cursor ? { id: { gt: cursor } } : {}),
@@ -153,13 +210,10 @@ export async function repairAttachedClusterFailures(limit = EVENT_REPAIR_BATCH_S
     take: Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)),
     select: { id: true },
   });
+  await assertWorkerCanWrite(signal);
   let repaired = 0;
   for (const article of articles) {
-    try {
-      if (await repairAttachedClusterArticle(article.id)) repaired++;
-    } catch (error) {
-      console.error(`[event-consistency] attached Article repair failed article=${article.id}:`, error);
-    }
+    if (await repairAttachedClusterArticle(article.id, signal)) repaired++;
   }
   return repaired;
 }
@@ -169,7 +223,8 @@ export async function repairAttachedClusterFailures(limit = EVENT_REPAIR_BATCH_S
  * 保留最早 Event 作为待确认的基准，把后续 Event 的同 key 成员降为
  * needs_review；这样旧数据也重新经过公开/推送安全门，而不会继续重复对外释放。
  */
-export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BATCH_SIZE, cursor?: string): Promise<number> {
+export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BATCH_SIZE, cursor?: string, signal?: AbortSignal): Promise<number> {
+  await assertWorkerCanWrite(signal);
   const rows = await db.article.findMany({
     where: {
       ...(cursor ? { id: { gt: cursor } } : {}),
@@ -188,6 +243,7 @@ export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BAT
     orderBy: { id: 'asc' },
     take: Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)),
   });
+  await assertWorkerCanWrite(signal);
 
   const eventKeys = [...new Set(rows.map((row) => row.eventKey).filter(Boolean))];
   const candidateEvents = eventKeys.length === 0
@@ -207,6 +263,7 @@ export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BAT
         },
       },
     });
+  await assertWorkerCanWrite(signal);
   const byKey = new Map<string, Map<string, { eventId: string; eventCreatedAt: Date }>>();
   for (const event of candidateEvents) {
     for (const article of event.articles) {
@@ -228,7 +285,7 @@ export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BAT
 
   let repaired = 0;
   for (const target of targets.slice(0, Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)))) {
-    const changed = await db.$transaction(async (tx) => {
+    const changed = await runEventRepairTransaction(async (tx) => {
       const event = await tx.event.findFirst({
         where: { id: target.eventId, status: 'active', clusterReviewStatus: 'confirmed' },
         select: { id: true },
@@ -292,18 +349,12 @@ export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BAT
         }
       }
       await recalculateEvent(tx, target.eventId);
+      await refreshEventPublicPublication(target.eventId, tx);
       return true;
-    });
+    }, signal);
     if (!changed) continue;
     repaired++;
-    try {
-      await refreshEventPublicPublication(target.eventId);
-    } catch (error) {
-      console.error(`[event-consistency] duplicate eventKey publication repair failed event=${target.eventId}:`, error);
-      await markEventDirty(target.eventId, `duplicate-event-key-publication-repair: ${error instanceof Error ? error.message : String(error)}`);
-    }
   }
-  if (repaired > 0) invalidatePublicArticleCache();
   return repaired;
 }
 
@@ -312,7 +363,8 @@ export async function repairDuplicateEventKeyCandidates(limit = EVENT_REPAIR_BAT
  * 将这类仍指向 active 候选 Event 的记录收敛为待复核，避免历史候选继续
  * 绕过公开与推送门禁；已失效候选不再阻断正常数据。
  */
-export async function repairPersistedCandidateReviews(limit = EVENT_REPAIR_BATCH_SIZE, cursor?: string): Promise<number> {
+export async function repairPersistedCandidateReviews(limit = EVENT_REPAIR_BATCH_SIZE, cursor?: string, signal?: AbortSignal): Promise<number> {
+  await assertWorkerCanWrite(signal);
   const audits = await db.eventClusterAudit.findMany({
     where: {
       ...(cursor ? { id: { gt: cursor } } : {}),
@@ -327,15 +379,15 @@ export async function repairPersistedCandidateReviews(limit = EVENT_REPAIR_BATCH
     orderBy: { id: 'asc' },
     take: Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)),
   });
+  await assertWorkerCanWrite(signal);
   const targets = [...new Map(audits.map((audit) => [
     `${audit.assignedEventId}:${audit.articleId}`,
     audit,
   ])).values()].slice(0, Math.max(1, Math.min(limit, EVENT_REPAIR_BATCH_SIZE)));
 
   let repaired = 0;
-  const refreshed = new Set<string>();
   for (const target of targets) {
-    const changed = await db.$transaction(async (tx) => {
+    const changed = await runEventRepairTransaction(async (tx) => {
       const article = await tx.article.findFirst({
         where: {
           id: target.articleId,
@@ -366,21 +418,12 @@ export async function repairPersistedCandidateReviews(limit = EVENT_REPAIR_BATCH
         data: { clusterStatus: 'needs_review', clusterError: null },
       });
       await recalculateEvent(tx, event.id);
+      await refreshEventPublicPublication(event.id, tx);
       return true;
-    });
+    }, signal);
     if (!changed) continue;
     repaired++;
-    refreshed.add(target.assignedEventId);
   }
-  for (const eventId of refreshed) {
-    try {
-      await refreshEventPublicPublication(eventId);
-    } catch (error) {
-      console.error(`[event-consistency] persisted candidate publication repair failed event=${eventId}:`, error);
-      await markEventDirty(eventId, `persisted-candidate-publication-repair: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  if (refreshed.size > 0) invalidatePublicArticleCache();
   return repaired;
 }
 
@@ -446,122 +489,20 @@ export async function repairEventConsistencyPage(
   limit = EVENT_REPAIR_BATCH_SIZE,
   signal?: AbortSignal,
 ): Promise<{ repaired: number; nextCursor: string | null; done: boolean }> {
-  assertNotAborted(signal);
+  await assertWorkerCanWrite(signal);
   const page = await countConsistencyPage(phase, cursor, limit);
+  await assertWorkerCanWrite(signal);
   if (page.ids.length === 0) {
     return { repaired: 0, nextCursor: null, done: true };
   }
   let repaired = 0;
-  if (phase === 'attached') repaired = await repairAttachedClusterFailures(limit, cursor);
-  if (phase === 'duplicate-key') repaired = await repairDuplicateEventKeyCandidates(limit, cursor);
-  if (phase === 'candidate-review') repaired = await repairPersistedCandidateReviews(limit, cursor);
+  if (phase === 'attached') repaired = await repairAttachedClusterFailures(limit, cursor, signal);
+  if (phase === 'duplicate-key') repaired = await repairDuplicateEventKeyCandidates(limit, cursor, signal);
+  if (phase === 'candidate-review') repaired = await repairPersistedCandidateReviews(limit, cursor, signal);
+  await assertWorkerCanWrite(signal);
   return {
     repaired,
     nextCursor: page.ids[page.ids.length - 1] ?? null,
     done: !page.hasMore,
   };
-}
-
-/**
- * Event 一致性扫描器 (P0). 检查所有 Event 的派生状态是否与基础事实一致。
- * 返回违规列表；空数组表示完全一致。
- */
-export async function scanEventConsistency(): Promise<ConsistencyViolation[]> {
-  const violations: ConsistencyViolation[] = [];
-  const events = await db.event.findMany({
-    where: { status: 'active' },
-    select: {
-      id: true,
-      articleCount: true,
-      representativeArticleId: true,
-      representativeManual: true,
-      publicStatus: true,
-      clusterReviewStatus: true,
-      pushedAt: true,
-      representativeArticle: { select: { id: true, clusterStatus: true, aiStatus: true, eventId: true } },
-      articles: { select: { id: true, clusterStatus: true } },
-    },
-  });
-
-  for (const event of events) {
-    // articleCount 与实际成员数不一致
-    const actualCount = event.articles.length;
-    if (event.articleCount !== actualCount) {
-      violations.push({
-        eventId: event.id,
-        issue: `articleCount=${event.articleCount} 实际=${actualCount}`,
-        severity: 'error',
-      });
-    }
-
-    // representativeArticle 不属于当前 Event
-    if (event.representativeArticleId && event.representativeArticle?.eventId !== event.id) {
-      violations.push({
-        eventId: event.id,
-        issue: `代表文章 ${event.representativeArticleId} 不属于当前 Event`,
-        severity: 'error',
-      });
-    }
-
-    // 非代表 Article 处于 published 状态
-    // (handled by public-publication-service, but check here)
-
-    // pending Event 有代表文章
-    if (event.clusterReviewStatus === 'pending' && event.representativeArticleId) {
-      violations.push({
-        eventId: event.id,
-        issue: '待复核 Event 不应有代表文章',
-        severity: 'warning',
-      });
-    }
-
-    // 空 Event 仍为 active
-    if (actualCount === 0) {
-      violations.push({
-        eventId: event.id,
-        issue: '空 Event 仍保持 active',
-        severity: 'error',
-      });
-    }
-
-    // representativeArticle 不可用
-    if (event.representativeArticleId && event.representativeArticle) {
-      const rep = event.representativeArticle;
-      if (rep.clusterStatus !== 'clustered' || rep.aiStatus !== 'done') {
-        violations.push({
-          eventId: event.id,
-          issue: `代表文章 ${rep.id} 不可用 (cluster=${rep.clusterStatus}, ai=${rep.aiStatus})`,
-          severity: 'warning',
-        });
-      }
-    }
-  }
-
-  // Check merged Events that should be cleaned
-  const mergedEvents = await db.event.findMany({
-    where: {
-      status: 'merged',
-      articles: { some: {} },
-    },
-    select: { id: true },
-  });
-  for (const event of mergedEvents) {
-    violations.push({
-      eventId: event.id,
-      issue: '已合并 Event 仍有成员文章',
-      severity: 'error',
-    });
-  }
-
-  // Check for orphaned EventDirty records
-  const dirtyCount = await db.eventDirty.count();
-  if (dirtyCount > 0) {
-    violations.push({
-      eventId: '(system)',
-      issue: `${dirtyCount} 个 Event 标记为脏，等待 Reconcile`,
-      severity: 'warning',
-    });
-  }
-
-  return violations;
 }

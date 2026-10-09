@@ -66,6 +66,20 @@ function eventRow(id: string, publishedAt: string, sourceCount = 1) {
 }
 
 describe('public-article-service Event 门禁', () => {
+  it('失效前的旧列表请求迟到失败，不能清掉失效后重建的缓存', async () => {
+    let rejectOld!: (error: Error) => void;
+    mocks.transaction.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
+    const pending = listPublicArticles();
+    const rejected = expect(pending).rejects.toThrow('late failure');
+    invalidatePublicArticleCache();
+    const fresh = await listPublicArticles();
+
+    rejectOld(new Error('late failure'));
+    await rejected;
+    await expect(listPublicArticles()).resolves.toBe(fresh);
+    expect(mocks.transaction).toHaveBeenCalledTimes(2);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     invalidatePublicArticleCache();

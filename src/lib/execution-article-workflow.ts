@@ -4,7 +4,10 @@ import { refetchArticle } from './article-refetch-service';
 import { db } from './db';
 import { LOW_ANALYSIS_CONFIDENCE_FILTER } from '@/contracts/ai-confidence';
 import { clusterArticle, markClusterFailure } from './event-clustering-service';
-import { recalculateEventById } from './event-service';
+import { recalculateEventsInTransaction } from './event/event-recalculation-service';
+import { refreshEventPublicPublication, refreshPublicPublication } from './public-publication-service';
+import { invalidatePublicArticleCache } from './public-article-cache';
+import { assertWorkerCanWrite } from './execution-write-guard';
 import { assertJobNotCancelled } from './execution-cancellation';
 import type { SingleWorkflowIntent, SingleWorkflowStart } from './execution-types';
 import { startJobStage, advanceJobProgress } from './job-progress';
@@ -129,6 +132,7 @@ export async function executeSingleArticleWorkflow(
       validationStatus: currentValidation.status,
     };
   }
+  await assertWorkerCanWrite(signal);
   const claimed = await claimSingleArticleWorkflow(articleId, startAt, intent, currentValidation.version);
   if (!claimed) {
     return {
@@ -162,7 +166,7 @@ export async function executeSingleArticleWorkflow(
       key: 'ai',
       shouldRun: () => startAt === 'process' || startAt === 'ai',
       run: async () => {
-        if (startAt === 'ai') await prepareArticleForAiRegeneration(articleId);
+        if (startAt === 'ai') await prepareArticleForClustering(articleId, true, signal);
         aiResult = await reprocessWithAI(articleId, signal, jobId);
         return aiResult;
       },
@@ -171,18 +175,7 @@ export async function executeSingleArticleWorkflow(
       key: 'cluster',
       shouldRun: () => startAt === 'cluster' || aiResult?.status === 'done',
       run: async () => {
-        await db.article.update({
-          where: { id: articleId },
-          data: {
-            ...(intent === 'regenerate' ? { eventId: null } : {}),
-            clusterStatus: 'pending',
-            clusteredAt: null,
-            clusterError: null,
-            clusterRetryCount: 0,
-            nextClusterRetryAt: null,
-          },
-        });
-        if (intent === 'regenerate' && article.eventId) await recalculateEventById(article.eventId);
+        if (startAt === 'cluster') await prepareArticleForClustering(articleId, intent === 'regenerate', signal);
         if (jobId) await startJobStage(jobId, { stage: 'cluster', total: 1, currentItemLabel: article.title });
         const clusterResult = await clusterSingleArticle(articleId, signal);
         if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
@@ -210,27 +203,38 @@ export async function executeSingleArticleWorkflow(
   return { articleId, startAt, intent, stages: Object.keys(stageResults), ...stageResults };
 }
 
-export async function prepareArticleForAiRegeneration(articleId: string): Promise<void> {
-  const article = await db.article.findUnique({ where: { id: articleId }, select: { eventId: true } });
-  if (!article) return;
-  await db.article.update({
-    where: { id: articleId },
-    data: {
-      eventId: null,
-      clusterStatus: 'pending',
-      clusteredAt: null,
-      clusterError: null,
-      clusterRetryCount: 0,
-      nextClusterRetryAt: null,
-    },
-  });
-  if (article.eventId) await recalculateEventById(article.eventId);
+export async function prepareArticleForClustering(articleId: string, detachEvent: boolean, signal?: AbortSignal): Promise<void> {
+  await assertWorkerCanWrite(signal);
+  await db.$transaction(async (tx) => {
+    await assertWorkerCanWrite(signal);
+    const article = await tx.article.findUnique({ where: { id: articleId }, select: { eventId: true } });
+    if (!article) throw new Error('文章不存在');
+    await tx.article.update({
+      where: { id: articleId },
+      data: {
+        ...(detachEvent ? { eventId: null } : {}),
+        clusterStatus: 'pending',
+        clusteredAt: null,
+        clusterError: null,
+        clusterRetryCount: 0,
+        nextClusterRetryAt: null,
+      },
+    });
+    if (article.eventId) {
+      await recalculateEventsInTransaction(tx, [article.eventId]);
+      await refreshEventPublicPublication(article.eventId, tx);
+    }
+    await refreshPublicPublication(articleId, tx);
+    await assertWorkerCanWrite(signal);
+  }, { maxWait: 10_000, timeout: 10_000 });
+  invalidatePublicArticleCache();
 }
 
 export async function clusterSingleArticle(articleId: string, signal?: AbortSignal) {
   try {
     return await clusterArticle(articleId, signal);
   } catch (error) {
+    await assertWorkerCanWrite(signal);
     await markClusterFailure(articleId, error);
     throw error;
   }

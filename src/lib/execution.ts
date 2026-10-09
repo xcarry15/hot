@@ -28,7 +28,7 @@ import {
   clearExpiredJobRunnerLease,
   type JobRunnerLease,
 } from './job-runner-lease';
-import { runWithJobId } from './job-context';
+import { getJobWriteWhere, JobLeaseLostError, runWithJobLease, type JobExecutionLease } from './job-context';
 import {
   createJobAbortController,
   clearJobAbortController,
@@ -235,6 +235,7 @@ async function runPipeline(
   jobId: string,
   reservation: MutationReservation,
   runnerLease: JobRunnerLease,
+  jobLease: JobExecutionLease,
 ): Promise<void> {
   let heartbeat: NodeJS.Timeout | null = null;
   let leaseTimer: NodeJS.Timeout | null = null;
@@ -243,16 +244,16 @@ async function runPipeline(
 
   try {
     const activeController = createJobAbortController(jobId);
-    cancellationWatcher = startJobCancellationWatcher(jobId, activeController);
+    cancellationWatcher = startJobCancellationWatcher(jobLease, activeController, () => runnerLease.isCurrent());
     heartbeat = startJobHeartbeat(jobId, HEARTBEAT_INTERVAL_MS);
 
     // Periodic lease renewal — if the process hangs, the lease expires and
     // another worker can claim the job.
     leaseTimer = setInterval(() => {
-      void Promise.all([renewJobLease(jobId), runnerLease.renew()]).then(([jobLeaseRenewed, runnerLeaseRenewed]) => {
+      void Promise.all([renewJobLease(jobLease), runnerLease.renew()]).then(([jobLeaseRenewed, runnerLeaseRenewed]) => {
         if ((!jobLeaseRenewed || !runnerLeaseRenewed) && !activeController.signal.aborted) {
           console.error(`[execution] runner lease lost for ${jobId}; stopping stale worker`);
-          activeController.abort(new Error('Job runner lease lost'));
+          activeController.abort(new JobLeaseLostError());
         }
       }).catch((err) => {
         console.error(`[execution] lease renewal failed for ${jobId}:`, err);
@@ -262,18 +263,21 @@ async function runPipeline(
       });
     }, 60_000);
 
-    const result = await runWithJobId(jobId, () =>
-      executeJob(type, payload, activeController.signal, jobId)
-    );
     await assertJobNotCancelled(jobId);
-    await markJobCompleted(jobId, result);
-    console.log(`[execution] completed job ${jobId} (${type})`);
+    assertNotAborted(activeController.signal);
+    const result = await executeJob(type, payload, activeController.signal, jobId);
+    assertNotAborted(activeController.signal);
+    await assertJobNotCancelled(jobId);
+    const completed = await markJobCompleted(jobId, result);
+    console.log(`[execution] ${completed ? 'completed' : 'no longer running'} job ${jobId} (${type})`);
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     const cancelled = msg === 'Job cancelled' || msg === 'Stopped by user';
     console.error(`[execution] ${cancelled ? 'cancelled' : 'failed'} job ${jobId} (${type}):`, msg);
 
-    if (cancelled) await markJobCancelled(jobId, 'Stopped by user');
+    if (error instanceof JobLeaseLostError) {
+      // 过期执行器只退出；任务的恢复或终态由当前持有者负责。
+    } else if (cancelled) await markJobCancelled(jobId, 'Stopped by user');
     else {
       try {
         const retry = await requeueJobAfterFailure(jobId, msg);
@@ -331,13 +335,13 @@ async function executeFullJob(
 ): Promise<Record<string, unknown>> {
   if (payload.settingsRebuild === true) {
     assertNotAborted(signal);
-    return { settingsRebuild: await rebuildPendingSettings() };
+    return { settingsRebuild: await rebuildPendingSettings(signal) };
   }
   const skipCollect = payload.skipCollect === true;
   const forceRetry = payload.forceRetry === true;
   // 人工“运行全流程”与单篇“全量重跑”使用同一恢复语义：先清理 AI/Event/
   // 聚类残留并把正文置为待重新获取，随后再进入 process -> ai -> cluster。
-  const recoveredAiArticles = await normalizeAiRecoveryBacklog(forceRetry);
+  const recoveredAiArticles = await normalizeAiRecoveryBacklog(forceRetry, new Date(), signal);
   const pushEnabled = await shouldPushAtPipelineEnd();
   const respectQuietHours = payload.trigger === 'auto' || payload.trigger === 'auto_retry';
   const tasks: PipelineStageTask[] = [
@@ -435,7 +439,10 @@ async function startClaimedJob(
     return null;
   }
 
-  void runPipeline(type, payload, jobId, reservation, runnerLease);
+  void runWithJobLease(claimed, () => runPipeline(type, payload, jobId, reservation, runnerLease, claimed), () => runnerLease.isCurrent())
+    .catch((error: unknown) => {
+      console.error(`[execution] finalization failed for job=${jobId}:`, error);
+    });
   return { queued: true, jobId };
 }
 
@@ -460,7 +467,7 @@ async function requeueJobAfterFailure(
   const now = new Date();
   const retryAt = new Date(now.getTime() + retryDelayMs(job.attempt));
   const updated = await db.job.updateMany({
-    where: { id: jobId, status: 'running', attempt: job.attempt },
+    where: { ...getJobWriteWhere(jobId), status: 'running', attempt: job.attempt },
     data: {
       status: 'queued',
       error: errorMessage.slice(0, 2000),

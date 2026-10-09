@@ -15,6 +15,8 @@ import {
 import { extractMetaPublishedAt } from './date-utils';
 import { computeContentFingerprint } from './content-fingerprint';
 import { assertNotAborted } from './worker-stop';
+import { assertWorkerCanWrite } from './execution-write-guard';
+import { JobLeaseLostError } from './job-context';
 import { readZaiPage } from '@/lib/zai-page-reader';
 
 const DIRECT_FETCH_TIMEOUT_MS = 20000;
@@ -40,6 +42,7 @@ export async function markArticleFetchFailure(
   if (!latest || (options.onlyIfPending && latest.fetchStatus !== 'pending')) return false;
 
   const retryCount = latest.fetchRetryCount + 1;
+  await assertWorkerCanWrite();
   const result = await db.article.updateMany({
     where: {
       id: articleId,
@@ -202,7 +205,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
           ? { originalSource: extractLinkshopOriginalSource(html) }
           : {};
 
-        assertNotAborted(signal);
+        await assertWorkerCanWrite(signal);
         await db.article.update({
           where: { id: articleId },
           data: {
@@ -224,7 +227,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
         lastError = new Error(`正文内容不足（有效文本 ${meaningfulTextLength(cleaned)} 字）`);
       }
     } catch (err) {
-      if (signal?.aborted) throw err;
+      if (signal?.aborted || err instanceof JobLeaseLostError) throw err;
       lastError = err instanceof Error ? err : new Error(String(err));
       console.error(`[fetchArticleDetail] article=${articleId} attempt=${attempt} error:`, lastError.message);
     }
@@ -234,7 +237,7 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
   const failureMessage = [lastError?.message, diagnosticMessage].filter(Boolean).join(' | ')
     || '未获取到有效正文';
   console.error(`[fetchArticleDetail] article=${articleId} all ${maxRetries + 1} attempts failed:`, failureMessage);
-  assertNotAborted(signal);
+  await assertWorkerCanWrite(signal);
   await markArticleFetchFailure(articleId, new Error(failureMessage));
 
   // 失败时不能把旧的短正文当作本次抓取成功的结果返回。

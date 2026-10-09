@@ -4,6 +4,7 @@ import { SETTING_KEYS } from '@/lib/settings-catalog'
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache'
 import { getPublicDateKey } from '@/lib/shared/public-date'
 import { getEventReleaseBlockReason } from '@/lib/event-release-policy'
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard'
 
 const PUBLIC_MIN_SCORE_KEY = SETTING_KEYS.PUBLIC_MIN_SCORE
 const PUBLIC_MIN_RELEVANCE_KEY = SETTING_KEYS.PUBLIC_MIN_RELEVANCE
@@ -252,26 +253,6 @@ export async function refreshEventPublicPublication(
   return refreshPublicPublication(event.representativeArticleId, client, options)
 }
 
-export async function refreshPublicPublications(
-  articleIds: string[],
-  client: PublicPublicationDb = db,
-  options: { contentChanged?: boolean } = {},
-): Promise<number> {
-  const ids = [...new Set(articleIds.filter(Boolean))]
-  if (ids.length === 0) return 0
-
-  const articles = await client.article.findMany({ where: { id: { in: ids } }, select: publicationSelect })
-  const [config, eventMap] = await Promise.all([
-    getPublicPublicationConfig(client),
-    getPublicationEventMap(client, articles),
-  ])
-  for (const article of articles) {
-    await syncCandidate(article, config, client, options, article.eventId ? eventMap.get(article.eventId) ?? null : null)
-  }
-  if (client === db) invalidatePublicArticleCache()
-  return articles.length
-}
-
 export async function refreshPublicPublicationsForSource(
   sourceId: string,
   client: PublicPublicationDb = db,
@@ -302,6 +283,7 @@ export async function refreshPublicPublicationsForSource(
       }
     }, { maxWait: 10_000, timeout: 10_000 })
     refreshed += articles.length
+    invalidatePublicArticleCache()
     cursor = articles[articles.length - 1]!.id
   }
   invalidatePublicArticleCache()
@@ -328,37 +310,20 @@ async function refreshPublicPublicationsForSourceWithClient(
 }
 
 /**
- * Recomputes the persisted public publication state once, after an infrequent
- * rule change. Public reads only consume publicStatus and do not recalculate
- * score/ad/source eligibility on every request.
- */
-async function rebuildWithClient(
-  client: PublicPublicationDb,
-  options: { contentChanged?: boolean } = {},
-): Promise<number> {
-  const [articles, config] = await Promise.all([
-    client.article.findMany({ select: publicationSelect }),
-    getPublicPublicationConfig(client),
-  ])
-  const eventMap = await getPublicationEventMap(client, articles ?? [])
-  for (const article of articles ?? []) {
-    await syncCandidate(article, config, client, options, article.eventId ? eventMap.get(article.eventId) ?? null : null)
-  }
-  return articles?.length ?? 0
-}
-
-/**
  * 规则调整后的全量公开状态同步。每批独立短事务，避免 SQLite 在大库上被
  * 一次性事务锁住；任一批失败时调用方保留重建标记并从头幂等重试。
  */
 export async function rebuildPublicPublicationSnapshotInBatches(
   options: { contentChanged?: boolean } = {},
+  signal?: AbortSignal,
 ): Promise<number> {
+  await assertWorkerCanWrite(signal)
   const config = await getPublicPublicationConfig(db)
   let cursor: string | undefined
   let rebuilt = 0
 
   while (true) {
+    await assertWorkerCanWrite(signal)
     const articles = await db.article.findMany({
       where: cursor ? { id: { gt: cursor } } : undefined,
       select: publicationSelect,
@@ -366,8 +331,10 @@ export async function rebuildPublicPublicationSnapshotInBatches(
       take: PUBLICATION_REBUILD_BATCH_SIZE,
     })
     if (articles.length === 0) break
+    await assertWorkerCanWrite(signal)
 
     await db.$transaction(async (tx) => {
+      await assertWorkerCanWrite(signal)
       const eventMap = await getPublicationEventMap(tx, articles)
       for (const article of articles) {
         await syncCandidate(
@@ -378,19 +345,13 @@ export async function rebuildPublicPublicationSnapshotInBatches(
           article.eventId ? eventMap.get(article.eventId) ?? null : null,
         )
       }
+      await assertWorkerCanWrite(signal)
     }, { maxWait: 10_000, timeout: 10_000 })
 
+    invalidatePublicArticleCache()
     rebuilt += articles.length
     cursor = articles[articles.length - 1]!.id
   }
   invalidatePublicArticleCache()
   return rebuilt
-}
-
-export async function rebuildPublicPublicationSnapshot(
-  client?: PublicPublicationDb,
-  options: { contentChanged?: boolean } = {},
-): Promise<number> {
-  if (client) return rebuildWithClient(client, options)
-  return rebuildPublicPublicationSnapshotInBatches(options)
 }

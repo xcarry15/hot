@@ -21,7 +21,8 @@ import { AI_MODEL_TIMEOUT_MS } from '@/lib/ai-client';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
 import { isFreeAIModel } from '@/lib/ai-rate-gate';
 import { providerSettingKey } from '@/contracts/ai-provider';
-import { assertNotAborted } from '@/lib/worker-stop';
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
+import { JobLeaseLostError } from '@/lib/job-context';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
 import { AI_PROVIDER_RETRY_DELAY_MS, AI_RATE_LIMIT_RETRY_DELAY_MS } from '@/lib/ai-provider-backoff';
 import { summarizeAIError } from '@/lib/ai-error';
@@ -56,7 +57,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   providerUnavailable: boolean;
   providerPaused: boolean;
 }> {
-  assertNotAborted(signal);
+  await assertWorkerCanWrite(signal);
 
   const pendingWhereBase: Prisma.ArticleWhereInput = {
     ...AUTOMATIC_ARTICLE_SOURCE_FILTER,
@@ -111,6 +112,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   });
   let providerUnavailable = false;
   while (!providerPause) {
+    await assertWorkerCanWrite(signal);
     const pendingRows = await db.article.findMany({
       where: getPendingRowsWhere(),
       select: aiProcessSelect,
@@ -120,7 +122,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
     const pending = pendingRows.map(toAiProcessArticle);
     if (pending.length === 0) break;
     for (let i = 0; i < pending.length; i += concurrency) {
-      assertNotAborted(signal);
+      await assertWorkerCanWrite(signal);
       const batch = pending.slice(i, i + concurrency);
       for (const article of batch) attemptedArticleIds.add(article.id);
       const results = await Promise.allSettled(batch.map(a => withTimeout(
@@ -129,7 +131,9 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
         `AI分析超时 "${a.title}"`,
         signal,
       )));
-      assertNotAborted(signal);
+      await assertWorkerCanWrite(signal);
+      const leaseLost = results.find(result => result.status === 'rejected' && result.reason instanceof JobLeaseLostError);
+      if (leaseLost?.status === 'rejected') throw leaseLost.reason;
       let batchErrors = 0;
       let unexpectedError: unknown = null;
       for (const [resultIndex, r] of results.entries()) {
@@ -142,6 +146,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
             batchErrors++;
             const article = batch[resultIndex];
             const retryCount = (article.aiRetryCount ?? 0) + 1;
+            await assertWorkerCanWrite(signal);
             await db.article.updateMany({
               where: { id: article.id, aiStatus: { in: ['pending', 'failed'] } },
               data: retryCount >= 5
@@ -201,6 +206,7 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   }
 
   if (providerPause) {
+    await assertWorkerCanWrite(signal);
     // Provider/配置级故障下，不再对剩余文章发起必然失败的 AI 请求。
     // 可恢复错误只暂缓队列，不能把未请求文章批量标失败或消耗各自重试次数。
     providerUnavailable = !providerPause.retryable;

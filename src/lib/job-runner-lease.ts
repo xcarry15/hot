@@ -10,6 +10,7 @@ const JOB_RUNNER_LEASE_KEY = '__runtime_job_runner_lease__';
 const JOB_RUNNER_LEASE_TTL_MS = 90_000;
 
 export interface JobRunnerLease {
+  isCurrent(): Promise<boolean>;
   renew(): Promise<boolean>;
   release(): Promise<void>;
 }
@@ -50,25 +51,44 @@ export async function acquireJobRunnerLease(): Promise<JobRunnerLease | null> {
   if (claimed.count !== 1) return null;
 
   let released = false;
+  let renewal: Promise<boolean> | null = null;
+  let release: Promise<void> | null = null;
   return {
-    async renew(): Promise<boolean> {
+    async isCurrent(): Promise<boolean> {
       if (released) return false;
-      const nextValue = nextLeaseValue(token);
-      const renewed = await db.setting.updateMany({
-        where: { key: JOB_RUNNER_LEASE_KEY, value },
-        data: { value: nextValue },
+      const current = await db.setting.findUnique({
+        where: { key: JOB_RUNNER_LEASE_KEY }, select: { value: true },
       });
-      if (renewed.count !== 1) return false;
-      value = nextValue;
-      return true;
+      return !released && Boolean(current && current.value.endsWith(`|${token}`) && !isExpiredLease(current.value, new Date()));
     },
-    async release(): Promise<void> {
-      if (released) return;
+    renew(): Promise<boolean> {
+      if (released) return Promise.resolve(false);
+      if (renewal) return renewal;
+      renewal = (async () => {
+        if (isExpiredLease(value, new Date())) return false;
+        const nextValue = nextLeaseValue(token);
+        const renewed = await db.setting.updateMany({
+          where: { key: JOB_RUNNER_LEASE_KEY, value },
+          data: { value: nextValue },
+        });
+        if (renewed.count !== 1) return false;
+        value = nextValue;
+        return true;
+      })().finally(() => { renewal = null; });
+      return renewal;
+    },
+    release(): Promise<void> {
+      if (release) return release;
       released = true;
-      await db.setting.updateMany({
-        where: { key: JOB_RUNNER_LEASE_KEY, value },
-        data: { value: '' },
-      });
+      release = (async () => {
+        // 续租可能已写入数据库而尚未返回；等它更新本地 CAS 值后再释放。
+        try { await renewal; } catch { /* 续租失败仍尝试释放已知租约。 */ }
+        await db.setting.updateMany({
+          where: { key: JOB_RUNNER_LEASE_KEY, value },
+          data: { value: '' },
+        });
+      })();
+      return release;
     },
   };
 }
@@ -85,5 +105,3 @@ export async function clearExpiredJobRunnerLease(): Promise<void> {
     data: { value: '' },
   });
 }
-
-export const jobRunnerLeaseKeyForTest = JOB_RUNNER_LEASE_KEY;

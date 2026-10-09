@@ -4,6 +4,7 @@ import {
   resetArticleAiAndEventState,
 } from '@/lib/article-ai-reset';
 import { buildAiRecoveryWhere } from '@/lib/ai-queue-policy';
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 
 const RECOVERY_BATCH_SIZE = 100;
 
@@ -17,9 +18,11 @@ const RECOVERY_BATCH_SIZE = 100;
 export async function normalizeAiRecoveryBacklog(
   forceRetry: boolean,
   now = new Date(),
+  signal?: AbortSignal,
 ): Promise<number> {
   let normalized = 0;
   while (true) {
+    await assertWorkerCanWrite(signal);
     const articles = await db.article.findMany({
       where: buildAiRecoveryWhere(forceRetry, now),
       orderBy: { id: 'asc' },
@@ -27,8 +30,10 @@ export async function normalizeAiRecoveryBacklog(
       select: AI_RESET_ARTICLE_SELECT,
     });
     if (articles.length === 0) break;
+    await assertWorkerCanWrite(signal);
 
     await db.$transaction(async (tx) => {
+      await assertWorkerCanWrite(signal);
       await resetArticleAiAndEventState(tx, articles);
       if (forceRetry) {
         const articleIds = articles.map((article) => article.id);
@@ -44,6 +49,7 @@ export async function normalizeAiRecoveryBacklog(
           },
         });
       }
+      await assertWorkerCanWrite(signal);
     }, { maxWait: 10_000, timeout: 10_000 });
     normalized += articles.length;
   }

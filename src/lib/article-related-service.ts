@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { splitBrands } from '@/lib/shared/article-codecs';
+import { isHttpUrl } from '@/lib/url-utils';
 
 const RELATED_WINDOW_DAYS = 30;
 const RELATED_CANDIDATE_TAKE = 300;
@@ -45,8 +46,6 @@ export type RelatedArticle = {
 type RelatedVisibility = 'public' | 'pushed';
 
 export interface RelatedArticleOptions {
-  /** Retained for the Feishu delivery call site. */
-  onlyPushed?: boolean;
   /** Public detail pages and pushed Feishu cards use different visibility gates. */
   visibility?: RelatedVisibility;
 }
@@ -89,8 +88,7 @@ function hasSharedBrand(article: RelatedArticleBase, candidate: RelatedArticleBa
   return articleBrands.some((brand) => candidateBrandSet.has(brand));
 }
 
-function buildEventVisibilityWhere(options: RelatedArticleOptions): Prisma.EventWhereInput | null {
-  const visibility = options.visibility ?? (options.onlyPushed ? 'pushed' : null);
+function buildEventVisibilityWhere(visibility: RelatedVisibility | undefined): Prisma.EventWhereInput | null {
   if (!visibility) return null;
 
   if (visibility === 'public') {
@@ -125,15 +123,6 @@ function buildEventVisibilityWhere(options: RelatedArticleOptions): Prisma.Event
 
 function isWithinRecentWindow(date: Date, cutoff: Date): boolean {
   return date.getTime() >= cutoff.getTime();
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 function getCandidateRelation(
@@ -191,8 +180,8 @@ export async function getRelatedArticles(
 
   const brands = splitBrands(article.brand);
   const cutoff = new Date(Date.now() - RELATED_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  const visibility = options.visibility ?? (options.onlyPushed ? 'pushed' : null);
-  const eventVisibilityWhere = buildEventVisibilityWhere(options);
+  const visibility = options.visibility;
+  const eventVisibilityWhere = buildEventVisibilityWhere(visibility);
   const sameEventBranch: Prisma.ArticleWhereInput | null = article.eventId
     ? {
         eventId: article.eventId,

@@ -10,6 +10,8 @@ const mocks = db as unknown as {
 const sourceServiceMocks = vi.hoisted(() => ({
   refreshPublicationsForSource: vi.fn(),
   invalidatePublicArticleCache: vi.fn(),
+  releaseSourceRepresentatives: vi.fn(),
+  markSourceRepresentativesDirty: vi.fn(),
 }));
 
 vi.mock('@/lib/public-publication-service', () => ({
@@ -18,13 +20,20 @@ vi.mock('@/lib/public-publication-service', () => ({
 vi.mock('@/lib/public-article-cache', () => ({
   invalidatePublicArticleCache: sourceServiceMocks.invalidatePublicArticleCache,
 }));
+vi.mock('@/lib/event/event-consistency-service', () => ({
+  releaseSourceRepresentatives: sourceServiceMocks.releaseSourceRepresentatives,
+  markSourceRepresentativesDirty: sourceServiceMocks.markSourceRepresentativesDirty,
+}));
 
 describe('source-service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sourceServiceMocks.refreshPublicationsForSource.mockResolvedValue(0);
     mocks.source.findMany.mockResolvedValue([]);
-    mocks.source.findFirst.mockResolvedValue({ id: 's1' });
+    mocks.source.findFirst.mockResolvedValue({ id: 's1', publicEnabled: true });
+    (db.$transaction as ReturnType<typeof vi.fn>).mockImplementation(async (operation: (tx: typeof db) => Promise<unknown>) => operation(db));
+    sourceServiceMocks.releaseSourceRepresentatives.mockResolvedValue(undefined);
+    sourceServiceMocks.markSourceRepresentativesDirty.mockResolvedValue(undefined);
   });
 
   it('已删除来源不会暴露详情', async () => {
@@ -41,6 +50,14 @@ describe('source-service', () => {
     expect(mocks.source.update).toHaveBeenCalledWith({ where: { id: 's1' }, data: { publicEnabled: false } });
     expect(sourceServiceMocks.refreshPublicationsForSource).toHaveBeenCalledWith('s1');
     expect(sourceServiceMocks.invalidatePublicArticleCache).toHaveBeenCalledOnce();
+    expect(sourceServiceMocks.releaseSourceRepresentatives).not.toHaveBeenCalled();
+    expect(sourceServiceMocks.markSourceRepresentativesDirty).toHaveBeenCalledWith(db, 's1', 'source-publication-changed');
+  });
+
+  it('公开开关未改变时，不登记重复修复', async () => {
+    mocks.source.update.mockResolvedValue({ id: 's1', publicEnabled: true });
+    await updateSource('s1', { publicEnabled: true });
+    expect(sourceServiceMocks.markSourceRepresentativesDirty).not.toHaveBeenCalled();
   });
 
   it('软删除来源会禁用采集并撤回该来源公开内容', async () => {
@@ -54,6 +71,7 @@ describe('source-service', () => {
     });
     expect(sourceServiceMocks.refreshPublicationsForSource).toHaveBeenCalledWith('s1');
     expect(sourceServiceMocks.invalidatePublicArticleCache).toHaveBeenCalledOnce();
+    expect(sourceServiceMocks.releaseSourceRepresentatives).toHaveBeenCalledWith(db, 's1');
   });
 
   it('编辑 URL 时使用与创建一致的规范化身份拒绝重复来源', async () => {

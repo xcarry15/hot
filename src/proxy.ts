@@ -53,7 +53,7 @@ export function proxy(request: NextRequest) {
   }
 
   const isPublicArticleApi = pathname === '/api/public/articles'
-    || pathname.startsWith('/api/public/articles/');
+    || /^\/api\/public\/articles\/[^/]+$/.test(pathname);
   if (isPublicArticleApi) {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       return NextResponse.json({ error: 'Method not allowed' }, { status: 405 });

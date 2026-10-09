@@ -135,7 +135,7 @@ describe('getRelatedArticles', () => {
   });
 
   it('推送场景按已推送 Event 筛选关联文章', async () => {
-    await getRelatedArticles(currentArticle.id, 3, { onlyPushed: true });
+    await getRelatedArticles(currentArticle.id, 3, { visibility: 'pushed' });
 
     expect(mocks.articleFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({

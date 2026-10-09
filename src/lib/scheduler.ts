@@ -334,7 +334,7 @@ async function runSchedulerTickInternal(): Promise<void> {
  * Crawl: uses a 1-minute tick with interval-based check (from settings).
  * Push: uses the minute tick with a durable daily marker and retry catch-up.
  * Both run jobs via runJob() (src/lib/execution.ts). No separate polling
- * worker — jobs execute in-process so SSE progress events reach the browser.
+ * worker — jobs execute in-process and persist progress for browser polling.
  */
 export function startScheduler(): void {
   if (globalThis.__newsSchedulerStarted) return;

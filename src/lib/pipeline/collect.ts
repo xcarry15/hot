@@ -11,7 +11,9 @@ import { cleanContent, extractArticleBody, meaningfulTextLength } from '@/lib/cl
 import { withTimeout } from '@/lib/shared/async';
 import { MIN_MEANINGFUL_CHARS } from '@/lib/shared/content-policy';
 import { assertNotAborted } from '@/lib/worker-stop';
-import { normalizeUrl } from '@/lib/url-utils';
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
+import { JobLeaseLostError } from '@/lib/job-context';
+import { isHttpUrl, normalizeUrl } from '@/lib/url-utils';
 import { parseChineseDate } from '@/lib/date-utils';
 import {
   advanceJobProgress,
@@ -39,15 +41,6 @@ function sourceHostname(url: string): string {
   }
 }
 
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 /**
  * 单条 crawlItem 入口：
  *   - URL 精确去重（命中已处理 URL 仅更新列表元数据，不重置处理状态）
@@ -60,11 +53,12 @@ export type CollectItemResult = 'created' | 'existing' | 'discarded';
 
 export async function collectItem(
   sourceId: string,
-  sourceName: string,
   item: CrawlItem,
   knownExisting?: ExistingCollectedArticle | null,
   knownDiscarded?: boolean,
+  signal?: AbortSignal,
 ): Promise<CollectItemResult> {
+  await assertWorkerCanWrite(signal);
   // Normalize URL
   const normalizedUrl = normalizeUrl(item.url);
   // 解析器面对的是第三方页面；结构化选择器可能意外抓到 javascript:、
@@ -88,6 +82,7 @@ export async function collectItem(
       && nextPublishedAt !== undefined
       && existing.publishedAt?.getTime() !== nextPublishedAt.getTime();
     if (titleChanged || publishedAtChanged) {
+      await assertWorkerCanWrite(signal);
       await db.article.update({
         where: { id: existing.id },
         data: {
@@ -120,6 +115,7 @@ export async function collectItem(
       `${item.title} ${item.summary || ''} ${item.content || ''}`,
     );
     if (blacklistMatch.blacklisted) {
+      await assertWorkerCanWrite(signal);
       await recordDiscardedItem({
         sourceId,
         title: item.title,
@@ -132,6 +128,7 @@ export async function collectItem(
       return 'discarded';
     }
   } catch (error) {
+    await assertWorkerCanWrite(signal);
     // 关键词 DB 异常时保持现有“放过不可误杀”策略。
     console.error(`[collectItem] blacklist check failed for article="${item.title}":`, error);
   }
@@ -139,6 +136,7 @@ export async function collectItem(
   // ---- Step 3: Length gate ----
   const hasDetailContent = meaningfulTextLength(item.content || '') >= MIN_MEANINGFUL_CHARS;
   if (!hasDetailContent && !item.summary && item.title.length < 10) {
+    await assertWorkerCanWrite(signal);
     await recordDiscardedItem({
       sourceId,
       title: item.title,
@@ -153,7 +151,7 @@ export async function collectItem(
   // 注意：关键字匹配已搬到 processAllPending，内容指纹由后续聚类使用。
   // 这里只做 URL 唯一约束 + 长度门控；item.content 只是列表页摘要，不能用于事件判断。
 
-  // ---- Step 5: Save article (direct create, P2002 fallback) ----
+  // Save directly; the database unique constraint remains the final URL dedup guard.
   // SQLite WAL 模式下写操作串行化，Step 1 的 findUnique 后极不可能发生并发插入。
   // 直接用 create，P2002 作兜底，移除事务内冗余的二次 URL 检查。
   const rawContent = item.content || '';
@@ -162,6 +160,7 @@ export async function collectItem(
   const articleBody = rawContent ? extractArticleBody(rawContent) : '';
 
   try {
+    await assertWorkerCanWrite(signal);
     await db.article.create({
       data: {
         sourceId,
@@ -180,11 +179,12 @@ export async function collectItem(
     return 'created';
   } catch (err: unknown) {
     // P2002: 极少见 — 常规竞态已由 Step 1 URL 去重消除；极端并发下仍可能触发。
-  // 不抛出中断整个 for 循环：按 URL 唯一约束命中跳过即可。
+    // 不抛出中断整个 for 循环：按 URL 唯一约束命中跳过即可。
     // 注意：此处不执行 title-change update（P2002 概率极低，无必要），与 Step 1 的
     // 正常 update 路径一致——Step 1 已处理非并发场景下的标题更新。
     if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === 'P2002') {
       console.log(`[collectItem] P2002 race for url=${normalizedUrl} — treating as dedup hit`);
+      await assertWorkerCanWrite(signal);
       await recordDiscardedItem({
         sourceId,
         title: item.title,
@@ -203,9 +203,6 @@ export async function collectItem(
     }
     throw err;
   }
-  // (函数内使用 sourceName 仅为兼容旧签名；目前被判定不会读取，但保留参数以避免调用方改动。)
-  void sourceName;
-  return 'discarded';
 }
 
 /**
@@ -213,7 +210,7 @@ export async function collectItem(
  * 永远无法入库。仅在新来源已成功解析列表后，接管同 URL 的已删除来源文章，
  * 并恢复此前未完成的正文抓取，避免产生第二份 Article 或长期不可见的孤儿记录。
  */
-async function reclaimArticlesFromDeletedSource(source: Source): Promise<number> {
+async function reclaimArticlesFromDeletedSource(source: Source, signal?: AbortSignal): Promise<number> {
   const deletedSources = await db.source.findMany({
     where: {
       id: { not: source.id },
@@ -224,6 +221,7 @@ async function reclaimArticlesFromDeletedSource(source: Source): Promise<number>
   });
   if (deletedSources.length === 0) return 0;
 
+  await assertWorkerCanWrite(signal);
   const result = await db.article.updateMany({
     where: {
       sourceId: { in: deletedSources.map((item) => item.id) },
@@ -244,6 +242,7 @@ async function reclaimArticlesFromDeletedSource(source: Source): Promise<number>
   });
 
   // 已完成文章无需重跑，仍需归属到当前启用来源，才能在工作台正常显示。
+  await assertWorkerCanWrite(signal);
   await db.article.updateMany({
     where: {
       sourceId: { in: deletedSources.map((item) => item.id) },
@@ -282,6 +281,7 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
     // deliberately emits no stage events so callers cannot create duplicate
     // progress records for the same source.
     const result = await dispatchParser(source.type, source.url, source.parserConfig, signal);
+    await assertWorkerCanWrite(signal);
 
     if (!result.success) {
       await recordFailure(sourceId, result.error || 'Unknown error');
@@ -325,7 +325,7 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
 
 
     // 列表已成功解析后才允许接管同 URL 的已删除来源，避免错误配置的来源夺取文章。
-    const reclaimedCount = await reclaimArticlesFromDeletedSource(source);
+    const reclaimedCount = await reclaimArticlesFromDeletedSource(source, signal);
 
     // 单批预取 URL 状态，把每条 2 次只读查询收敛为 2 次批量查询。
     const normalizedUrls = [...new Set(result.items.map((item) => normalizeUrl(item.url)))];
@@ -353,6 +353,7 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
 
     let createdCount = 0;
     let deduplicatedCount = 0;
+    await assertWorkerCanWrite(signal);
 
     // Collect each item (no detail fetch, no AI — those are separate stages).
     for (const item of result.items) {
@@ -365,10 +366,10 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
       processedUrls.add(normalizedUrl);
       const outcome = await collectItem(
         sourceId,
-        source.name,
         item,
         existingByUrl.get(normalizedUrl) ?? null,
         discardedUrlSet.has(normalizedUrl),
+        signal,
       );
       if (outcome === 'created') createdCount++;
       if (outcome === 'existing') deduplicatedCount++;
@@ -376,7 +377,8 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
 
     return { ...result, createdCount, deduplicatedCount, reclaimedCount };
   } catch (error: unknown) {
-    if (signal?.aborted) throw error;
+    if (signal?.aborted || error instanceof JobLeaseLostError) throw error;
+    await assertWorkerCanWrite(signal);
     const msg = error instanceof Error ? error.message : 'Unknown crawl error';
     await recordFailure(sourceId, msg);
     return { success: false, items: [], error: msg };
@@ -470,7 +472,8 @@ export async function collectAllSources(signal?: AbortSignal, jobId?: string) {
           );
           return { sourceId: source.id, sourceName: source.name, ...result };
         } catch (err) {
-          if (signal?.aborted) throw err;
+          if (signal?.aborted || err instanceof JobLeaseLostError) throw err;
+          await assertWorkerCanWrite(signal);
           const msg = err instanceof Error ? err.message : String(err);
           // crawlSource 在收到子超时信号时会原样抛出，以免把“任务取消”
           // 误记为来源失败。这里确认父任务仍在运行，说明是本来源的超时，

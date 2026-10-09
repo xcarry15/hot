@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   articleUpdate: vi.fn(),
   articleCreate: vi.fn(),
   discardedItemFindFirst: vi.fn(),
+  keywordMatch: vi.fn(),
+  recordDiscarded: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -25,6 +27,9 @@ vi.mock('@/lib/db', () => ({
     },
   },
 }));
+
+vi.mock('@/lib/filter', () => ({ evaluateKeywordMatch: mocks.keywordMatch }));
+vi.mock('@/lib/pipeline/discarded-items', () => ({ recordDiscardedItem: mocks.recordDiscarded }));
 
 import { collectItem } from '@/lib/pipeline/collect';
 
@@ -50,7 +55,7 @@ describe('collectItem URL 去重', () => {
       title: '新标题',
     };
 
-    await expect(collectItem('source-1', '示例来源', item, existingArticle())).resolves.toBe('existing');
+    await expect(collectItem('source-1', item, existingArticle())).resolves.toBe('existing');
 
     expect(mocks.articleCreate).not.toHaveBeenCalled();
     expect(mocks.articleUpdate).toHaveBeenCalledWith({
@@ -69,7 +74,7 @@ describe('collectItem URL 去重', () => {
     const article = existingArticle();
     const item: CrawlItem = { url: article.url, title: article.title };
 
-    await expect(collectItem('source-1', '示例来源', item, article)).resolves.toBe('existing');
+    await expect(collectItem('source-1', item, article)).resolves.toBe('existing');
 
     expect(mocks.articleUpdate).not.toHaveBeenCalled();
     expect(mocks.articleCreate).not.toHaveBeenCalled();
@@ -77,7 +82,7 @@ describe('collectItem URL 去重', () => {
 
   it('列表只有日期时不能覆盖已抓取文章的精确时间', async () => {
     const article = existingArticle({ fetchStatus: 'fetched', publishedAt: new Date('2026-07-20T10:35:00+08:00') });
-    await collectItem('source-1', '示例来源', {
+    await collectItem('source-1', {
       url: article.url, title: article.title, publishedAt: '2026-07-20',
     }, article);
     expect(mocks.articleUpdate).not.toHaveBeenCalled();
@@ -85,11 +90,28 @@ describe('collectItem URL 去重', () => {
 
   it('尚未抓取的文章仍可以补充列表时间', async () => {
     const article = existingArticle({ fetchStatus: 'pending', publishedAt: null });
-    await collectItem('source-1', '示例来源', {
+    await collectItem('source-1', {
       url: article.url, title: article.title, publishedAt: '2026-07-20',
     }, article);
     expect(mocks.articleUpdate).toHaveBeenCalledWith({
       where: { id: article.id }, data: { publishedAt: new Date('2026-07-20') },
     });
+  });
+});
+
+
+describe('collectItem 迟到查询', () => {
+  it.each([false, true])('关键词查询返回后取消，黑名单=%s 时不得落库', async (blacklisted) => {
+    vi.clearAllMocks();
+    const controller = new AbortController();
+    mocks.keywordMatch.mockImplementationOnce(async () => {
+      controller.abort(new Error('collection cancelled'));
+      return { blacklisted };
+    });
+    await expect(collectItem('source-1', {
+      url: 'https://example.com/late', title: '合成文章测试标题足够长',
+    }, null, false, controller.signal)).rejects.toThrow('collection cancelled');
+    expect(mocks.articleCreate).not.toHaveBeenCalled();
+    expect(mocks.recordDiscarded).not.toHaveBeenCalled();
   });
 });

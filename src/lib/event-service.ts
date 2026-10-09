@@ -7,10 +7,9 @@ import {
   recalculateEvent,
   releaseRepresentativeOwnership,
 } from '@/lib/event/event-recalculation-service';
-import { markEventDirty } from '@/lib/event/event-consistency-service';
+import type { Prisma } from '@prisma/client';
 export {
   deriveEventClusterReviewStatus,
-  isRepresentativeEligible,
   selectRepresentativeCandidate,
   sharedBrands,
   type RepresentativeCandidate,
@@ -18,22 +17,15 @@ export {
 export { getSameBrandCandidates, searchActiveEvents } from '@/lib/event/event-query-service';
 export { getEventArticles } from '@/lib/event/event-query-service';
 export {
-  recalculateArticleEvent,
-  recalculateEventById,
   recalculateEventsInTransaction,
-  reconcileEventAfterArticleDeletion,
   reconcileEventAfterArticleDeletionInTransaction,
-  repairStaleEventRepresentatives,
   type ArticleDeletionEventResult,
 } from '@/lib/event/event-recalculation-service';
-export {
-  scanEventConsistency,
-  type ConsistencyViolation,
-} from '@/lib/event/event-consistency-service';
 
-async function refreshEventRepresentatives(eventIds: string[]): Promise<void> {
-  for (const eventId of [...new Set(eventIds)]) await refreshEventPublicPublication(eventId);
-  invalidatePublicArticleCache();
+const EVENT_MUTATION_TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 30_000 };
+
+async function refreshEventRepresentatives(client: Prisma.TransactionClient, eventIds: string[]): Promise<void> {
+  for (const eventId of [...new Set(eventIds)]) await refreshEventPublicPublication(eventId, client);
 }
 
 export async function confirmIndependentArticle(eventId: string, articleId: string): Promise<boolean> {
@@ -66,76 +58,15 @@ export async function confirmIndependentArticle(eventId: string, articleId: stri
         evidence: JSON.stringify({ eventId }),
       },
     });
+    await refreshEventRepresentatives(tx, [eventId]);
     return true;
-  });
-  if (updated) await refreshEventRepresentatives([eventId]);
+  }, EVENT_MUTATION_TRANSACTION_OPTIONS);
+  if (updated) invalidatePublicArticleCache();
   return updated;
 }
 
-/**
- * 旧版本会把单篇、多主题或缺少事件身份的文章留下为待复核 Event。
- * 单篇 Event 没有可比较的成员，系统可以安全地按独立事件确认，避免历史数据
- * 永久占据人工队列；真正包含多个成员的待复核 Event 仍保留人工校准入口。
- */
-export async function autoConfirmSingleArticleReviewEvents(): Promise<number> {
-  const candidates = await db.event.findMany({
-    where: { status: 'active', clusterReviewStatus: 'pending' },
-    select: {
-      id: true,
-      articles: { select: { id: true, aiStatus: true, clusterStatus: true } },
-      assignedAudits: {
-        where: {
-          candidateEventId: { not: null },
-          candidateEvent: { is: { status: 'active' } },
-        },
-        select: { id: true },
-        take: 1,
-      },
-    },
-  });
-  let confirmed = 0;
-  for (const candidate of candidates) {
-    const article = candidate.articles[0];
-    if (candidate.articles.length !== 1 || !article || article.aiStatus !== 'done' || article.clusterStatus !== 'needs_review') continue;
-    // 候选关系导致的单篇待复核 Event 不能自动确认，否则会再次绕过
-    // 公开/推送安全门。只有没有候选 Event 的历史单篇 review 才能自动收口。
-    if (candidate.assignedAudits.length > 0) continue;
-    const updated = await db.$transaction(async (tx) => {
-      const current = await tx.article.findFirst({
-        where: { id: article.id, eventId: candidate.id, aiStatus: 'done', clusterStatus: 'needs_review' },
-        select: { id: true },
-      });
-      if (!current) return false;
-      await tx.article.update({
-        where: { id: article.id },
-        data: { clusterStatus: 'clustered', clusteredAt: new Date(), clusterError: null, skipReason: null },
-      });
-      await recalculateEvent(tx, candidate.id);
-      await tx.eventClusterAudit.create({
-        data: {
-          articleId: article.id,
-          assignedEventId: candidate.id,
-          actor: 'system',
-          action: 'confirm_independent',
-          decisionSource: 'rule',
-          confidence: null,
-          evidence: JSON.stringify({
-            automatic: true,
-            reason: '单篇待复核 Event 没有其他成员，自动按独立事件确认',
-          }),
-        },
-      });
-      return true;
-    });
-    if (!updated) continue;
-    confirmed++;
-    await refreshEventRepresentatives([candidate.id]);
-  }
-  return confirmed;
-}
-
 export async function moveArticleToEvent(sourceEventId: string, articleId: string, targetEventId: string): Promise<boolean> {
-  // 移动同时更新文章、重算源和目标 Event、写入 dirty 标记及审计。
+  // 移动同时更新文章、重算源和目标 Event、同步公开投影及审计。
   // SQLite 响应变慢或写入等待时，这些查询可能超过 Prisma 默认的 5 秒交互事务上限，
   // 导致 P2028 并回滚整次移动；给这段必须原子提交的操作留出合理等待时间。
   const result = await db.$transaction(async (tx) => {
@@ -166,8 +97,6 @@ export async function moveArticleToEvent(sourceEventId: string, articleId: strin
     });
     await recalculateEvent(tx, sourceEventId);
     await recalculateEvent(tx, targetEventId);
-    await markEventDirty(sourceEventId, `article ${articleId} moved out to ${targetEventId}`, tx);
-    await markEventDirty(targetEventId, `article ${articleId} moved in from ${sourceEventId}`, tx);
     await tx.eventClusterAudit.create({
       data: {
         articleId,
@@ -184,10 +113,11 @@ export async function moveArticleToEvent(sourceEventId: string, articleId: strin
         }),
       },
     });
-    return { sourceEventId };
-  }, { maxWait: 10_000, timeout: 30_000 });
+    await refreshEventRepresentatives(tx, [sourceEventId, targetEventId]);
+    return true;
+  }, EVENT_MUTATION_TRANSACTION_OPTIONS);
   if (!result) return false;
-  await refreshEventRepresentatives([result.sourceEventId, targetEventId]);
+  invalidatePublicArticleCache();
   return true;
 }
 
@@ -239,10 +169,10 @@ export async function setEventRepresentative(eventId: string, articleId: string)
         evidence: JSON.stringify({ representativeArticleId: articleId }),
       },
     });
+    await refreshEventRepresentatives(tx, [eventId]);
     return true;
-  });
+  }, EVENT_MUTATION_TRANSACTION_OPTIONS);
   if (!updated) return false;
-  await refreshEventPublicPublication(eventId);
   invalidatePublicArticleCache();
   return true;
 }
@@ -289,12 +219,10 @@ export async function mergeEvents(sourceEventId: string, targetEventId: string):
     });
     // P0-5: 禁止复制 pushedAt — 合并后重新计算投递状态
     await recalculateEvent(tx, targetEventId);
-    // 源 Event 合并后标记为脏，使 Reconciler 处理投递状态对齐
-    await markEventDirty(targetEventId, `merged from ${sourceEventId}`, tx);
+    await refreshEventRepresentatives(tx, [targetEventId]);
     return true;
-  });
+  }, EVENT_MUTATION_TRANSACTION_OPTIONS);
   if (result) {
-    await refreshEventPublicPublication(targetEventId);
     invalidatePublicArticleCache();
   }
   return result;
@@ -354,13 +282,10 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
         },
       });
     }
-    await markEventDirty(created.id, `split from ${eventId}`, tx);
-    await markEventDirty(eventId, `split to ${created.id}`, tx);
+    await refreshEventRepresentatives(tx, [eventId, created.id]);
     return created.id;
-  });
+  }, EVENT_MUTATION_TRANSACTION_OPTIONS);
   if (newEventId) {
-    await refreshEventPublicPublication(eventId);
-    await refreshEventPublicPublication(newEventId);
     invalidatePublicArticleCache();
   }
   return newEventId;

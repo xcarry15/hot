@@ -1,5 +1,7 @@
 import { db } from '@/lib/db';
 import { KEYWORD_BLACKLIST_CATEGORY } from '@/contracts/keywords';
+import type { KeywordMatchResult } from '@/lib/filter';
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 
 export const KEYWORD_HIT_COUNT_WINDOW_DAYS = 90;
 
@@ -8,7 +10,7 @@ type KeywordDb = Pick<typeof db, 'keyword' | 'keywordHit'>;
 export async function replaceArticleKeywordHits(
   articleId: string,
   matchedWords: readonly string[],
-  client: KeywordDb = db,
+  client: KeywordDb,
 ): Promise<void> {
   const normalizedWords = [...new Set(matchedWords.map((word) => word.trim()).filter(Boolean))];
   await client.keywordHit.deleteMany({ where: { articleId } });
@@ -25,6 +27,24 @@ export async function replaceArticleKeywordHits(
   await client.keywordHit.createMany({
     data: keywords.map((keyword) => ({ articleId, keywordId: keyword.id })),
   });
+}
+
+/** Commit the processing result and its hit details together, including cancellation. */
+export async function persistArticleKeywordMatch(
+  articleId: string,
+  match: Pick<KeywordMatchResult, 'matched' | 'matchedWords'>,
+  signal?: AbortSignal,
+): Promise<void> {
+  await assertWorkerCanWrite(signal);
+  await db.$transaction(async (transaction) => {
+    await assertWorkerCanWrite(signal);
+    await transaction.article.update({
+      where: { id: articleId },
+      data: { keywordMatched: match.matched },
+    });
+    await replaceArticleKeywordHits(articleId, match.matchedWords, transaction);
+    await assertWorkerCanWrite(signal);
+  }, { maxWait: 10_000, timeout: 10_000 });
 }
 
 /**

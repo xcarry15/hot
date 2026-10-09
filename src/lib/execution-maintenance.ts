@@ -8,6 +8,7 @@ import { rebuildPublicPublicationSnapshotInBatches } from './public-publication-
 import { advanceJobProgress, startJobStage } from './job-progress';
 import { assertJobNotCancelled } from './execution-cancellation';
 import { assertNotAborted } from './worker-stop';
+import { getJobWriteWhere } from './job-context';
 import {
   EVENT_CONSISTENCY_REPAIR_PHASES,
   repairDirtyEvents,
@@ -85,7 +86,7 @@ export async function executeMaintenanceJob(
         cursor = page.nextCursor ?? undefined;
       }
       await db.job.updateMany({
-        where: { id: jobId, status: 'running' },
+        where: { ...getJobWriteWhere(jobId), status: 'running' },
         data: {
           payload: JSON.stringify({ ...payload, action, phase: phase ?? null, cursor: cursor ?? null, repaired, total }),
           currentItemLabel: `历史一致性修复 ${repaired} 项`,
@@ -108,13 +109,13 @@ export async function executeMaintenanceJob(
   while (true) {
     assertNotAborted(signal);
     await assertJobNotCancelled(jobId);
-    const batch = await resetAiBatch(action, cursor);
+    const batch = await resetAiBatch(action, cursor, signal);
     if (batch.processed === 0) break;
 
     reset += batch.processed;
     cursor = batch.nextCursor ?? undefined;
     await db.job.updateMany({
-      where: { id: jobId, status: 'running' },
+      where: { ...getJobWriteWhere(jobId), status: 'running' },
       data: {
         payload: JSON.stringify({ ...payload, action, cursor: cursor ?? null, reset, total }),
         currentItemLabel: `已重置 ${reset}/${total} 篇文章`,
@@ -128,6 +129,6 @@ export async function executeMaintenanceJob(
 
   assertNotAborted(signal);
   await assertJobNotCancelled(jobId);
-  if (reset > 0) await rebuildPublicPublicationSnapshotInBatches();
+  if (reset > 0) await rebuildPublicPublicationSnapshotInBatches({}, signal);
   return { action, reset, total };
 }

@@ -228,15 +228,3 @@ export async function deleteKeywordCandidate(id: string): Promise<void> {
     await invalidateKeywordFilterDiscards();
   }
 }
-
-/** 清空旧候选，并从现有关键词未命中记录重新生成。 */
-export async function rebuildKeywordCandidatesFromDiscardedItems(): Promise<{ titles: number; candidates: number }> {
-  const discarded = await db.discardedItem.findMany({
-    where: { reason: 'filter:keyword' },
-    select: { title: true },
-    orderBy: { createdAt: 'asc' },
-  });
-  await db.keywordCandidate.deleteMany({});
-  for (const item of discarded) await recordKeywordCandidates(item.title);
-  return { titles: discarded.length, candidates: await db.keywordCandidate.count() };
-}

@@ -60,7 +60,6 @@ restore_database_backup() {
   [[ -n "$BACKUP_DIR" && -f "$BACKUP_DIR/custom.db" ]] || return 1
   rm -f -- "$database_file" "$database_file-journal" "$database_file-wal" "$database_file-shm"
   cp -a -- "$BACKUP_DIR/custom.db" "$database_file"
-  cp -a "$BACKUP_DIR/custom.db-wal" "$BACKUP_DIR/custom.db-shm" "$SHARED_DIR/db/" 2>/dev/null || true
 }
 
 link_release_state() {
@@ -243,7 +242,6 @@ else
   BACKUP_DIR="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)"
   mkdir -p -- "$BACKUP_DIR"
   sqlite3 "$DATABASE_FILE" ".timeout 5000" ".backup '$BACKUP_DIR/custom.db'"
-  cp -a "$DATABASE_FILE-wal" "$DATABASE_FILE-shm" "$BACKUP_DIR/" 2>/dev/null || true
   DATABASE_ROLLBACK_AVAILABLE=1
 fi
 

@@ -10,10 +10,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock runWithJobId / getCurrentJobId 走直传
+// 单元测试使用固定领取上下文；真实所有权隔离由 SQLite 测试覆盖。
 vi.mock('@/lib/job-context', () => ({
-  runWithJobId: <T>(_id: string, fn: () => Promise<T>) => fn(),
-  getCurrentJobId: () => 'job-test',
+  getJobWriteWhere: (id: string) => ({ id, leaseOwner: 'test-owner', leaseExpiresAt: { gt: new Date() } }),
 }));
 
 // Mock db.job
@@ -50,7 +49,7 @@ describe('startJobStage', () => {
     updateManyMock.mockResolvedValueOnce({ count: 1 });
     await startJobStage('job-1', { stage: 'collect', total: 5 });
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: { id: 'job-1', status: 'running' },
+      where: expect.objectContaining({ id: 'job-1', status: 'running' }),
       data: expect.objectContaining({
         currentStage: 'collect',
         progressTotal: 5,
@@ -65,7 +64,7 @@ describe('startJobStage', () => {
     updateManyMock.mockResolvedValueOnce({ count: 1 });
     await startJobStage('job-2', { stage: 'process', total: 0 });
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: { id: 'job-2', status: 'running' },
+      where: expect.objectContaining({ id: 'job-2', status: 'running' }),
       data: expect.objectContaining({ progressTotal: 0 }),
     });
   });
@@ -89,7 +88,7 @@ describe('advanceJobProgress', () => {
     await advanceJobProgress('job-3', { doneDelta: 3, errorDelta: 1 });
 
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: { id: 'job-3', status: 'running' },
+      where: expect.objectContaining({ id: 'job-3', status: 'running' }),
       data: expect.objectContaining({
         progressDone: 5, // 2 + 3
         progressErrors: 2, // 1 + 1
@@ -110,7 +109,7 @@ describe('advanceJobProgress', () => {
     await advanceJobProgress('job-cap', { doneDelta: 5 });
 
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: { id: 'job-cap', status: 'running' },
+      where: expect.objectContaining({ id: 'job-cap', status: 'running' }),
       data: expect.objectContaining({ progressDone: 10 }),
     });
   });
@@ -127,7 +126,7 @@ describe('advanceJobProgress', () => {
     await advanceJobProgress('job-indet', { doneDelta: 50 });
 
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: { id: 'job-indet', status: 'running' },
+      where: expect.objectContaining({ id: 'job-indet', status: 'running' }),
       data: expect.objectContaining({ progressDone: 150 }),
     });
   });
@@ -161,7 +160,7 @@ describe('touchJobHeartbeat', () => {
     updateManyMock.mockResolvedValueOnce({ count: 1 });
     await touchJobHeartbeat('job-hb');
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: { id: 'job-hb', status: 'running' },
+      where: expect.objectContaining({ id: 'job-hb', status: 'running' }),
       data: { heartbeatAt: expect.any(Date) },
     });
   });
@@ -207,7 +206,7 @@ describe('markJobCompleted / markJobFailed', () => {
     updateManyMock.mockResolvedValueOnce({ count: 1 });
     await markJobCompleted('job-comp', { ok: true });
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: { id: 'job-comp', status: 'running' },
+      where: expect.objectContaining({ id: 'job-comp', status: 'running' }),
       data: expect.objectContaining({
         status: 'succeeded',
         result: JSON.stringify({ ok: true }),
@@ -221,7 +220,7 @@ describe('markJobCompleted / markJobFailed', () => {
     updateManyMock.mockResolvedValueOnce({ count: 1 });
     await markJobFailed('job-fail', 'something broke');
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: { id: 'job-fail', status: 'running' },
+      where: expect.objectContaining({ id: 'job-fail', status: 'running' }),
       data: expect.objectContaining({
         status: 'failed',
         error: 'something broke',
@@ -235,7 +234,7 @@ describe('markJobCompleted / markJobFailed', () => {
     const long = 'x'.repeat(5000);
     await markJobFailed('job-long', long);
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: { id: 'job-long', status: 'running' },
+      where: expect.objectContaining({ id: 'job-long', status: 'running' }),
       data: expect.objectContaining({
         error: 'x'.repeat(2000),
       }),
@@ -246,7 +245,7 @@ describe('markJobCompleted / markJobFailed', () => {
     updateManyMock.mockResolvedValueOnce({ count: 1 });
     await markJobCancelled('job-cancel', 'Stopped by user');
     expect(updateManyMock).toHaveBeenCalledWith({
-      where: { id: 'job-cancel', status: { in: ['running', 'cancel_requested'] } },
+      where: expect.objectContaining({ id: 'job-cancel', status: { in: ['running', 'cancel_requested'] } }),
       data: expect.objectContaining({
         status: 'cancelled',
         error: 'Stopped by user',

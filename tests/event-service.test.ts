@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { db } from '@/lib/db';
 
 const mocks = vi.hoisted(() => ({
   articleFindFirst: vi.fn(),
@@ -16,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   auditCreate: vi.fn(),
   auditDeleteMany: vi.fn(),
   pushLogDeleteMany: vi.fn(),
-  eventDirtyUpsert: vi.fn(),
   transaction: vi.fn(),
   refresh: vi.fn(),
 }));
@@ -41,7 +41,6 @@ function transactionClient() {
     },
     eventClusterAudit: { create: mocks.auditCreate, deleteMany: mocks.auditDeleteMany },
     pushLog: { deleteMany: mocks.pushLogDeleteMany },
-    eventDirty: { upsert: mocks.eventDirtyUpsert },
   };
 }
 
@@ -54,7 +53,7 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/public-publication-service', () => ({ refreshEventPublicPublication: mocks.refresh }));
 
-import { confirmIndependentArticle, deriveEventClusterReviewStatus, mergeEvents, moveArticleToEvent, reconcileEventAfterArticleDeletion, repairStaleEventRepresentatives, selectRepresentativeCandidate, setEventRepresentative, sharedBrands, splitEventArticles } from '@/lib/event-service';
+import { confirmIndependentArticle, deriveEventClusterReviewStatus, mergeEvents, moveArticleToEvent, reconcileEventAfterArticleDeletionInTransaction, selectRepresentativeCandidate, setEventRepresentative, sharedBrands, splitEventArticles } from '@/lib/event-service';
 
 describe('Event 人工纠错', () => {
   beforeEach(() => {
@@ -158,33 +157,17 @@ describe('Event 人工纠错', () => {
     expect(mocks.eventCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ representativeArticleId: null }),
     }));
-    expect(mocks.refresh).toHaveBeenCalledWith('source');
-    expect(mocks.refresh).toHaveBeenCalledWith('new-event');
+    expect(mocks.refresh).toHaveBeenCalledWith('source', expect.any(Object));
+    expect(mocks.refresh).toHaveBeenCalledWith('new-event', expect.any(Object));
   });
 
-  it('聚类前清理已经不再属于当前 Event 的代表文章指针', async () => {
-    mocks.eventFindMany.mockResolvedValueOnce([
-      { id: 'stale-event', representativeArticleId: 'a1', representativeArticle: { eventId: 'new-event' } },
-      { id: 'valid-event', representativeArticleId: 'a2', representativeArticle: { eventId: 'valid-event' } },
-    ]);
-    mocks.articleFindMany.mockResolvedValueOnce([]);
-
-    await expect(repairStaleEventRepresentatives()).resolves.toBe(1);
-
-    expect(mocks.eventUpdateMany).toHaveBeenCalledWith({
-      where: { id: { in: ['stale-event'] } },
-      data: { representativeArticleId: null, representativeManual: false },
-    });
-    expect(mocks.eventUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'stale-event' },
-      data: expect.objectContaining({ representativeArticleId: null }),
-    }));
-  });
 
   it('删除最后一篇 Article 后归档空 Event 并保留投递审计', async () => {
     mocks.eventFindUnique.mockResolvedValueOnce({ id: 'e1' });
     mocks.articleCount.mockResolvedValue(0);
-    await expect(reconcileEventAfterArticleDeletion('e1')).resolves.toEqual({ pushLogsDeleted: 0 });
+    await expect(reconcileEventAfterArticleDeletionInTransaction(db, 'e1')).resolves.toEqual({
+      eventExists: true, pushLogsDeleted: 0, representativeArticleId: null,
+    });
     expect(mocks.pushLogDeleteMany).not.toHaveBeenCalled();
     expect(mocks.eventDelete).not.toHaveBeenCalled();
     expect(mocks.eventUpdate).toHaveBeenCalledWith(expect.objectContaining({
@@ -254,13 +237,9 @@ describe('Event 人工纠错', () => {
     expect(moveUpdate?.data).not.toHaveProperty('eventAction');
     expect(moveUpdate?.data).not.toHaveProperty('eventObject');
     expect(moveUpdate?.data).not.toHaveProperty('eventKey');
-    expect(mocks.eventDirtyUpsert).toHaveBeenCalledTimes(2);
-    expect(mocks.eventDirtyUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { eventId: 'source' },
-    }));
-    expect(mocks.eventDirtyUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { eventId: 'target' },
-    }));
+    expect(mocks.refresh).toHaveBeenCalledWith('source', expect.any(Object));
+    expect(mocks.refresh).toHaveBeenCalledWith('target', expect.any(Object));
+    expect(mocks.refresh.mock.calls[0][1]).toBe(mocks.refresh.mock.calls[1][1]);
   });
 
   it('移动文章必须与路径中的源 Event 一致', async () => {

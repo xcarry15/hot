@@ -18,7 +18,8 @@ import { db } from '@/lib/db';
 import { evaluateKeywordMatch, matchIndustryTitleSignal } from '@/lib/filter';
 import { ARTICLE_FETCH_TIMEOUT_MS, fetchArticleDetail, markArticleFetchFailure } from '@/lib/detail-fetcher';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
-import { assertNotAborted } from '@/lib/worker-stop';
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
+import { JobLeaseLostError } from '@/lib/job-context';
 import { extractMetaPublishedAt } from '@/lib/date-utils';
 import {
   advanceJobProgress,
@@ -27,7 +28,8 @@ import {
 import { recordDiscardedItem } from '@/lib/pipeline/discarded-items';
 import { recordKeywordCandidates } from '@/lib/keyword-candidate-service';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
-import { replaceArticleKeywordHits } from '@/lib/keyword-hit-service';
+import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
+import { persistArticleKeywordMatch } from '@/lib/keyword-hit-service';
 
 const MAX_BATCH_SIZE = 500;
 const PROCESS_CONCURRENCY = 5;
@@ -41,7 +43,7 @@ const PROCESS_MAX_RETRIES = 5;
  * Updates fetchStatus='fetched' after a successful fetch with meaningful cleaned text.
  */
 export async function processAllPending(signal?: AbortSignal, jobId?: string, forceRetry = false): Promise<{ total: number; processed: number; errors: number; capped: boolean }> {
-  assertNotAborted(signal);
+  await assertWorkerCanWrite(signal);
 
   // 重置"已抓取但正文为空"的文章，让它们重新进详情页流程。
   await db.article.updateMany({
@@ -51,6 +53,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
 
   // 只恢复仍在自动重试额度内、且退避已到期的失败文章。
   // 达到上限的文章保留 failed 终态，等待人工重试或忽略。
+  await assertWorkerCanWrite(signal);
   await db.article.updateMany({
     where: {
       ...AUTOMATIC_ARTICLE_SOURCE_FILTER,
@@ -70,6 +73,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
   // 每轮只取固定窗口。详情抓取会把 Article 转为 fetched/failed，因此已处理的
   // 项自然离开 where；不会因积压量把整张待处理列表留在 Node 内存中。
   while (true) {
+    await assertWorkerCanWrite(signal);
     const page = await db.article.findMany({
       where: pendingWhere,
       select: { id: true, title: true, url: true, sourceId: true, publishedAt: true },
@@ -78,10 +82,10 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
     });
     if (page.length === 0) break;
     for (let i = 0; i < page.length; i += PROCESS_CONCURRENCY) {
-      assertNotAborted(signal);
+      await assertWorkerCanWrite(signal);
       const batch = page.slice(i, i + PROCESS_CONCURRENCY);
       const errorsBeforeBatch = errors;
-      await Promise.all(batch.map(async (article) => {
+      const results = await Promise.allSettled(batch.map(async (article) => {
         try {
           const content = await withTimeout(
             timeoutSignal => fetchArticleDetail(article.id, 2, timeoutSignal),
@@ -89,15 +93,15 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
             `详情抓取超时 "${article.title}"`,
             signal,
           );
+          await assertWorkerCanWrite(signal);
           if (!content || content.length <= 50) {
             errors++;
             return;
           }
 
-            // ---- 全文关键字匹配 ----
-            // 关键词是入库门槛，不能沿用聚类指纹的前窗截断；命中正文后部也必须保留。
-            try {
-              const text = `${article.title} ${content}`;
+          // 关键词是入库门槛，不能沿用聚类指纹的前窗截断；命中正文后部也必须保留。
+          try {
+            const text = `${article.title} ${content}`;
             // 品牌白名单命中，或标题本身已是明确的餐饮/零售业态事件，均保留。
             // 便利店、超市、餐厅等行业报道不应因未提及已知品牌而在 AI 前被误删。
             const keywordMatch = await evaluateKeywordMatch(text);
@@ -106,18 +110,17 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
               || keywordMatch.matched
               || matchIndustryTitleSignal(article.title)
             );
-            await db.article.update({
-              where: { id: article.id },
-              data: { keywordMatched: keywordMatch.matched },
-            });
-            await replaceArticleKeywordHits(article.id, keywordMatch.matchedWords);
+            await persistArticleKeywordMatch(article.id, keywordMatch, signal);
             if (!retained) {
               try {
+                await assertWorkerCanWrite(signal);
                 await recordKeywordCandidates(article.title);
               } catch (candidateError) {
-                if (signal?.aborted) throw candidateError;
+                if (signal?.aborted || candidateError instanceof JobLeaseLostError) throw candidateError;
+                await assertWorkerCanWrite(signal);
                 console.error('[processAllPending] keyword candidate recording failed:', candidateError);
               }
+              await assertWorkerCanWrite(signal);
               const recorded = await recordDiscardedItem({
                 sourceId: article.sourceId,
                 title: article.title,
@@ -133,20 +136,23 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
                 console.error(`[processAllPending] skipped deleting article=${article.id}: discarded audit failed`);
                 return;
               }
+              await assertWorkerCanWrite(signal);
               await db.article.delete({ where: { id: article.id } });
               console.log(`[processAllPending] keyword miss: "${article.title}", discarded`);
               return;
             }
           } catch (err) {
             // 关键字 DB 异常时不应阻塞 process —— 宁可放过不可误杀
-            if (signal?.aborted) throw err;
+            if (signal?.aborted || err instanceof JobLeaseLostError) throw err;
+            await assertWorkerCanWrite(signal);
             const errMsg = err instanceof Error ? err.message : String(err);
             console.error(`[processAllPending] keyword check failed for article=${article.id}:`, errMsg);
           }
 
           processed++;
         } catch (err) {
-          if (signal?.aborted) throw err;
+          if (signal?.aborted || err instanceof JobLeaseLostError) throw err;
+          await assertWorkerCanWrite(signal);
           errors++;
           const errMsg = err instanceof Error ? err.message : String(err);
           console.error(`[processAllPending] fetch failed for article=${article.id} title="${article.title}":`, errMsg);
@@ -155,6 +161,10 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
           await markArticleFetchFailure(article.id, err, { onlyIfPending: true });
         }
       }));
+      // 所有同批请求收尾后才能结束 Job，避免释放写入预约时仍有旧请求在执行。
+      const rejected = results.find(result => result.status === 'rejected');
+      if (rejected?.status === 'rejected') throw rejected.reason;
+      await assertWorkerCanWrite(signal);
       if (jobId) {
         await advanceJobProgress(jobId, {
           doneDelta: batch.length,
@@ -188,7 +198,7 @@ export async function repairPublishedDates(signal?: AbortSignal): Promise<void> 
     const sevenDaysAgo = new Date(Date.now() - REPAIR_WINDOW_DAYS * 24 * 60 * 60 * 1000);
     let cursor: { createdAt: Date; id: string } | null = null;
     while (true) {
-      assertNotAborted(signal);
+      await assertWorkerCanWrite(signal);
       const page: Array<Pick<Article, 'id' | 'title' | 'rawContent' | 'publishedAt' | 'createdAt'>> = await db.article.findMany({
         where: {
           ...AUTOMATIC_ARTICLE_SOURCE_FILTER,
@@ -215,24 +225,33 @@ export async function repairPublishedDates(signal?: AbortSignal): Promise<void> 
       );
       for (let i = 0; i < needsRepair.length; i += 5) {
         const batch = needsRepair.slice(i, i + 5);
-        await Promise.all(
+        const results = await Promise.allSettled(
           batch.map(async (article) => {
             try {
               const detailDate = extractMetaPublishedAt(article.rawContent);
               if (detailDate) {
-                await db.article.update({
-                  where: { id: article.id },
-                  data: { publishedAt: detailDate },
-                });
-                await refreshPublicPublication(article.id, db, { contentChanged: true });
+                await assertWorkerCanWrite(signal);
+                await db.$transaction(async (tx) => {
+                  await assertWorkerCanWrite(signal);
+                  await tx.article.update({
+                    where: { id: article.id },
+                    data: { publishedAt: detailDate },
+                  });
+                  await refreshPublicPublication(article.id, tx, { contentChanged: true });
+                  await assertWorkerCanWrite(signal);
+                }, { maxWait: 10_000, timeout: 10_000 });
+                invalidatePublicArticleCache();
                 console.log(`[repairPublishedDates] fixed article=${article.id} title="${article.title}" → ${detailDate.toISOString()}`);
               }
             } catch (err) {
-              if (signal?.aborted) throw err;
+              if (signal?.aborted || err instanceof JobLeaseLostError) throw err;
+              await assertWorkerCanWrite(signal);
               console.error(`[repairPublishedDates] failed for article=${article.id}:`, err);
             }
           }),
         );
+        const rejected = results.find(result => result.status === 'rejected');
+        if (rejected?.status === 'rejected') throw rejected.reason;
       }
 
       const last = page[page.length - 1];
@@ -240,7 +259,8 @@ export async function repairPublishedDates(signal?: AbortSignal): Promise<void> 
       if (page.length < REPAIR_BATCH_SIZE) break;
     }
   } catch (err) {
-    if (signal?.aborted) throw err;
+    if (signal?.aborted || err instanceof JobLeaseLostError) throw err;
+    await assertWorkerCanWrite(signal);
     console.error('[repairPublishedDates] error:', err);
   }
 }

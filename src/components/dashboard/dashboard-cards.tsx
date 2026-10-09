@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { DashboardAnalytics } from "@/features/dashboard-api.client"
+import { formatNumber, formatPercent } from "./format"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
@@ -24,8 +25,6 @@ interface CrawlTimeCardProps {
   onPageChange: (page: number) => void
 }
 
-function formatNumber(value: number): string { return value.toLocaleString() }
-function formatPercent(value: number): string { return `${Math.round(value * 100)}%` }
 const CHART_VIEWBOX_WIDTH = 640
 const CHART_HEIGHT = 160
 const CHART_PLOT_TOP = 12

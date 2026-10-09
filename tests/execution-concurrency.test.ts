@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   jobCreate: vi.fn(),
@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   acquireJobRunnerLease: vi.fn(),
   clearExpiredJobRunnerLease: vi.fn(),
   runnerLeaseRenew: vi.fn(),
+  runnerLeaseIsCurrent: vi.fn(),
   runnerLeaseRelease: vi.fn(),
   normalizeAiRecoveryBacklog: vi.fn(),
 }));
@@ -80,19 +81,30 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe.sequential('global job execution invariant', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.jobFindFirst.mockReset().mockResolvedValue(null);
     mocks.jobFindMany.mockReset().mockResolvedValue([]);
-    mocks.jobFindUnique.mockReset().mockResolvedValue(null);
+    mocks.jobFindUnique.mockReset().mockImplementation(async ({ where }) => {
+      const claim = mocks.jobUpdateMany.mock.calls.findLast(([input]) => (
+        input.where.id === where.id && input.data.status === 'running' && input.data.leaseOwner
+      ))?.[0];
+      return claim ? {
+        status: 'running', leaseOwner: claim.data.leaseOwner, leaseExpiresAt: claim.data.leaseExpiresAt,
+        attempt: 1, maxAttempts: 3,
+      } : null;
+    });
     mocks.jobUpdateMany.mockReset().mockResolvedValue({ count: 1 }); // needed for claimAndRunJob
     mocks.jobDeleteMany.mockReset().mockResolvedValue({ count: 1 });
     mocks.acquireJobRunnerLease.mockResolvedValue({
+      isCurrent: mocks.runnerLeaseIsCurrent.mockResolvedValue(true),
       renew: mocks.runnerLeaseRenew.mockResolvedValue(true),
       release: mocks.runnerLeaseRelease.mockResolvedValue(undefined),
     });
     mocks.clearExpiredJobRunnerLease.mockResolvedValue(undefined);
     mocks.normalizeAiRecoveryBacklog.mockResolvedValue(0);
+    mocks.markJobCompleted.mockResolvedValue(true);
   });
 
   it('为自动重试任务按 Job 类型生成不同幂等键', () => {
@@ -120,7 +132,7 @@ describe.sequential('global job execution invariant', () => {
   it('rejects every overlapping job type and releases the reservation after completion', async () => {
     const running = deferred<{ results: never[]; totalNewArticles: number; errors: number }>();
     mocks.jobCreate.mockResolvedValueOnce({ id: 'job-1' }).mockResolvedValueOnce({ id: 'job-2' });
-    mocks.markJobCompleted.mockResolvedValue(undefined);
+    mocks.markJobCompleted.mockResolvedValue(true);
     mocks.markJobFailed.mockResolvedValue(undefined);
     mocks.collectAllSources.mockReturnValueOnce(running.promise);
     mocks.pushAllPendingArticles.mockResolvedValue({ total: 0, processed: 0, errors: 0 });
@@ -204,16 +216,35 @@ describe.sequential('global job execution invariant', () => {
   it('requeues a crashed batch job instead of marking it terminal on the first attempt', async () => {
     mocks.jobCreate.mockResolvedValueOnce({ id: 'job-retry' });
     mocks.collectAllSources.mockRejectedValueOnce(new Error('sqlite busy'));
-    mocks.jobFindUnique.mockResolvedValueOnce({ status: 'running', attempt: 1, maxAttempts: 3 });
 
     await expect(runJob('collect')).resolves.toEqual({ queued: true, jobId: 'job-retry' });
 
     await waitFor(() => mocks.jobUpdateMany.mock.calls.some(([input]) => input?.data?.status === 'queued'));
     expect(mocks.jobUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'job-retry', status: 'running', attempt: 1 },
+      where: expect.objectContaining({ id: 'job-retry', status: 'running', attempt: 1, leaseOwner: expect.any(String) }),
       data: expect.objectContaining({ status: 'queued', availableAt: expect.any(Date) }),
     }));
     expect(mocks.markJobFailed).not.toHaveBeenCalledWith('job-retry', expect.anything());
+  });
+
+  it('终态数据库写入也失败时消费后台异常并释放预约，避免未处理拒绝中止服务', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.jobCreate.mockResolvedValueOnce({ id: 'job-finalization-error' });
+    mocks.collectAllSources.mockRejectedValueOnce(new Error('collection failure'));
+    mocks.jobUpdateMany.mockResolvedValueOnce({ count: 1 }).mockRejectedValue(new Error('database unavailable'));
+    mocks.markJobFailed.mockRejectedValue(new Error('finalization database unavailable'));
+
+    await expect(runJob('collect')).resolves.toEqual({ queued: true, jobId: 'job-finalization-error' });
+    await waitFor(() => mocks.runnerLeaseRelease.mock.calls.length > 0);
+    await waitFor(() => errors.mock.calls.some(([message]) => (
+      String(message).includes('finalization failed for job=job-finalization-error')
+    )));
+
+    mocks.jobUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.jobCreate.mockResolvedValueOnce({ id: 'job-after-finalization-error' });
+    mocks.pushAllPendingArticles.mockResolvedValueOnce({ total: 0, processed: 0, errors: 0 });
+    await expect(runJob('push')).resolves.toEqual({ queued: true, jobId: 'job-after-finalization-error' });
+    await waitFor(() => mocks.markJobCompleted.mock.calls.some(([id]) => id === 'job-after-finalization-error'));
   });
 
   it('resumes a ready queued job with its persisted payload', async () => {

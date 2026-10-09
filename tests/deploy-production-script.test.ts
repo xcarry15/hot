@@ -172,6 +172,9 @@ deployDescribe('production release deployment', () => {
   });
 
   it('健康检查失败时恢复数据库备份和旧 current', () => {
+    const databaseFile = path.join(APP_DIR, 'shared', 'db', 'custom.db');
+    writeFileSync(`${databaseFile}-wal`, 'old wal');
+    writeFileSync(`${databaseFile}-shm`, 'old shm');
     createReleaseArchive();
     expect(() => runDeploy('release-two', { failHealth: true })).toThrow();
 
@@ -181,6 +184,8 @@ deployDescribe('production release deployment', () => {
     );
     expect(existsSync(path.join(APP_DIR, 'releases', 'release-two'))).toBe(false);
     expect(readFileSync(path.join(APP_DIR, 'shared', 'db', 'custom.db'), 'utf8')).toBe('before');
+    expect(existsSync(`${databaseFile}-wal`)).toBe(false);
+    expect(existsSync(`${databaseFile}-shm`)).toBe(false);
   });
 
   it('迁移历史不兼容时在切换前清理未激活 release', () => {

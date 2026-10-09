@@ -4,6 +4,7 @@ import path from 'node:path';
 import { PrismaClient, type ExportJob, type ExportJobStatus } from '@prisma/client';
 import { exportFilterSchema, type ExportFilter, type ExportJobDto, type ExportJobStatusValue } from '@/contracts/data-export';
 import { db } from '@/lib/db';
+import { parseShanghaiDate } from './export-date';
 import { buildExportWorkbook, type ExportProgress } from './export-workbook';
 
 const EXPORT_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -12,7 +13,7 @@ const EXPORT_STORAGE_DIR = path.resolve(process.cwd(), 'db', 'exports');
 
 let exportWorkerPromise: Promise<void> | null = null;
 let exportMaintenanceInProgress = false;
-let exportMaintenancePromise: Promise<number> | null = null;
+let exportMaintenanceVersion = 0;
 
 export class ExportInputError extends Error {
   readonly exposeToClient = true;
@@ -37,8 +38,10 @@ function normalizeFilter(input: unknown): ExportFilter {
   if (parsed.data.includeDiscarded && parsed.data.dateField === 'updatedAt') {
     throw new ExportInputError('未入库条目不支持按更新时间筛选，请改用创建时间或发布时间');
   }
-  const from = parseShanghaiDate(parsed.data.from, '开始时间');
-  const to = parseShanghaiDate(parsed.data.to, '结束时间');
+  const from = parseShanghaiDate(parsed.data.from);
+  const to = parseShanghaiDate(parsed.data.to);
+  if (parsed.data.from && !from) throw new ExportInputError('开始时间无效');
+  if (parsed.data.to && !to) throw new ExportInputError('结束时间无效');
   if (from && to && from.getTime() >= to.getTime()) {
     throw new ExportInputError('开始时间必须早于结束时间');
   }
@@ -47,20 +50,6 @@ function normalizeFilter(input: unknown): ExportFilter {
     from: from?.toISOString() ?? '',
     to: to?.toISOString() ?? '',
   };
-}
-
-function parseShanghaiDate(value: string, label: string): Date | undefined {
-  if (!value) return undefined;
-  const text = value.trim();
-  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
-  const candidate = hasTimezone
-    ? text
-    : /^\d{4}-\d{2}-\d{2}$/.test(text)
-      ? `${text}T00:00:00+08:00`
-      : `${text}+08:00`;
-  const date = new Date(candidate);
-  if (!Number.isFinite(date.getTime())) throw new ExportInputError(`${label}无效`);
-  return date;
 }
 
 function parseStoredFilter(value: string): ExportFilter {
@@ -182,50 +171,51 @@ async function getJobOrThrow(id: string): Promise<ExportJob> {
 export async function createExportJob(input: unknown): Promise<ExportJobDto> {
   const filter = normalizeFilter(input);
   if (exportMaintenanceInProgress) throw new ExportJobConflictError('数据清理进行中，请稍后重试');
+  const preparationVersion = exportMaintenanceVersion;
   const snapshotAt = new Date();
   const storageKey = `${randomUUID()}.xlsx`;
+  const preparationToken = randomUUID();
   const job = await db.exportJob.create({
     data: {
       filterSnapshot: JSON.stringify(filter),
       snapshotAt,
       storageKey,
+      status: 'running',
+      startedAt: snapshotAt,
+      workerToken: preparationToken,
+      currentItemLabel: '准备数据库快照',
     },
   });
   try {
     await ensureStorageDirectory();
     await createSnapshotFile(storageKey);
+    if (exportMaintenanceInProgress || preparationVersion !== exportMaintenanceVersion) {
+      throw new ExportJobConflictError('数据清理期间的旧快照已取消，请重新导出');
+    }
     // VACUUM INTO 完成后再落边界，使快照内已复制记录的 createdAt/publishedAt
     // 不会被错误地排除；工作簿查询仍全部针对这份不可变副本。
     const boundary = await db.exportJob.updateMany({
-      where: { id: job.id, status: 'queued' },
-      data: { snapshotAt: new Date() },
+      where: { id: job.id, status: 'running', workerToken: preparationToken, cancelRequestedAt: null },
+      data: { snapshotAt: new Date(), status: 'queued', startedAt: null, workerToken: '' },
     });
     if (boundary.count !== 1) throw new ExportJobConflictError('导出任务已取消或正在清理');
-    const current = await db.exportJob.findUnique({ where: { id: job.id } });
-    if (!current) throw new ExportJobConflictError('数据清理进行中，请稍后重试');
-    if (current.status !== 'queued') {
-      await removeSnapshotFile(storageKey).catch(() => undefined);
-      return toDto(current);
-    }
-    if (exportMaintenanceInProgress) {
-      await removeSnapshotFile(storageKey).catch(() => undefined);
-      await db.exportJob.deleteMany({ where: { id: job.id, status: 'queued' } });
-      throw new ExportJobConflictError('数据清理进行中，请稍后重试');
-    }
   } catch (error: unknown) {
     await removeFile(storageKey).catch(() => undefined);
     await removeTempFile(storageKey).catch(() => undefined);
     await removeSnapshotFile(storageKey).catch(() => undefined);
-    if (error instanceof ExportJobConflictError) throw error;
-    const failed = await db.exportJob.update({
-      where: { id: job.id },
+    const current = await db.exportJob.findUnique({ where: { id: job.id } });
+    const cancelled = Boolean(current?.cancelRequestedAt) || error instanceof ExportJobConflictError;
+    await db.exportJob.updateMany({
+      where: { id: job.id, status: 'running', workerToken: preparationToken },
       data: {
-        status: 'failed',
+        status: cancelled ? 'cancelled' : 'failed',
         completedAt: new Date(),
-        error: '导出快照创建失败，请重试',
+        workerToken: '',
+        error: cancelled ? '已取消' : '导出快照创建失败，请重试',
       },
     });
-    return toDto(failed);
+    if (error instanceof ExportJobConflictError) throw error;
+    return toDto(await getJobOrThrow(job.id));
   }
   startExportWorker();
   return toDto(await getJobOrThrow(job.id));
@@ -558,15 +548,17 @@ async function performDeleteAllExportJobs(): Promise<number> {
   return result.count;
 }
 
-export function deleteAllExportJobs(): Promise<number> {
-  if (exportMaintenancePromise) return exportMaintenancePromise;
+/** 导出禁入覆盖整个业务清理，旧快照即使在清理完成后返回也不能再入队。 */
+export async function runExportDataMaintenance<T>(operation: (exportJobsDeleted: number) => Promise<T>): Promise<T> {
+  if (exportMaintenanceInProgress) throw new ExportJobConflictError('数据清理进行中，请稍后重试');
   exportMaintenanceInProgress = true;
-  const promise = performDeleteAllExportJobs().finally(() => {
+  exportMaintenanceVersion += 1;
+  try {
+    const deleted = await performDeleteAllExportJobs();
+    return await operation(deleted);
+  } finally {
     exportMaintenanceInProgress = false;
-    exportMaintenancePromise = null;
-  });
-  exportMaintenancePromise = promise;
-  return promise;
+  }
 }
 
 export type { ExportJobStatus };

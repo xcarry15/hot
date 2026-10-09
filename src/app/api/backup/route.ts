@@ -3,6 +3,7 @@ import { apiError } from '@/lib/api-helpers';
 import { exportProjectBackup, restoreProjectBackup } from '@/lib/backup-service';
 import { runJob } from '@/lib/execution';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
+import { readLimitedJson } from '@/lib/request-body';
 
 const MAX_BACKUP_BYTES = 50_000_000;
 const BACKUP_RESPONSE_HEADERS = {
@@ -24,11 +25,7 @@ export async function POST() {
 
 export async function PUT(request: Request) {
   try {
-    const contentLength = Number(request.headers.get('content-length'));
-    if (Number.isFinite(contentLength) && contentLength > MAX_BACKUP_BYTES) {
-      return NextResponse.json({ error: '备份文件过大，最大支持 50MB' }, { status: 400 });
-    }
-    const payload = await request.json().catch(() => ({}));
+    const payload = await readLimitedJson(request, MAX_BACKUP_BYTES, '备份文件过大，最大支持 50MB');
     const result = await runExclusiveMutation('恢复完整备份', () => restoreProjectBackup(payload));
 
     let rebuildJobQueued = false;

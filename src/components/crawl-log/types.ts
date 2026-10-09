@@ -2,16 +2,6 @@
 
 import type { ArticleProgress } from '@/contracts/crawl-log'
 
-export function isArticleSkipped(a: ArticleProgress): boolean {
-  return [a.crawl, a.process, a.ai, a.cluster, a.push].some(s =>
-    s === 'skipped' || s === 'filtered' || s === 'not_applicable'
-  )
-}
-
-export function isArticleFullyDone(a: ArticleProgress): boolean {
-  return a.crawl === 'done' && a.process === 'done' && a.ai === 'done' && a.cluster === 'done' && a.push === 'done'
-}
-
 export function isArticleFailed(a: ArticleProgress): boolean {
   return [a.crawl, a.process, a.ai, a.cluster, a.push].some(s => s === 'failed')
 }

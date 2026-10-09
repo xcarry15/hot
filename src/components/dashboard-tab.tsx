@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { AiInvocationCard, CrawlTimeCard, DailyNewArticlesCard, DailyPublicArticlesCard, DailyPushedArticlesCard, TopViewedArticlesCard } from './dashboard/dashboard-cards'
+import { formatNumber, formatPercent } from './dashboard/format'
 import { isRequestAborted } from '@/lib/request-json.client'
 import { EmptyState } from '@/components/ui/empty-state'
 
@@ -46,14 +47,6 @@ const SOURCE_FIELD_HELP: Record<string, { formula: string; detail: string }> = {
   '重复': { formula: '重复数 ÷ 文章总数', detail: '与历史文章重复的文章数及其在全部文章中的占比' },
   '软文': { formula: '软文数 ÷ 文章总数', detail: 'AI 判定为广告/软文的文章数及其在全部文章中的占比' },
   '状态': { formula: '数据源当前运行状态', detail: '正常 / 熔断（连续失败）/ 警告 / 已禁用' },
-}
-
-function formatPercent(value: number): string {
-  return `${Math.round(value * 100)}%`
-}
-
-function formatNumber(value: number): string {
-  return value.toLocaleString()
 }
 
 function statusLabel(status: string, enabled: boolean): string {

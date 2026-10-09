@@ -1,7 +1,4 @@
-import { Prisma } from '@prisma/client';
-import { db } from '@/lib/db';
-import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
-import { refreshEventPublicPublication } from '@/lib/public-publication-service';
+import type { Prisma } from '@prisma/client';
 import { isRepresentativeEligible as isReleaseRepresentativeEligible } from '@/lib/event-release-policy';
 import {
   deriveEventClusterReviewStatus,
@@ -120,58 +117,6 @@ export async function recalculateEventsInTransaction(
   }
 }
 
-export async function recalculateArticleEvent(articleId: string): Promise<void> {
-  const article = await db.article.findUnique({ where: { id: articleId }, select: { eventId: true } });
-  if (!article?.eventId) return;
-  await db.$transaction((tx) => recalculateEvent(tx, article.eventId!));
-  await refreshEventPublicPublication(article.eventId);
-  invalidatePublicArticleCache();
-}
-
-export async function recalculateEventById(eventId: string): Promise<void> {
-  await db.$transaction((tx) => recalculateEvent(tx, eventId));
-  await refreshEventPublicPublication(eventId);
-  invalidatePublicArticleCache();
-}
-
-/**
- * 修复历史或异常并发留下的代表文章指针：
- * Event 的 representativeArticleId 必须指向自身 articles 中的成员。
- * 在聚类批处理前执行一次，避免旧指针与新聚类结果争抢唯一约束。
- */
-export async function repairStaleEventRepresentatives(): Promise<number> {
-  const eventIds = await db.$transaction(async (tx) => {
-    const rows = await tx.event.findMany({
-      where: { representativeArticleId: { not: null } },
-      select: {
-        id: true,
-        representativeArticleId: true,
-        representativeArticle: { select: { eventId: true } },
-      },
-    });
-    const staleIds = rows
-      .filter((event) => event.representativeArticle?.eventId !== event.id)
-      .map((event) => event.id);
-    if (staleIds.length === 0) return [];
-
-    // 先统一释放，再按当前成员重新选择，避免修复顺序之间互相触发唯一约束。
-    await tx.event.updateMany({
-      where: { id: { in: staleIds } },
-      data: { representativeArticleId: null, representativeManual: false },
-    });
-    for (const staleId of staleIds) {
-      await recalculateEvent(tx, staleId);
-    }
-    return staleIds;
-  });
-
-  if (eventIds.length > 0) {
-    await Promise.all(eventIds.map((eventId) => refreshEventPublicPublication(eventId)));
-    invalidatePublicArticleCache();
-  }
-  return eventIds.length;
-}
-
 export interface ArticleDeletionEventResult {
   eventExists: boolean;
   pushLogsDeleted: number;
@@ -213,13 +158,4 @@ export async function reconcileEventAfterArticleDeletionInTransaction(
     select: { representativeArticleId: true },
   });
   return { eventExists: true, pushLogsDeleted: 0, representativeArticleId: updated?.representativeArticleId ?? null };
-}
-
-export async function reconcileEventAfterArticleDeletion(eventId: string): Promise<{ pushLogsDeleted: number }> {
-  const result = await db.$transaction((tx) => reconcileEventAfterArticleDeletionInTransaction(tx, eventId));
-  if (result.eventExists) {
-    await refreshEventPublicPublication(eventId);
-  }
-  invalidatePublicArticleCache();
-  return { pushLogsDeleted: result.pushLogsDeleted };
 }

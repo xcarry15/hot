@@ -1,13 +1,6 @@
 /**
- * Worker stop / cancellation utilities.
- *
- * Single-process model: a shared AbortController gives immediate-ish
- * cancellation (the current loop iteration finishes, then the next check sees
- * signal.aborted and throws).
- *
- * The cross-process Setting-flag stop mechanism (for a standalone worker) was
- * removed — the standalone worker mode is obsolete (SSE doesn't work cross-
- * process). All execution entry points now register their controller here.
+ * 当前进程的 Job 取消控制器。执行入口注册控制器，长循环在写入或下一项前检查信号。
+ * 数据库取消请求及本轮租约由 execution-lease 轮询，覆盖不同模块实例和进程。
  */
 
 interface ActiveJobController {

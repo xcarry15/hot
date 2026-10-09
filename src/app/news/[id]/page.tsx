@@ -98,7 +98,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
             <h1 className="public-detail-block public-detail-delay-1 public-display mt-2 text-3xl leading-[1.25] text-[var(--public-ink)] sm:text-4xl">{article.title}</h1>
 
             <div className="public-detail-block public-detail-delay-2 mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-              <span aria-label={`评分 ${article.score} 分`} className="inline-flex shrink-0 items-center"><ScoreBadge score={article.score} variant="compact-square-wide" /></span>
+              <span aria-label={`评分 ${article.score} 分`} className="inline-flex shrink-0 items-center"><ScoreBadge score={article.score} variant="compact-square" /></span>
               {brands.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   {brands.map((brand, index) => <Badge key={`${brand}-${index}`} variant="outline" className="rounded-none border-[var(--public-ink)] bg-[var(--public-ink)] px-2 py-0.5 text-white">{brand.trim()}</Badge>)}

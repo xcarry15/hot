@@ -134,7 +134,10 @@ export async function fetchArticleDetail(
     value,
   });
   trimArticleDetailCache();
-  void value.catch(() => articleDetailCache.delete(articleId));
+  void value.catch(() => {
+    // 旧请求失败时，只移除它自己的缓存，不能清掉编辑或重取后的新记录。
+    if (articleDetailCache.get(articleId)?.value === value) articleDetailCache.delete(articleId);
+  });
   return withAbort(value, signal);
 }
 

@@ -38,10 +38,24 @@ class BoundedPublicArticleCache<T> extends Map<string, PublicArticleCacheEntry<T
   }
 }
 
-export const publicArticleRevisionCache = new BoundedPublicArticleCache<PublicArticleFeedRevisionDto>(20);
+type PublicArticleCaches = {
+  revision: BoundedPublicArticleCache<PublicArticleFeedRevisionDto>;
+  list: BoundedPublicArticleCache<PublicArticleListResponseDto>;
+  detail: BoundedPublicArticleCache<PublicArticleDetailDto | null>;
+};
 
-export const publicArticleListCache = new BoundedPublicArticleCache<PublicArticleListResponseDto>(MAX_PUBLIC_ARTICLE_CACHE_ENTRIES);
-export const publicArticleDetailCache = new BoundedPublicArticleCache<PublicArticleDetailDto | null>(MAX_PUBLIC_ARTICLE_DETAIL_CACHE_ENTRIES);
+// Next 的页面、Route Handler 和调度器可能加载独立的模块实例。
+// 单进程部署共用一份缓存，确保后台写入能失效公开页面持有的条目。
+const cacheGlobal = globalThis as typeof globalThis & { hotPublicArticleCaches?: PublicArticleCaches };
+const caches = cacheGlobal.hotPublicArticleCaches ??= {
+  revision: new BoundedPublicArticleCache<PublicArticleFeedRevisionDto>(20),
+  list: new BoundedPublicArticleCache<PublicArticleListResponseDto>(MAX_PUBLIC_ARTICLE_CACHE_ENTRIES),
+  detail: new BoundedPublicArticleCache<PublicArticleDetailDto | null>(MAX_PUBLIC_ARTICLE_DETAIL_CACHE_ENTRIES),
+};
+
+export const publicArticleRevisionCache = caches.revision;
+export const publicArticleListCache = caches.list;
+export const publicArticleDetailCache = caches.detail;
 
 export function invalidatePublicArticleCache(): void {
   publicArticleRevisionCache.clear();

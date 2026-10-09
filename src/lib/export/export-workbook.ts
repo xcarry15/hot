@@ -7,6 +7,7 @@ import {
   appendIdPages,
   EXPORT_BATCH_SIZE,
 } from './export-paging';
+import { parseShanghaiDate } from './export-date';
 
 export { EXPORT_BATCH_SIZE } from './export-paging';
 
@@ -428,19 +429,6 @@ function createSheetBuilder(
   };
 }
 
-function parseDate(value: string): Date | undefined {
-  if (!value) return undefined;
-  const text = value.trim();
-  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
-  const candidate = hasTimezone
-    ? text
-    : /^\d{4}-\d{2}-\d{2}$/.test(text)
-      ? `${text}T00:00:00+08:00`
-      : `${text}+08:00`;
-  const date = new Date(candidate);
-  return Number.isFinite(date.getTime()) ? date : undefined;
-}
-
 function isUnboundedFilter(filter: ExportFilter): boolean {
   return filter.dateField === 'createdAt'
     && !filter.from
@@ -518,8 +506,8 @@ function buildArticleWhere(
       : { OR: [{ event: { is: null } }, { event: { is: { pushedAt: null } } }] });
   }
 
-  const from = parseDate(filter.from);
-  const to = parseDate(filter.to);
+  const from = parseShanghaiDate(filter.from);
+  const to = parseShanghaiDate(filter.to);
   if (filter.dateField === 'createdAt') {
     conditions[0] = { createdAt: { lte: snapshotAt, ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) } };
   } else if (filter.dateField === 'publishedAt') {
@@ -533,8 +521,8 @@ function buildArticleWhere(
 function buildDiscardedWhere(filter: ExportFilter, snapshotAt: Date): Prisma.DiscardedItemWhereInput {
   const where: Prisma.DiscardedItemWhereInput = { createdAt: { lte: snapshotAt } };
   if (filter.sourceIds.length > 0) where.sourceId = { in: filter.sourceIds };
-  const from = parseDate(filter.from);
-  const to = parseDate(filter.to);
+  const from = parseShanghaiDate(filter.from);
+  const to = parseShanghaiDate(filter.to);
   if (filter.dateField === 'publishedAt') {
     where.publishedAt = { lte: snapshotAt, ...(from ? { gte: from } : {}), ...(to ? { lt: to } : {}) };
   } else if (filter.dateField === 'createdAt' || filter.dateField === 'updatedAt') {

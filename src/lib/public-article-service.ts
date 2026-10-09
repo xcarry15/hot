@@ -259,7 +259,9 @@ export async function listPublicArticles(params: PublicArticleListParams = {}): 
   if (existing && existing.expiresAt > Date.now()) return existing.value;
   const value = buildList(params);
   publicArticleListCache.set(key, { value, expiresAt: Date.now() + PUBLIC_CACHE_TTL_MS });
-  void value.catch(() => publicArticleListCache.delete(key));
+  void value.catch(() => {
+    if (publicArticleListCache.get(key)?.value === value) publicArticleListCache.delete(key);
+  });
   return value;
 }
 
@@ -360,7 +362,9 @@ export async function getPublicArticleDetail(id: string): Promise<PublicArticleD
   }
   const value = buildPublicArticleDetail(id);
   publicArticleDetailCache.set(id, { value, expiresAt: Date.now() + PUBLIC_DETAIL_CACHE_TTL_MS });
-  void value.catch(() => publicArticleDetailCache.delete(id));
+  void value.catch(() => {
+    if (publicArticleDetailCache.get(id)?.value === value) publicArticleDetailCache.delete(id);
+  });
   return value;
 }
 

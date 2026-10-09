@@ -13,6 +13,7 @@
  */
 import { SETTING_KEYS } from '@/lib/settings';
 import { db } from '@/lib/db';
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 import { abortCurrentJob } from '@/lib/worker-stop';
 import { getDbFileSize, runVacuum } from '@/lib/maintenance/sqlite';
 import { deleteArticlesByIds } from '@/lib/article-service';
@@ -22,7 +23,7 @@ import {
   resetArticleAiAndEventState,
 } from '@/lib/article-ai-reset';
 import { buildAiResetWhere, type AiResetAction } from '@/lib/ai-queue-policy';
-import { deleteAllExportJobs } from '@/lib/export/export-service';
+import { runExportDataMaintenance } from '@/lib/export/export-service';
 import type { Prisma } from '@prisma/client';
 
 export const AI_RESET_BATCH_SIZE = 100;
@@ -159,7 +160,9 @@ function pauseAndResetOps() {
 export async function resetAiBatch(
   action: AiResetAction,
   cursor?: string,
+  signal?: AbortSignal,
 ): Promise<{ processed: number; nextCursor: string | null }> {
+  await assertWorkerCanWrite(signal);
   const where: Prisma.ArticleWhereInput = {
     ...buildAiResetWhere(action),
     ...(cursor ? { id: { gt: cursor } } : {}),
@@ -171,10 +174,13 @@ export async function resetAiBatch(
     select: AI_RESET_ARTICLE_SELECT,
   });
   if (articles.length === 0) return { processed: 0, nextCursor: null };
+  await assertWorkerCanWrite(signal);
 
   await db.$transaction(async tx => {
+    await assertWorkerCanWrite(signal);
     await resetArticleAiAndEventState(tx, articles);
-  });
+    await assertWorkerCanWrite(signal);
+  }, { maxWait: 10_000, timeout: 10_000 });
   return {
     processed: articles.length,
     nextCursor: articles[articles.length - 1]?.id ?? null,
@@ -218,25 +224,26 @@ export async function deletePushedArticles() {
 // ── all-articles：删除全部文章 + 暂停 scheduler ──────────────────
 
 export async function deleteAllArticles() {
-  // Guard: temporarily disable auto-crawl so scheduler doesn't immediately re-fill deleted articles
-  const exportJobsDeleted = await deleteAllExportJobs();
-  const { prevWasEnabled } = await pauseAutoCrawlForWindow();
-  invalidatePublicArticleCache();
-  try {
-    const [pushResult, , , articleResult] = await db.$transaction([
-      db.pushLog.deleteMany(),
-      db.pushDelivery.deleteMany(),
-      db.eventClusterAudit.deleteMany(),
-      db.article.deleteMany(),
-      db.event.deleteMany(),
-      db.eventDirty.deleteMany(),
-      ...pauseAndResetOps(),
-    ]);
-    return { deleted: articleResult.count, pushLogsDeleted: pushResult.count, exportJobsDeleted };
-  } finally {
-    await restoreAutoCrawl(prevWasEnabled);
+  return runExportDataMaintenance(async (exportJobsDeleted) => {
+    // Guard: temporarily disable auto-crawl so scheduler doesn't immediately re-fill deleted articles
+    const { prevWasEnabled } = await pauseAutoCrawlForWindow();
     invalidatePublicArticleCache();
-  }
+    try {
+      const [pushResult, , , articleResult] = await db.$transaction([
+        db.pushLog.deleteMany(),
+        db.pushDelivery.deleteMany(),
+        db.eventClusterAudit.deleteMany(),
+        db.article.deleteMany(),
+        db.event.deleteMany(),
+        db.eventDirty.deleteMany(),
+        ...pauseAndResetOps(),
+      ]);
+      return { deleted: articleResult.count, pushLogsDeleted: pushResult.count, exportJobsDeleted };
+    } finally {
+      await restoreAutoCrawl(prevWasEnabled);
+      invalidatePublicArticleCache();
+    }
+  });
 }
 
 // ── purge-all：清空所有业务数据 + 暂停 scheduler + 中止当前 Job ──
@@ -254,44 +261,45 @@ export interface PurgeAllDeleted {
 }
 
 export async function purgeAllData(): Promise<{ deleted: PurgeAllDeleted }> {
-  // 清空期间临时关闭自动采集；先 abort 当前 worker 避免并行写入；
-  // $transaction 保证原子性。
-  abortCurrentJob();
-  const exportJobs = await deleteAllExportJobs();
-  const { prevWasEnabled } = await pauseAutoCrawlForWindow();
-  invalidatePublicArticleCache();
-  try {
-  const [pushResult, , eventAuditResult, articleResult, eventResult, , discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
-      await db.$transaction([
-        db.pushLog.deleteMany(),
-        db.pushDelivery.deleteMany(),
-        db.eventClusterAudit.deleteMany(),
-        db.article.deleteMany(),
-        db.event.deleteMany(),
-        db.eventDirty.deleteMany(),
-        db.discardedItem.deleteMany(),
-        db.discardedRetryAudit.deleteMany(),
-        db.fetchLog.deleteMany(),
-        db.job.deleteMany(),
-        ...pauseAndResetOps(),
-      ]);
-    return {
-      deleted: {
-        articles: articleResult.count,
-        events: eventResult.count,
-        eventClusterAudits: eventAuditResult.count,
-        pushLogs: pushResult.count,
-        discarded: discardedResult.count,
-        discardedRetryAudits: discardedRetryAuditResult.count,
-        fetchLogs: fetchResult.count,
-        jobs: jobResult.count,
-        exportJobs,
-      },
-    };
-  } finally {
-    await restoreAutoCrawl(prevWasEnabled);
+  return runExportDataMaintenance(async (exportJobs) => {
+    // 清空期间临时关闭自动采集；先 abort 当前 worker 避免并行写入；
+    // $transaction 保证原子性。
+    abortCurrentJob();
+    const { prevWasEnabled } = await pauseAutoCrawlForWindow();
     invalidatePublicArticleCache();
-  }
+    try {
+      const [pushResult, , eventAuditResult, articleResult, eventResult, , discardedResult, discardedRetryAuditResult, fetchResult, jobResult] =
+        await db.$transaction([
+          db.pushLog.deleteMany(),
+          db.pushDelivery.deleteMany(),
+          db.eventClusterAudit.deleteMany(),
+          db.article.deleteMany(),
+          db.event.deleteMany(),
+          db.eventDirty.deleteMany(),
+          db.discardedItem.deleteMany(),
+          db.discardedRetryAudit.deleteMany(),
+          db.fetchLog.deleteMany(),
+          db.job.deleteMany(),
+          ...pauseAndResetOps(),
+        ]);
+      return {
+        deleted: {
+          articles: articleResult.count,
+          events: eventResult.count,
+          eventClusterAudits: eventAuditResult.count,
+          pushLogs: pushResult.count,
+          discarded: discardedResult.count,
+          discardedRetryAudits: discardedRetryAuditResult.count,
+          fetchLogs: fetchResult.count,
+          jobs: jobResult.count,
+          exportJobs,
+        },
+      };
+    } finally {
+      await restoreAutoCrawl(prevWasEnabled);
+      invalidatePublicArticleCache();
+    }
+  });
 }
 
 // ── 调度入口 ───────────────────────────────────────────────────

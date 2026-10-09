@@ -80,4 +80,22 @@ describe('AI 批量恢复状态归一化', () => {
       }),
     }));
   });
+
+  it('读取待恢复批次期间取消，不进入重置事务', async () => {
+    const controller = new AbortController();
+    mocks.articleFindMany.mockImplementationOnce(async () => {
+      controller.abort(new Error('Stopped by user'));
+      return [{ id: 'failed' }];
+    });
+    await expect(normalizeAiRecoveryBacklog(true, new Date(), controller.signal)).rejects.toThrow('Stopped by user');
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.resetArticleAiAndEventState).not.toHaveBeenCalled();
+  });
+
+  it('已取消的恢复不查询文章', async () => {
+    const controller = new AbortController();
+    controller.abort(new Error('Stopped by user'));
+    await expect(normalizeAiRecoveryBacklog(true, new Date(), controller.signal)).rejects.toThrow('Stopped by user');
+    expect(mocks.articleFindMany).not.toHaveBeenCalled();
+  });
 });

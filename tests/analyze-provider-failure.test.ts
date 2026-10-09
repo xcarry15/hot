@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({
   db: {
+    job: { findUnique: vi.fn(async () => ({ status: 'running', leaseOwner: 'test-owner', leaseExpiresAt: new Date(Date.now() + 300_000) })) },
     article: {
       findMany: mocks.articleFindMany,
       count: mocks.articleCount,
@@ -47,6 +48,7 @@ vi.mock('@/lib/shared/async', () => ({
 vi.mock('@/lib/worker-stop', () => ({ assertNotAborted: mocks.assertNotAborted }));
 
 import { analyzeAllPending } from '@/lib/pipeline/analyze';
+import { JobLeaseLostError, runWithJobLease } from '@/lib/job-context';
 
 describe('analyzeAllPending Provider 全局异常', () => {
   beforeEach(() => {
@@ -56,6 +58,36 @@ describe('analyzeAllPending Provider 全局异常', () => {
     mocks.articleUpdateMany.mockResolvedValueOnce({ count: 2 });
     mocks.startJobStage.mockResolvedValue(undefined);
     mocks.advanceJobProgress.mockResolvedValue(undefined);
+  });
+
+  it.each(['timeout', 'provider-pause'] as const)('执行权交接后的 %s 不写失败、队列退避或进度', async (kind) => {
+    let current = true;
+    mocks.articleFindMany.mockResolvedValueOnce([{ id: 'article-1', title: '合成文章' }]);
+    mocks.processWithAI.mockImplementationOnce(async () => {
+      current = false;
+      if (kind === 'timeout') throw new Error('AI分析超时');
+      return { status: 'deferred', globalError: true, retryable: true, errorKind: 'rate_limit' };
+    });
+    await expect(runWithJobLease({ jobId: 'j1', owner: 'test-owner' }, () => analyzeAllPending(undefined, 'j1'), async () => current)).rejects.toBeInstanceOf(JobLeaseLostError);
+    expect(mocks.articleUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.advanceJobProgress).not.toHaveBeenCalled();
+  });
+
+  it('同批有租约丢失错误时直接传播，不记为文章技术错误', async () => {
+    mocks.articleFindMany.mockResolvedValueOnce([{ id: 'article-1', title: '合成文章' }]);
+    mocks.processWithAI.mockRejectedValueOnce(new JobLeaseLostError());
+    await expect(analyzeAllPending(undefined, 'j1')).rejects.toBeInstanceOf(JobLeaseLostError);
+    expect(mocks.articleUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.advanceJobProgress).not.toHaveBeenCalled();
+  });
+
+  it('同批先有超时、后有租约丢失时，不提前写入超时失败', async () => {
+    mocks.getSetting.mockResolvedValue('2');
+    mocks.articleFindMany.mockResolvedValueOnce([{ id: 'timeout', title: '合成超时' }, { id: 'lost', title: '合成交接' }]);
+    mocks.processWithAI.mockRejectedValueOnce(new Error('AI分析超时')).mockRejectedValueOnce(new JobLeaseLostError());
+    await expect(analyzeAllPending(undefined, 'j1')).rejects.toBeInstanceOf(JobLeaseLostError);
+    expect(mocks.articleUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.advanceJobProgress).not.toHaveBeenCalled();
   });
 
   it('自动 AI 待办排除软删除来源，但不排除仅禁用来源', async () => {

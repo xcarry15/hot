@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
-import { refreshEventPublicPublication, refreshPublicPublication } from '@/lib/public-publication-service';
+import { rebuildPublicPublicationSnapshotInBatches, refreshEventPublicPublication, refreshPublicPublication } from '@/lib/public-publication-service';
 
 const mocks = db as unknown as {
   article: {
+    findMany: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
@@ -33,6 +34,18 @@ describe('public-publication-service', () => {
       .mockResolvedValueOnce({ value: '70' })
       .mockResolvedValueOnce({ value: '50' })
       .mockResolvedValueOnce({ value: 'true' });
+  });
+
+  it('公开重建在读取批次期间取消，不进入写入事务', async () => {
+    const controller = new AbortController();
+    mocks.article.findMany.mockImplementationOnce(async () => {
+      controller.abort(new Error('Stopped by user'));
+      return [{ id: 'a1' }];
+    });
+    await expect(rebuildPublicPublicationSnapshotInBatches({}, controller.signal)).rejects.toThrow('Stopped by user');
+    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(mocks.article.update).not.toHaveBeenCalled();
+    expect(mocks.event.update).not.toHaveBeenCalled();
   });
 
   it('符合规则的文章会被持久化标记为已发布', async () => {

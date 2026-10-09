@@ -6,9 +6,6 @@ import { runJob } from '@/lib/execution';
 import { previewPushDelivery, previewPublicPublication, previewScorePolicy } from '@/lib/score-policy-service';
 import { z } from 'zod';
 
-// 保持旧的 reveal 路由导入路径兼容；实际清单来自统一配置目录。
-export { SENSITIVE_SETTING_KEYS } from '@/lib/settings';
-
 // GET /api/settings - Get all settings (sensitive keys are redacted)
 export async function GET() {
   try {

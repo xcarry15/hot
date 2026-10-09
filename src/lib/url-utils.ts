@@ -18,6 +18,15 @@ export function resolveUrl(href: string, baseUrl: string): string {
   }
 }
 
+export function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 /** 已知的跟踪参数列表。 */
 const TRACKING_PARAMS = new Set([
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',

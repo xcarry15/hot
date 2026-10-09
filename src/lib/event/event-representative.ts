@@ -36,10 +36,6 @@ export function deriveEventClusterReviewStatus(clusterStatuses: readonly string[
   return clusterStatuses.some((status) => status === 'needs_review') ? 'pending' : 'confirmed';
 }
 
-export function isRepresentativeEligible(article: RepresentativeCandidate): boolean {
-  return isReleaseRepresentativeEligible(article);
-}
-
 export function selectRepresentativeCandidate(articles: RepresentativeCandidate[]): string | null {
   const ready = articles.filter(isReleaseRepresentativeEligible);
   ready.sort(compareRepresentative);

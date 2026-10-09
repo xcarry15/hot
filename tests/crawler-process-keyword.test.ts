@@ -35,7 +35,7 @@ const mocks = vi.hoisted(() => ({
   // detail-fetcher
   fetchArticleDetail: vi.fn(),
   markArticleFetchFailure: vi.fn(),
-  // utils-shared
+  // shared/async
   withTimeout: vi.fn(),
   abortableDelay: vi.fn(),
   // worker-stop
@@ -45,6 +45,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/db', () => ({
   db: {
+    job: { findUnique: vi.fn(async () => ({ status: 'running', leaseOwner: 'test-owner', leaseExpiresAt: new Date(Date.now() + 300_000) })) },
     article: {
       findMany: mocks.articleFindMany,
       count: mocks.articleCount,
@@ -82,7 +83,7 @@ vi.mock('@/lib/detail-fetcher', () => ({
 }));
 
 // withTimeout：直接返回 promise，避免 fetch 阶段被卡死
-vi.mock('@/lib/utils-shared', () => ({
+vi.mock('@/lib/shared/async', () => ({
   withTimeout: mocks.withTimeout,
   abortableDelay: mocks.abortableDelay,
 }));
@@ -98,6 +99,8 @@ vi.mock('@/lib/public-publication-service', () => ({
 
 import { processAllPending, repairPublishedDates } from '../src/lib/pipeline/process';
 import { invalidateKeywordCache } from '../src/lib/filter';
+import { db } from '@/lib/db';
+import { JobLeaseLostError, runWithJobLease } from '@/lib/job-context';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -126,7 +129,9 @@ beforeEach(() => {
   mocks.keywordCandidateUpsert.mockResolvedValue({});
   mocks.keywordHitDeleteMany.mockResolvedValue({ count: 0 });
   mocks.keywordHitCreateMany.mockResolvedValue({ count: 0 });
-  mocks.transaction.mockImplementation(async (writes: Array<Promise<unknown>>) => Promise.all(writes));
+  mocks.transaction.mockImplementation(async (operation: Array<Promise<unknown>> | ((client: typeof db) => Promise<unknown>)) => (
+    typeof operation === 'function' ? operation(db) : Promise.all(operation)
+  ));
 });
 
 // 触发 processAllPending 的最小数据：一条 pending article
@@ -140,6 +145,44 @@ function mockPendingArticle(overrides: Partial<{ id: string; title: string; url:
 }
 
 describe('processAllPending 全文关键字匹配', () => {
+  it('租约丢失不能转换成正文失败', async () => {
+    mocks.articleFindMany.mockResolvedValueOnce([mockPendingArticle()]);
+    mocks.fetchArticleDetail.mockRejectedValueOnce(new JobLeaseLostError());
+    await expect(processAllPending()).rejects.toBeInstanceOf(JobLeaseLostError);
+    expect(mocks.markArticleFetchFailure).not.toHaveBeenCalled();
+    expect(mocks.keywordHitDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('关键词查询期间失去执行权，不提交命中结果或吞掉错误', async () => {
+    let current = true;
+    mocks.articleFindMany.mockResolvedValueOnce([mockPendingArticle()]);
+    mocks.fetchArticleDetail.mockResolvedValueOnce('合成正文。'.repeat(40));
+    mocks.keywordFindMany.mockImplementationOnce(async () => {
+      current = false;
+      return [{ word: '奈雪' }];
+    });
+    await expect(runWithJobLease({ jobId: 'j1', owner: 'test-owner' }, () => processAllPending(), async () => current)).rejects.toBeInstanceOf(JobLeaseLostError);
+    expect(mocks.articleUpdate).not.toHaveBeenCalled();
+    expect(mocks.keywordHitDeleteMany).not.toHaveBeenCalled();
+    expect(mocks.articleDelete).not.toHaveBeenCalled();
+    expect(mocks.markArticleFetchFailure).not.toHaveBeenCalled();
+  });
+
+  it('同批一篇失去租约时，等待其他请求收尾后再拒绝', async () => {
+    mocks.articleFindMany.mockResolvedValueOnce([mockPendingArticle(), mockPendingArticle({ id: 'art-002' })]);
+    let finish!: (content: string) => void;
+    const slow = new Promise<string>(resolve => { finish = resolve; });
+    mocks.fetchArticleDetail.mockRejectedValueOnce(new JobLeaseLostError()).mockReturnValueOnce(slow);
+    let settled = false;
+    const outcome = processAllPending().then(() => { settled = true; return null; }, error => { settled = true; return error; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(mocks.fetchArticleDetail).toHaveBeenCalledTimes(2);
+    expect(settled).toBe(false);
+    finish('');
+    expect(await outcome).toBeInstanceOf(JobLeaseLostError);
+    expect(mocks.markArticleFetchFailure).not.toHaveBeenCalled();
+  });
+
   it('正文命中关键字 → 文章保留，processed++', async () => {
     const article = mockPendingArticle();
     mocks.articleFindMany.mockResolvedValueOnce([article]);

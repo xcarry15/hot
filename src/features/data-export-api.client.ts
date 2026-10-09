@@ -16,11 +16,6 @@ export async function createDataExportJob(filter: ExportFilter, signal?: AbortSi
   return result.job;
 }
 
-export async function getDataExportJob(id: string, signal?: AbortSignal): Promise<ExportJobDto> {
-  const result = await requestJson<ExportJobResponse>('GET', `/api/data-export/${encodeURIComponent(id)}`, { signal });
-  return result.job;
-}
-
 export async function cancelDataExportJob(id: string, signal?: AbortSignal): Promise<ExportJobDto> {
   const result = await requestJson<ExportJobResponse>('POST', `/api/data-export/${encodeURIComponent(id)}/cancel`, { signal });
   return result.job;

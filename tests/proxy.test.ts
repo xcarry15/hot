@@ -86,6 +86,16 @@ describe('proxy auth', () => {
     expect(proxy(makeRequest('GET', '/api/public/share-poster')).status).toBe(405);
   });
 
+  it('只公开文章列表和单篇详情，不放行未登记的嵌套 API', async () => {
+    process.env.API_TOKEN = 'secret123';
+    (process.env as Record<string,string>).NODE_ENV = 'production';
+    const { proxy } = await import('@/proxy');
+
+    expect(proxy(makeRequest('GET', '/api/public/articles')).status).not.toBe(401);
+    expect(proxy(makeRequest('GET', '/api/public/articles/article-1')).status).not.toBe(401);
+    expect(proxy(makeRequest('GET', '/api/public/articles/future/export')).status).toBe(401);
+  });
+
   it('POST /api/articles 无 token → 401', async () => {
     process.env.API_TOKEN = 'secret123';
     (process.env as Record<string,string>).NODE_ENV = 'production';

@@ -11,9 +11,8 @@ const mocks = vi.hoisted(() => ({
   eventUpdate: vi.fn(),
   pushLogFindMany: vi.fn(),
   pushLogCreate: vi.fn(),
-  pushTargetFindUnique: vi.fn(),
   pushTargetFindMany: vi.fn(),
-  pushTargetCreate: vi.fn(),
+  pushTargetUpsert: vi.fn(),
   pushDeliveryFindMany: vi.fn(),
   pushDeliveryUpsert: vi.fn(),
   pushDeliveryUpdateMany: vi.fn(),
@@ -27,7 +26,7 @@ vi.mock('@/lib/db', () => ({
     article: { findUnique: mocks.articleFindUnique },
     event: { findUnique: mocks.eventFindUnique, update: mocks.eventUpdate },
     pushLog: { findMany: mocks.pushLogFindMany, create: mocks.pushLogCreate },
-    pushTarget: { findUnique: mocks.pushTargetFindUnique, findMany: mocks.pushTargetFindMany, create: mocks.pushTargetCreate },
+    pushTarget: { findMany: mocks.pushTargetFindMany, upsert: mocks.pushTargetUpsert },
     pushDelivery: { findMany: mocks.pushDeliveryFindMany, upsert: mocks.pushDeliveryUpsert, updateMany: mocks.pushDeliveryUpdateMany },
     setting: { findUnique: mocks.settingFindUnique },
   },
@@ -69,14 +68,12 @@ describe('Event 推送门禁', () => {
     vi.clearAllMocks();
     mocks.webhookConfigs = [];
     mocks.sendWebhook.mockResolvedValue({ ok: true, retryCount: 0 });
-    mocks.pushTargetFindUnique.mockResolvedValue(null);
     mocks.pushTargetFindMany.mockImplementation(async ({ where }: { where: { urlHash?: { in?: string[] } } }) => {
       const hashes: string[] = where?.urlHash?.in ?? [];
       return hashes.map((hash) => ({ id: `t-${hash.slice(0, 8)}`, urlHash: hash }));
     });
-    mocks.pushTargetCreate.mockImplementation(async ({ data }: { data: { name: string; urlHash: string } }) => ({
-      id: `t-${data.urlHash.slice(0, 8)}`, name: data.name, urlHash: data.urlHash,
-      status: 'sending', leaseOwner: expect.any(String),
+    mocks.pushTargetUpsert.mockImplementation(async ({ where, create }: { where: { urlHash: string }; create: { name: string; urlHash: string } }) => ({
+      id: `t-${where.urlHash.slice(0, 8)}`, name: create.name, urlHash: where.urlHash,
     }));
     mocks.pushDeliveryFindMany.mockResolvedValue([]);
     mocks.pushDeliveryUpsert.mockImplementation(async ({ create }: { create: Record<string, unknown> }) => create);
@@ -117,6 +114,11 @@ describe('Event 推送门禁', () => {
       }]);
     await pushEventToFeishu('e1', 'manual_force');
     expect(mocks.sendWebhook).toHaveBeenCalledTimes(1);
+    expect(mocks.pushTargetUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { urlHash: computeUrlHash('https://hook/a') },
+      create: { name: 'A', urlHash: computeUrlHash('https://hook/a') },
+      update: { name: 'A' },
+    }));
   });
 
   it('没有 Event 的 Article 不能直接推送', async () => {
@@ -304,6 +306,47 @@ describe('Event 推送门禁', () => {
     expect(mocks.pushDeliveryUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: 'unknown', leaseOwner: '', leaseExpiresAt: null }),
     }));
+  });
+
+  it('领取投递后但发出请求前取消时释放为 pending，不误记为结果未知', async () => {
+    const controller = new AbortController();
+    mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(),
+      representativeArticleId: 'a1', pushRetryCount: 0, nextPushRetryAt: null,
+      representativeArticle: representative(),
+    });
+    mocks.pushDeliveryUpsert.mockImplementationOnce(async ({ create }: { create: Record<string, unknown> }) => {
+      controller.abort(new Error('Stopped by user'));
+      return create;
+    });
+    await expect(pushEventToFeishu('e1', 'normal', controller.signal)).rejects.toThrow('Stopped by user');
+    expect(mocks.sendWebhook).not.toHaveBeenCalled();
+    expect(mocks.pushDeliveryUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'pending', leaseOwner: '', leaseExpiresAt: null }),
+    }));
+    expect(mocks.eventUpdate).not.toHaveBeenCalled();
+    expect(mocks.pushLogCreate).not.toHaveBeenCalled();
+  });
+
+  it('远端已确定成功后取消仍保留成功账本，但不继续改写 Event 投影', async () => {
+    const controller = new AbortController();
+    mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(),
+      representativeArticleId: 'a1', pushRetryCount: 0, nextPushRetryAt: null,
+      representativeArticle: representative(),
+    });
+    mocks.sendWebhook.mockImplementationOnce(async () => {
+      controller.abort(new Error('Stopped by user'));
+      return { ok: true, retryCount: 0 };
+    });
+    await expect(pushEventToFeishu('e1', 'normal', controller.signal)).rejects.toThrow('Stopped by user');
+    expect(mocks.pushDeliveryUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'succeeded' }),
+    }));
+    expect(mocks.eventUpdate).not.toHaveBeenCalled();
+    expect(mocks.pushLogCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'success' }) }));
   });
 
   it('普通投递不能重新领取过期 sending', async () => {

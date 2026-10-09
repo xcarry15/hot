@@ -1,12 +1,15 @@
-import type { PublicToolIconName } from './types';
-import type { ToolDirectoryStatus, ToolDirectoryTag } from '@/contracts/tool-directory';
+import type {
+  ToolDirectoryIconName,
+  ToolDirectoryStatus,
+  ToolDirectoryTag,
+} from '@/contracts/tool-directory';
 
 interface StaticTool {
   readonly id: string;
   readonly name: string;
   readonly description: string;
   readonly href: string | null;
-  readonly icon: PublicToolIconName;
+  readonly icon: ToolDirectoryIconName;
   readonly status?: ToolDirectoryStatus;
   readonly tags?: readonly ToolDirectoryTag[];
 }

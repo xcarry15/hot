@@ -1,15 +1,15 @@
 /**
  * 客户端请求 helper：把通用 fetch + JSON + 错误 + AbortSignal 收敛到此。
  *
- * 设计原则（按 B15 计划）：
+ * 设计原则：
  *   - 只统一 fetch 的样板（JSON / 头部 / 错误解析 / AbortSignal 传递）
  *   - 不引入缓存、重试、全局状态或 optimistic update
  *   - 不做 endpoint 拼装，endpoint 拼装由各 feature api client 负责
  *
  * 使用：
  *   import { requestJson } from '@/lib/request-json.client';
- *   const data = await requestJson<MyDto>('GET', '/api/foo', undefined, signal);
- *   const data = await requestJson<MyDto>('POST', '/api/bar', { body: 'x' }, signal);
+ *   const data = await requestJson<MyDto>('GET', '/api/foo', { signal });
+ *   const data = await requestJson<MyDto>('POST', '/api/bar', { body: { value: 'x' }, signal });
  */
 export interface RequestJsonError extends Error {
   status: number;

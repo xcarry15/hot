@@ -2,13 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { refetchArticle } from '@/lib/article-refetch-service';
 import { fetchArticleDetail, markArticleFetchFailure } from '@/lib/detail-fetcher';
+import { recalculateEventsInTransaction } from '@/lib/event-service';
 import { invalidateKeywordCache } from '@/lib/filter';
+import { refreshEventPublicPublication, refreshPublicPublication } from '@/lib/public-publication-service';
+
+const eventMocks = vi.hoisted(() => ({
+  recalculateEventsInTransaction: vi.fn(async () => undefined),
+}));
 
 const mocks = db as unknown as {
   article: {
     findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
+  $transaction: ReturnType<typeof vi.fn>;
   keyword: {
     findMany: ReturnType<typeof vi.fn>;
   };
@@ -24,8 +31,13 @@ vi.mock('@/lib/detail-fetcher', () => ({
   markArticleFetchFailure: vi.fn(async () => true),
 }));
 
+vi.mock('@/lib/event-service', () => ({
+  recalculateEventsInTransaction: eventMocks.recalculateEventsInTransaction,
+}));
+
 vi.mock('@/lib/public-publication-service', () => ({
   refreshPublicPublication: vi.fn(async () => true),
+  refreshEventPublicPublication: vi.fn(async () => true),
 }));
 
 describe('article-refetch-service', () => {
@@ -33,6 +45,7 @@ describe('article-refetch-service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invalidateKeywordCache();
+    mocks.$transaction.mockImplementation(async (callback: (tx: typeof db) => Promise<unknown>) => callback(db));
     mocks.article.update.mockResolvedValue({});
     mocks.keyword.findMany.mockResolvedValue([]);
     mocks.keywordHit.deleteMany.mockResolvedValue({ count: 0 });
@@ -110,6 +123,33 @@ describe('article-refetch-service', () => {
       data: { keywordMatched: false },
     });
     expect(mocks.keywordHit.deleteMany).toHaveBeenCalledWith({ where: { articleId: 'a1' } });
+  });
+
+  it('在同一事务中重算旧 Event 并刷新公开状态', async () => {
+    mocks.article.findUnique.mockResolvedValue({
+      id: 'a1',
+      title: '旧标题',
+      eventId: 'event-1',
+      manualOverrides: '[]',
+      relevance: 0,
+      summary: '',
+      brand: '',
+      category: '',
+      eventSubjects: '[]',
+      eventAction: '',
+      eventObject: '',
+      keyPoints: '[]',
+      eventScore: null,
+      contentScore: null,
+      adProbability: null,
+      isAd: false,
+    });
+
+    await refetchArticle('a1');
+
+    expect(recalculateEventsInTransaction).toHaveBeenCalledWith(db, ['event-1']);
+    expect(refreshEventPublicPublication).toHaveBeenCalledWith('event-1', db);
+    expect(refreshPublicPublication).toHaveBeenCalledWith('a1', db);
   });
 
   it('重新抓取没有获得有效正文时返回失败，供工作流中断后续阶段', async () => {

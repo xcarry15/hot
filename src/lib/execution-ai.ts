@@ -4,11 +4,12 @@ import {
   clusterSingleArticle,
   executeSingleArticleWorkflow,
   isSingleWorkflow,
-  prepareArticleForAiRegeneration,
+  prepareArticleForClustering,
 } from './execution-article-workflow';
 import { advanceJobProgress, startJobStage } from './job-progress';
 import { analyzeAllPending } from './pipeline/analyze';
 import { runStages } from './pipeline/stage-runner';
+import { assertWorkerCanWrite } from './execution-write-guard';
 import { assertNotAborted } from './worker-stop';
 
 export async function executeAiJob(
@@ -36,7 +37,7 @@ export async function executeAiJob(
             assertNotAborted(signal);
             if (jobId) await assertJobNotCancelled(jobId);
             try {
-              await prepareArticleForAiRegeneration(id);
+              await prepareArticleForClustering(id, true, signal);
               const result = await reprocessWithAI(id, signal);
               const failed = !result || result.status === 'failed';
               if (failed) errors++;
@@ -46,6 +47,7 @@ export async function executeAiJob(
               }
               if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, errorDelta: failed ? 1 : 0 });
             } catch {
+              await assertWorkerCanWrite(signal);
               errors++;
               if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, errorDelta: 1 });
             }
@@ -68,6 +70,7 @@ export async function executeAiJob(
               await clusterSingleArticle(id, signal);
               clustered++;
             } catch {
+              await assertWorkerCanWrite(signal);
               failed = true;
               clusterErrors++;
             }
@@ -93,7 +96,7 @@ export async function executeAiJob(
     };
   }
   if (articleId) {
-    await prepareArticleForAiRegeneration(articleId);
+    await prepareArticleForClustering(articleId, true, signal);
     const result = await reprocessWithAI(articleId, signal, jobId);
     let cluster: Awaited<ReturnType<typeof clusterSingleArticle>> | null = null;
     if (result?.status === 'done') {

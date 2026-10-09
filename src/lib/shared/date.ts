@@ -1,3 +1,9 @@
+export function parseOptionalDate(value: string | null): Date | undefined {
+  if (!value) return undefined
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
+
 export function formatRelativeTime(dateStr: string | null): string {
   if (!dateStr) return '从未抓取'
   const now = new Date()
