@@ -74,4 +74,22 @@ describe('collectItem URL 去重', () => {
     expect(mocks.articleUpdate).not.toHaveBeenCalled();
     expect(mocks.articleCreate).not.toHaveBeenCalled();
   });
+
+  it('列表只有日期时不能覆盖已抓取文章的精确时间', async () => {
+    const article = existingArticle({ fetchStatus: 'fetched', publishedAt: new Date('2026-07-20T10:35:00+08:00') });
+    await collectItem('source-1', '示例来源', {
+      url: article.url, title: article.title, publishedAt: '2026-07-20',
+    }, article);
+    expect(mocks.articleUpdate).not.toHaveBeenCalled();
+  });
+
+  it('尚未抓取的文章仍可以补充列表时间', async () => {
+    const article = existingArticle({ fetchStatus: 'pending', publishedAt: null });
+    await collectItem('source-1', '示例来源', {
+      url: article.url, title: article.title, publishedAt: '2026-07-20',
+    }, article);
+    expect(mocks.articleUpdate).toHaveBeenCalledWith({
+      where: { id: article.id }, data: { publishedAt: new Date('2026-07-20') },
+    });
+  });
 });

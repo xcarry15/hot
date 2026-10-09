@@ -135,6 +135,9 @@ export async function autoConfirmSingleArticleReviewEvents(): Promise<number> {
 }
 
 export async function moveArticleToEvent(sourceEventId: string, articleId: string, targetEventId: string): Promise<boolean> {
+  // 移动同时更新文章、重算源和目标 Event、写入 dirty 标记及审计。
+  // SQLite 响应变慢或写入等待时，这些查询可能超过 Prisma 默认的 5 秒交互事务上限，
+  // 导致 P2028 并回滚整次移动；给这段必须原子提交的操作留出合理等待时间。
   const result = await db.$transaction(async (tx) => {
     const [article, target] = await Promise.all([
       tx.article.findUnique({
@@ -182,7 +185,7 @@ export async function moveArticleToEvent(sourceEventId: string, articleId: strin
       },
     });
     return { sourceEventId };
-  });
+  }, { maxWait: 10_000, timeout: 30_000 });
   if (!result) return false;
   await refreshEventRepresentatives([result.sourceEventId, targetEventId]);
   return true;

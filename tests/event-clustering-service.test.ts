@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
-import { clusterArticle } from '@/lib/event-clustering-service';
+import { clusterArticle, findRecentPushedEventDuplicate } from '@/lib/event-clustering-service';
 
 vi.mock('@/lib/event/event-recalculation-service', () => ({ recalculateEvent: vi.fn() }));
 vi.mock('@/lib/public-publication-service', () => ({ refreshEventPublicPublication: vi.fn() }));
@@ -47,5 +47,82 @@ describe('缺少单一事件身份的转载归并', () => {
     vi.mocked(db.article.findUnique).mockResolvedValue(article({ title: '行业快讯：品牌A收购公司；品牌B上海首店开业' }) as never);
     await expect(clusterArticle('new')).resolves.toEqual({ eventId: 'independent', action: 'create' });
     expect(db.event.findMany).not.toHaveBeenCalled();
+  });
+
+  it('精确命中的旧非代表成员超过最新12篇窗口时仍参与归并', async () => {
+    const incoming = article({ contentHash: 'same-body' });
+    const matched = article({ id: 'old-matched', contentHash: 'same-body', createdAt: new Date('2026-10-01') });
+    const recent = Array.from({ length: 12 }, (_, i) => article({
+      id: `recent-${i}`, title: `无关的新稿${i}`, cleanContent: '完全不同的主题与事实',
+    }));
+    vi.mocked(db.article.findUnique).mockResolvedValue(incoming as never);
+    vi.mocked(db.event.findMany).mockImplementation((async (args: { select?: unknown }) => {
+      // 模拟数据库：Event 因旧成员命中而被召回；关系投影决定是否带回旧成员。
+      const select = args?.select as { articles?: { where?: { contentHash?: string } } };
+      return [{
+        id: 'existing', representativeArticleId: recent[0].id, clusterReviewStatus: 'confirmed',
+        representativeArticle: recent[0], articles: select.articles?.where?.contentHash ? [matched] : recent,
+      }] as never;
+    }) as never);
+    await expect(clusterArticle('new')).resolves.toEqual({ eventId: 'existing', action: 'attach' });
+    expect(db.eventClusterAudit.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ evidence: expect.stringContaining('old-matched') }),
+    }));
+    await expect(findRecentPushedEventDuplicate('new', 'another-event')).resolves.toMatchObject({
+      eventId: 'existing', evidence: { matchedMemberArticleId: 'old-matched', fingerprintMatch: true },
+    });
+  });
+
+  it('高相似分但阶段冲突的15个候选不能挤掉同稿 exact 决策', async () => {
+    const incoming = article({
+      title: '测试品牌正式开业北京旗舰店', contentHash: 'same-body', eventKey: 'shared-key',
+      eventSubjects: '["测试品牌"]', eventAction: '正式开业', eventObject: '北京旗舰店', eventKeyConfidence: 90,
+    });
+    vi.mocked(db.article.findUnique).mockResolvedValue(incoming as never);
+    const exactMember = article({ id: 'exact-member', title: '转载标题不同', contentHash: 'same-body' });
+    vi.mocked(db.event.findMany).mockResolvedValue([
+      ...Array.from({ length: 15 }, (_, i) => ({
+        id: `conflict-event-${i}`, representativeArticleId: `conflict-${i}`, clusterReviewStatus: 'confirmed',
+        representativeArticle: {
+          ...incoming, id: `conflict-${i}`, contentHash: `different-${i}`,
+          title: '测试品牌计划开业北京旗舰店', eventAction: '计划开业',
+        }, articles: [],
+      })),
+      { id: 'exact-event', representativeArticleId: exactMember.id, clusterReviewStatus: 'confirmed', representativeArticle: exactMember, articles: [] },
+    ] as never);
+    await expect(clusterArticle('new')).resolves.toEqual({ eventId: 'exact-event', action: 'attach' });
+  });
+
+  it('12篇较新的同key冲突稿不能挤掉较旧的同哈希强证据', async () => {
+    const incoming = article({
+      contentHash: 'same-body', eventKey: 'shared-key', eventSubjects: '["测试品牌"]',
+      eventAction: '正式开业', eventObject: '北京旗舰店', eventKeyConfidence: 90,
+    });
+    const matched = { ...incoming, id: 'old-matched', createdAt: new Date('2026-10-01') };
+    const members = [matched, ...Array.from({ length: 12 }, (_, i) => ({
+      ...incoming, id: `conflict-${i}`, contentHash: `other-${i}`,
+      title: '测试品牌计划开业', eventAction: '计划开业', cleanContent: '计划中的新店尚未开业',
+      createdAt: new Date(now.getTime() + i),
+    }))];
+    vi.mocked(db.article.findUnique).mockResolvedValue(incoming as never);
+    vi.mocked(db.event.findMany).mockImplementation((async (args: { select?: unknown }) => {
+      // 按实际查询的 where/orderBy/take 筛选，防止 mock 隐藏窗口截断。
+      const select = args?.select as { articles: { where: Record<string, unknown>; take: number } };
+      const where = select.articles.where;
+      const rows = members.filter((member) => {
+        if (where.contentHash && member.contentHash !== where.contentHash) return false;
+        if (where.eventKey && member.eventKey !== where.eventKey) return false;
+        if (where.title && member.title !== where.title) return false;
+        return true;
+      }).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, select.articles.take);
+      return rows.length ? [{
+        id: 'existing', representativeArticleId: members[1].id, clusterReviewStatus: 'confirmed',
+        representativeArticle: members[1], articles: rows,
+      }] as never : [];
+    }) as never);
+    await expect(clusterArticle('new')).resolves.toEqual({ eventId: 'existing', action: 'attach' });
+    expect(db.eventClusterAudit.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ evidence: expect.stringContaining('old-matched') }),
+    }));
   });
 });

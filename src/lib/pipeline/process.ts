@@ -16,7 +16,7 @@ import { AUTOMATIC_ARTICLE_SOURCE_FILTER } from '@/lib/pipeline/eligibility';
 import type { Article } from '@prisma/client';
 import { db } from '@/lib/db';
 import { evaluateKeywordMatch, matchIndustryTitleSignal } from '@/lib/filter';
-import { fetchArticleDetail, markArticleFetchFailure } from '@/lib/detail-fetcher';
+import { ARTICLE_FETCH_TIMEOUT_MS, fetchArticleDetail, markArticleFetchFailure } from '@/lib/detail-fetcher';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
 import { assertNotAborted } from '@/lib/worker-stop';
 import { extractMetaPublishedAt } from '@/lib/date-utils';
@@ -29,7 +29,6 @@ import { recordKeywordCandidates } from '@/lib/keyword-candidate-service';
 import { refreshPublicPublication } from '@/lib/public-publication-service';
 import { replaceArticleKeywordHits } from '@/lib/keyword-hit-service';
 
-const FETCH_TIMEOUT_MS = 30_000;
 const MAX_BATCH_SIZE = 500;
 const PROCESS_CONCURRENCY = 5;
 const PROCESS_DELAY_MS = 150;
@@ -86,7 +85,7 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
         try {
           const content = await withTimeout(
             timeoutSignal => fetchArticleDetail(article.id, 2, timeoutSignal),
-            FETCH_TIMEOUT_MS,
+            ARTICLE_FETCH_TIMEOUT_MS,
             `详情抓取超时 "${article.title}"`,
             signal,
           );

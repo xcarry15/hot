@@ -105,6 +105,10 @@ export interface RuleCandidateAudit {
   ruleEvidence: Record<string, unknown>;
 }
 
+export function pairDecisionRank(evidence: Pick<PairEvidence, 'decision'>): number {
+  return { exact: 3, strong: 2, ambiguous: 1, reject: 0 }[evidence.decision];
+}
+
 export function hasDuplicateReportEvidence(evidence: {
   titleOverlap: number;
   charContentOverlap: number;
@@ -689,9 +693,8 @@ export function bestPairEvidenceForCandidate(
     if (!best) { best = evidence; continue; }
 
     // 决策优先级：exact > strong > ambiguous > reject
-    const decisionRank: Record<string, number> = { exact: 3, strong: 2, ambiguous: 1, reject: 0 };
-    const currentRank = decisionRank[evidence.decision] ?? 0;
-    const bestRank = decisionRank[best.decision] ?? 0;
+    const currentRank = pairDecisionRank(evidence);
+    const bestRank = pairDecisionRank(best);
 
     if (currentRank > bestRank) { best = evidence; continue; }
     if (currentRank < bestRank) continue;

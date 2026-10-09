@@ -149,7 +149,7 @@ export async function executeSingleArticleWorkflow(
       shouldRun: () => startAt === 'process',
       run: async () => {
         if (jobId) await startJobStage(jobId, { stage: 'process', total: 1, currentItemLabel: article.title });
-        const processResult = await refetchArticle(articleId);
+        const processResult = await refetchArticle(articleId, signal);
         if (jobId) await advanceJobProgress(jobId, { doneDelta: 1, currentItemLabel: article.title });
         if (!processResult || processResult.success !== true) {
           const reason = processResult?.error || '未获取到有效正文';

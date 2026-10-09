@@ -262,4 +262,96 @@ describe('Event 推送门禁', () => {
       ['e1', [{ webhookUrl: 'https://hook/new', latestStatus: 'never_attempted' }]],
     ]));
   });
+
+  it('连接结果未知会立即写入 ledger，后续普通与失败重试都不再发送', async () => {
+    const url = 'https://hook/a';
+    const targetId = `t-${computeUrlHash(url).slice(0, 8)}`;
+    mocks.webhookConfigs = [{ url, remark: 'A', enabled: true }];
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(),
+      representativeArticleId: 'a1', pushRetryCount: 0, nextPushRetryAt: null,
+      representativeArticle: representative(),
+    });
+    let delivery: Record<string, unknown> | null = null;
+    mocks.pushDeliveryFindMany.mockImplementation(async () => delivery ? [delivery] : []);
+    mocks.pushDeliveryUpsert.mockImplementation(async ({ create }) => {
+      delivery = { ...create, targetId, createdAt: new Date(), updatedAt: new Date() };
+      return delivery;
+    });
+    mocks.pushDeliveryUpdateMany.mockImplementation(async ({ data }) => {
+      delivery = { ...delivery, ...data, updatedAt: new Date() };
+      return { count: 1 };
+    });
+    mocks.sendWebhook.mockResolvedValue({ ok: false, unknown: true, retryCount: 0, errorMessage: 'response lost' });
+
+    await pushEventToFeishu('e1');
+    expect(delivery).toMatchObject({ status: 'unknown', leaseOwner: '', leaseExpiresAt: null });
+    expect(mocks.pushLogCreate).not.toHaveBeenCalled();
+    await pushEventToFeishu('e1');
+    await pushEventToFeishu('e1', 'retry_failed');
+    expect(mocks.sendWebhook).toHaveBeenCalledTimes(1);
+  });
+
+  it('投递中被取消也保留 unknown，取消错误继续传给 Job', async () => {
+    mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(),
+      representativeArticleId: 'a1', pushRetryCount: 0, nextPushRetryAt: null,
+      representativeArticle: representative(),
+    });
+    mocks.sendWebhook.mockRejectedValue(new Error('Stopped by user'));
+    await expect(pushEventToFeishu('e1')).rejects.toThrow('Stopped by user');
+    expect(mocks.pushDeliveryUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'unknown', leaseOwner: '', leaseExpiresAt: null }),
+    }));
+  });
+
+  it('普通投递不能重新领取过期 sending', async () => {
+    mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(),
+      representativeArticleId: 'a1', pushRetryCount: 0, nextPushRetryAt: null,
+      representativeArticle: representative(),
+    });
+    mocks.pushDeliveryUpsert.mockResolvedValue({ status: 'sending', leaseOwner: 'old-worker', leaseExpiresAt: new Date(0) });
+    mocks.pushDeliveryUpdateMany.mockImplementation(async ({ where }) => ({
+      count: where.OR.some((clause: { status: unknown }) => clause.status === 'sending') ? 1 : 0,
+    }));
+    await pushEventToFeishu('e1');
+    expect(mocks.sendWebhook).not.toHaveBeenCalled();
+  });
+
+  it('人工完整重推可以明确重发本模式的 unknown 记录', async () => {
+    const targetId = `t-${computeUrlHash('https://hook/a').slice(0, 8)}`;
+    mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: new Date(),
+      representativeArticleId: 'a1', pushRetryCount: 0, nextPushRetryAt: null,
+      representativeArticle: representative(),
+    });
+    mocks.pushDeliveryFindMany.mockResolvedValue([{
+      eventId: 'e1', targetId, status: 'unknown', createdAt: new Date(), updatedAt: new Date(),
+    }]);
+    mocks.pushDeliveryUpsert.mockResolvedValue({ status: 'unknown', leaseOwner: '' });
+    await pushEventToFeishu('e1', 'repush_all');
+    expect(mocks.sendWebhook).toHaveBeenCalledTimes(1);
+  });
+
+  it('远端成功但 ledger 落库失败时，完整重推不能误报 completed', async () => {
+    const targetId = `t-${computeUrlHash('https://hook/a').slice(0, 8)}`;
+    mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0, nextPushRetryAt: null,
+      representativeArticle: representative(),
+    });
+    mocks.pushDeliveryUpdateMany.mockRejectedValueOnce(new Error('DB unavailable')).mockResolvedValue({ count: 1 });
+    mocks.pushDeliveryFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([{
+      eventId: 'e1', targetId, status: 'unknown', createdAt: new Date(), updatedAt: new Date(),
+    }]);
+    await expect(pushEventToFeishu('e1', 'repush_all')).resolves.toMatchObject({ status: 'failed', succeeded: 0 });
+    expect(mocks.eventUpdate).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ pushedAt: expect.any(Date) }),
+    }));
+  });
 });

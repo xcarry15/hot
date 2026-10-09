@@ -18,6 +18,7 @@ import { assertNotAborted } from './worker-stop';
 import { readZaiPage } from '@/lib/zai-page-reader';
 
 const DIRECT_FETCH_TIMEOUT_MS = 20000;
+export const ARTICLE_FETCH_TIMEOUT_MS = 30_000;
 export const FETCH_MAX_RETRIES = 5;
 export const FETCH_RETRY_DELAY_MS = 2 * 60 * 60 * 1000;
 

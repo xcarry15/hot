@@ -9,11 +9,10 @@ import { fetchSafe, readResponseText } from '@/lib/http';
 import type { WebhookConfig } from '@/lib/settings';
 import { assertNotAborted } from '@/lib/worker-stop';
 
-/** 飞书 webhook 单次请求超时（10s）：webhook 偶发 hang 会让重试循环累计 36s，
- *  阻塞 cron。AbortController 强制结束单次请求。 */
+/** 飞书 webhook 单次请求超时；超时后结果未知，不能自动补发。 */
 export const PUSH_REQUEST_TIMEOUT_MS = 10_000;
 
-/** 失败后退避：1s → 5s → 30s；
+/** 仅明确 HTTP 429 拒绝时退避：1s → 5s → 30s；
  *  循环 attempt ≤ delays.length，共 4 次尝试（初始 + 3 退避）。 */
 const RETRY_DELAYS_MS = [1000, 5000, 30000];
 
@@ -21,33 +20,35 @@ export interface SingleWebhookPushResult {
   ok: boolean;
   retryCount: number;
   errorMessage?: string;
+  unknown?: boolean;
 }
 
 /**
  * 飞书 webhook 的 HTTP 2xx 只代表网关接收成功，业务层仍可能返回错误码。
- * 只有明确得到 code/StatusCode 为 0 才算投递成功；空响应或非 JSON 响应一律
- * 视为失败，避免把“业务拒绝”写成 PushDelivery succeeded。
+ * 只有明确得到 code/StatusCode 为 0 才算投递成功；缺失业务结果及网关异常
+ * 保留 unknown，避免把可能已发送的卡片当作失败补发。
  */
 export function evaluateFeishuResponse(status: number, bodyText: string): {
   ok: boolean;
   errorMessage?: string;
+  unknown?: boolean;
 } {
   const body = bodyText.trim();
   if (status < 200 || status >= 300) {
-    return { ok: false, errorMessage: `HTTP ${status}: ${body.slice(0, 1000)}` };
+    return { ok: false, unknown: status >= 500 || status < 400, errorMessage: `HTTP ${status}: ${body.slice(0, 1000)}` };
   }
   if (!body) {
-    return { ok: false, errorMessage: `Feishu HTTP ${status}: 响应体为空，缺少业务结果码` };
+    return { ok: false, unknown: true, errorMessage: `Feishu HTTP ${status}: 响应体为空，缺少业务结果码` };
   }
 
   let payload: unknown;
   try {
     payload = JSON.parse(body);
   } catch {
-    return { ok: false, errorMessage: `Feishu HTTP ${status}: 响应不是有效 JSON` };
+    return { ok: false, unknown: true, errorMessage: `Feishu HTTP ${status}: 响应不是有效 JSON` };
   }
   if (!payload || typeof payload !== 'object') {
-    return { ok: false, errorMessage: `Feishu HTTP ${status}: 响应格式无效` };
+    return { ok: false, unknown: true, errorMessage: `Feishu HTTP ${status}: 响应格式无效` };
   }
 
   const record = payload as Record<string, unknown>;
@@ -55,9 +56,13 @@ export function evaluateFeishuResponse(status: number, bodyText: string): {
   const isSuccessCode = rawCode === 0 || (typeof rawCode === 'string' && rawCode.trim() === '0');
   if (isSuccessCode) return { ok: true };
 
+  const hasFailureCode = (typeof rawCode === 'number' && Number.isFinite(rawCode))
+    || (typeof rawCode === 'string' && /^-?\d+$/.test(rawCode.trim()));
+
   const message = record.msg ?? record.StatusMessage ?? record.message ?? '业务拒绝';
   return {
     ok: false,
+    unknown: !hasFailureCode,
     errorMessage: `Feishu HTTP ${status}: code=${String(rawCode ?? 'missing')}, msg=${String(message).slice(0, 900)}`,
   };
 }
@@ -95,7 +100,7 @@ export async function sendFeishuWebhook(
           return { ok: rawResponse.ok, status: rawResponse.status, bodyText };
         },
         PUSH_REQUEST_TIMEOUT_MS,
-        `Feishu webhook timeout: ${config.url}`,
+        'Feishu webhook timeout',
         signal,
       );
 
@@ -104,9 +109,12 @@ export async function sendFeishuWebhook(
         return { ok: true, retryCount: attempt };
       }
       lastError = evaluation.errorMessage ?? `HTTP ${response.status}: webhook rejected`;
+      if (response.status !== 429) {
+        return { ok: false, retryCount: attempt, errorMessage: lastError, unknown: evaluation.unknown };
+      }
     } catch (error: unknown) {
       if (signal?.aborted) throw error;
-      lastError = classifyError(error);
+      return { ok: false, unknown: true, retryCount: attempt, errorMessage: classifyError(error) };
     }
 
     // Wait before retry

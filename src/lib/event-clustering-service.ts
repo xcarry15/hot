@@ -27,6 +27,7 @@ import {
   type Candidate,
   type PairEvidence,
   type RuleCandidateAudit,
+  pairDecisionRank,
 } from '@/lib/event/event-cluster-evidence';
 export {
   buildRuleCandidateAuditEvidence,
@@ -39,6 +40,51 @@ export {
 
 type ClusterClient = Prisma.TransactionClient;
 
+const eventCandidateSelect = {
+  id: true,
+  representativeArticleId: true,
+  clusterReviewStatus: true,
+  representativeArticle: { select: candidateArticleSelect },
+  articles: {
+    where: { clusterStatus: { in: ['clustered', 'needs_review'] }, aiStatus: 'done' },
+    orderBy: { createdAt: 'desc' },
+    take: EVENT_CLUSTER_MAX_MEMBER_ARTICLES,
+    select: candidateArticleSelect,
+  },
+} satisfies Prisma.EventSelect;
+
+async function loadCandidateRows(
+  article: { eventKey: string; contentHash: string; title: string },
+  baseWhere: Prisma.EventWhereInput,
+) {
+  const matches: Prisma.ArticleWhereInput[] = [
+    ...(article.contentHash ? [{ contentHash: article.contentHash }] : []),
+    ...(article.eventKey ? [{ eventKey: article.eventKey }] : []),
+    { title: article.title },
+  ];
+  // 分别召回同稿、同身份、同标题成员。宽泛 key 命中不能挤掉旧成员的同稿强证据。
+  const groups = await Promise.all([
+    ...matches.map((match) => {
+      const where = { ...eventCandidateSelect.articles.where, ...match };
+      return db.event.findMany({
+        where: { ...baseWhere, articles: { some: where } },
+        select: {
+          ...eventCandidateSelect,
+          articles: { ...eventCandidateSelect.articles, where },
+        },
+        orderBy: { lastSeenAt: 'desc' },
+        take: EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES,
+      });
+    }),
+    db.event.findMany({
+      where: baseWhere,
+      select: eventCandidateSelect,
+      orderBy: { lastSeenAt: 'desc' },
+      take: EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES,
+    }),
+  ]);
+  return uniqueCandidateRows(...groups);
+}
 
 export async function findRecentPushedEventDuplicate(articleId: string, eventId: string): Promise<{
   eventId: string;
@@ -62,41 +108,12 @@ export async function findRecentPushedEventDuplicate(articleId: string, eventId:
   });
   if (!article) return null;
   const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-  const candidateSelect = {
-    id: true,
-    representativeArticleId: true,
-    clusterReviewStatus: true,
-    representativeArticle: { select: candidateArticleSelect },
-    articles: {
-      where: { clusterStatus: { in: ['clustered', 'needs_review'] }, aiStatus: 'done' },
-      orderBy: { createdAt: 'desc' },
-      take: EVENT_CLUSTER_MAX_MEMBER_ARTICLES,
-      select: candidateArticleSelect,
-    },
-  } satisfies Prisma.EventSelect;
   const baseWhere = {
       id: { not: eventId },
       status: 'active',
       pushedAt: { not: null, gte: cutoff },
   } satisfies Prisma.EventWhereInput;
-  const [exactRows, recentRows] = await Promise.all([
-    db.event.findMany({
-      where: {
-        ...baseWhere,
-        articles: { some: { clusterStatus: { in: ['clustered', 'needs_review'] }, aiStatus: 'done', eventKey: article.eventKey } },
-      },
-      select: candidateSelect,
-      orderBy: { lastSeenAt: 'desc' },
-      take: EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES,
-    }),
-    db.event.findMany({
-      where: baseWhere,
-      select: candidateSelect,
-      orderBy: { lastSeenAt: 'desc' },
-      take: EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES,
-    }),
-  ]);
-  const rows = uniqueCandidateRows(exactRows, recentRows);
+  const rows = await loadCandidateRows(article, baseWhere);
   const matches = rows
     .map(({ representativeArticle, articles, ...event }) => {
       const candidate: Candidate = {
@@ -122,13 +139,19 @@ export async function findRecentPushedEventDuplicate(articleId: string, eventId:
   return matches[0] ?? null;
 }
 
-function uniqueCandidateRows<T extends { id: string }>(...groups: readonly T[][]): T[] {
-  const seen = new Set<string>();
-  return groups.flat().filter((row) => {
-    if (seen.has(row.id)) return false;
-    seen.add(row.id);
-    return true;
-  });
+function uniqueCandidateRows<T extends { id: string; articles: Candidate['articles'] }>(...groups: readonly T[][]): T[] {
+  const byId = new Map<string, T>();
+  for (const row of groups.flat()) {
+    const previous = byId.get(row.id);
+    if (!previous) {
+      byId.set(row.id, row);
+      continue;
+    }
+    // 精确命中成员与近期成员各有一个有界窗口；合并 Event 时不能丢掉其中一组证据。
+    const articles = new Map([...previous.articles, ...row.articles].map((member) => [member.id, member]));
+    byId.set(row.id, { ...previous, articles: [...articles.values()] });
+  }
+  return [...byId.values()];
 }
 
 /**
@@ -306,21 +329,6 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
   const windowMs = EVENT_CLUSTER_FOLLOW_UP_DAYS * 24 * 60 * 60 * 1000;
   const windowStart = new Date(referenceAt.getTime() - windowMs);
   const windowEnd = new Date(referenceAt.getTime() + windowMs);
-  const candidateSelect = {
-    id: true,
-    representativeArticleId: true,
-    clusterReviewStatus: true,
-    representativeArticle: { select: candidateArticleSelect },
-    articles: {
-      where: {
-        clusterStatus: { in: ['clustered', 'needs_review'] },
-        aiStatus: 'done',
-      },
-      orderBy: { createdAt: 'desc' },
-      take: EVENT_CLUSTER_MAX_MEMBER_ARTICLES,
-      select: candidateArticleSelect,
-    },
-  } satisfies Prisma.EventSelect;
   const candidateBaseWhere = {
       status: 'active',
       firstSeenAt: { lte: windowEnd },
@@ -330,34 +338,7 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
         aiStatus: 'done',
       } },
   } satisfies Prisma.EventWhereInput;
-  const [exactCandidateRows, recentCandidateRows] = await Promise.all([
-    db.event.findMany({
-      where: {
-        ...candidateBaseWhere,
-        articles: {
-          some: {
-            clusterStatus: { in: ['clustered', 'needs_review'] },
-            aiStatus: 'done',
-            OR: [
-              ...(article.eventKey ? [{ eventKey: article.eventKey }] : []),
-              ...(article.contentHash ? [{ contentHash: article.contentHash }] : []),
-              { title: article.title },
-            ],
-          },
-        },
-      },
-      select: candidateSelect,
-      orderBy: { lastSeenAt: 'desc' },
-      take: EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES,
-    }),
-    db.event.findMany({
-      where: candidateBaseWhere,
-      select: candidateSelect,
-      orderBy: { lastSeenAt: 'desc' },
-      take: EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES,
-    }),
-  ]);
-  const candidateRows = uniqueCandidateRows(exactCandidateRows, recentCandidateRows);
+  const candidateRows = await loadCandidateRows(article, candidateBaseWhere);
   assertNotAborted(signal);
   const candidates: Candidate[] = candidateRows.map(({ representativeArticle, articles, ...candidate }) => ({
     ...candidate,
@@ -386,6 +367,8 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
       };
     })
     .sort((left, right) => {
+      const decision = pairDecisionRank(right.evidence) - pairDecisionRank(left.evidence);
+      if (decision !== 0) return decision;
       const score = (e: PairEvidence) => Number(e.fingerprintMatch) * 5
         + Number(e.exactTitle) * 4
         + Number(e.eventKeyMatch) * 8
@@ -409,6 +392,8 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     })
     .filter((item): item is { candidate: Candidate; evidence: PairEvidence } => item !== null)
     .sort((left, right) => {
+      const decision = pairDecisionRank(right.evidence) - pairDecisionRank(left.evidence);
+      if (decision !== 0) return decision;
       const score = (e: PairEvidence) => Number(e.fingerprintMatch) * 5
         + Number(e.exactTitle) * 4
         + Number(e.eventKeyMatch) * 8

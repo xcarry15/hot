@@ -76,6 +76,7 @@ vi.mock('@/lib/db', () => ({
 }));
 
 vi.mock('@/lib/detail-fetcher', () => ({
+  ARTICLE_FETCH_TIMEOUT_MS: 30_000,
   fetchArticleDetail: mocks.fetchArticleDetail,
   markArticleFetchFailure: mocks.markArticleFetchFailure,
 }));

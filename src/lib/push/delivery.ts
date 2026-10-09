@@ -4,7 +4,7 @@
  * 职责：
  *   - 使用 PushDelivery 记录作为持久化防重依据（替代 inFlightPushes Map）
  *   - 发送前创建 sending Delivery，发送后更新为 succeeded/failed
- *   - 发送结果未知（HTTP ok 但 DB 写入失败）标记为 unknown，禁止自动重发
+ *   - 网络/响应异常或成功后 DB 写入失败标记为 unknown，禁止自动重发
  *   - PushTarget 通过 urlHash 解析，不再在 PushLog 中保留明文 Webhook URL
  */
 
@@ -16,7 +16,7 @@ import { getWebhookConfigs, type WebhookConfig } from '@/lib/settings';
 import { findRecentPushedEventDuplicate } from '@/lib/event-clustering-service';
 import { PUSH_MAX_RETRIES, PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/push/policy';
 import { getPushUrgency, buildFeishuCard } from '@/lib/push/feishu-card';
-import { sendFeishuWebhook } from '@/lib/push/feishu-transport';
+import { sendFeishuWebhook, type SingleWebhookPushResult } from '@/lib/push/feishu-transport';
 import { getEventReleaseBlockReason, type EventReleaseBlockReason } from '@/lib/event-release-policy';
 import { maskWebhookTarget } from '@/lib/webhook-display';
 
@@ -350,7 +350,7 @@ async function pushEventToFeishuInternal(
     if (mode !== 'manual_force' && mode !== 'repush_all' && succeededTargets.has(target.id)) continue;
 
     // P0-4: Don't auto-retry unknown deliveries
-    if (mode !== 'manual_force' && unknownTargets.has(target.id)) continue;
+    if (mode !== 'manual_force' && mode !== 'repush_all' && unknownTargets.has(target.id)) continue;
 
     const ok = await pushToSingleTarget(
       eventId, article.id, target.id, config, cVersion, mode, card, signal,
@@ -446,13 +446,13 @@ async function pushToSingleTarget(
         mode,
         OR: [
           { status: { in: retryableStatuses } },
-          {
+          ...((mode === 'manual_force' || mode === 'repush_all') ? [{
             status: 'sending',
             OR: [
               { leaseExpiresAt: null },
               { leaseExpiresAt: { lt: new Date() } },
             ],
-          },
+          }] : []),
         ],
       },
       data: {
@@ -469,7 +469,18 @@ async function pushToSingleTarget(
   }
 
   // Send to webhook
-  const result = await sendFeishuWebhook(config, card, signal);
+  let result: SingleWebhookPushResult;
+  try {
+    result = await sendFeishuWebhook(config, card, signal);
+  } catch (error) {
+    await markDeliveryUnknown(idempotencyKey, leaseOwner, error, '投递被中断，远端结果未知；需要人工确认');
+    throw error;
+  }
+
+  if (result.unknown) {
+    await markDeliveryUnknown(idempotencyKey, leaseOwner, result.errorMessage, result.errorMessage || '远端投递结果未知');
+    return false;
+  }
 
   if (result.ok) {
     try {
@@ -480,7 +491,7 @@ async function pushToSingleTarget(
       if (settled.count === 0) return false;
     } catch (error) {
       await markDeliveryUnknown(idempotencyKey, leaseOwner, error);
-      return true;
+      return false;
     }
     try {
       await db.pushLog.create({
@@ -538,13 +549,18 @@ function getDeliveryLeaseOwner(): string {
   return `push:${host}:${pid}:${Math.random().toString(36).slice(2)}`;
 }
 
-async function markDeliveryUnknown(idempotencyKey: string, leaseOwner: string, error: unknown): Promise<void> {
+async function markDeliveryUnknown(
+  idempotencyKey: string,
+  leaseOwner: string,
+  error: unknown,
+  reason = 'DB write failed after successful webhook delivery',
+): Promise<void> {
   try {
     await db.pushDelivery.updateMany({
       where: { idempotencyKey, status: 'sending', leaseOwner },
       data: {
         status: 'unknown',
-        lastError: 'DB write failed after successful webhook delivery',
+        lastError: reason.slice(0, 1000),
         completedAt: new Date(),
         leaseOwner: '',
         leaseExpiresAt: null,

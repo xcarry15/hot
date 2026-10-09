@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { refetchArticle } from '@/lib/article-refetch-service';
+import { fetchArticleDetail, markArticleFetchFailure } from '@/lib/detail-fetcher';
+import { invalidateKeywordCache } from '@/lib/filter';
 
 const mocks = db as unknown as {
   article: {
@@ -17,7 +19,9 @@ const mocks = db as unknown as {
 };
 
 vi.mock('@/lib/detail-fetcher', () => ({
+  ARTICLE_FETCH_TIMEOUT_MS: 30_000,
   fetchArticleDetail: vi.fn(async () => '新的正文内容'),
+  markArticleFetchFailure: vi.fn(async () => true),
 }));
 
 vi.mock('@/lib/public-publication-service', () => ({
@@ -25,12 +29,54 @@ vi.mock('@/lib/public-publication-service', () => ({
 }));
 
 describe('article-refetch-service', () => {
+  afterEach(() => { vi.useRealTimers(); });
   beforeEach(() => {
     vi.clearAllMocks();
+    invalidateKeywordCache();
     mocks.article.update.mockResolvedValue({});
     mocks.keyword.findMany.mockResolvedValue([]);
     mocks.keywordHit.deleteMany.mockResolvedValue({ count: 0 });
     mocks.keywordHit.createMany.mockResolvedValue({ count: 0 });
+  });
+
+  it('重跑全文后部的关键词仍保留命中与加分依据', async () => {
+    mocks.article.findUnique.mockResolvedValue({ id: 'a1', title: '行业新闻' });
+    mocks.keyword.findMany.mockResolvedValue([{ id: 'k1', word: '后部品牌', category: '品牌' }]);
+    vi.mocked(fetchArticleDetail).mockResolvedValueOnce('正文'.repeat(600) + '后部品牌');
+
+    await refetchArticle('a1');
+
+    expect(mocks.article.update).toHaveBeenLastCalledWith({
+      where: { id: 'a1' }, data: { keywordMatched: true },
+    });
+    expect(mocks.keywordHit.createMany).toHaveBeenCalledWith({ data: [{ articleId: 'a1', keywordId: 'k1' }] });
+  });
+
+  it('停止重跑会中止抓取且不写入迟到的关键词结果', async () => {
+    mocks.article.findUnique.mockResolvedValue({ id: 'a1', title: '新闻' });
+    const controller = new AbortController();
+    vi.mocked(fetchArticleDetail).mockImplementationOnce(async (_id, _retries, signal) => {
+      controller.abort(new Error('Stopped by user'));
+      // 故意返回迟到结果，检验服务层仍会守住取消边界。
+      expect(signal?.aborted).toBe(true);
+      return '迟到的正文';
+    });
+
+    await expect(refetchArticle('a1', controller.signal)).rejects.toThrow('Stopped by user');
+    expect(mocks.article.update).toHaveBeenCalledTimes(1);
+    expect(markArticleFetchFailure).not.toHaveBeenCalled();
+  });
+
+  it('内部超时会写入可恢复失败，不覆盖已经完成的抓取', async () => {
+    vi.useFakeTimers();
+    mocks.article.findUnique.mockResolvedValue({ id: 'a1', title: '新闻' });
+    vi.mocked(fetchArticleDetail).mockImplementationOnce(() => new Promise(() => {}));
+    const result = refetchArticle('a1');
+    const rejected = expect(result).rejects.toThrow('正文重新获取超时');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await rejected;
+    expect(markArticleFetchFailure).toHaveBeenCalledWith('a1', expect.any(Error), { onlyIfPending: true });
+    expect(mocks.article.update).toHaveBeenCalledTimes(1);
   });
 
   it('文章不存在时返回 null，不执行写入', async () => {

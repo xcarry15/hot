@@ -26,6 +26,11 @@ import type { Article, Source } from '@prisma/client';
 const CRAWL_SOURCE_TIMEOUT_MS = 60_000;
 const COLLECT_CONCURRENCY = 4;
 
+type ExistingCollectedArticle = Pick<Article, 'id' | 'url' | 'title' | 'publishedAt' | 'fetchStatus'>;
+const existingCollectedArticleSelect = {
+  id: true, url: true, title: true, publishedAt: true, fetchStatus: true,
+} as const;
+
 function sourceHostname(url: string): string {
   try {
     return new URL(url).hostname.toLowerCase();
@@ -57,7 +62,7 @@ export async function collectItem(
   sourceId: string,
   sourceName: string,
   item: CrawlItem,
-  knownExisting?: Article | null,
+  knownExisting?: ExistingCollectedArticle | null,
   knownDiscarded?: boolean,
 ): Promise<CollectItemResult> {
   // Normalize URL
@@ -71,14 +76,16 @@ export async function collectItem(
 
   // ---- Step 1: URL exact dedup ----
   const existing = knownExisting === undefined
-    ? await db.article.findUnique({ where: { url: normalizedUrl } })
+    ? await db.article.findUnique({ where: { url: normalizedUrl }, select: existingCollectedArticleSelect })
     : knownExisting;
   if (existing) {
     // 同 URL 视为同一篇文章：采集阶段绝不因列表标题/日期变化重跑详情、AI 或聚类。
     // 重新抓取只能由失败重试或管理员显式操作触发，避免常规采集反复消耗资源。
     const titleChanged = existing.title !== item.title;
     const nextPublishedAt = item.publishedAt ? parseChineseDate(item.publishedAt) : undefined;
-    const publishedAtChanged = nextPublishedAt !== undefined
+    // 抓取完成后的已有时间由详情阶段维护，列表元数据不能将它降级为日期。
+    const publishedAtChanged = (existing.fetchStatus !== 'fetched' || existing.publishedAt === null)
+      && nextPublishedAt !== undefined
       && existing.publishedAt?.getTime() !== nextPublishedAt.getTime();
     if (titleChanged || publishedAtChanged) {
       await db.article.update({
@@ -323,7 +330,7 @@ export async function crawlSource(sourceId: string, signal?: AbortSignal): Promi
     // 单批预取 URL 状态，把每条 2 次只读查询收敛为 2 次批量查询。
     const normalizedUrls = [...new Set(result.items.map((item) => normalizeUrl(item.url)))];
     const [existingArticles, discardedUrls] = await Promise.all([
-      db.article.findMany({ where: { url: { in: normalizedUrls } } }),
+      db.article.findMany({ where: { url: { in: normalizedUrls } }, select: existingCollectedArticleSelect }),
       db.discardedItem.findMany({ where: { url: { in: normalizedUrls } }, select: { url: true } }),
     ]);
     const existingByUrl = new Map(existingArticles.map((article) => [article.url, article]));
