@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -46,6 +47,11 @@ function createFakeCommands(): void {
 set -euo pipefail
 printf 'npm %s\\n' "$*" >> "\${FAKE_LOG}"
 if [[ "$*" == "run build" ]]; then mkdir -p .next; fi
+if [[ "$*" == "ci --no-audit --no-fund" ]]; then
+  mkdir -p node_modules/.bin
+  printf '#!/usr/bin/env bash\\nexit 0\\n' > node_modules/.bin/prisma
+  chmod +x node_modules/.bin/prisma
+fi
 exit 0
 `);
   writeExecutable('pm2', `#!/usr/bin/env bash
@@ -94,6 +100,11 @@ function createReleaseArchive(): void {
   mkdirSync(path.join(source, 'prisma', 'migrations', '20260731120000_current_schema_baseline'), { recursive: true });
   writeFileSync(path.join(source, 'package.json'), '{}');
   writeFileSync(path.join(source, 'package-lock.json'), '{}');
+  mkdirSync(path.join(source, 'scripts'), { recursive: true });
+  copyFileSync(
+    path.join(PROJECT_ROOT, 'scripts', 'install-dependencies.sh'),
+    path.join(source, 'scripts', 'install-dependencies.sh'),
+  );
   writeFileSync(
     path.join(source, 'prisma', 'migrations', '20260731120000_current_schema_baseline', 'migration.sql'),
     '-- test migration',
