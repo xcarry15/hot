@@ -44,15 +44,17 @@
     "cheerio": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
     "iconv-lite": "^0.6.3",
+    "jszip": "^3.10.2",
     "lucide-react": "^0.525.0",
-    "next": "^16.1.1",
+    "next": "^16.4.0",
     "node-cron": "^3.0.3",
     "prisma": "^6.11.1",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "sharp": "^0.34.3",
+    "sharp": "^0.35.5",
     "sonner": "^2.0.6",
     "tailwind-merge": "^3.3.1",
     "tsx": "^4.22.4",
@@ -71,11 +73,16 @@
     "@types/react-dom": "^19",
     "@vitest/ui": "^4.1.8",
     "eslint": "^9",
-    "eslint-config-next": "^16.1.1",
+    "eslint-config-next": "^16.4.0",
     "happy-dom": "^20.10.3",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.5",
     "typescript": "^5",
     "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "^8.0.1"
+    }
   }
 }

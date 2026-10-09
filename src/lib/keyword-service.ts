@@ -2,6 +2,8 @@ import { db } from '@/lib/db';
 import { createCache } from '@/lib/cache';
 import { invalidateKeywordCache } from '@/lib/filter';
 import { invalidateKeywordFilterDiscards } from '@/lib/keyword-filter-state';
+import { Workbook } from 'exceljs';
+import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
 import {
   importKeywordCandidate,
@@ -13,6 +15,7 @@ import { KEYWORD_BLACKLIST_CATEGORY, KEYWORD_DEFAULT_CATEGORY } from '@/contract
 
 const DEFAULT_CATEGORY = KEYWORD_DEFAULT_CATEGORY;
 const keywordHitCountCache = createCache<Map<string, number>>(15_000);
+export const KEYWORD_XLSX_MAX_BYTES = 5 * 1024 * 1024;
 
 export function invalidateKeywordRuntimeCaches(): void {
   keywordHitCountCache.invalidate();
@@ -101,9 +104,119 @@ const CANDIDATE_SHEETS: Array<{ name: string; status: ImportedKeywordCandidate['
   { name: '候选词-待确认', status: 'pending' },
 ];
 
-function sheetRows<T>(workbook: XLSX.WorkBook, name: string): T[] {
-  const sheet = workbook.Sheets[name];
-  return sheet ? XLSX.utils.sheet_to_json<T>(sheet, { defval: '' }) : [];
+const MAX_KEYWORD_WORKBOOK_ENTRIES = 32;
+const MAX_KEYWORD_WORKBOOK_ENTRY_BYTES = 8 * 1024 * 1024;
+const MAX_KEYWORD_WORKBOOK_UNCOMPRESSED_BYTES = 20 * 1024 * 1024;
+const MAX_KEYWORD_WORKBOOK_SHEETS = 8;
+const MAX_KEYWORD_WORKBOOK_ROWS = 100_000;
+const MAX_KEYWORD_WORKBOOK_COLUMNS = 16;
+
+class KeywordWorkbookLimitError extends Error {}
+
+async function validateKeywordWorkbookArchive(input: Uint8Array): Promise<void> {
+  const archive = await JSZip.loadAsync(Buffer.from(input), { checkCRC32: false });
+  const entries = Object.values(archive.files).filter((entry) => !entry.dir);
+  if (entries.length > MAX_KEYWORD_WORKBOOK_ENTRIES) {
+    throw new KeywordWorkbookLimitError('关键词工作簿包含过多文件');
+  }
+
+  let uncompressedBytes = 0;
+  for (const entry of entries) {
+    const size = (entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize;
+    if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) {
+      throw new Error('Invalid XLSX archive entry size');
+    }
+    if (size > MAX_KEYWORD_WORKBOOK_ENTRY_BYTES) {
+      throw new KeywordWorkbookLimitError('关键词工作簿单个文件内容过大');
+    }
+
+    let entryBytes = 0;
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const stream = entry.nodeStream('nodebuffer') as NodeJS.ReadableStream & { destroy(): void };
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        stream.destroy();
+        reject(error);
+      };
+
+      stream.on('data', (chunk: Buffer) => {
+        entryBytes += chunk.byteLength;
+        uncompressedBytes += chunk.byteLength;
+        if (entryBytes > MAX_KEYWORD_WORKBOOK_ENTRY_BYTES) {
+          rejectOnce(new KeywordWorkbookLimitError('关键词工作簿单个文件内容过大'));
+        } else if (uncompressedBytes > MAX_KEYWORD_WORKBOOK_UNCOMPRESSED_BYTES) {
+          rejectOnce(new KeywordWorkbookLimitError('关键词工作簿解压后内容过大'));
+        }
+      });
+      stream.once('error', (error: Error) => {
+        if (!settled) {
+          settled = true;
+          reject(error);
+        }
+      });
+      stream.once('end', () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      });
+    });
+  }
+}
+
+function validateKeywordWorkbook(workbook: Workbook): void {
+  if (workbook.worksheets.length > MAX_KEYWORD_WORKBOOK_SHEETS) {
+    throw new KeywordWorkbookLimitError('关键词工作簿包含过多工作表');
+  }
+
+  let rowCount = 0;
+  for (const worksheet of workbook.worksheets) {
+    if (worksheet.columnCount > MAX_KEYWORD_WORKBOOK_COLUMNS) {
+      throw new KeywordWorkbookLimitError('关键词工作簿列数超出限制');
+    }
+    rowCount += worksheet.rowCount;
+    if (rowCount > MAX_KEYWORD_WORKBOOK_ROWS) {
+      throw new KeywordWorkbookLimitError('关键词工作簿行数超出限制');
+    }
+  }
+}
+
+function sheetRows(workbook: Workbook, name: string): Array<Record<string, string>> {
+  const sheet = workbook.getWorksheet(name);
+  if (!sheet || sheet.rowCount === 0) return [];
+
+  const headerRow = sheet.getRow(1);
+  const usedHeaders = new Set<string>();
+  const headers = Array.from(
+    { length: sheet.columnCount },
+    (_, index) => headerRow.getCell(index + 1).text.trim(),
+  ).map((header) => {
+    if (!header) return '';
+    let uniqueHeader = header;
+    let suffix = 1;
+    while (usedHeaders.has(uniqueHeader)) {
+      uniqueHeader = `${header}_${suffix}`;
+      suffix += 1;
+    }
+    usedHeaders.add(uniqueHeader);
+    return uniqueHeader;
+  });
+  const rows: Array<Record<string, string>> = [];
+  for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const worksheetRow = sheet.getRow(rowNumber);
+    const row = Object.create(null) as Record<string, string>;
+    let hasValue = false;
+    headers.forEach((header, index) => {
+      if (!header) return;
+      const value = worksheetRow.getCell(index + 1).text;
+      row[header] = value;
+      if (value.trim()) hasValue = true;
+    });
+    if (hasValue) rows.push(row);
+  }
+  return rows;
 }
 
 function cellText(row: Record<string, unknown>, key: string): string {
@@ -141,14 +254,22 @@ export function keywordsToXlsx(
 }
 
 export async function importKeywordsXlsx(input: Uint8Array) {
-  let workbook: XLSX.WorkBook;
+  if (input.byteLength > KEYWORD_XLSX_MAX_BYTES) {
+    throw new KeywordWorkbookLimitError('关键词工作簿过大，最大支持 5MB');
+  }
+  const workbook = new Workbook();
   try {
-    workbook = XLSX.read(input, { type: 'array' });
-  } catch {
+    await validateKeywordWorkbookArchive(input);
+    const workbookBytes = new ArrayBuffer(input.byteLength);
+    new Uint8Array(workbookBytes).set(input);
+    await workbook.xlsx.load(workbookBytes);
+    validateKeywordWorkbook(workbook);
+  } catch (error) {
+    if (error instanceof KeywordWorkbookLimitError) throw error;
     throw new Error('文件不是有效的关键词 XLSX 工作簿');
   }
 
-  const keywordRows = sheetRows<Record<string, unknown>>(workbook, KEYWORD_SHEET);
+  const keywordRows = sheetRows(workbook, KEYWORD_SHEET);
   const keywordEntries = keywordRows.flatMap((row) => {
     const category = cellText(row, '类型') || DEFAULT_CATEGORY;
     const word = cellText(row, '关键词');
@@ -166,7 +287,7 @@ export async function importKeywordsXlsx(input: Uint8Array) {
   const candidatePhrases = new Set<string>();
   let skippedCandidates = 0;
   for (const { name, status } of CANDIDATE_SHEETS) {
-    for (const row of sheetRows<Record<string, unknown>>(workbook, name)) {
+    for (const row of sheetRows(workbook, name)) {
       const phrase = cellText(row, '候选词');
       if (!phrase) {
         skippedCandidates++;

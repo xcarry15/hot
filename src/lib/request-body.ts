@@ -4,13 +4,13 @@ class RequestBodyError extends Error {
 }
 
 /** 同时检查声明长度与实际流长度，不能依赖可缺失或伪造的 Content-Length。 */
-export async function readLimitedJson(request: Request, maxBytes: number, tooLargeMessage: string): Promise<unknown> {
+export async function readLimitedBytes(request: Request, maxBytes: number, tooLargeMessage: string): Promise<Buffer> {
   const declaredLength = Number(request.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
     throw new RequestBodyError(tooLargeMessage);
   }
   const reader = request.body?.getReader();
-  if (!reader) throw new RequestBodyError('请求正文不是有效 JSON');
+  if (!reader) return Buffer.alloc(0);
   const chunks: Uint8Array[] = [];
   let length = 0;
   try {
@@ -27,8 +27,13 @@ export async function readLimitedJson(request: Request, maxBytes: number, tooLar
   } finally {
     reader.releaseLock();
   }
+  return Buffer.concat(chunks, length);
+}
+
+export async function readLimitedJson(request: Request, maxBytes: number, tooLargeMessage: string): Promise<unknown> {
+  const body = await readLimitedBytes(request, maxBytes, tooLargeMessage);
   try {
-    return JSON.parse(Buffer.concat(chunks, length).toString('utf8'));
+    return JSON.parse(body.toString('utf8'));
   } catch {
     throw new RequestBodyError('请求正文不是有效 JSON');
   }

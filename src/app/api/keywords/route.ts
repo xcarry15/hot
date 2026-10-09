@@ -2,11 +2,14 @@ import { NextResponse } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import {
   addKeyword, addKeywordsText, clearKeywords, deleteKeyword, importKeywordsXlsx,
-  keywordsToXlsx, listKeywordCategories, listKeywords, rebuildKeywordHitCounts,
+  KEYWORD_XLSX_MAX_BYTES, keywordsToXlsx, listKeywordCategories, listKeywords, rebuildKeywordHitCounts,
 } from '@/lib/keyword-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 import { deleteKeywordCandidate, dismissKeywordCandidates, listKeywordCandidates, listKeywordCandidatesForExport, updateKeywordCandidate } from '@/lib/keyword-candidate-service';
 import { runJob } from '@/lib/execution';
+import { readLimitedBytes, readLimitedJson } from '@/lib/request-body';
+
+const MAX_KEYWORD_REQUEST_BYTES = KEYWORD_XLSX_MAX_BYTES;
 
 // GET /api/keywords - List all keywords
 //   ?format=xlsx  → export keywords and candidate decisions as XLSX
@@ -47,8 +50,13 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     if (request.headers.get('content-type')?.includes('spreadsheetml')) {
+      const workbookBytes = await readLimitedBytes(
+        request,
+        KEYWORD_XLSX_MAX_BYTES,
+        '关键词工作簿过大，最大支持 5MB',
+      );
       const result = await runExclusiveMutation('导入关键词', async () => {
-        const imported = await importKeywordsXlsx(new Uint8Array(await request.arrayBuffer()));
+        const imported = await importKeywordsXlsx(workbookBytes);
         const rebuiltHits = await rebuildKeywordHitCounts();
         return { ...imported, rebuiltHits };
       });
@@ -59,24 +67,32 @@ export async function POST(request: Request) {
     }
 
     const result = await runExclusiveMutation('更新关键词', async () => {
-      const body = await request.json();
-      if (body.action === 'dismiss-candidates' && Array.isArray(body.ids)) {
-        return { kind: 'candidate-bulk' as const, count: await dismissKeywordCandidates(body.ids.filter((id: unknown): id is string => typeof id === 'string')) };
+      const body = await readLimitedJson(
+        request,
+        MAX_KEYWORD_REQUEST_BYTES,
+        '关键词请求过大，最大支持 5MB',
+      );
+      if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+        return { kind: 'invalid' as const };
       }
-      if (body.action === 'rebuild-hit-counts') {
+      const payload = body as Record<string, unknown>;
+      if (payload.action === 'dismiss-candidates' && Array.isArray(payload.ids)) {
+        return { kind: 'candidate-bulk' as const, count: await dismissKeywordCandidates(payload.ids.filter((id): id is string => typeof id === 'string')) };
+      }
+      if (payload.action === 'rebuild-hit-counts') {
         return { kind: 'hit-counts-rebuilt' as const, rebuiltHits: await rebuildKeywordHitCounts() };
       }
-      if ((body.action === 'approve-candidate' || body.action === 'dismiss-candidate') && typeof body.id === 'string') {
-        const result = await updateKeywordCandidate(body.id, body.action === 'approve-candidate' ? 'approve' : 'dismiss');
+      if ((payload.action === 'approve-candidate' || payload.action === 'dismiss-candidate') && typeof payload.id === 'string') {
+        const result = await updateKeywordCandidate(payload.id, payload.action === 'approve-candidate' ? 'approve' : 'dismiss');
         if (!result) return { kind: 'invalid' as const };
         return { kind: 'candidate' as const, data: result };
       }
-      if (body.text) {
-        const data = await addKeywordsText(String(body.text), body.category);
+      if (payload.text) {
+        const data = await addKeywordsText(String(payload.text), typeof payload.category === 'string' ? payload.category : undefined);
         return data ? { kind: 'ok' as const, data } : { kind: 'invalid' as const };
       }
-      if (!body.word) return { kind: 'invalid' as const };
-      return { kind: 'created' as const, data: await addKeyword(String(body.word), typeof body.category === 'string' ? body.category : undefined) };
+      if (!payload.word) return { kind: 'invalid' as const };
+      return { kind: 'created' as const, data: await addKeyword(String(payload.word), typeof payload.category === 'string' ? payload.category : undefined) };
     });
     if (result.kind === 'invalid') {
       return NextResponse.json({ error: '未输入任何关键词' }, { status: 400 });
@@ -104,8 +120,14 @@ export async function POST(request: Request) {
 //   action='clear-all'     : 清空所有关键词
 export async function PUT(request: Request) {
   try {
-    const body = await request.json();
-    const { action } = body;
+    const body = await readLimitedJson(
+      request,
+      MAX_KEYWORD_REQUEST_BYTES,
+      '关键词请求过大，最大支持 5MB',
+    );
+    const action = body !== null && typeof body === 'object' && !Array.isArray(body)
+      ? (body as Record<string, unknown>).action
+      : undefined;
 
     if (action === 'clear-all') {
       return NextResponse.json({
