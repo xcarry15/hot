@@ -386,7 +386,9 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Input
+                  name={`ai-provider-api-key-${currentProvider.id}`}
                   type={showApiKey ? 'text' : 'password'}
+                  autoComplete="new-password"
                   value={currentConfig.apiKey}
                   onChange={(e) => updateProviderConfig(currentProvider.id, 'apiKey', e.target.value)}
                   disabled={sensitiveStatus !== 'ready'}
