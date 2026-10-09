@@ -46,7 +46,11 @@ function createFakeCommands(): void {
   writeExecutable('npm', `#!/usr/bin/env bash
 set -euo pipefail
 printf 'npm %s\\n' "$*" >> "\${FAKE_LOG}"
-if [[ "$*" == "run build" ]]; then mkdir -p .next; fi
+if [[ "$*" == "run build" ]]; then
+  resolved_db="$(readlink -f db)"
+  [[ "$resolved_db" == "$PWD"/* ]] || { echo 'build database must stay inside the release'; exit 1; }
+  mkdir -p .next
+fi
 if [[ "$*" == "ci --no-audit --no-fund" ]]; then
   mkdir -p node_modules/.bin
   printf '#!/usr/bin/env bash\\nexit 0\\n' > node_modules/.bin/prisma
@@ -178,7 +182,13 @@ deployDescribe('production release deployment', () => {
     expect(normalizedPath(readlinkSync(path.join(APP_DIR, 'db')))).toBe(
       normalizedPath(path.join(APP_DIR, 'shared', 'db')),
     );
-    expect(readFileSync(LOG_PATH, 'utf8')).toContain('npm run build');
+    expect(normalizedPath(readlinkSync(path.join(APP_DIR, 'releases', 'release-one', 'db')))).toBe(
+      normalizedPath(path.join(APP_DIR, 'shared', 'db')),
+    );
+    expect(existsSync(path.join(APP_DIR, 'releases', 'release-one', '.build-db'))).toBe(false);
+    const commandLog = readFileSync(LOG_PATH, 'utf8');
+    expect(commandLog).toContain('npm run db:seed');
+    expect(commandLog).toContain('npm run build');
     expect(existsSync(path.join(APP_DIR, 'releases', 'release-one', '.next'))).toBe(true);
   });
 

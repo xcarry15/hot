@@ -17,6 +17,7 @@ HEALTH_RETRY_COUNT="${HEALTH_RETRY_COUNT:-20}"
 HEALTH_RETRY_DELAY="${HEALTH_RETRY_DELAY:-3}"
 
 RELEASE_STAGING_DIR=""
+BUILD_DB_DIR=""
 RELEASE_DIR=""
 OLD_CURRENT_TARGET=""
 BACKUP_DIR=""
@@ -195,14 +196,23 @@ mapfile -t EXPECTED_MIGRATIONS < <(find "$RELEASE_STAGING_DIR/prisma/migrations"
 EXPECTED_MIGRATION_SQL="$(printf "'%s'," "${EXPECTED_MIGRATIONS[@]}")"
 EXPECTED_MIGRATION_SQL="${EXPECTED_MIGRATION_SQL%,}"
 
-link_release_state "$RELEASE_STAGING_DIR" "$STATE_ENV" "$STATE_DB_DIR"
+BUILD_DB_DIR="$RELEASE_STAGING_DIR/.build-db"
+mkdir -p -- "$BUILD_DB_DIR"
+link_release_state "$RELEASE_STAGING_DIR" "$STATE_ENV" "$BUILD_DB_DIR"
 cd "$RELEASE_STAGING_DIR"
 echo "[deploy] installing release dependencies: $RELEASE_ID"
 bash scripts/install-dependencies.sh
 echo "[deploy] generating Prisma Client"
 npm run db:generate
+echo "[deploy] preparing isolated build database"
+npm run db:migrate:deploy
+npm run db:seed
 echo "[deploy] building release: $RELEASE_ID"
 npm run build
+rm -f -- "$RELEASE_STAGING_DIR/db"
+rm -rf -- "$BUILD_DB_DIR"
+BUILD_DB_DIR=""
+link_release_state "$RELEASE_STAGING_DIR" "$STATE_ENV" "$STATE_DB_DIR"
 
 mv -- "$RELEASE_STAGING_DIR" "$RELEASE_DIR"
 RELEASE_STAGING_DIR=""
