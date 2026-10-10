@@ -3,6 +3,7 @@ import sharp from 'sharp'
 import { z } from 'zod'
 import { PUBLIC_SITE_NAME, PUBLIC_SITE_TAGLINE } from '@/lib/public-brand'
 import { enforcePublicRateLimit } from '@/lib/public-rate-limit'
+import { MAX_SMALL_JSON_BODY_BYTES, readLimitedJson } from '@/lib/request-body'
 
 const requestSchema = z.object({
   publishedAt: z.string().trim().max(50),
@@ -49,7 +50,8 @@ export async function POST(request: Request) {
   const limited = enforcePublicRateLimit(request)
   if (limited) return limited
 
-  const parsed = requestSchema.safeParse(await request.json().catch(() => null))
+  const body = await readLimitedJson(request, MAX_SMALL_JSON_BODY_BYTES, '请求正文过大').catch(() => null)
+  const parsed = requestSchema.safeParse(body)
   if (!parsed.success) return Response.json({ error: '参数错误' }, { status: 400 })
 
   const { publishedAt, shareUrl, summary, title } = parsed.data

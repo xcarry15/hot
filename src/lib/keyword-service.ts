@@ -133,11 +133,13 @@ async function validateKeywordWorkbookArchive(input: Uint8Array): Promise<void> 
     let entryBytes = 0;
     await new Promise<void>((resolve, reject) => {
       let settled = false;
-      const stream = entry.nodeStream('nodebuffer') as NodeJS.ReadableStream & { destroy(): void };
+      const stream = entry.nodeStream('nodebuffer') as NodeJS.ReadableStream;
       const rejectOnce = (error: Error) => {
         if (settled) return;
         settled = true;
-        stream.destroy();
+        // JSZip's Node stream adapter does not cancel its worker chain on destroy;
+        // pausing preserves backpressure and avoids writes into a destroyed stream.
+        stream.pause();
         reject(error);
       };
 

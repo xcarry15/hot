@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Workbook } from 'exceljs';
+import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
 
 const mocks = vi.hoisted(() => ({
@@ -15,7 +17,12 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-import { importKeywordsXlsx, keywordsToXlsx, listKeywords } from '../src/lib/keyword-service';
+import {
+  importKeywordsXlsx,
+  KEYWORD_XLSX_MAX_BYTES,
+  keywordsToXlsx,
+  listKeywords,
+} from '../src/lib/keyword-service';
 
 describe('关键词命中统计', () => {
   beforeEach(() => {
@@ -57,12 +64,63 @@ describe('关键词命中统计', () => {
       XLSX.utils.aoa_to_sheet([['类型', '关键词'], ['品牌', '奈雪'], ['品牌', '奈雪']]),
       '关键词',
     );
-    expect(importKeywordsXlsx(new Uint8Array(XLSX.write(duplicateKeywords, { bookType: 'xlsx', type: 'buffer' })))).rejects.toThrow('关键词工作表存在重复项');
+    await expect(importKeywordsXlsx(new Uint8Array(XLSX.write(duplicateKeywords, { bookType: 'xlsx', type: 'buffer' })))).rejects.toThrow('关键词工作表存在重复项');
 
     const duplicateCandidates = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(duplicateCandidates, XLSX.utils.aoa_to_sheet([['类型', '关键词']]), '关键词');
     XLSX.utils.book_append_sheet(duplicateCandidates, XLSX.utils.aoa_to_sheet([['候选词', '出现次数', '示例标题'], ['新品牌', 2, '标题一']]), '候选词-已采用');
     XLSX.utils.book_append_sheet(duplicateCandidates, XLSX.utils.aoa_to_sheet([['候选词', '出现次数', '示例标题'], ['新品牌', 1, '标题二']]), '候选词-待确认');
-    expect(importKeywordsXlsx(new Uint8Array(XLSX.write(duplicateCandidates, { bookType: 'xlsx', type: 'buffer' })))).rejects.toThrow('候选词工作表存在重复状态');
+    await expect(importKeywordsXlsx(new Uint8Array(XLSX.write(duplicateCandidates, { bookType: 'xlsx', type: 'buffer' })))).rejects.toThrow('候选词工作表存在重复状态');
+  });
+
+  it('拒绝超过压缩体积、归档文件数和解压体积上限的工作簿', async () => {
+    await expect(importKeywordsXlsx(new Uint8Array(KEYWORD_XLSX_MAX_BYTES + 1)))
+      .rejects.toThrow('关键词工作簿过大');
+
+    const tooManyFiles = new JSZip();
+    for (let index = 0; index < 33; index += 1) tooManyFiles.file(`entry-${index}.xml`, 'x');
+    const tooManyFilesBuffer = await tooManyFiles.generateAsync({ type: 'uint8array' });
+    await expect(importKeywordsXlsx(tooManyFilesBuffer))
+      .rejects.toThrow('关键词工作簿包含过多文件');
+
+    const tooLargeEntry = new JSZip();
+    tooLargeEntry.file('large.xml', 'x'.repeat(8 * 1024 * 1024 + 1));
+    const tooLargeEntryBuffer = await tooLargeEntry.generateAsync({
+      type: 'uint8array',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 1 },
+    });
+    await expect(importKeywordsXlsx(tooLargeEntryBuffer))
+      .rejects.toThrow('关键词工作簿单个文件内容过大');
+
+    const tooMuchUncompressed = new JSZip();
+    const sevenMegabytes = 'x'.repeat(7 * 1024 * 1024);
+    tooMuchUncompressed.file('first.xml', sevenMegabytes);
+    tooMuchUncompressed.file('second.xml', sevenMegabytes);
+    tooMuchUncompressed.file('third.xml', sevenMegabytes);
+    const tooMuchUncompressedBuffer = await tooMuchUncompressed.generateAsync({
+      type: 'uint8array',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 1 },
+    });
+    await expect(importKeywordsXlsx(tooMuchUncompressedBuffer))
+      .rejects.toThrow('关键词工作簿解压后内容过大');
+  });
+
+  it('拒绝超出行数、列数或工作表数量限制的工作簿', async () => {
+    const tooManySheets = new Workbook();
+    for (let index = 0; index < 9; index += 1) tooManySheets.addWorksheet(`sheet-${index}`);
+    await expect(importKeywordsXlsx(new Uint8Array(await tooManySheets.xlsx.writeBuffer())))
+      .rejects.toThrow('关键词工作簿包含过多工作表');
+
+    const tooManyRows = new Workbook();
+    tooManyRows.addWorksheet('关键词').getCell('A100001').value = 'overflow';
+    await expect(importKeywordsXlsx(new Uint8Array(await tooManyRows.xlsx.writeBuffer())))
+      .rejects.toThrow('关键词工作簿行数超出限制');
+
+    const tooManyColumns = new Workbook();
+    tooManyColumns.addWorksheet('关键词').getCell('Q1').value = 'overflow';
+    await expect(importKeywordsXlsx(new Uint8Array(await tooManyColumns.xlsx.writeBuffer())))
+      .rejects.toThrow('关键词工作簿列数超出限制');
   });
 });

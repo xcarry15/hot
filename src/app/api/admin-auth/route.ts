@@ -6,6 +6,7 @@ import {
   isValidApiToken,
 } from '@/lib/admin-auth';
 import { enforceAdminAuthRateLimit } from '@/lib/admin-auth-rate-limit';
+import { MAX_SMALL_JSON_BODY_BYTES, readLimitedJson } from '@/lib/request-body';
 
 function cookieOptions() {
   return {
@@ -30,7 +31,11 @@ export async function POST(request: Request) {
 
   let body: unknown;
   try {
-    body = await request.json();
+    body = await readLimitedJson(
+      request,
+      MAX_SMALL_JSON_BODY_BYTES,
+      '请求正文过大',
+    );
   } catch {
     return NextResponse.json({ error: '无效的请求格式' }, { status: 400 });
   }

@@ -21,6 +21,7 @@ import {
   EyeOff,
   Cpu,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { fetchOpenCodeModels, fetchOpenRouterModels, testAiSettings, testSavedAiModel, type AiTestResult } from '@/features/settings-api.client'
@@ -137,6 +138,9 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
     ...(currentConfig.model.trim() ? [currentConfig.model.trim()] : []),
     ...discoveredModelCandidates,
   ])]
+  const openRouterModelUrl = currentProvider.id === 'openrouter' && currentConfig.model.trim()
+    ? `https://openrouter.ai/${currentConfig.model.trim().split('/').map(encodeURIComponent).join('/')}`
+    : null
 
   const loadOpenCodeModels = useCallback(async (showToast: boolean) => {
     setLoadingOpenCodeModels(true)
@@ -429,7 +433,21 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
         {/* Model name */}
         <div className="space-y-1">
           <div className="flex items-center justify-between gap-2">
-            <Label className="text-xs">模型名称</Label>
+            <div className="flex items-center gap-2">
+              <Label className="text-xs">模型名称</Label>
+              {openRouterModelUrl && (
+                <a
+                  href={openRouterModelUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={openRouterModelUrl}
+                  className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                >
+                  查看模型可用率
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                </a>
+              )}
+            </div>
             {currentHealthProvider && (
               <Button
                 type="button"

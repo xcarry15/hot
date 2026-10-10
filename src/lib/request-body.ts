@@ -3,10 +3,13 @@ class RequestBodyError extends Error {
   readonly exposeToClient = true;
 }
 
+export const MAX_SMALL_JSON_BODY_BYTES = 16 * 1024;
+
 /** 同时检查声明长度与实际流长度，不能依赖可缺失或伪造的 Content-Length。 */
 export async function readLimitedBytes(request: Request, maxBytes: number, tooLargeMessage: string): Promise<Buffer> {
   const declaredLength = Number(request.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await request.body?.cancel().catch(() => undefined);
     throw new RequestBodyError(tooLargeMessage);
   }
   const reader = request.body?.getReader();

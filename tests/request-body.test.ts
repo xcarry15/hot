@@ -40,9 +40,9 @@ describe('请求正文的实际字节限制', () => {
     await expect(readLimitedJson(request, 10, 'too large')).rejects.toMatchObject({ status: 400 });
   });
 
-  it('声明超限时不读取正文', async () => {
-    const { request } = streamedRequest(['{}'], '100');
+  it('声明超限时取消请求正文流', async () => {
+    const { request, cancel } = streamedRequest(['{}'], '100');
     await expect(readLimitedJson(request, 10, 'too large')).rejects.toThrow('too large');
-    expect(request.bodyUsed).toBe(false);
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 });

@@ -70,6 +70,8 @@ export const AI_PROVIDERS = {
     defaultModel: 'openrouter/free',
     models: [
       'openrouter/free',
+      'qwen/qwen3.8-27b:free',
+      'inclusionai/ling-3.1-flash:free',
       'nvidia/nemotron-3-ultra-550b-a55b:free',
       'poolside/laguna-s-2.1:free',
       'nvidia/nemotron-3.5-lightning:free',

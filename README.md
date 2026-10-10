@@ -23,6 +23,8 @@
 
 公开端统一复用 `PublicPageShell`、公共头部与页脚；产品名称和文案常量集中在 `src/lib/public-brand.ts`。
 
+匿名后台登录与公开分享海报接口的 JSON 正文限制为 16KiB，服务端按声明长度和实际流字节数拒绝超限请求。
+
 ## 核心架构
 
 ### Article 与 Event
@@ -198,7 +200,7 @@ AI 运行时配置按需读取：模型请求只加载当前 Provider 的连接�
 
 ### 配置 OpenRouter 免费模型
 
-项目通过 OpenAI 兼容接口接入 OpenRouter，不需要额外安装 SDK。在后台进入 `设置 → AI 模型`，选择 `OpenRouter (免费模型)`，填写你自己的 API Key；默认 API 地址为 `https://openrouter.ai/api/v1`，默认模型为 `openrouter/free`。模型按钮会从官方 `GET /api/v1/models` 动态读取文本输出、输入与输出价格均为 0 的免费模型，并保留 `openrouter/free` 作为兜底；服务端也会拒绝非 `openrouter/free`、非 `:free` 模型，防止手工提交付费模型产生费用。OpenRouter 的免费模型列表会变化，可点击“刷新免费模型”。免费模型存在速率限制。项目会对 OpenRouter 免费请求自动串行、每次间隔约 3 秒，收到 429 后停止本次自动重试并进入冷却，避免突发请求反复消耗额度。文章结构化结果由 Prompt 和应用端 Schema 校验完成，不发送 `response_format`，不会因格式兼容问题额外发起请求；429/5xx、连接故障、无效 JSON 和空响应的 Provider 冷却与退避会持久化到 SQLite，服务重启后仍会生效。API Key 在保存时使用 `SETTINGS_ENCRYPTION_KEY` 加密；历史明文兼容读取，并会在下次保存时转为加密格式。不要把密钥写入 `.env`、代码或 Git。
+项目通过 OpenAI 兼容接口接入 OpenRouter，不需要额外安装 SDK。在后台进入 `设置 → AI 模型`，选择 `OpenRouter (免费模型)`，填写你自己的 API Key；默认 API 地址为 `https://openrouter.ai/api/v1`，默认模型为 `openrouter/free`。模型按钮会从官方 `GET /api/v1/models` 动态读取文本输出、输入与输出价格均为 0 的免费模型；接口不可用时使用内置兜底候选，包括 `openrouter/free`、`qwen/qwen3.8-27b:free` 和 `inclusionai/ling-3.1-flash:free`。模型名称旁的“查看模型可用率”会打开当前模型的 OpenRouter 详情页，模型切换后链接同步更新。服务端也会拒绝非 `openrouter/free`、非 `:free` 模型，防止手工提交付费模型产生费用。OpenRouter 的免费模型列表会变化，可点击“刷新免费模型”。免费模型存在速率限制。项目会对 OpenRouter 免费请求自动串行、每次间隔约 3 秒，收到 429 后停止本次自动重试并进入冷却，避免突发请求反复消耗额度。文章结构化结果由 Prompt 和应用端 Schema 校验完成，不发送 `response_format`，不会因格式兼容问题额外发起请求；429/5xx、连接故障、无效 JSON 和空响应的 Provider 冷却与退避会持久化到 SQLite，服务重启后仍会生效。API Key 在保存时使用 `SETTINGS_ENCRYPTION_KEY` 加密；历史明文兼容读取，并会在下次保存时转为加密格式。不要把密钥写入 `.env`、代码或 Git。
 
 项目内的串行和冷却只控制短时请求节奏，不能绕过 OpenRouter 的免费层额度或平台限流；额度政策以 OpenRouter 当前规则为准。收到 429 后，项目会按 `Retry-After` 冷却，尚未完成的文章保留为待处理并等待后续恢复，不会继续盲目请求。
 
