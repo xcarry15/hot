@@ -47,6 +47,14 @@ describe('AI 批量恢复状态归一化', () => {
         OR: expect.arrayContaining([
           { aiStatus: 'failed' },
           { aiStatus: 'skipped', skipReason: { startsWith: 'AI 连续失败' } },
+          expect.objectContaining({
+            aiStatus: 'pending',
+            OR: expect.arrayContaining([
+              { nextAiRetryAt: { not: null } },
+              { eventId: { not: null } },
+              { clusterStatus: { not: 'pending' } },
+            ]),
+          }),
         ]),
       }),
     }));

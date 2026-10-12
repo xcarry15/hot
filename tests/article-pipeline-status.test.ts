@@ -1,9 +1,4 @@
-/**
- * 重构 #4：article-pipeline-status.ts 投影规则测试。
- *
- * 这些断言是冻结的——任何调整都必须同步更新 push.ts 的 pushableWhere
- * 并在 PR 中说明理由（见重构报告 12.6 / 12.12）。
- */
+/** article-pipeline-status 的文章步骤显示投影回归测试。 */
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -258,8 +253,17 @@ describe('withRunningOverlay', () => {
   it('done 不会被覆盖为 running', () => {
     const base = projectArticleSteps(article(), push());
     const overlay = withRunningOverlay(base, 'process');
+    expect(overlay.process).toBe('done');
     expect(overlay.ai).toBe('done');
-    expect(overlay.push).toBe('pending'); // pending → running via push stage
+    expect(overlay.push).toBe('pending');
+  });
+
+  it('activeStage=push 只把待推送步骤升级为 running', () => {
+    const base = projectArticleSteps(article(), push());
+    const overlay = withRunningOverlay(base, 'push');
+    expect(overlay.push).toBe('running');
+    expect(overlay.process).toBe('done');
+    expect(overlay.ai).toBe('done');
   });
 });
 

@@ -282,7 +282,7 @@ describe('规则归并对抗样例', () => {
       eventSubjects: '["2026中国餐饮品招发展论坛"]', eventAction: '举办', eventObject: '广州广交会展馆',
       eventKey: '2026中国餐饮品招发展论坛/举办/广州广交会展馆',
     });
-    expect(pairEvidence(article, member).decision).not.toBe('strong');
+    expect(['ambiguous', 'reject']).toContain(pairEvidence(article, member).decision);
   });
 
   it('动作和事项改写但标题锚点稳定时自动归并', () => {
@@ -341,7 +341,7 @@ describe('规则归并对抗样例', () => {
       eventKey: '瑞幸咖啡/发布业绩/2026年第一季度业绩',
     });
 
-    expect(pairEvidence(article, member).decision).not.toBe('strong');
+    expect(['ambiguous', 'reject']).toContain(pairEvidence(article, member).decision);
   });
 
   it('同一事件的改写报道以高置信身份直接归并', () => {
@@ -464,7 +464,7 @@ describe('规则归并对抗样例', () => {
 
     const evidence = pairEvidence(article, member);
     expect(evidence.preciseIdentity).toBe(false);
-    expect(evidence.decision).not.toBe('strong');
+    expect(['ambiguous', 'reject']).toContain(evidence.decision);
   });
 
   it('低置信但相同 eventKey 的拒绝候选必须进入待复核', () => {
@@ -558,7 +558,7 @@ describe('规则归并对抗样例', () => {
       eventKey: '7-Eleven/发布产品/便利店零食',
     });
 
-    expect(pairEvidence(article, member).decision).not.toBe('strong');
+    expect(['ambiguous', 'reject']).toContain(pairEvidence(article, member).decision);
   });
 
   it('预告与已发生的同一项目保留为不同事件', () => {

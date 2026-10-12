@@ -141,7 +141,7 @@ describe('parseAiAnalysisOutput', () => {
     }))).toThrow('少于最低要求 111 字');
   });
 
-  it('缺少完整事件身份时保留分析结果并清空身份，不触发重试', () => {
+  it('缺少完整事件身份时仍接受评分摘要并清空身份', () => {
     const parsed = parseAiAnalysisOutput(JSON.stringify({
       ...validOutput,
       event_object: '',
@@ -164,16 +164,6 @@ describe('parseAiAnalysisOutput', () => {
     expect(parsed.event_subjects).toEqual(['幸运咖']);
     expect(parsed.event_action).toBe('正式开店');
     expect(parsed.event_object).toBe('郑州首店');
-  });
-
-  it('单次分析直接接受不完整身份，保留评分和摘要', () => {
-    const parsed = parseAiAnalysisOutput(JSON.stringify({
-      ...validOutput,
-      event_object: '',
-    }));
-    expect(parsed.event_score).toBe(validOutput.event_score);
-    expect(parsed.event_key).toBe('');
-    expect(parsed.event_key_confidence).toBe(0);
   });
 
   it('纯观点文章缺少事件身份时保留低事件分和分析结果', () => {

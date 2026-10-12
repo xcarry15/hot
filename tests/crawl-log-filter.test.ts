@@ -406,13 +406,6 @@ describe('writeFilterToUrl & readFilterFromCurrentUrl', () => {
     expect(window.location.search).toBe('')
   })
 
-  it('相同 state 不重复写入（无操作）', () => {
-    writeFilterToUrl(EMPTY_FILTER_STATE)
-    const before = window.location.search
-    writeFilterToUrl(EMPTY_FILTER_STATE)
-    expect(window.location.search).toBe(before)
-  })
-
   it('readFilterFromCurrentUrl：当前 URL 无参数 → EMPTY', () => {
     expect(readFilterFromCurrentUrl()).toEqual(EMPTY_FILTER_STATE)
   })

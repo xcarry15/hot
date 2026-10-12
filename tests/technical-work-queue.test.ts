@@ -68,7 +68,7 @@ describe('technical work queue', () => {
     ]);
   });
 
-  it('AI 等待到期后会触发独立恢复任务', async () => {
+  it('AI 等待到期后会被技术恢复到期查询选中', async () => {
     mocks.articleFindFirst.mockResolvedValue({ id: 'a-waiting' });
 
     await expect(hasDueTechnicalRecovery(new Date('2026-07-27T12:00:00Z'))).resolves.toBe(true);

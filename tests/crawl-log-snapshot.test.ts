@@ -1,8 +1,4 @@
-/**
- * 重构 #4：/api/crawl-log/status snapshot API 测试。
- *
- * 不连真实 DB——通过 setup.ts 已 mock 的 Prisma client 配置返回值。
- */
+/** /api/crawl-log/status HTTP response tests; Prisma is mocked by setup.ts. */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Job, Article } from '@prisma/client';

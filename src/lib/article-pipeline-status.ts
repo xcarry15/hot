@@ -5,8 +5,8 @@
  * 此模块是唯一权威实现，任何路由 / 前端组件需要给出 crawl/process/ai/cluster/push
  * 的显示状态时，都必须调用 projectArticleSteps()，不得重新发明条件。
  *
- * 投影规则冻结（见重构报告 12.6）。任何调整都需要同步更新 push.ts 的 pushableWhere
- * 并测试覆盖。
+ * 本模块只负责文章步骤的显示投影；Event 是否进入真实推送查询由
+ * src/lib/push/policy.ts 的 pushableWhere 决定，两者通过边界测试保持语义一致。
  */
 
 import { PUSH_MAX_RETRIES, type PushMode } from '@/contracts/push';
@@ -83,8 +83,8 @@ export interface ArticleStepProjection {
  *   - nextRetryAt > now → failed（同时返回 retryAt）
  *   - 满足条件且未推送 → pending
  *
- * 推送资格的判断必须复用 push.ts 的 where 条件语义（pushedAt=null / aiStatus=done /
- * score/relevance ≥ 阈值 / nextRetryAt 已到期），不允许本模块与 push.ts 演化分叉。
+ * 这里将 Event 推送事实投影为文章步骤状态，不替代 Event 查询资格；真实推送资格
+ * 由 src/lib/push/policy.ts 的 pushableWhere 统一决定。
  */
 export function projectArticleSteps(
   article: ArticleStepInput,

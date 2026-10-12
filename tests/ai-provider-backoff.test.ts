@@ -74,7 +74,7 @@ describe('AI Provider 持久化冷却与退避', () => {
     expect(AI_PROVIDER_MAX_BACKOFF_MS).toBe(24 * 60 * 60 * 1000);
   });
 
-  it('读取状态并只清理已到期的旧退避', async () => {
+  it('读取 Provider 状态，并且清理查询只覆盖已到期的冷却', async () => {
     const row = {
       provider: 'opencode',
       cooldownUntil: new Date('2026-09-01T00:01:00.000Z'),
@@ -88,12 +88,22 @@ describe('AI Provider 持久化冷却与退避', () => {
     await expect(getAIProviderBackoff('opencode')).resolves.toEqual(row);
     await clearAIProviderBackoff('opencode');
 
-    expect(mocks.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
+    expect(mocks.updateMany).toHaveBeenCalledWith({
+      where: {
         provider: 'opencode',
         failureCount: { gt: 0 },
-      }),
-      data: expect.objectContaining({ failureCount: 0, cooldownUntil: null }),
-    }));
+        OR: [
+          { cooldownUntil: null },
+          { cooldownUntil: { lte: new Date('2026-09-01T00:00:00.000Z') } },
+        ],
+      },
+      data: {
+        cooldownUntil: null,
+        failureCount: 0,
+        lastErrorKind: '',
+        lastStatus: null,
+        lastRetryAfterMs: null,
+      },
+    });
   });
 });

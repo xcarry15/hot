@@ -72,7 +72,7 @@ describe('crawl-log-service', () => {
   });
 
   describe('clampCrawlLogLimit', () => {
-    it('缺省或非法输入 → 400', () => {
+    it('缺省或非法输入使用默认窗口 400 篇', () => {
       expect(clampCrawlLogLimit(undefined)).toBe(400);
       expect(clampCrawlLogLimit(null)).toBe(400);
       expect(clampCrawlLogLimit(Number.NaN)).toBe(400);
@@ -317,12 +317,6 @@ describe('crawl-log-service', () => {
       setupWithArticles([
         {
           sourceId: 's1',
-          id: 'old-ingested-late-published',
-          createdAt: new Date('2026-07-10T10:00:00Z'),
-          publishedAt: new Date('2026-07-10T15:00:00Z'),
-        },
-        {
-          sourceId: 's1',
           id: 'new-ingested-old-published',
           createdAt: new Date('2026-07-10T12:00:00Z'),
           publishedAt: new Date('2026-07-10T09:00:00Z'),
@@ -333,13 +327,25 @@ describe('crawl-log-service', () => {
           createdAt: new Date('2026-07-10T11:00:00Z'),
           publishedAt: new Date('2026-07-10T11:00:00Z'),
         },
+        {
+          sourceId: 's1',
+          id: 'old-ingested-late-published',
+          createdAt: new Date('2026-07-10T10:00:00Z'),
+          publishedAt: new Date('2026-07-10T15:00:00Z'),
+        },
       ]);
 
       const snapshot = await getCrawlLogSnapshot({ limit: 2 });
 
       expect(snapshot.hasMoreArticles).toBe(true);
+      expect(mocks.articleFindMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { source: { enabled: true, deletedAt: null } },
+        take: 3,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      }));
+      // 先按 createdAt 选出窗口；组内再按 publishedAt 展示，因此较早入库的晚发布时间不挤入窗口。
       expect(snapshot.sources[0].articles.map((article) => article.id)).toEqual([
-        'old-ingested-late-published',
+        'middle-ingested',
         'new-ingested-old-published',
       ]);
     });

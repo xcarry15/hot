@@ -283,11 +283,13 @@ describe('processAllPending 全文关键字匹配', () => {
 });
 
 describe('processAllPending 边界条件', () => {
-  it('详情抓取失败（content 长度 ≤ 50）→ 跳过两道路闸，errors++', async () => {
+  it.each([
+    { label: '空内容', content: '' },
+    { label: '50 个字符', content: 'x'.repeat(50) },
+  ])('详情抓取返回$label时不进入关键词处理', async ({ content }) => {
     const article = mockPendingArticle();
     mocks.articleFindMany.mockResolvedValueOnce([article]);
-    // fetchArticleDetail 返空（对应 detail-fetcher 返 '' 或 short）
-    mocks.fetchArticleDetail.mockResolvedValueOnce('');
+    mocks.fetchArticleDetail.mockResolvedValueOnce(content);
 
     const result = await processAllPending();
 
@@ -295,7 +297,6 @@ describe('processAllPending 边界条件', () => {
     expect(result.errors).toBe(1);
     expect(mocks.articleDelete).not.toHaveBeenCalled();
     expect(mocks.discardedItemUpsert).not.toHaveBeenCalled();
-    // 详情抓取未完成时不执行关键字判断
     expect(mocks.keywordFindMany).not.toHaveBeenCalled();
   });
 
