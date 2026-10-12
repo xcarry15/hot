@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import type { JobStatus } from '@prisma/client';
+import type { JobStatus, Prisma } from '@prisma/client';
 import { getPublicDateKey } from '@/lib/shared/public-date';
 import { getAIInvocationStats } from '@/lib/ai-invocation-service';
 import { getBusinessSkipLabel } from '@/lib/article-pipeline-status';
@@ -9,6 +9,13 @@ export type DashboardAnalyticsRange = 'all' | 'today' | '3d' | '7d' | '30d';
 interface RangeWindow {
   startAt: Date | null;
   endAt: Date;
+}
+
+interface AIJobActivityStats {
+  failedAttempts: number;
+  deferredOccurrences: number;
+  providerPausedJobs: number;
+  failedJobs: number;
 }
 
 interface MutableStats {
@@ -146,6 +153,92 @@ function parseRecord(value: string): Record<string, unknown> {
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readNonNegativeCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function readSingleArticleAIResult(value: unknown): Record<string, unknown> | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  if (typeof record.status === 'string') return record;
+
+  const result = asRecord(record.result);
+  if (!result) return null;
+  if (typeof result.status === 'string') return result;
+
+  const nestedResult = asRecord(result.result);
+  return typeof nestedResult?.status === 'string' ? nestedResult : null;
+}
+
+function parseAIJobActivity(type: string, serializedResult: string): AIJobActivityStats | null {
+  const result = parseRecord(serializedResult);
+  const fullStages = asRecord(result.stages);
+  const nestedResult = asRecord(result.result);
+  // Job.result 有批处理阶段汇总、直接单篇结果和单篇工作流三种既有形状。
+  const workflowAIResult = asRecord(result.ai);
+  const workflowStages = Array.isArray(result.stages) ? result.stages : [];
+  const nestedHasCounters = nestedResult !== null
+    && (readNonNegativeCount(nestedResult.errors) !== null
+      || readNonNegativeCount(nestedResult.deferred) !== null);
+  let aiResult: Record<string, unknown> | null = null;
+  if (type === 'full') {
+    aiResult = asRecord(fullStages?.ai);
+  } else if (type === 'ai') {
+    if (workflowAIResult) aiResult = workflowAIResult;
+    else if (nestedHasCounters) aiResult = nestedResult;
+    else aiResult = result;
+  } else if (type === 'process' && workflowStages.includes('ai')) {
+    aiResult = workflowAIResult;
+  }
+  if (!aiResult) return null;
+
+  const singleArticleResult = readSingleArticleAIResult(aiResult);
+  const failedAttempts = readNonNegativeCount(aiResult.errors)
+    ?? (singleArticleResult?.status === 'failed' ? 1 : 0);
+  const deferredOccurrences = readNonNegativeCount(aiResult.deferred)
+    ?? (singleArticleResult?.status === 'deferred' ? 1 : 0);
+
+  return {
+    failedAttempts,
+    deferredOccurrences,
+    providerPausedJobs: aiResult.providerPaused === true
+      || aiResult.providerUnavailable === true
+      || singleArticleResult?.globalError === true
+      ? 1
+      : 0,
+    failedJobs: 0,
+  };
+}
+
+function aggregateAIJobActivity(
+  jobs: Array<{ type: string; result: string; status: string }>,
+): AIJobActivityStats {
+  const totals: AIJobActivityStats = {
+    failedAttempts: 0,
+    deferredOccurrences: 0,
+    providerPausedJobs: 0,
+    failedJobs: 0,
+  };
+  for (const job of jobs) {
+    const activity = parseAIJobActivity(job.type, job.result);
+    if (activity) {
+      totals.failedAttempts += activity.failedAttempts;
+      totals.deferredOccurrences += activity.deferredOccurrences;
+      totals.providerPausedJobs += activity.providerPausedJobs;
+    }
+    if (job.status === 'failed') totals.failedJobs++;
+  }
+  return totals;
+}
+
 function parseTrigger(payload: Record<string, unknown>): CrawlTrigger {
   return payload.trigger === 'auto' || payload.trigger === 'manual' ? payload.trigger : 'unknown';
 }
@@ -233,6 +326,33 @@ async function buildDashboardAnalytics(
     : { lte: dateKey(window.endAt) };
   const sourceFilter = sourceId ? { sourceId } : {};
   const eventSourceFilter = sourceId ? { representativeArticle: { is: { sourceId } } } : {};
+  const currentAiQueueBaseWhere: Prisma.ArticleWhereInput = {
+    aiStatus: { in: ['pending', 'failed'] },
+    fetchStatus: 'fetched',
+    technicalIgnoredAt: null,
+    eventId: null,
+    clusterStatus: 'pending',
+    source: { is: { deletedAt: null } },
+    ...sourceFilter,
+  };
+  const currentAiStatsAt = new Date();
+  const currentAiReadyWhere: Prisma.ArticleWhereInput = {
+    ...currentAiQueueBaseWhere,
+    OR: [
+      { nextAiRetryAt: null },
+      { nextAiRetryAt: { lte: currentAiStatsAt } },
+    ],
+  };
+  const currentAiCoolingWhere: Prisma.ArticleWhereInput = {
+    ...currentAiQueueBaseWhere,
+    nextAiRetryAt: { gt: currentAiStatsAt },
+  };
+  const aiJobHistoryPromise = sourceId
+    ? Promise.resolve([] as Array<{ type: string; result: string; status: string }>)
+    : db.job.findMany({
+        where: { type: { in: ['full', 'ai', 'process'] }, createdAt: timeWhere },
+        select: { type: true, result: true, status: true },
+      });
 
   const [
     sources,
@@ -242,7 +362,11 @@ async function buildDashboardAnalytics(
     interactionBySource,
     interactionByEvent,
     eventActivities,
-    ai,
+    aiInvocations,
+    aiJobHistory,
+    currentAiReadyByStatus,
+    currentAiCoolingByStatus,
+    currentAiAbandonedCount,
   ] = await Promise.all([
     db.source.findMany({
       where: { deletedAt: null, ...(sourceId ? { id: sourceId } : {}) },
@@ -319,7 +443,53 @@ async function buildDashboardAnalytics(
       },
     }),
     getAIInvocationStats(window.startAt, window.endAt, sourceId),
+    aiJobHistoryPromise,
+    db.article.groupBy({
+      by: ['aiStatus'] as const,
+      where: currentAiReadyWhere,
+      _count: { _all: true } as const,
+    }),
+    db.article.groupBy({
+      by: ['aiStatus'] as const,
+      where: currentAiCoolingWhere,
+      _count: { _all: true } as const,
+    }),
+    db.article.count({
+      where: {
+        fetchStatus: 'fetched',
+        aiStatus: 'skipped',
+        skipReason: { startsWith: 'AI 连续失败' },
+        source: { is: { deletedAt: null } },
+        ...sourceFilter,
+      },
+    }),
   ]);
+
+  const currentAiQueue = { ready: 0, cooling: 0, failed: 0 };
+  for (const row of currentAiReadyByStatus) {
+    if (row.aiStatus === 'pending' || row.aiStatus === 'failed') {
+      currentAiQueue.ready += row._count._all;
+    }
+    if (row.aiStatus === 'failed') currentAiQueue.failed += row._count._all;
+  }
+  for (const row of currentAiCoolingByStatus) {
+    if (row.aiStatus === 'pending' || row.aiStatus === 'failed') {
+      currentAiQueue.cooling += row._count._all;
+    }
+    if (row.aiStatus === 'failed') currentAiQueue.failed += row._count._all;
+  }
+  const ai = {
+    ...aiInvocations,
+    processing: {
+      period: sourceId ? null : aggregateAIJobActivity(aiJobHistory),
+      current: {
+        ready: currentAiQueue.ready,
+        cooling: currentAiQueue.cooling,
+        failed: currentAiQueue.failed,
+        abandoned: currentAiAbandonedCount,
+      },
+    },
+  };
 
   const recentJobs = await db.job.findMany({
     where: { type: { in: ['full', 'collect'] }, createdAt: timeWhere },

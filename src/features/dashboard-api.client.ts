@@ -79,6 +79,20 @@ export interface DashboardAnalytics {
     successRate: number;
     averageDurationMs: number;
     failuresByKind: Array<{ kind: string; count: number }>;
+    processing: {
+      period: {
+        failedAttempts: number;
+        deferredOccurrences: number;
+        providerPausedJobs: number;
+        failedJobs: number;
+      } | null;
+      current: {
+        ready: number;
+        cooling: number;
+        failed: number;
+        abandoned: number;
+      };
+    };
     byProvider: Array<{
       provider: string;
       model: string;

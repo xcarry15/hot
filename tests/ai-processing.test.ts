@@ -1,15 +1,4 @@
-/**
- * ai.ts AI 失败路径回归测试
- *
- * 设计变更（commit 9f30d80）：删除 offlineClassify + FALLBACK_BRANDS 硬编码，
- * AI 失败时改写 aiStatus='failed' 留重试池，不再用规则打分伪装成 done。
- * 原因：fallback 分数会被当真实 AI 分数推送，污染推送池。
- *
- * 本测试验证新契约：
- *   - AI 失败 → aiStatus='failed'，不读品牌字典（offlineClassify 已删）
- *   - 不伪装成 done（不进推送池）
- *   - 不抛错（留重试池等下一轮）
- */
+/** AI 失败收口、广告处理和模型输出持久化回归测试。 */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -73,7 +62,7 @@ vi.mock('@/lib/dedup', () => ({
 import * as aiModule from '@/lib/ai';
 import { AIClientError } from '@/lib/ai-client';
 
-describe('AI 失败路径（offlineClassify 已删除）', () => {
+describe('processWithAI 结果处理', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.articleUpdate.mockResolvedValue({});
@@ -116,7 +105,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
     expect(mocks.createChatCompletion).toHaveBeenCalledTimes(1);
   });
 
-  it('AI 失败 → 写 aiStatus=failed，不读品牌字典（offlineClassify 已删）', async () => {
+  it('AI 调用失败时写入失败状态和摘要，不触发关键词回退', async () => {
     mocks.keywordFindMany.mockResolvedValue([
       { word: '测试品牌A' },
       { word: '测试品牌B' },
@@ -129,7 +118,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
       aiStatus: 'pending',
     });
 
-    await aiModule.processWithAI({
+    const result = await aiModule.processWithAI({
       id: 't1',
       title: '测试品牌A 新店开业',
       aiStatus: 'pending',
@@ -138,62 +127,18 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
       publishedAt: null,
     });
 
-    // offlineClassify 已删 → 不应读品牌字典
+    // 模型失败只进入可重试状态，不根据本地关键词伪造 AI 结果。
     expect(mocks.keywordFindMany).not.toHaveBeenCalled();
-    const updateCall = mocks.articleUpdate.mock.calls.find(
-      c => c[0]?.where?.id === 't1'
-    );
-    expect(updateCall).toBeDefined();
-    expect(updateCall![0].data.aiStatus).toBe('failed');
-    expect(updateCall![0].data.summary).toBe('[AI 处理失败]');
-    expect(updateCall![0].data.aiError).toBe('AI 分析失败');
-  });
-
-  it('AI 失败时不伪装成 done（failed 不进推送池）', async () => {
-    const longContent = '这是一段足够长的内容用于测试 AI 流程。'.repeat(5);
-    mocks.articleFindUnique.mockResolvedValue({
-      id: 't2',
-      title: '瑞幸咖啡开店',
-      cleanContent: longContent,
-      aiStatus: 'pending',
+    expect(result.status).toBe('failed');
+    const updateData = mocks.articleUpdate.mock.calls.find(
+      call => call[0]?.where?.id === 't1',
+    )?.[0].data;
+    expect(updateData).toMatchObject({
+      aiStatus: 'failed',
+      summary: '[AI 处理失败]',
+      aiError: 'AI 分析失败',
     });
-
-    await aiModule.processWithAI({
-      id: 't2',
-      title: '瑞幸咖啡开店',
-      aiStatus: 'pending',
-      cleanContent: longContent,
-      summary: null,
-      publishedAt: null,
-    });
-
-    const updateCall = mocks.articleUpdate.mock.calls.find(
-      c => c[0]?.where?.id === 't2'
-    );
-    expect(updateCall).toBeDefined();
-    expect(updateCall![0].data.aiStatus).not.toBe('done');
-    expect(updateCall![0].data.aiStatus).toBe('failed');
-    // 不写 promptVersion='offline'（offlineClassify 已删）
-    expect(updateCall![0].data.promptVersion).toBeUndefined();
-  });
-
-  it('AI 失败时不抛错（留重试池等下一轮）', async () => {
-    const longContent = '这是一段足够长的内容用于测试 AI 流程。'.repeat(5);
-    mocks.articleFindUnique.mockResolvedValue({
-      id: 't3',
-      title: '瑞幸咖啡开店',
-      cleanContent: longContent,
-      aiStatus: 'pending',
-    });
-
-    await expect(aiModule.processWithAI({
-      id: 't3',
-      title: '瑞幸咖啡开店',
-      aiStatus: 'pending',
-      cleanContent: longContent,
-      summary: null,
-      publishedAt: null,
-    })).resolves.not.toThrow();
+    expect(updateData).not.toHaveProperty('promptVersion');
   });
 
   it('Provider 鉴权错误保留 pending，不消耗文章重试次数', async () => {
@@ -286,7 +231,7 @@ describe('AI 失败路径（offlineClassify 已删除）', () => {
     });
   });
 
-  it('多事件标题保留模型选出的主事件，由聚类阶段自动建立独立 Event', async () => {
+  it('聚合文章仍保留模型选定的单个主事件身份', async () => {
     const longContent = '聚合稿包含多条有效零售新闻，需要保留整体分析和广告判断。'.repeat(8);
     mocks.createChatCompletion.mockResolvedValue({
       content: JSON.stringify({

@@ -156,7 +156,12 @@ describe('tool-directory-service', () => {
     mocks.toolDirectoryCategory.findUnique.mockResolvedValue(storedCategory('other-tools', 4, '其他工具'));
     mocks.toolDirectoryItem.findFirst.mockResolvedValue(null);
     mocks.toolDirectoryCategory.delete.mockResolvedValue(storedCategory('other-tools', 4, '其他工具'));
-    await expect(deleteToolDirectoryCategory('other-tools')).resolves.toBeTruthy();
+    await expect(deleteToolDirectoryCategory('other-tools')).resolves.toEqual({
+      id: 'other-tools',
+      name: '其他工具',
+      sortOrder: 4,
+      hidden: false,
+    });
 
     mocks.toolDirectoryItem.findFirst.mockResolvedValue({ id: 'tool-1' });
     await expect(deleteToolDirectoryCategory('other-tools')).rejects.toThrow('分类下仍有工具');

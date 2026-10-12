@@ -95,9 +95,17 @@ describe('Event 推送门禁', () => {
     expect(mocks.sendWebhook).not.toHaveBeenCalled();
   });
 
-  it('自动推送队列在查询时排除软文，不消耗重试次数', () => {
+  it('自动推送队列只选已完成 AI 和聚类的非软文代表', () => {
     expect(pushableWhere({ pushMode: 'realtime', minScore: 0, minRelevance: 0 }))
-      .toMatchObject({ representativeArticle: { is: { isAd: false } } });
+      .toMatchObject({
+        representativeArticle: {
+          is: {
+            isAd: false,
+            aiStatus: 'done',
+            clusterStatus: 'clustered',
+          },
+        },
+      });
   });
 
   it('人工明确强制推送仍可投递已完成AI和聚类的软文', async () => {

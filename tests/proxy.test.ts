@@ -2,7 +2,7 @@
  * API 鉴权代理测试（原 middleware，Next.js 16 重命名为 proxy）
  *
  * 验证：
- * - 生产环境所有 API（含 GET）缺 token 或错 token → 401
+ * - 生产环境受保护 API（含 GET）缺 token 或错 token → 401；公开 allowlist 按各自方法放行
  * - 正确 Bearer → 放行
  * - 开发模式无 API_TOKEN → 放行
  * - 生产模式无 API_TOKEN → 500
@@ -45,7 +45,7 @@ describe('proxy auth', () => {
     const res = proxy(req);
 
     expect(session).not.toBe('secret123');
-    expect(res.status).not.toBe(307);
+    expect(res.status).toBe(200);
   });
 
   it('旧版原始 API_TOKEN Cookie 不再被视为后台会话', async () => {
@@ -73,8 +73,8 @@ describe('proxy auth', () => {
     process.env.API_TOKEN = 'secret123';
     (process.env as Record<string,string>).NODE_ENV = 'production';
     const { proxy } = await import('@/proxy');
-    expect(proxy(makeRequest('GET', '/api/health')).status).not.toBe(401);
-    expect(proxy(makeRequest('HEAD', '/api/health')).status).not.toBe(401);
+    expect(proxy(makeRequest('GET', '/api/health')).status).toBe(200);
+    expect(proxy(makeRequest('HEAD', '/api/health')).status).toBe(200);
     expect(proxy(makeRequest('POST', '/api/health')).status).toBe(405);
   });
 
@@ -82,7 +82,7 @@ describe('proxy auth', () => {
     process.env.API_TOKEN = 'secret123';
     (process.env as Record<string,string>).NODE_ENV = 'production';
     const { proxy } = await import('@/proxy');
-    expect(proxy(makeRequest('POST', '/api/public/share-poster')).status).not.toBe(401);
+    expect(proxy(makeRequest('POST', '/api/public/share-poster')).status).toBe(200);
     expect(proxy(makeRequest('GET', '/api/public/share-poster')).status).toBe(405);
   });
 
@@ -91,8 +91,8 @@ describe('proxy auth', () => {
     (process.env as Record<string,string>).NODE_ENV = 'production';
     const { proxy } = await import('@/proxy');
 
-    expect(proxy(makeRequest('GET', '/api/public/articles')).status).not.toBe(401);
-    expect(proxy(makeRequest('GET', '/api/public/articles/article-1')).status).not.toBe(401);
+    expect(proxy(makeRequest('GET', '/api/public/articles')).status).toBe(200);
+    expect(proxy(makeRequest('GET', '/api/public/articles/article-1')).status).toBe(200);
     expect(proxy(makeRequest('GET', '/api/public/articles/future/export')).status).toBe(401);
   });
 
@@ -117,7 +117,7 @@ describe('proxy auth', () => {
     (process.env as Record<string,string>).NODE_ENV = 'production';
     const { proxy } = await import('@/proxy');
     const res = proxy(makeRequest('POST', '/api/articles', 'Bearer secret123'));
-    expect(res.status).not.toBe(401);
+    expect(res.status).toBe(200);
   });
 
   it('生产环境 GET /api/articles 正确 Bearer → 放行', async () => {
@@ -125,7 +125,7 @@ describe('proxy auth', () => {
     (process.env as Record<string,string>).NODE_ENV = 'production';
     const { proxy } = await import('@/proxy');
     const res = proxy(makeRequest('GET', '/api/articles', 'Bearer secret123'));
-    expect(res.status).not.toBe(401);
+    expect(res.status).toBe(200);
   });
 
   it('开发模式 + 无 API_TOKEN → POST 放行', async () => {
@@ -133,7 +133,7 @@ describe('proxy auth', () => {
     (process.env as Record<string,string>).NODE_ENV = 'development';
     const { proxy } = await import('@/proxy');
     const res = proxy(makeRequest('POST', '/api/articles'));
-    expect(res.status).not.toBe(401);
+    expect(res.status).toBe(200);
   });
 
   it('生产模式 + 无 API_TOKEN → POST 500', async () => {
@@ -149,7 +149,7 @@ describe('proxy auth', () => {
     (process.env as Record<string,string>).NODE_ENV = 'production';
     const { proxy } = await import('@/proxy');
     const res = proxy(makeRequest('DELETE', '/api/articles/a1', 'Bearer mytoken'));
-    expect(res.status).not.toBe(401);
+    expect(res.status).toBe(200);
   });
 
   it('无 Bearer 前缀 → 401', async () => {

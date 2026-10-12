@@ -1,9 +1,8 @@
 /**
  * Vitest 全局设置
  *
- * - mock prisma client：测试不连真实 DB
- * - mock Next.js Request/Response
- * - 屏蔽 console.error 噪音（可按需开启）
+ * - 默认 mock Prisma client；使用真实 SQLite 的集成测试需显式 vi.unmock('@/lib/db')
+ * - 默认 stub 全局 fetch，网络边界测试需在用例中覆盖
  */
 
 import { vi } from 'vitest';
@@ -167,5 +166,5 @@ vi.mock('@/lib/db', () => ({
 
 // Mock global fetch
 global.fetch = vi.fn(async () => {
-  return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+  throw new Error('Unexpected fetch in test; configure a response in the test');
 }) as unknown as typeof fetch;

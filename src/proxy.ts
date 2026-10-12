@@ -5,8 +5,8 @@ import { ADMIN_SESSION_COOKIE, isValidAdminSession, isValidApiToken } from '@/li
  * API 鉴权代理（原 middleware，Next.js 16 重命名为 proxy）
  *
  * 策略：
- * - 生产环境所有 API（含 GET）均要求 `Authorization: Bearer <API_TOKEN>`；
- *   业务数据、Webhook 投递历史与 AI 产出不应默认公开。
+ * - 生产环境所有受保护 API（含 GET）均要求 `Authorization: Bearer <API_TOKEN>`；
+ *   公开路由仅限下方明确列出的 allowlist。
  * - 开发环境保持无 token 可用；设置 API_TOKEN 后同样统一鉴权。
  * - 开发模式（无 API_TOKEN + NODE_ENV !== 'production'）放行
  * - 生产模式无 API_TOKEN → 拒绝所有受保护操作（fail-closed，避免默认放行）

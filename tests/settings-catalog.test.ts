@@ -4,6 +4,7 @@ import {
   FRONTEND_SETTING_KEYS,
   SETTING_DEFINITIONS,
   SENSITIVE_SETTING_KEYS,
+  WRITABLE_SETTING_KEYS,
   getFrontendSettingDefaults,
   getSettingDefaults,
 } from '@/lib/settings-catalog';
@@ -23,12 +24,17 @@ describe('settings catalog', () => {
     }
   });
 
-  it('每个可写 key 都有校验，未声明的运行态 key 不可导出', () => {
-    for (const definition of SETTING_DEFINITIONS.filter((item) => item.exportable)) {
-      expect(definition.schema).toBeDefined();
+  it('可写 key 的默认值均通过对应校验，运行态 key 不可写入或导出', () => {
+    const definitions = new Map(SETTING_DEFINITIONS.map((definition) => [definition.key, definition]));
+    for (const key of WRITABLE_SETTING_KEYS) {
+      const definition = definitions.get(key);
+      expect(definition).toBeDefined();
+      expect(definition!.schema.safeParse(definition!.defaultValue).success).toBe(true);
     }
-    expect(EXPORTABLE_SETTING_KEYS).not.toContain('scheduler_last_crawl_at');
-    expect(EXPORTABLE_SETTING_KEYS).not.toContain('scheduler_last_push_date');
+    for (const key of ['scheduler_last_crawl_at', 'scheduler_last_push_date', 'scheduler_push_job']) {
+      expect(WRITABLE_SETTING_KEYS).not.toContain(key);
+      expect(EXPORTABLE_SETTING_KEYS).not.toContain(key);
+    }
   });
 
   it('默认值和前端“使用默认提示词”空值均从目录派生', () => {

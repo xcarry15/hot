@@ -226,13 +226,14 @@ export function AiInvocationCard({
     <Card className="rounded-none py-0 shadow-none">
       <CardContent className="p-2">
         <div className="mb-1 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">AI 调用</h3>
-          <span className="text-[10px] text-muted-foreground">真实上游请求</span>
+          <h3 className="text-sm font-medium">AI 处理统计</h3>
+          <span className="text-[10px] text-muted-foreground">上游调用与文章状态分开展示</span>
         </div>
+        <div className="mb-1 text-[10px] text-muted-foreground">上游请求 · 所选时间范围</div>
         <div className="grid grid-cols-2 gap-px border bg-border sm:grid-cols-4">
           <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">调用</span><strong className="text-sm tabular-nums">{formatNumber(stats.total)}</strong></div>
           <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">成功率</span><strong className={`text-sm tabular-nums ${stats.failed > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{formatPercent(stats.successRate)}</strong></div>
-          <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">失败</span><strong className={`text-sm tabular-nums ${stats.failed > 0 ? 'text-red-600' : ''}`}>{formatNumber(stats.failed)}</strong></div>
+          <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">请求失败</span><strong className={`text-sm tabular-nums ${stats.failed > 0 ? 'text-red-600' : ''}`}>{formatNumber(stats.failed)}</strong></div>
           <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">平均耗时</span><strong className="text-sm tabular-nums">{formatAiDuration(stats.averageDurationMs)}</strong></div>
         </div>
         {stats.failuresByKind.length > 0 && (
@@ -254,6 +255,30 @@ export function AiInvocationCard({
         ) : (
           <div className="border border-t-0 py-2 text-center text-[11px] text-muted-foreground">当前范围暂无 AI 调用</div>
         )}
+        <div className="mt-2 border-t pt-1.5">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-x-2">
+            <h4 className="text-[11px] font-medium">文章处理与队列</h4>
+            <span className="text-[10px] text-muted-foreground">Job 按创建时间 · 队列为当前状态</span>
+          </div>
+          {stats.processing.period ? (
+            <div className="grid grid-cols-2 gap-px border bg-border sm:grid-cols-4">
+              <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">AI 阶段失败</span><strong className="text-sm tabular-nums">{formatNumber(stats.processing.period.failedAttempts)}</strong></div>
+              <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">延期次数</span><strong className="text-sm tabular-nums">{formatNumber(stats.processing.period.deferredOccurrences)}</strong></div>
+              <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">Provider 暂停 Job</span><strong className="text-sm tabular-nums">{formatNumber(stats.processing.period.providerPausedJobs)}</strong></div>
+              <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">Job 终态失败</span><strong className="text-sm tabular-nums">{formatNumber(stats.processing.period.failedJobs)}</strong></div>
+            </div>
+          ) : (
+            <div className="border px-2 py-1.5 text-[10px] text-muted-foreground">历史 Job 统计无法按单个数据源拆分；当前文章队列已按所选数据源筛选。</div>
+          )}
+          <div className="mt-1 grid grid-cols-2 gap-px border bg-border sm:grid-cols-4">
+            <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">可立即执行</span><strong className="text-sm tabular-nums">{formatNumber(stats.processing.current.ready)}</strong></div>
+            <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">冷却等待</span><strong className="text-sm tabular-nums">{formatNumber(stats.processing.current.cooling)}</strong></div>
+            <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">失败待重试</span><strong className="text-sm tabular-nums">{formatNumber(stats.processing.current.failed)}</strong></div>
+            <div className="flex items-center justify-between gap-2 bg-background px-2 py-1.5"><span className="text-[10px] text-muted-foreground">连续失败已放弃</span><strong className="text-sm tabular-nums">{formatNumber(stats.processing.current.abandoned)}</strong></div>
+          </div>
+          <p className="mt-1 text-[10px] text-muted-foreground">Job 终态失败不定位具体阶段；AI 阶段失败、延期按执行次数累计，同一文章可能重复计数。</p>
+          <p className="text-[10px] text-muted-foreground">失败待重试数包含在可立即执行或冷却等待中。</p>
+        </div>
       </CardContent>
     </Card>
   )
