@@ -104,6 +104,16 @@ describe('完整配置恢复事务边界', () => {
   });
 
   it('将所有覆盖写入置于同一个事务，并仅在提交后失效运行时缓存', async () => {
+    let transactionCallbackCompleted = false;
+    mocks.transaction.mockImplementationOnce(async (operation) => {
+      const result = await operation(transactionClient());
+      transactionCallbackCompleted = true;
+      return result;
+    });
+    mocks.invalidateSettingsRuntimeCaches.mockImplementationOnce(() => {
+      expect(transactionCallbackCompleted).toBe(true);
+    });
+
     await expect(restoreProjectBackup(backup)).resolves.toMatchObject({ rebuildQueued: true });
 
     expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { maxWait: 10_000, timeout: 30_000 });

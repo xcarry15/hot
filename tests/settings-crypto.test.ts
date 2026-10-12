@@ -8,7 +8,7 @@ import {
 
 afterEach(() => vi.unstubAllEnvs());
 
-describe('Webhook 配置加密', () => {
+describe('敏感设置加密', () => {
   it('加密通用敏感设置并可恢复代理认证信息', () => {
     const source = 'http://proxy-user:proxy-password@proxy.example:8080';
     const encrypted = encryptSensitiveSetting(source);
@@ -55,10 +55,14 @@ describe('Webhook 配置加密', () => {
   });
 
   it('生产环境缺少独立加密密钥时拒绝读写敏感配置', () => {
+    vi.stubEnv('SETTINGS_ENCRYPTION_KEY', 'configured-before-production');
+    const encrypted = encryptSensitiveSetting('proxy-password');
+
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('SETTINGS_ENCRYPTION_KEY', '');
     vi.stubEnv('API_TOKEN', 'login-token-must-not-be-used');
 
+    expect(() => decryptSensitiveSetting(encrypted)).toThrow('SETTINGS_ENCRYPTION_KEY');
     expect(() => encryptWebhookConfigsForStorage(JSON.stringify([
       { url: 'https://open.feishu.cn/open-apis/bot/v2/hook/strict123456', remark: '', enabled: true },
     ]))).toThrow('SETTINGS_ENCRYPTION_KEY');

@@ -213,7 +213,7 @@ LV主张，深圳市茉莉奶白餐饮管理有限公司使用的品牌图形，
 // 重叠会让 LCS 假阳性。下面用真实结构的 HTML 跑 cleanContent → computeContentFingerprint
 // → longestCommonSubstring 链路，验证修复后两篇主题不同的文章不会被误判。
 
-describe('端到端：真实 linkshop 结构 → 清理 → dedup 信号', () => {
+describe('linkshop 正文清理与去重输入特征', () => {
   // 同事件聚类：奈雪股东会 / 1元年薪 / 96% 跌
   const naixueEventArticles = [
     {
@@ -262,10 +262,10 @@ describe('端到端：真实 linkshop 结构 → 清理 → dedup 信号', () =>
     return cleanContent(buildLinkshopHtml(article.body));
   }
 
-  it('同事件聚类（奈雪）：两篇应共享数值/品牌，dedup 应识别为同事件', () => {
+  it('清理后的奈雪报道保留多项共享数值，且正文指纹可区分', () => {
     const a = cleanedBody(naixueEventArticles[0]);
     const b = cleanedBody(naixueEventArticles[1]);
-    // 共享数值：96%, 11亿, 43.31亿, 1646家 — M1 走 numeric 强信号分支
+    // 多项共享数值应保留在清理结果中，供后续处理使用。
     expect(a).toContain('96%');
     expect(b).toContain('96%');
     expect(a).toContain('11亿港元');
@@ -274,13 +274,10 @@ describe('端到端：真实 linkshop 结构 → 清理 → dedup 信号', () =>
     expect(b).toContain('43.31亿');
     expect(a).toContain('1646家');
     expect(b).toContain('1646家');
-    // 两篇主题相近但正文不同，全文 fingerprint 应保持可区分；同事件判断交给数值/LCS信号。
+    // 本用例只检查清理结果与内容指纹，不在这里推断聚类决策。
     const fpA = computeContentFingerprint(naixueEventArticles[0].title, a);
     const fpB = computeContentFingerprint(naixueEventArticles[1].title, b);
     expect(fpA).not.toBe(fpB);
-    // M1 通过 numeric 强信号（≥4 共享值）跳过 LCS 验证；这里只断言核心
-    // 数值都在，dedup 路径上 numeric 分支会触发。LCS 在差异化结构下不强求
-    // 重叠（同事件两篇文章用不同句式表达是常见情况）。
   });
 
   it('不同事件（奈雪 vs 茉莉奶白）：全文指纹保持可区分', () => {
@@ -295,8 +292,7 @@ describe('端到端：真实 linkshop 结构 → 清理 → dedup 信号', () =>
     expect(a).not.toContain('1030万');
   });
 
-  it('未修 cleaner 时的对照（模拟）：两篇 cleanedContent 应不再共享任何 boilerplate 字符串', () => {
-    // 验证即使加了 M1 LCS backstop，boilerplate 也不会触发
+  it('清理后的不同主题文章不再共享站级模板噪声', () => {
     const a = cleanedBody(naixueEventArticles[0]);
     const b = cleanedBody(moliEvent);
     // 这些字符串如果同时出现，说明 cleaner 没剥干净

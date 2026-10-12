@@ -213,6 +213,10 @@ describe('createChatCompletion', () => {
     global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse(''));
 
     await expect(createChatCompletion([{ role: 'user', content: 'hi' }])).rejects.toThrow('API 返回空响应');
+    expect(mocks.noteAIProviderFailure).toHaveBeenCalledWith('opencode', {
+      kind: 'provider',
+      status: 200,
+    });
   });
 
   it('只读取当前 provider 配置，不再读取旧版全局配置', async () => {

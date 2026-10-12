@@ -13,7 +13,7 @@ import { encryptSensitiveSetting, encryptWebhookConfigsForStorage } from '@/lib/
 describe('settings backup values', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('导出完整可编辑配置并解密 Webhook', async () => {
+  it('导出全部可编辑配置，并解密 Provider Key 与 Webhook', async () => {
     const webhook = JSON.stringify([
       { url: 'https://open.feishu.cn/open-apis/bot/v2/hook/export123456', remark: '主群', enabled: true },
     ]);
@@ -25,6 +25,7 @@ describe('settings backup values', () => {
 
     const settings = await exportSettingsValues();
 
+    expect(new Set(Object.keys(settings))).toEqual(new Set(EXPORTABLE_SETTING_KEYS));
     expect(settings.deepseek_api_key).toBe('sk-export-secret');
     expect(settings.feishu_webhook_url).toBe(webhook);
     expect(settings.ai_provider).toBe('deepseek');

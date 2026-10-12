@@ -14,7 +14,7 @@ import {
 } from '@/lib/outbound-url';
 
 describe('outbound URL boundary', () => {
-  it('keeps DNS records alive long enough for Undici to select an address', () => {
+  it('为 Undici DNS 记录配置非零 TTL', () => {
     expect(SAFE_DNS_RECORD_TTL_MS).toBeGreaterThan(0);
   });
 
@@ -36,14 +36,14 @@ describe('outbound URL boundary', () => {
     expect(isBlockedOutboundHostname(hostname)).toBe(true);
   });
 
-  it('allows a public hostname in test mode without performing real DNS', async () => {
+  it('测试环境接受公共 HTTP URL', async () => {
     await expect(assertSafeOutboundUrl('https://example.com/path')).resolves.toMatchObject({
       hostname: 'example.com',
       protocol: 'https:',
     });
   });
 
-  it('rejects private literal URLs before any fetch', async () => {
+  it('拒绝受限 IP 主机名和非 HTTP 协议', async () => {
     await expect(assertSafeOutboundUrl('http://127.0.0.1:3011/internal')).rejects.toThrow('受限主机');
     await expect(assertSafeOutboundUrl('ftp://example.com/file')).rejects.toThrow('仅允许 http/https');
   });

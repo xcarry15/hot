@@ -38,7 +38,11 @@ describe('完整配置备份加密封装', () => {
 
   it('拒绝错误密码、篡改密文与旧的明文载荷', async () => {
     const encrypted = await encryptProjectBackup(payload, 'a-strong-backup-password');
-    const tampered = { ...encrypted, ciphertext: `${encrypted.ciphertext.slice(0, -2)}aa` };
+    const tampered = {
+      ...encrypted,
+      // 修改首字节对应的 Base64 字符，确保密文一定变化；末尾字符可能只改到未使用的填充位。
+      ciphertext: `${encrypted.ciphertext[0] === 'A' ? 'B' : 'A'}${encrypted.ciphertext.slice(1)}`,
+    };
 
     await expect(decryptProjectBackup(encrypted, 'another-strong-password')).rejects.toThrow('备份密码错误或文件已损坏');
     await expect(decryptProjectBackup(tampered, 'a-strong-backup-password')).rejects.toThrow('备份密码错误或文件已损坏');

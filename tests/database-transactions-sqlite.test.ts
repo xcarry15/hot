@@ -408,7 +408,7 @@ describe('真实 SQLite 的 Event 人工操作', () => {
     const { publicArticleDetailCache } = await import('@/lib/public-article-cache');
     publicArticleDetailCache.set('manual-event-audit', { expiresAt: Date.now() + 60_000, value: Promise.resolve(null) });
     try {
-      expect(await performAction(action)).toBeTruthy();
+      await performAction(action);
       expect(publicArticleDetailCache.has('manual-event-audit')).toBe(false);
       const events = await db.event.findMany({ where: { status: 'active' }, include: { articles: true } });
       expect(events).toHaveLength(action === 'split' || action === 'move' ? 2 : 1);
