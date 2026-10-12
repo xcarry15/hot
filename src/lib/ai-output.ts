@@ -8,7 +8,9 @@ const CATEGORIES = new Set([
 ]);
 
 export const AI_SUMMARY_MIN_LENGTH = 111;
-export const AI_SUMMARY_MAX_LENGTH = 222;
+// Prompt asks for 111-222 characters. Keep a larger parser cap so model drift
+// does not discard otherwise useful insight while still bounding stored text.
+export const AI_SUMMARY_MAX_LENGTH = 500;
 
 export interface AiAnalysisOutput {
   event_score: number;
@@ -217,8 +219,8 @@ function readEventIdentity(raw: Record<string, unknown>): {
  * 结构化 AI 分析结果的唯一入口。
  *
  * 模型输出的数组格式和数字类型存在自然波动，不能把这些表达差异当成整篇
- * 分析失败。摘要长度是明确的落库契约：超出上限时截断，低于下限时让上层
- * 进入失败重试；其余内容统一归一化后落库。
+ * 分析失败。摘要低于最低长度时让上层进入失败重试；超出解析保护上限时
+ * 截断，避免模型偏离提示词后丢弃过多内容或无限放大落库文本。
  */
 export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
   const raw = extractJsonObject(text);
@@ -236,7 +238,7 @@ export function parseAiAnalysisOutput(text: string): AiAnalysisOutput {
     || keyPoints.join('；').slice(0, AI_SUMMARY_MAX_LENGTH);
   if (!summary) throw new Error('LLM 响应缺少可用洞察');
   if (summary.length < AI_SUMMARY_MIN_LENGTH) {
-    throw new Error(`LLM 响应摘要长度必须在 ${AI_SUMMARY_MIN_LENGTH}-${AI_SUMMARY_MAX_LENGTH} 字之间，实际为 ${summary.length} 字`);
+    throw new Error(`LLM 响应摘要长度少于最低要求 ${AI_SUMMARY_MIN_LENGTH} 字，实际为 ${summary.length} 字`);
   }
 
   const hasAdProbability = raw.ad_probability != null || raw.adProbability != null;

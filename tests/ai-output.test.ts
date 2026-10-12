@@ -56,6 +56,17 @@ describe('parseAiAnalysisOutput', () => {
     expect(parsed.key_points).toHaveLength(1);
   });
 
+  it('容忍模型超出提示词上限，但保留 500 字以内的完整洞察', () => {
+    const summary = '较长但信息完整的洞察。'.repeat(24);
+    const parsed = parseAiAnalysisOutput(JSON.stringify({
+      ...validOutput,
+      summary,
+    }));
+
+    expect(summary.length).toBeGreaterThan(222);
+    expect(parsed.summary).toBe(summary);
+  });
+
   it('归一化互相矛盾的广告字段和重复结果', () => {
     const parsed = parseAiAnalysisOutput(JSON.stringify({
       ...validOutput,
@@ -123,11 +134,11 @@ describe('parseAiAnalysisOutput', () => {
     expect(() => parseAiAnalysisOutput(JSON.stringify({ summary: '没有评分' }))).toThrow();
   });
 
-  it('摘要少于 111 字时拒绝结果', () => {
+  it('摘要少于最低长度时拒绝结果', () => {
     expect(() => parseAiAnalysisOutput(JSON.stringify({
       ...validOutput,
       summary: '摘要过短',
-    }))).toThrow('111-222');
+    }))).toThrow('少于最低要求 111 字');
   });
 
   it('缺少完整事件身份时保留分析结果并清空身份，不触发重试', () => {
