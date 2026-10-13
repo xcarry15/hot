@@ -38,7 +38,7 @@ export default function PublicHeader({ active, readingProgress = false }: Props)
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--public-hairline)] bg-[var(--public-canvas)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--public-canvas)]/85">
       <div className="mx-auto flex min-h-14 max-w-[1200px] items-center gap-3 px-4 sm:min-h-16 sm:gap-4 sm:px-6 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-        <Link href="/" className="public-pressable flex min-w-0 items-center gap-2 sm:gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]">
+        <Link href="/" className="public-pressable flex min-w-0 items-center gap-2 sm:gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary-strong)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]">
           <img src={logo.src} alt={PUBLIC_SITE_NAME} width="36" height="36" className="h-8 w-8 sm:h-9 sm:w-9" />
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold tracking-tight text-[var(--public-ink)] sm:text-base">{PUBLIC_SITE_NAME}</h1>

@@ -152,7 +152,7 @@ export const SourceBlock = memo(function SourceBlock({
     return (
       <button
         type="button"
-        className="flex w-full items-center gap-1 border-b border-border/40 px-2 py-0.5 text-left text-xs text-muted-foreground hover:text-foreground"
+        className="flex min-h-6 w-full items-center gap-1 border-b border-border/40 px-2 py-1 text-left text-xs text-muted-foreground hover:text-foreground"
         onClick={() => toggleArticleGroup(group)}
         aria-expanded={isExpanded}
       >
@@ -255,7 +255,7 @@ export const SourceBlock = memo(function SourceBlock({
             {onRetrySource && (
               <button
                 type="button"
-                className="shrink-0 rounded-none border border-destructive/30 px-1.5 py-0.5 hover:bg-red-100"
+                className="min-h-6 shrink-0 rounded-none border border-destructive/30 px-1.5 py-0.5 hover:bg-red-100"
                 onClick={(event) => { event.stopPropagation(); onRetrySource(source.id) }}
                 disabled={isJobRunning}
               >

@@ -142,9 +142,10 @@
   --public-ink: #141413;
   --public-body: #3d3d3a;
   --public-muted: #6c6a64;
-  --public-muted-soft: #8e8b82;
+  --public-muted-soft: var(--public-muted);
   --public-primary: #cc785c;
-  --public-primary-active: #a9583e;
+  --public-primary-strong: #984832;
+  --public-primary-active: #843d2a;
   --public-hairline: #e6dfd8;
   --public-hairline-soft: #ebe6df;
   --public-hairline-strong: #d6cfc4;
@@ -278,7 +279,7 @@
 
   .public-article-link:hover .public-article-title,
   .public-navigation-link:hover .public-navigation-title {
-    color: var(--public-primary);
+    color: var(--public-primary-strong);
   }
 
   .public-article-link:hover .public-timeline-marker {
@@ -286,7 +287,7 @@
   }
 
   .public-back-link:hover {
-    color: var(--public-primary);
+    color: var(--public-primary-strong);
   }
 }
 
@@ -309,7 +310,10 @@
 
   .public-article-surface,
   .public-timeline-marker,
-  .public-back-link {
+  .public-timeline-chevron,
+  .public-timeline-collapse,
+  .public-back-link,
+  .public-about-contact-card {
     transition-duration: 1ms;
   }
 }

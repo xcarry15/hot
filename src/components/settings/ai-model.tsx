@@ -92,7 +92,7 @@ function getModelHealthStatus(result: AiTestResult | undefined, testing: boolean
 }
 
 function getModelChipClass(result: AiTestResult | undefined, selected: boolean, testing: boolean): string {
-  const baseClass = 'border px-2 py-0.5 text-[11px] transition-colors'
+  const baseClass = 'inline-flex min-h-6 items-center border px-2 py-0.5 text-[11px] transition-colors'
   const selectedClass = selected ? 'ring-2 ring-primary/40' : ''
   if (testing) return `${baseClass} border-amber-300 bg-amber-50 text-amber-700 animate-pulse ${selectedClass}`
   if (!result) {

@@ -8,7 +8,7 @@ function ToolCardBody({ tool, disabled }: { tool: PublicTool; disabled: boolean 
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 items-start gap-2.5">
-        <span className={`mt-0.5 shrink-0 ${disabled ? 'text-[var(--public-muted)]' : 'text-[var(--public-primary)]'}`}>
+        <span className={`mt-0.5 shrink-0 ${disabled ? 'text-[var(--public-muted)]' : 'text-[var(--public-primary-strong)]'}`}>
           <PublicToolIcon name={tool.icon} />
         </span>
         <h3 className="min-w-0 flex-1 line-clamp-1 text-base font-semibold leading-6 text-[var(--public-ink)] sm:line-clamp-2">{tool.name}</h3>
@@ -32,8 +32,8 @@ export default function PublicToolCard({
   const disabled = !isToolDirectoryLinkableStatus(tool.status) || !tool.href;
   const cardSurfaceClassName = disabled
     ? 'cursor-not-allowed border-[var(--public-hairline)] bg-[var(--public-surface-soft)] opacity-60 shadow-[0_1px_2px_rgb(20_20_19_/_0.05)] grayscale-[0.7]'
-    : 'public-pressable border-[var(--public-hairline-soft)] bg-gradient-to-br from-[var(--public-surface-soft)] via-[var(--public-surface-strong)] to-[color:rgb(20_20_19_/_0.04)] shadow-[0_1px_2px_rgb(20_20_19_/_0.08),0_2px_4px_rgb(20_20_19_/_0.06)] transition-[transform,box-shadow,border-color] duration-300 ease-out hover:-translate-y-0.5 hover:border-[color:rgb(204_120_92_/_0.3)] hover:shadow-[0_4px_8px_rgb(20_20_19_/_0.1),0_8px_16px_rgb(20_20_19_/_0.08)]';
-  const cardClassName = `group relative flex min-h-[88px] min-w-0 flex-col overflow-hidden border px-3.5 py-3 sm:min-h-[100px] sm:px-4 sm:py-3.5 ${cardSurfaceClassName} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]`;
+    : 'public-pressable border-[var(--public-hairline-soft)] bg-gradient-to-br from-[var(--public-surface-soft)] via-[var(--public-surface-strong)] to-[color:rgb(20_20_19_/_0.04)] shadow-[0_1px_2px_rgb(20_20_19_/_0.08),0_2px_4px_rgb(20_20_19_/_0.06)] transition-colors duration-150 ease-out hover:border-[var(--public-primary-strong)]';
+  const cardClassName = `group relative flex min-h-[88px] min-w-0 flex-col overflow-hidden border px-3.5 py-3 sm:min-h-[100px] sm:px-4 sm:py-3.5 ${cardSurfaceClassName} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary-strong)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)]`;
   const style = { '--public-reveal-delay': `${Math.min(revealIndex, 7) * 35}ms` } as CSSProperties;
 
   return (

@@ -14,7 +14,7 @@ import { CRAWL_LOG_ROW_HOVER_CLASS } from './styles'
 
 const ARTICLE_ROW_CLASS = `group box-border flex w-full max-w-full min-w-0 flex-col gap-0 overflow-hidden px-2 py-0.5 text-[12px] leading-4 ${CRAWL_LOG_ROW_HOVER_CLASS} sm:px-1 sm:min-h-6 sm:flex-row sm:items-center sm:gap-1 sm:whitespace-nowrap`
 const ARTICLE_BADGE_CLASS = 'shrink-0 px-1 text-[11px] font-medium leading-5 text-white'
-const ARTICLE_ACTION_CLASS = 'inline-flex h-5 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted'
+const ARTICLE_ACTION_CLASS = 'inline-flex h-6 shrink-0 items-center justify-center border border-black bg-background px-1.5 text-[11px] font-medium leading-5 text-foreground hover:bg-muted'
 const ARTICLE_STEP_LIST_CLASS = 'flex shrink-0 flex-nowrap items-center gap-0.5 overflow-hidden whitespace-nowrap pb-0.5 group-hover:ring-1 group-hover:ring-blue-300 group-hover:ring-offset-1 [&>*]:shrink-0 sm:flex-none sm:overflow-visible sm:pb-0'
 
 const PUSH_BLOCK_LABELS = {
@@ -106,9 +106,21 @@ export const ArticleRow = memo(function ArticleRow({
   const retryWaiting = article.technicalState === 'auto_retry' && Boolean(retryAt && new Date(retryAt) > new Date())
   const pushResultUnknown = nextAction?.step === 'push' && article.technicalErrorReasons.push?.includes('结果未知')
   const canRunNextAction = Boolean(nextAction) && !isJobRunning && !nextActionLoading && !retryWaiting && !pushResultUnknown
+  const technicalReason = nextAction ? article.technicalErrorReasons[nextAction.step] : undefined
+  const nextActionStageLabel = nextAction?.step === 'process' ? '处理'
+    : nextAction?.step === 'ai' ? 'AI 分析'
+      : nextAction?.step === 'cluster' ? '聚类'
+        : null
+  const mobileNextActionLabel = nextActionStageLabel
+    ? nextActionLoading ? nextAction?.step === 'ai' ? 'AI 分析中' : `${nextActionStageLabel}中`
+      : retryWaiting ? nextAction?.step === 'ai' ? 'AI 等待' : `${nextActionStageLabel}等待`
+        : nextAction?.label
+    : null
+  const mobileNextActionTitle = retryWaiting && retryAt
+    ? `将在 ${new Date(retryAt).toLocaleString('zh-CN')} 自动重试`
+    : technicalReason || (isJobRunning ? '批量任务运行中，暂不可操作' : nextAction?.label)
   const actionFor = (step: 'process' | 'cluster' | 'ai' | 'push') =>
     nextAction?.step === step && canRunNextAction ? handleNextAction : undefined
-  const technicalReason = nextAction ? article.technicalErrorReasons[nextAction.step] : undefined
   const isUnknownPushResult = article.pushResultUnknown ?? (article.technicalErrorReasons.push?.includes('投递结果未知') ?? false)
 
   return (
@@ -131,7 +143,7 @@ export const ArticleRow = memo(function ArticleRow({
         )}
         <button
           type="button"
-          className="min-w-0 flex-1 truncate text-left leading-4 text-muted-foreground group-hover:text-foreground"
+          className="min-h-6 min-w-0 flex-1 truncate text-left leading-4 text-muted-foreground group-hover:text-foreground"
           title={article.title}
           onClick={handleOpen}
           onMouseEnter={handlePrefetch}
@@ -140,6 +152,17 @@ export const ArticleRow = memo(function ArticleRow({
         >
           {article.title}
         </button>
+        {mobileNextActionLabel && (
+          <button
+            type="button"
+            onClick={handleNextAction}
+            disabled={!canRunNextAction}
+            className="inline-flex h-6 shrink-0 items-center justify-center border border-amber-500 bg-amber-100 px-1.5 text-[11px] font-medium leading-5 text-amber-800 disabled:cursor-not-allowed disabled:opacity-60 sm:hidden"
+            title={mobileNextActionTitle}
+          >
+            {mobileNextActionLabel}
+          </button>
+        )}
       </div>
       <div className="order-2 grid box-border w-full max-w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 overflow-hidden sm:contents">
         <div className="order-2 flex min-w-0 items-center gap-0.5 overflow-hidden whitespace-nowrap sm:contents">
@@ -193,7 +216,7 @@ export const ArticleRow = memo(function ArticleRow({
           <button
             type="button"
             onClick={() => onOpenArticle?.(article.id)}
-            className="inline-flex h-5 shrink-0 items-center justify-center border border-amber-500 bg-background px-1.5 text-[11px] font-medium leading-5 text-amber-800 hover:bg-amber-50"
+            className="inline-flex h-6 shrink-0 items-center justify-center border border-amber-500 bg-background px-1.5 text-[11px] font-medium leading-5 text-amber-800 hover:bg-amber-50"
             title="结果未知不能自动重试；请在文章工作台确认后使用 Event 强制推送"
           >
             去确认推送
