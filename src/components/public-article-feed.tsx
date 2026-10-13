@@ -145,16 +145,16 @@ export default function PublicArticleFeed({
               name="q"
               defaultValue={search}
               placeholder="搜索标题、摘要或品牌"
-              className="h-9 w-full rounded-none border border-[var(--public-hairline)] bg-transparent px-3 text-sm text-[var(--public-ink)] outline-none transition-[border-color,box-shadow] placeholder:text-[var(--public-muted-soft)] focus:border-[var(--public-primary-strong)] focus:ring-2 focus:ring-[var(--public-primary-strong)]"
+              className="h-9 w-full rounded-none border border-[var(--public-hairline)] bg-transparent px-3 text-sm text-[var(--public-ink)] outline-none transition-[border-color,box-shadow] placeholder:text-[var(--public-muted-soft)] focus:border-[var(--public-primary)] focus:ring-4 focus:ring-[color:rgb(204_120_92_/_0.15)]"
             />
           </label>
-          <button type="submit" className="public-pressable h-9 shrink-0 rounded-none bg-[var(--public-primary-strong)] px-3 text-sm font-medium text-white transition-colors hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary-strong)] sm:px-4">搜索</button>
-          {hasFilter && <Link href="/" className="shrink-0 px-1 text-sm text-[var(--public-muted)] underline-offset-4 transition-colors hover:text-[var(--public-primary-strong)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary-strong)]">清除</Link>}
+          <button type="submit" className="public-pressable h-9 shrink-0 rounded-none bg-[var(--public-primary)] px-3 text-sm font-medium text-white transition-colors hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color:rgb(204_120_92_/_0.25)] sm:px-4">搜索</button>
+          {hasFilter && <Link href="/" className="shrink-0 px-1 text-sm text-[var(--public-muted)] underline-offset-4 transition-colors hover:text-[var(--public-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">清除</Link>}
         </form>
       </div>
 
       {hasNewArticles && (
-        <div className="public-notice-enter mb-5 flex items-center justify-between gap-3 border border-[var(--public-primary)] bg-[var(--public-surface-soft)] px-4 py-3 text-sm text-[var(--public-primary-strong)]" role="status">
+        <div className="public-notice-enter mb-5 flex items-center justify-between gap-3 border border-[var(--public-primary)] bg-[var(--public-surface-soft)] px-4 py-3 text-sm text-[var(--public-primary)]" role="status">
           <span>资讯有更新</span>
           <button type="button" onClick={refreshLatest} disabled={refreshing} className="public-pressable shrink-0 font-medium underline underline-offset-4 disabled:opacity-60">
             {refreshing ? '刷新中…' : '刷新资讯'}
@@ -168,7 +168,7 @@ export default function PublicArticleFeed({
         <div className="public-section-enter border border-[var(--public-hairline)] bg-[var(--public-surface)] px-6 py-16 text-center">
           <p className="public-display text-2xl text-[var(--public-ink)]">{hasFilter ? '没有找到匹配文章' : '暂时没有公开文章'}</p>
           <p className="mx-auto mt-2 max-w-md text-sm leading-7 text-[var(--public-muted)]">{hasFilter ? '可以尝试更换或缩短搜索关键词。' : '符合公开条件的文章将在这里按日期整理。'}</p>
-          {hasFilter && <Link href="/" className="public-pressable mt-5 inline-flex h-10 items-center border border-[var(--public-hairline-strong)] px-4 text-sm font-medium text-[var(--public-ink)] transition-colors hover:border-[var(--public-primary-strong)] hover:text-[var(--public-primary-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary-strong)]">清除筛选</Link>}
+          {hasFilter && <Link href="/" className="public-pressable mt-5 inline-flex h-10 items-center border border-[var(--public-hairline-strong)] px-4 text-sm font-medium text-[var(--public-ink)] transition-colors hover:border-[var(--public-primary)] hover:text-[var(--public-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">清除筛选</Link>}
         </div>
       )}
 
@@ -176,7 +176,7 @@ export default function PublicArticleFeed({
         <>
           <div className="mt-10 flex justify-center">
             {state.hasMore ? (
-              <button type="button" onClick={loadMore} disabled={loading} className="public-pressable h-10 rounded-none border border-[var(--public-hairline-strong)] px-5 text-sm font-medium text-[var(--public-ink)] transition-colors hover:border-[var(--public-primary-strong)] hover:text-[var(--public-primary-strong)] disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary-strong)]">
+              <button type="button" onClick={loadMore} disabled={loading} className="public-pressable h-10 rounded-none border border-[var(--public-hairline-strong)] px-5 text-sm font-medium text-[var(--public-ink)] transition-colors hover:border-[var(--public-primary)] hover:text-[var(--public-primary)] disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">
                 {loading ? '加载中…' : loadError ? '加载失败，点击重试' : '加载更多'}
               </button>
             ) : (

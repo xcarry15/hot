@@ -92,7 +92,7 @@ export function StepIndicator({
     <button
       type="button"
       onClick={onClick}
-      className={`${INDICATOR_CLASS} min-h-6 ${columnWidth} justify-center ${actionStateClass}
+      className={`${INDICATOR_CLASS} ${columnWidth} justify-center ${actionStateClass}
         cursor-pointer hover:ring-1 hover:ring-primary/20 hover:brightness-95 active:scale-95 transition-[box-shadow,filter,transform] duration-150
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
       `}

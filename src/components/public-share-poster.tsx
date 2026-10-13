@@ -116,7 +116,7 @@ export default function PublicSharePoster(props: Props) {
           </article>
 
           <div className="mx-auto mt-6 grid max-w-[390px] grid-cols-2 gap-3">
-            <button type="button" disabled={saving || !qrUrl} onClick={() => void savePoster()} className="public-pressable inline-flex h-11 items-center justify-center gap-1.5 bg-[var(--public-primary-strong)] px-2 text-sm font-medium text-white transition-colors hover:bg-[var(--public-primary-active)] disabled:opacity-40">{saving ? <LoaderCircle className="h-4 w-4 motion-reduce:animate-none" /> : <Download className="h-4 w-4" />}{saving ? '保存中' : '保存图片'}</button>
+            <button type="button" disabled={saving || !qrUrl} onClick={() => void savePoster()} className="public-pressable inline-flex h-11 items-center justify-center gap-1.5 bg-[var(--public-primary)] px-2 text-sm font-medium text-white transition-colors hover:bg-[var(--public-primary-active)] disabled:opacity-40">{saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{saving ? '保存中' : '保存图片'}</button>
             <button type="button" onClick={() => void systemShare()} className="public-pressable inline-flex h-11 items-center justify-center gap-1.5 border border-[var(--public-hairline)] bg-[var(--public-surface-soft)] px-2 text-sm font-medium text-[var(--public-ink)] transition-colors hover:bg-[var(--public-surface)]"><Share2 className="h-4 w-4" />系统分享</button>
           </div>
         </div>

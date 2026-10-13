@@ -26,8 +26,6 @@ import { EmptyState } from '@/components/ui/empty-state'
 
 type SourceSort = 'found' | 'totalArticles' | 'avgScore' | 'ingested' | 'processed' | 'analyzed' | 'pushed' | 'unmatched' | 'duplicates' | 'ads'
 
-const SOURCE_FIELD_HELP_BUTTON_CLASS = 'inline-flex h-6 w-6 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-
 const RANGE_OPTIONS: Array<{ value: DashboardAnalyticsRange; label: string }> = [
   { value: 'all', label: '全部' },
   { value: 'today', label: '今天' },
@@ -303,7 +301,6 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-medium">数据源质量</h3>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground sm:hidden">左右滑动查看全部指标</p>
                 </div>
                 <select
                   value={sourceSort}
@@ -323,12 +320,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                   <option value="ads">按软文数</option>
                 </select>
               </div>
-              <div
-                className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                role="region"
-                aria-label="数据源质量指标，可横向滚动查看"
-                tabIndex={0}
-              >
+              <div className="overflow-x-auto">
                 <table className="w-full min-w-[1060px] whitespace-nowrap border-collapse text-[11px]">
                   <thead>
                     <tr className="border-b text-left text-[11px] text-muted-foreground">
@@ -336,7 +328,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           数据源
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '数据源', x: e.clientX, y: e.clientY }) }}
                             aria-label="数据源说明"
                           >
@@ -348,7 +340,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           发现
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '发现', x: e.clientX, y: e.clientY }) }}
                             aria-label="发现说明"
                           >
@@ -360,7 +352,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           文章总数
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '文章总数', x: e.clientX, y: e.clientY }) }}
                             aria-label="文章总数说明"
                           >
@@ -372,7 +364,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           平均分
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '平均分', x: e.clientX, y: e.clientY }) }}
                             aria-label="平均分说明"
                           >
@@ -384,7 +376,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           入库
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '入库', x: e.clientX, y: e.clientY }) }}
                             aria-label="入库说明"
                           >
@@ -396,7 +388,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           处理
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '处理', x: e.clientX, y: e.clientY }) }}
                             aria-label="处理说明"
                           >
@@ -408,7 +400,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           AI分析
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: 'AI分析', x: e.clientX, y: e.clientY }) }}
                             aria-label="AI分析说明"
                           >
@@ -420,7 +412,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           推送
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '推送', x: e.clientX, y: e.clientY }) }}
                             aria-label="推送说明"
                           >
@@ -432,7 +424,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           未命中
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '未命中', x: e.clientX, y: e.clientY }) }}
                             aria-label="未命中说明"
                           >
@@ -444,7 +436,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           重复
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '重复', x: e.clientX, y: e.clientY }) }}
                             aria-label="重复说明"
                           >
@@ -456,7 +448,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           软文
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '软文', x: e.clientX, y: e.clientY }) }}
                             aria-label="软文说明"
                           >
@@ -468,7 +460,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
                         <span className="inline-flex items-center gap-1">
                           状态
                           <button
-                            className={SOURCE_FIELD_HELP_BUTTON_CLASS}
+                            className="text-muted-foreground/50 hover:text-muted-foreground cursor-help"
                             onClick={(e) => { e.stopPropagation(); setTooltipInfo({ field: '状态', x: e.clientX, y: e.clientY }) }}
                             aria-label="状态说明"
                           >

@@ -30,7 +30,7 @@ import { CRAWL_LOG_ROW_HOVER_CLASS } from './styles'
 // ========== Discarded Row ==========
 
 const DISCARDED_ROW_CLASS = `group min-w-0 overflow-hidden px-1 py-0.5 text-[11px] leading-4 text-muted-foreground ${CRAWL_LOG_ROW_HOVER_CLASS}`
-const RETRY_BUTTON_CLASS = 'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-none text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700'
+const RETRY_BUTTON_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-none text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-700'
 
 export function DiscardedRow({
   item,
@@ -106,7 +106,7 @@ export function DiscardedRow({
           </span>
         )}
         <button
-          className="min-h-6 min-w-0 flex-1 truncate text-left text-[12px] leading-4 text-muted-foreground group-hover:text-foreground"
+          className="min-w-0 flex-1 truncate text-left text-[12px] leading-4 text-muted-foreground group-hover:text-foreground"
           title={item.title}
           onClick={() => onOpen?.(item.id)}
         >

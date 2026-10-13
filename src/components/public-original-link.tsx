@@ -14,7 +14,7 @@ interface Props {
 
 export function PublicShareButton({ shareUrl, title, summary, publishedAt, className }: { shareUrl: string; title: string; summary: string; publishedAt: string; className?: string }) {
   const [open, setOpen] = useState(false)
-  return <><button type="button" onClick={() => setOpen(true)} className={`public-pressable inline-flex h-11 items-center justify-center gap-2 bg-[var(--public-primary-strong)] px-7 text-sm font-semibold text-white transition-colors hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary-strong)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--public-canvas)] ${className ?? ''}`} aria-label="生成分享海报"><Share2 className="h-4 w-4" />分享文章</button>{open && <PublicSharePoster open onOpenChange={setOpen} shareUrl={shareUrl} title={title} summary={summary} publishedAt={publishedAt} />}</>
+  return <><button type="button" onClick={() => setOpen(true)} className={`public-pressable inline-flex h-11 items-center justify-center gap-2 bg-[var(--public-primary)] px-7 text-sm font-semibold text-white transition-colors hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--public-canvas)] ${className ?? ''}`} aria-label="生成分享海报"><Share2 className="h-4 w-4" />分享文章</button>{open && <PublicSharePoster open onOpenChange={setOpen} shareUrl={shareUrl} title={title} summary={summary} publishedAt={publishedAt} />}</>
 }
 
 export default function PublicOriginalLink({ href, articleId, className }: Props) {
@@ -56,7 +56,7 @@ export default function PublicOriginalLink({ href, articleId, className }: Props
         aria-haspopup="dialog"
         title="打开原文"
         onClick={() => setOpen((current) => !current)}
-        className="public-pressable inline-flex h-7 w-7 items-center justify-center rounded-none text-[var(--public-muted-soft)] transition-colors hover:bg-[var(--public-surface-soft)] hover:text-[var(--public-primary-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary-strong)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--public-canvas)]"
+        className="public-pressable inline-flex h-7 w-7 items-center justify-center rounded-none text-[var(--public-muted-soft)] transition-colors hover:bg-[var(--public-surface-soft)] hover:text-[var(--public-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--public-canvas)]"
       >
         <ExternalLink aria-hidden="true" className="h-4 w-4" strokeWidth={1.5} />
       </button>
@@ -66,10 +66,10 @@ export default function PublicOriginalLink({ href, articleId, className }: Props
           <p className="text-sm font-medium text-[var(--public-ink)]">打开原文？</p>
           <p className="mt-1 text-xs leading-5 text-[var(--public-muted)]">将前往来源网站继续阅读。</p>
           <div className="mt-3 flex justify-end gap-2">
-            <button type="button" onClick={() => setOpen(false)} className="public-pressable h-8 px-3 text-xs text-[var(--public-muted)] transition-colors hover:text-[var(--public-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary-strong)]">
+            <button type="button" onClick={() => setOpen(false)} className="public-pressable h-8 px-3 text-xs text-[var(--public-muted)] transition-colors hover:text-[var(--public-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">
               取消
             </button>
-            <button type="button" onClick={() => { handleClick(); window.open(href, '_blank', 'noreferrer'); setOpen(false) }} className="public-pressable inline-flex h-8 items-center bg-[var(--public-primary-strong)] px-3 text-xs text-white transition-colors hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary-strong)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--public-surface)]">
+            <button type="button" onClick={() => { handleClick(); window.open(href, '_blank', 'noreferrer'); setOpen(false) }} className="public-pressable inline-flex h-8 items-center bg-[var(--public-primary)] px-3 text-xs text-white transition-colors hover:bg-[var(--public-primary-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--public-surface)]">
               继续打开
             </button>
           </div>

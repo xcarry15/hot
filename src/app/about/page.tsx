@@ -26,7 +26,7 @@ export default function AboutPage() {
 
           <div className="relative space-y-8">
             <div className="space-y-3">
-              <p className="text-sm font-semibold tracking-[0.2em] text-[var(--public-primary-strong)] uppercase">
+              <p className="text-sm font-semibold tracking-[0.2em] text-[var(--public-primary)] uppercase">
                 关于我
               </p>
               <h2 className="public-display text-2xl text-[var(--public-ink)] sm:text-3xl">
@@ -35,7 +35,7 @@ export default function AboutPage() {
             </div>
 
             <div className="space-y-3">
-              <p className="text-sm font-semibold tracking-[0.2em] text-[var(--public-primary-strong)] uppercase">
+              <p className="text-sm font-semibold tracking-[0.2em] text-[var(--public-primary)] uppercase">
                 本站理念
               </p>
               <h2 className="public-display text-2xl text-[var(--public-ink)] sm:text-3xl">
@@ -61,7 +61,7 @@ export default function AboutPage() {
           </header>
 
           <div className="grid gap-6 sm:grid-cols-2">
-            <figure className="public-about-contact-card group relative overflow-hidden border border-[var(--public-hairline)] bg-[var(--public-surface-soft)] p-6 transition-all duration-300 hover:border-[var(--public-primary-strong)] hover:shadow-lg sm:grid sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-center sm:gap-6 sm:p-8">
+            <figure className="group relative overflow-hidden border border-[var(--public-hairline)] bg-[var(--public-surface-soft)] p-6 transition-all duration-300 hover:border-[var(--public-primary)] hover:shadow-lg sm:grid sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-center sm:gap-6 sm:p-8">
               <div className="relative mx-auto h-32 w-32 shrink-0 overflow-hidden bg-white p-2 shadow-sm sm:mx-0">
                 <Image
                   src={FeishuGroupQrCode}
@@ -72,7 +72,7 @@ export default function AboutPage() {
                 />
               </div>
               <figcaption className="mt-4 text-center sm:mt-0 sm:text-left">
-                <div className="inline-flex items-center gap-2 bg-[var(--public-primary)] px-3 py-1 text-xs font-medium text-[var(--public-ink)]">
+                <div className="inline-flex items-center gap-2 bg-gradient-to-r from-[var(--public-primary)] via-[rgb(230,140,100)] to-[var(--public-primary)] bg-[length:200%_auto] px-3 py-1 text-xs font-medium text-white shadow-[0_0_25px_rgba(204,120,92,0.9),0_0_50px_rgba(204,120,92,0.5)] animate-[pulse_1s_ease-in-out_infinite] hover:scale-110 transition-transform duration-300">
                   每日推送
                 </div>
                 <h3 className="mt-3 text-xl font-semibold text-[var(--public-ink)]">
@@ -84,7 +84,7 @@ export default function AboutPage() {
               </figcaption>
             </figure>
 
-            <figure className="public-about-contact-card group relative overflow-hidden border border-[var(--public-hairline)] bg-[var(--public-surface-soft)] p-6 transition-all duration-300 hover:border-[var(--public-primary-strong)] hover:shadow-lg sm:grid sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-center sm:gap-6 sm:p-8">
+            <figure className="group relative overflow-hidden border border-[var(--public-hairline)] bg-[var(--public-surface-soft)] p-6 transition-all duration-300 hover:border-[var(--public-primary)] hover:shadow-lg sm:grid sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-center sm:gap-6 sm:p-8">
               <div className="relative mx-auto h-32 w-32 shrink-0 overflow-hidden bg-white p-2 shadow-sm sm:mx-0">
                 <Image
                   src={WechatQrCode}
@@ -94,7 +94,7 @@ export default function AboutPage() {
                 />
               </div>
               <figcaption className="mt-4 text-center sm:mt-0 sm:text-left">
-                <div className="inline-flex items-center gap-2 bg-[var(--public-surface-strong)] px-3 py-1 text-xs font-medium text-[var(--public-primary-strong)]">
+                <div className="inline-flex items-center gap-2 bg-[var(--public-surface-strong)] px-3 py-1 text-xs font-medium text-[var(--public-primary)]">
                   随时交流
                 </div>
                 <h3 className="mt-3 text-xl font-semibold text-[var(--public-ink)]">
