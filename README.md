@@ -199,6 +199,10 @@ AI 运行时配置按需读取：模型请求只加载当前 Provider 的连接�
 
 模型列表与价格以 OpenCode 官方文档为准：<https://opencode.ai/docs/zh-cn/zen>；模型发现接口：<https://opencode.ai/zen/v1/models>。
 
+### 配置 DeepSeek 模型
+
+在后台进入 `设置 → AI 模型` 并选择 `DeepSeek`，模型列表会在进入该配置时通过服务端使用已保存的 API Key 请求官方 `GET https://api.deepseek.com/models`，浏览器只接收模型 ID；也可点击“刷新模型列表”立即更新。目录暂不可用时保留上次成功的浏览器缓存和内置候选。需先保存 API Key 才能同步官方列表。默认模型使用官方当前稳定名称 `deepseek-flash`；DeepSeek 会在该名称下更新 Flash 版本，旧 `deepseek-v4-flash` 虽仍兼容但已退役并转发到当前 Flash。官方模型目录和版本可能变化，请以 [模型列表](https://api-docs.deepseek.com/api/list-models/) 与 [更新日志](https://api-docs.deepseek.com/updates/) 为准。
+
 ### 配置 OpenRouter 免费模型
 
 项目通过 OpenAI 兼容接口接入 OpenRouter，不需要额外安装 SDK。在后台进入 `设置 → AI 模型`，选择 `OpenRouter (免费模型)`，填写你自己的 API Key；默认 API 地址为 `https://openrouter.ai/api/v1`，默认模型为 `openrouter/free`。模型按钮会从官方 `GET /api/v1/models` 动态读取文本输出、输入与输出价格均为 0 的免费模型；接口不可用时使用内置兜底候选，包括 `openrouter/free`、`qwen/qwen3.8-27b:free` 和 `inclusionai/ling-3.1-flash:free`。模型名称旁的“查看模型可用率”会打开当前模型的 OpenRouter 详情页，模型切换后链接同步更新。服务端也会拒绝非 `openrouter/free`、非 `:free` 模型，防止手工提交付费模型产生费用。OpenRouter 的免费模型列表会变化，可点击“刷新免费模型”。免费模型存在速率限制。项目会对 OpenRouter 免费请求自动串行、每次间隔约 3 秒，收到 429 后停止本次自动重试并进入冷却，避免突发请求反复消耗额度。文章结构化结果由 Prompt 和应用端 Schema 校验完成，不发送 `response_format`，不会因格式兼容问题额外发起请求；429/5xx、连接故障、无效 JSON 和空响应的 Provider 冷却与退避会持久化到 SQLite，服务重启后仍会生效。API Key 在保存时使用 `SETTINGS_ENCRYPTION_KEY` 加密；历史明文兼容读取，并会在下次保存时转为加密格式。不要把密钥写入 `.env`、代码或 Git。

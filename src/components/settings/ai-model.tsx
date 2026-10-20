@@ -24,7 +24,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { fetchOpenCodeModels, fetchOpenRouterModels, testAiSettings, testSavedAiModel, type AiTestResult } from '@/features/settings-api.client'
+import { fetchDeepSeekModels, fetchOpenCodeModels, fetchOpenRouterModels, testAiSettings, testSavedAiModel, type AiTestResult } from '@/features/settings-api.client'
 import { isRequestJsonError } from '@/lib/request-json.client'
 import {
   ProviderConfig,
@@ -42,9 +42,10 @@ interface Props {
   onRetrySensitive: () => void
 }
 
-const MODEL_CACHE_STORAGE_KEYS: Record<FreeAIProviderId, string> = {
+const MODEL_CACHE_STORAGE_KEYS: Record<AIProviderId, string> = {
   opencode: 'hot2:opencode-free-models:v1',
   openrouter: 'hot2:openrouter-free-models:v1',
+  deepseek: 'hot2:deepseek-models:v1',
 }
 const MAX_CACHED_MODELS = 50
 
@@ -56,7 +57,7 @@ function normalizeModelIds(value: unknown): string[] {
     .filter(Boolean))].slice(0, MAX_CACHED_MODELS)
 }
 
-function readCachedModels(provider: FreeAIProviderId): string[] {
+function readCachedModels(provider: AIProviderId): string[] {
   try {
     const value = window.localStorage.getItem(MODEL_CACHE_STORAGE_KEYS[provider])
     return normalizeModelIds(value ? JSON.parse(value) : null)
@@ -65,7 +66,7 @@ function readCachedModels(provider: FreeAIProviderId): string[] {
   }
 }
 
-function cacheModels(provider: FreeAIProviderId, models: string[]): void {
+function cacheModels(provider: AIProviderId, models: string[]): void {
   try {
     window.localStorage.setItem(MODEL_CACHE_STORAGE_KEYS[provider], JSON.stringify(normalizeModelIds(models)))
   } catch {
@@ -119,6 +120,8 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   const [loadingOpenCodeModels, setLoadingOpenCodeModels] = useState(false)
   const [openrouterModels, setOpenrouterModels] = useState<string[]>(() => [...AI_PROVIDERS.openrouter.models])
   const [loadingOpenRouterModels, setLoadingOpenRouterModels] = useState(false)
+  const [deepseekModels, setDeepseekModels] = useState<string[]>(() => [...AI_PROVIDERS.deepseek.models])
+  const [loadingDeepSeekModels, setLoadingDeepSeekModels] = useState(false)
   const [modelTestResults, setModelTestResults] = useState<Record<string, AiTestResult>>({})
   const [testingModels, setTestingModels] = useState<Record<string, boolean>>({})
   const [testingAllModels, setTestingAllModels] = useState(false)
@@ -133,7 +136,9 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
     ? opencodeModels
     : currentProvider.id === 'openrouter'
       ? openrouterModels
-      : currentProvider.models
+      : currentProvider.id === 'deepseek'
+        ? deepseekModels
+        : currentProvider.models
   const currentModelCandidates = [...new Set([
     ...(currentConfig.model.trim() ? [currentConfig.model.trim()] : []),
     ...discoveredModelCandidates,
@@ -180,6 +185,25 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
     }
   }, [])
 
+  const loadDeepSeekModels = useCallback(async (showToast: boolean) => {
+    setLoadingDeepSeekModels(true)
+    try {
+      const result = await fetchDeepSeekModels()
+      const models = normalizeModelIds(result.models)
+      if (models.length === 0) {
+        if (showToast) toast.info('DeepSeek 官方模型列表暂不可用，已保留当前候选')
+        return
+      }
+      setDeepseekModels(models)
+      cacheModels('deepseek', models)
+      if (showToast) toast.success(`已更新 ${models.length} 个 DeepSeek 模型`)
+    } catch {
+      if (showToast) toast.error('读取 DeepSeek 模型列表失败，已保留当前候选；请检查已保存的 API Key')
+    } finally {
+      setLoadingDeepSeekModels(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (currentProvider.id !== 'opencode') return
     const cachedModels = readCachedModels('opencode')
@@ -195,12 +219,24 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
     void loadOpenRouterModels(false)
   }, [currentProvider.id, loadOpenRouterModels])
 
+  useEffect(() => {
+    if (currentProvider.id !== 'deepseek') return
+    const cachedModels = readCachedModels('deepseek')
+    if (cachedModels.length > 0) setDeepseekModels(cachedModels)
+    // 切换到 DeepSeek 设置时通过服务端已保存的 API Key 同步官方目录。
+    void loadDeepSeekModels(false)
+  }, [currentProvider.id, loadDeepSeekModels])
+
   const handleRefreshOpenCodeModels = () => {
     void loadOpenCodeModels(true)
   }
 
   const handleRefreshOpenRouterModels = () => {
     void loadOpenRouterModels(true)
+  }
+
+  const handleRefreshDeepSeekModels = () => {
+    void loadDeepSeekModels(true)
   }
 
   const updateSetting = (key: keyof Settings, value: string) => {
@@ -454,7 +490,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                 size="sm"
                 variant="outline"
                 className="h-6 gap-1 px-2 text-[11px]"
-                disabled={testingAllModels || loadingOpenCodeModels || loadingOpenRouterModels}
+                disabled={testingAllModels || loadingOpenCodeModels || loadingOpenRouterModels || loadingDeepSeekModels}
                 title={`绿色=可用，黄色=较慢，红色=不可用；本次最多消耗 ${currentModelCandidates.length} 次免费调用`}
                 onClick={() => void handleTestAllModels()}
               >
@@ -603,6 +639,23 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
               {loadingOpenRouterModels ? '读取中' : '刷新免费模型'}
             </Button>
             <p className="text-[11px] text-muted-foreground">列表来自 OpenRouter Models API</p>
+          </div>
+        )}
+
+        {currentProvider.id === 'deepseek' && (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-1.5 text-[11px]"
+              disabled={loadingDeepSeekModels}
+              onClick={handleRefreshDeepSeekModels}
+            >
+              <RefreshCw className={`h-3 w-3 ${loadingDeepSeekModels ? 'animate-spin' : ''}`} />
+              {loadingDeepSeekModels ? '读取中' : '刷新模型列表'}
+            </Button>
+            <p className="text-[11px] text-muted-foreground">进入此页时自动同步官方目录；需先保存 API Key</p>
           </div>
         )}
 

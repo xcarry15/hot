@@ -5,7 +5,7 @@
  *   - settings 读写（GET /api/settings、PUT /api/settings、/api/settings/reveal 解密）
  *   - AI 模型测试（POST /api/settings/test-ai）
  *   - AI 免费模型可用性测试（POST /api/settings/test-ai-model）
- *   - OpenCode / OpenRouter 免费模型列表
+ *   - DeepSeek 官方模型目录、OpenCode / OpenRouter 免费模型列表
  *   - Webhook 测试（POST /api/settings/test-webhook）
  *   - 全局代理测试（POST /api/settings/test-proxy）
  *
@@ -77,6 +77,14 @@ export async function deletePromptVersion(id: string, signal?: AbortSignal): Pro
 
 export interface OpenCodeModelsResult {
   models: string[];
+}
+
+export interface DeepSeekModelsResult {
+  models: string[];
+}
+
+export async function fetchDeepSeekModels(signal?: AbortSignal): Promise<DeepSeekModelsResult> {
+  return requestJson<DeepSeekModelsResult>('GET', '/api/settings/deepseek-models', { signal });
 }
 
 export async function fetchOpenCodeModels(signal?: AbortSignal): Promise<OpenCodeModelsResult> {

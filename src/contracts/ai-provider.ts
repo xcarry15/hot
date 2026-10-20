@@ -58,8 +58,9 @@ export const AI_PROVIDERS = {
     id: 'deepseek',
     name: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com',
-    defaultModel: 'deepseek-v4-flash',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    // DeepSeek 官方稳定别名会指向最新 Flash 版本；此列表作为模型目录不可用时的兜底。
+    defaultModel: 'deepseek-flash',
+    models: ['deepseek-flash', 'deepseek-v4-pro'],
     needsApiKey: true,
   },
   openrouter: {
