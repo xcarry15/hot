@@ -186,22 +186,32 @@ NEXT_PUBLIC_SITE_URL=https://hot.kfxz.cn
 
 设置页的“获取并测速全部”会优先保留 6 个历史兜底节点和 12 个近期实测通过赢商网的中国出口，再从 [HProxy 中国出口列表](https://github.com/hproxy-com/free-proxy-list) 与 [ProxyScrape 中国出口 API](https://zh.proxyscrape.com/free-proxy-list/china) 补充候选，服务端去重后最多测试 24 个节点、同时测试 6 个。内置节点会随发布/重启保留，但每次仍需按当前目标重新测速；动态列表缓存 5 分钟，刷新失败时沿用上次候选。单节点测试包含目标页面响应体读取并有 8 秒总超时。测速通过后再点击“使用最快”并保存。公开免费代理可能随时失效，禁止传输密钥、Webhook、登录态或其他敏感数据。
 
-### 配置 OpenCode Zen 免费模型
+### OpenCode 免费模型已暂停接入
 
-项目通过 OpenAI 兼容接口接入 OpenCode Zen，默认 API 地址为 `https://opencode.ai/zen/v1`。在后台进入 `设置 → AI 模型`，选择 `OpenCode (免费)` 并填写 API Key；模型列表会从官方 `GET /zen/v1/models` 动态读取，接口不可用时使用内置兜底。项目只允许 OpenCode 免费模型，免费模型请求会自动串行、间隔约 4 秒，收到 429 后尊重 `Retry-After` 并暂停后续请求，不自动重复发送。文章结构化结果由 Prompt 和应用端 Schema 校验完成，不发送 `response_format`。由于模型目录没有统一的协议字段，项目在 `src/contracts/ai-provider.ts` 显式维护 `/responses` 模型 ID；映射中的模型使用 `/responses`，其他模型使用 `/chat/completions`。新增或调整模型协议时需同步更新该映射与回归测试。429/5xx、连接故障、无效 JSON 和空响应的 Provider 冷却会持久化到 SQLite，服务重启后仍会生效。模型列表、可用性和数据处理政策可能变化，请以官方信息为准；请勿提交敏感内容。API Key 在保存时使用 `SETTINGS_ENCRYPTION_KEY` 加密；历史明文兼容读取，并会在下次保存时转为加密格式。不要把密钥写入 `.env`、代码或 Git。
+正式服务器实测 OpenCode 免费模型返回 403，明确要求免费层在 OpenCode 客户端内使用；Beam 还存在地区限制。项目保留已有 OpenCode 设置与备份字段，但停止推荐、刷新和请求这些模型；`GET /api/settings/opencode-models` 返回 410 和停用说明。设置页不允许再选用 OpenCode，服务端也会拒绝将其设为当前厂商；已有配置仍能读取，运行和连接测试会在本地返回明确的配置错误，不发送上游请求。新配置默认使用 OpenRouter，已有厂商选择不会自动改写，需要手动选择可用厂商后保存。
 
-设置 → AI 模型的当前免费模型候选框旁提供“测试全部”；每次只测试当前选中的厂商，优先测试当前模型，并用最小请求逐个探测。结果直接用候选项颜色标记：绿色表示可用，黄色表示响应较慢，红色表示不可用；黄色只统计上游请求耗时，不包含本地限速排队。配置、网络故障或限流会提前停止本轮测试，避免浪费免费额度；诊断探测不会写入生产 Provider 冷却，测试结果也只保留在当前页面。
+401 继续提示密钥鉴权失败；403 按已知免费层限制、地区限制或一般访问权限分别提示。所有提示均为固定文案，不回显上游响应正文或凭据。官方模型信息见：<https://opencode.ai/v2/docs/console/models/>。
+
+### AI 调用与运行统计
+
+设置 → AI 模型的 OpenRouter 免费模型候选框旁提供“测试全部”；每次只测试当前选中的厂商，优先测试当前模型，并用最小请求逐个探测。结果直接用候选项颜色标记：绿色表示可用，黄色表示响应较慢，红色表示不可用；黄色只统计上游请求耗时，不包含本地限速排队。配置、网络故障或限流会提前停止本轮测试，避免浪费免费额度；诊断探测不会写入生产 Provider 冷却，测试结果也只保留在当前页面。
 
 工作台概览的“AI 处理统计”分开显示几种口径：上游请求按所选时间范围统计实际发出的请求数、成功率、请求失败、耗时及 Provider/模型分布；AI 阶段失败次数、延期次数和 Provider 暂停任务从创建于所选时间范围内的 `full`/`ai`/`process` Job 结果汇总，其中 `process` 只解析实际执行过 AI 的单篇工作流，同一文章在不同 Job 中重复失败或延期会重复计数。Job 终态失败数只表示整项任务失败，无法单独归因到 AI 阶段。
 当前队列按重试时间显示符合自动处理条件且可立即执行、冷却等待的文章，并单独显示其中失败待重试文章的数量，以及因 AI 连续失败 5 次而放弃的文章。当前队列是状态快照，不受日期范围影响；选择单个数据源时，因历史 Job 结果没有文章来源明细，不展示全局 AI 阶段计数。上游请求指标不保存提示词、正文、响应内容或密钥，记录保留 90 天。
 
 AI 运行时配置按需读取：模型请求只加载当前 Provider 的连接配置，评分重算只加载评分策略；Provider 模型收费规则、免费模型闸门和设置校验共用同一份纯契约。AI 失败写入文章状态时只保留错误类别与 HTTP 状态码，不持久化模型原始响应。
 
-模型列表与价格以 OpenCode 官方文档为准：<https://opencode.ai/docs/zh-cn/zen>；模型发现接口：<https://opencode.ai/zen/v1/models>。
-
 ### 配置 DeepSeek 模型
 
 在后台进入 `设置 → AI 模型` 并选择 `DeepSeek`，模型列表会在进入该配置时通过服务端使用已保存的 API Key 请求官方 `GET https://api.deepseek.com/models`，浏览器只接收模型 ID；也可点击“刷新模型列表”立即更新。目录暂不可用时保留上次成功的浏览器缓存和内置候选。需先保存 API Key 才能同步官方列表。默认模型使用官方当前稳定名称 `deepseek-flash`；DeepSeek 会在该名称下更新 Flash 版本，旧 `deepseek-v4-flash` 虽仍兼容但已退役并转发到当前 Flash。官方模型目录和版本可能变化，请以 [模型列表](https://api-docs.deepseek.com/api/list-models/) 与 [更新日志](https://api-docs.deepseek.com/updates/) 为准。
+
+### 配置 Google Gemini
+
+在 `设置 → AI 模型` 选择 `Google Gemini`，填写 [Google AI Studio API Key](https://aistudio.google.com/apikey)，点击“测试连接”，成功后保存即可。API 地址默认 `https://generativelanguage.googleapis.com/v1beta/openai`，默认模型 `gemini-3.8-flash`，备用候选为 `gemini-3.5-flash-lite`，无需额外 SDK 或手动配置请求参数。Gemini 使用模型默认采样参数、`reasoning_effort=low` 与 `max_completion_tokens`；连接测试留出 2048 tokens 和 30 秒，避免思考模型因探测预算过小而返回空内容。测试只使用目标厂商的 Key，目标厂商未配置时不会借用其他厂商的密钥。
+
+保存 Key 后，进入 Gemini 配置时会自动同步模型目录，也可手动刷新。受保护的 `GET /api/settings/gemini-models` 在服务端通过固定 Google 官方地址读取分页目录，保留支持 `generateContent` 的 Gemini 文本候选并排除图像、语音、实时、嵌入等专用模型；失败时保留浏览器缓存与内置候选。Key 使用现有加密、按需解密和整机备份机制；目录 URL 与响应均不含 Key，编辑页仍通过受保护路径按需解密。无需新增数据库迁移。
+
+Gemini 请求强制串行、至少间隔 12 秒，这是应用的保守策略，不是 Google 配额承诺。429 不立即重复发送，支持 Google `RetryInfo` 和 HTTP `Retry-After`，并沿用现有持久化冷却、恢复队列和概览统计。免费额度、是否计费、模型权限与可用地区由 Google 项目决定；已开通计费的 Key 不会因接入本项目而变成免费。连接失败时会区分 Key 无效、地区限制、免费层不可用、API 未启用与模型不可用。官方说明：[OpenAI 兼容接口](https://ai.google.dev/gemini-api/docs/openai)、[价格与免费层](https://ai.google.dev/gemini-api/docs/pricing)、[支持地区](https://ai.google.dev/gemini-api/docs/available-regions)。
 
 ### 配置 OpenRouter 免费模型
 

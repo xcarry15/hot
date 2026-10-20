@@ -6,7 +6,7 @@
  */
 
 /**
- * OpenCode 当前 Zen 免费模型采用的协议。
+ * OpenCode 历史 Zen 免费模型采用的协议（接入已暂停，保留历史配置元数据）。
  *
  * OpenCode 的 Models API 目前主要返回模型 ID，不返回统一的协议元数据，
  * 因此保留官方文档中唯一 Responses 免费模型的显式映射，其余免费模型走
@@ -38,20 +38,11 @@ export function getOpenCodeModelProtocol(model: string): OpenCodeModelProtocol {
 export const AI_PROVIDERS = {
   opencode: {
     id: 'opencode',
-    name: 'OpenCode (免费)',
+    name: 'OpenCode（已停用）',
     baseUrl: 'https://opencode.ai/zen/v1',
     defaultModel: 'big-pickle',
-    // OpenCode 推荐模型由 /api/settings/opencode-models 动态刷新；这里仅作为接口不可用时的兜底。
-    models: [
-      'big-pickle',
-      'deepseek-v4-flash-free',
-      'mimo-v2.5-free',
-      'hy3-free',
-      'nemotron-3-ultra-free',
-      'nemotron-3.5-lightning-free',
-      'muse-spark-1.2-contributor-free',
-      'laguna-s-2.1-free',
-    ],
+    // 免费层限制在 OpenCode 客户端内使用；保留元数据供已有配置和备份读取。
+    models: [] as string[],
     needsApiKey: true,
   },
   deepseek: {
@@ -61,6 +52,15 @@ export const AI_PROVIDERS = {
     // DeepSeek 官方稳定别名会指向最新 Flash 版本；此列表作为模型目录不可用时的兜底。
     defaultModel: 'deepseek-flash',
     models: ['deepseek-flash', 'deepseek-v4-pro'],
+    needsApiKey: true,
+  },
+  gemini: {
+    id: 'gemini',
+    name: 'Google Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    defaultModel: 'gemini-3.8-flash',
+    // 官方目录不可用时的文本模型兜底；是否免费取决于 Google 项目的计费层级。
+    models: ['gemini-3.8-flash', 'gemini-3.5-flash-lite'],
     needsApiKey: true,
   },
   openrouter: {
@@ -97,6 +97,14 @@ export const AI_PROVIDERS = {
 
 export type AIProviderId = keyof typeof AI_PROVIDERS;
 
+export const DEFAULT_AI_PROVIDER_ID: AIProviderId = 'openrouter';
+
+export function getAIProviderUnavailableReason(provider: string): string | null {
+  return provider === 'opencode'
+    ? 'OpenCode 免费层当前限制在 OpenCode 客户端内使用，本项目已暂停接入；请选择其他厂商'
+    : null;
+}
+
 export function isAIProviderId(value: string): value is AIProviderId {
   return Object.prototype.hasOwnProperty.call(AI_PROVIDERS, value);
 }
@@ -113,7 +121,12 @@ export function isFreeAIModel(provider: string, model: string): boolean {
 
 export function isAIModelAllowed(provider: string, model: string): boolean {
   if (!isAIProviderId(provider)) return false;
-  return provider === 'deepseek' || isFreeAIModel(provider, model);
+  return provider === 'deepseek' || provider === 'gemini' || isFreeAIModel(provider, model);
+}
+
+/** Gemini 的账户层级无法从模型 ID 判断；统一保守限速，不把付费 Key 宣称为免费。 */
+export function requiresConservativeAIRequests(provider: string, model: string): boolean {
+  return provider === 'gemini' || isFreeAIModel(provider, model);
 }
 
 export function getAIModelValidationError(provider: string, model: string): string | null {

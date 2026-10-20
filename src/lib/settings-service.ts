@@ -9,6 +9,7 @@ import { SETTING_KEYS } from '@/lib/settings-catalog';
 import {
   FREE_AI_PROVIDER_IDS,
   getAIModelValidationError,
+  getAIProviderUnavailableReason,
   providerSettingKey,
 } from '@/contracts/ai-provider';
 import { parseWebhookConfigsForServer, serializeWebhookConfigsForServer } from '@/contracts/webhook';
@@ -75,6 +76,10 @@ function validateSettingsInput(input: unknown, options: SettingsUpdateOptions = 
     if (!definition) { validationErrors.push(`${key}: 不可写(未在配置目录中声明)`); continue; }
     const result = definition.schema.safeParse(value);
     if (!result.success) validationErrors.push(`${key}: ${result.error.issues[0].message}`);
+    if (key === SETTING_KEYS.AI_PROVIDER) {
+      const unavailableReason = getAIProviderUnavailableReason(value);
+      if (unavailableReason) validationErrors.push(`${key}: ${unavailableReason}`);
+    }
     const freeProvider = FREE_AI_PROVIDER_IDS.find((provider) => key === providerSettingKey(provider, 'model'));
     if (freeProvider && value.trim()) {
       const modelError = getAIModelValidationError(freeProvider, value);

@@ -19,8 +19,7 @@ import { db } from '@/lib/db';
 import { aiProcessSelect, processWithAI, toAiProcessArticle } from '@/lib/ai';
 import { AI_MODEL_TIMEOUT_MS } from '@/lib/ai-client';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
-import { isFreeAIModel } from '@/lib/ai-rate-gate';
-import { providerSettingKey } from '@/contracts/ai-provider';
+import { AI_PROVIDERS, isAIProviderId, providerSettingKey, requiresConservativeAIRequests } from '@/contracts/ai-provider';
 import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 import { JobLeaseLostError } from '@/lib/job-context';
 import { getSetting, SETTING_KEYS } from '@/lib/settings';
@@ -84,18 +83,18 @@ export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, fo
   let errors = 0;
   let deferred = 0;
   // AI 并发可配置（设置项 ai_concurrency，默认 1，范围 1-10）。
-  // OpenCode / OpenRouter 免费模型强制并发 1，避免一批文章在 429 冷却期间
+  // 免费模型与 Gemini 强制并发 1，避免一批文章在 429 冷却期间
   // 继续并发发请求。
   const provider = await getSetting(SETTING_KEYS.AI_PROVIDER);
-  const model = provider === 'openrouter' || provider === 'opencode'
+  const model = isAIProviderId(provider)
     ? await getSetting(providerSettingKey(provider, 'model'))
     : '';
-  const freeModel = isFreeAIModel(
+  const serialRequests = requiresConservativeAIRequests(
     provider,
-    model || (provider === 'openrouter' ? 'openrouter/free' : 'big-pickle'),
+    model || (isAIProviderId(provider) ? AI_PROVIDERS[provider].defaultModel : ''),
   );
   const rawConcurrency = parseInt(await getSetting(SETTING_KEYS.AI_CONCURRENCY) || String(DEFAULT_AI_CONCURRENCY), 10);
-  const concurrency = freeModel
+  const concurrency = serialRequests
     ? 1
     : Math.max(
       MIN_AI_CONCURRENCY,

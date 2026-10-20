@@ -24,14 +24,14 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { fetchDeepSeekModels, fetchOpenCodeModels, fetchOpenRouterModels, testAiSettings, testSavedAiModel, type AiTestResult } from '@/features/settings-api.client'
+import { fetchDeepSeekModels, fetchGeminiModels, fetchOpenRouterModels, testAiSettings, testSavedAiModel, type AiTestResult } from '@/features/settings-api.client'
 import { isRequestJsonError } from '@/lib/request-json.client'
 import {
   ProviderConfig,
   ProviderConfigs,
   Settings,
 } from './types'
-import { AI_PROVIDERS, type AIProviderId, type FreeAIProviderId } from '@/contracts/ai-provider'
+import { AI_PROVIDERS, DEFAULT_AI_PROVIDER_ID, getAIProviderUnavailableReason, type AIProviderId, type FreeAIProviderId } from '@/contracts/ai-provider'
 
 interface Props {
   settings: Settings
@@ -46,6 +46,7 @@ const MODEL_CACHE_STORAGE_KEYS: Record<AIProviderId, string> = {
   opencode: 'hot2:opencode-free-models:v1',
   openrouter: 'hot2:openrouter-free-models:v1',
   deepseek: 'hot2:deepseek-models:v1',
+  gemini: 'hot2:gemini-models:v1',
 }
 const MAX_CACHED_MODELS = 50
 
@@ -116,53 +117,37 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   const [testingAI, setTestingAI] = useState(false)
   const [aiTestResult, setAiTestResult] = useState<AiTestResult | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
-  const [opencodeModels, setOpencodeModels] = useState<string[]>(() => [...AI_PROVIDERS.opencode.models])
-  const [loadingOpenCodeModels, setLoadingOpenCodeModels] = useState(false)
   const [openrouterModels, setOpenrouterModels] = useState<string[]>(() => [...AI_PROVIDERS.openrouter.models])
   const [loadingOpenRouterModels, setLoadingOpenRouterModels] = useState(false)
   const [deepseekModels, setDeepseekModels] = useState<string[]>(() => [...AI_PROVIDERS.deepseek.models])
   const [loadingDeepSeekModels, setLoadingDeepSeekModels] = useState(false)
+  const [geminiModels, setGeminiModels] = useState<string[]>(() => [...AI_PROVIDERS.gemini.models])
+  const [loadingGeminiModels, setLoadingGeminiModels] = useState(false)
   const [modelTestResults, setModelTestResults] = useState<Record<string, AiTestResult>>({})
   const [testingModels, setTestingModels] = useState<Record<string, boolean>>({})
   const [testingAllModels, setTestingAllModels] = useState(false)
   const [testingProgress, setTestingProgress] = useState({ completed: 0, total: 0 })
 
-  const currentProvider = AI_PROVIDERS[settings.ai_provider as AIProviderId] || AI_PROVIDERS.opencode
+  const currentProvider = AI_PROVIDERS[settings.ai_provider as AIProviderId] || AI_PROVIDERS[DEFAULT_AI_PROVIDER_ID]
   const currentConfig = providerConfigs[currentProvider.id]
-  const currentHealthProvider: FreeAIProviderId | null = currentProvider.id === 'opencode' || currentProvider.id === 'openrouter'
+  const providerUnavailableReason = getAIProviderUnavailableReason(currentProvider.id)
+  const currentHealthProvider: FreeAIProviderId | null = currentProvider.id === 'openrouter'
     ? currentProvider.id
     : null
-  const discoveredModelCandidates = currentProvider.id === 'opencode'
-    ? opencodeModels
-    : currentProvider.id === 'openrouter'
-      ? openrouterModels
-      : deepseekModels
-  const currentModelCandidates = [...new Set([
+  const discoveredModelCandidates = currentProvider.id === 'openrouter'
+    ? openrouterModels
+    : currentProvider.id === 'deepseek'
+      ? deepseekModels
+      : currentProvider.id === 'gemini'
+        ? geminiModels
+        : []
+  const currentModelCandidates = providerUnavailableReason ? [] : [...new Set([
     ...(currentConfig.model.trim() ? [currentConfig.model.trim()] : []),
     ...discoveredModelCandidates,
   ])]
   const openRouterModelUrl = currentProvider.id === 'openrouter' && currentConfig.model.trim()
     ? `https://openrouter.ai/${currentConfig.model.trim().split('/').map(encodeURIComponent).join('/')}`
     : null
-
-  const loadOpenCodeModels = useCallback(async (showToast: boolean) => {
-    setLoadingOpenCodeModels(true)
-    try {
-      const result = await fetchOpenCodeModels()
-      if (result.models.length === 0) {
-        if (showToast) toast.info('OpenCode 暂无可用的免费模型')
-        return
-      }
-      const models = normalizeModelIds(result.models)
-      setOpencodeModels(models)
-      cacheModels('opencode', models)
-      if (showToast) toast.success(`已更新 ${models.length} 个免费模型`)
-    } catch {
-      if (showToast) toast.error('读取 OpenCode 免费模型失败，已保留当前推荐项')
-    } finally {
-      setLoadingOpenCodeModels(false)
-    }
-  }, [])
 
   const loadOpenRouterModels = useCallback(async (showToast: boolean) => {
     setLoadingOpenRouterModels(true)
@@ -202,13 +187,24 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
     }
   }, [])
 
-  useEffect(() => {
-    if (currentProvider.id !== 'opencode') return
-    const cachedModels = readCachedModels('opencode')
-    if (cachedModels.length > 0) setOpencodeModels(cachedModels)
-    // 切换到 OpenCode 时同步一次列表；接口失败时保留上次成功结果。
-    void loadOpenCodeModels(false)
-  }, [currentProvider.id, loadOpenCodeModels])
+  const loadGeminiModels = useCallback(async (showToast: boolean) => {
+    setLoadingGeminiModels(true)
+    try {
+      const result = await fetchGeminiModels()
+      const models = normalizeModelIds(result.models)
+      if (models.length === 0) {
+        if (showToast) toast.info('Gemini 模型目录暂不可用，已保留当前候选')
+        return
+      }
+      setGeminiModels(models)
+      cacheModels('gemini', models)
+      if (showToast) toast.success(`已更新 ${models.length} 个 Gemini 模型`)
+    } catch (error) {
+      if (showToast) toast.error(error instanceof Error ? error.message : '读取 Gemini 模型列表失败，已保留当前候选')
+    } finally {
+      setLoadingGeminiModels(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (currentProvider.id !== 'openrouter') return
@@ -225,9 +221,12 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
     void loadDeepSeekModels(false)
   }, [currentProvider.id, loadDeepSeekModels])
 
-  const handleRefreshOpenCodeModels = () => {
-    void loadOpenCodeModels(true)
-  }
+  useEffect(() => {
+    if (currentProvider.id !== 'gemini') return
+    const cachedModels = readCachedModels('gemini')
+    if (cachedModels.length > 0) setGeminiModels(cachedModels)
+    void loadGeminiModels(false)
+  }, [currentProvider.id, loadGeminiModels])
 
   const handleRefreshOpenRouterModels = () => {
     void loadOpenRouterModels(true)
@@ -251,7 +250,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   }
 
   const handleProviderChange = (providerId: string) => {
-    if (!AI_PROVIDERS[providerId as AIProviderId]) return
+    if (!AI_PROVIDERS[providerId as AIProviderId] || getAIProviderUnavailableReason(providerId)) return
     setSettings(prev => ({ ...prev, ai_provider: providerId }))
     setAiTestResult(null)
   }
@@ -398,281 +397,291 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
             </SelectTrigger>
             <SelectContent className="rounded-none shadow-sm">
               {Object.values(AI_PROVIDERS).map((p) => (
-                <SelectItem key={p.id} value={p.id} className="text-xs">
+                <SelectItem key={p.id} value={p.id} disabled={Boolean(getAIProviderUnavailableReason(p.id))} className="text-xs">
                   {p.name}
-                  {providerConfigs[p.id].apiKey ? ' ✓' : ''}
+                  {providerConfigs[p.id].apiKey && !getAIProviderUnavailableReason(p.id) ? ' ✓' : ''}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
 
-        {/* API Key */}
-        {currentProvider.needsApiKey && (
-          <div className="space-y-1">
-            <Label className="text-xs">API Key <span className="text-muted-foreground">({currentProvider.name})</span></Label>
-            {sensitiveStatus !== 'ready' && (
-              <div className="flex items-center justify-between gap-2 border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
-                <span>{sensitiveStatus === 'error' ? 'API Key 读取失败，已锁定编辑，避免覆盖已有密钥。' : '正在安全读取 API Key，暂不可编辑。'}</span>
-                {sensitiveStatus === 'error' && (
-                  <Button type="button" size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={onRetrySensitive}>
-                    重试
+        {providerUnavailableReason && (
+          <p role="alert" className="border border-amber-300 bg-amber-50 px-2 py-2 text-xs text-amber-800">
+            {providerUnavailableReason}。已保存配置仍予保留。
+          </p>
+        )}
+
+        {!providerUnavailableReason && (
+          <>
+            {/* API Key */}
+            {currentProvider.needsApiKey && (
+              <div className="space-y-1">
+                <Label className="text-xs">API Key <span className="text-muted-foreground">({currentProvider.name})</span></Label>
+                {sensitiveStatus !== 'ready' && (
+                  <div className="flex items-center justify-between gap-2 border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                    <span>{sensitiveStatus === 'error' ? 'API Key 读取失败，已锁定编辑，避免覆盖已有密钥。' : '正在安全读取 API Key，暂不可编辑。'}</span>
+                    {sensitiveStatus === 'error' && (
+                      <Button type="button" size="sm" variant="outline" className="h-6 shrink-0 px-2 text-[11px]" onClick={onRetrySensitive}>
+                        重试
+                      </Button>
+                    )}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Input
+                      name={`ai-provider-api-key-${currentProvider.id}`}
+                      type={showApiKey ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={currentConfig.apiKey}
+                      onChange={(e) => updateProviderConfig(currentProvider.id, 'apiKey', e.target.value)}
+                      disabled={sensitiveStatus !== 'ready'}
+                      className="h-8 pr-9 font-mono text-xs"
+                      placeholder={currentProvider.id === 'gemini' ? 'AIza...' : 'sk-...'}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-8 w-8 px-0"
+                      disabled={sensitiveStatus !== 'ready'}
+                      onClick={() => setShowApiKey(!showApiKey)}
+                    >
+                      {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  留空表示保持原值不变。
+                </p>
+              </div>
+            )}
+
+            {/* Base URL */}
+            {currentProvider.needsApiKey && (
+              <div className="space-y-1">
+                <Label className="text-xs">API 地址（默认已填充，可覆盖）</Label>
+                <Input
+                  value={currentConfig.baseUrl}
+                  onChange={(e) => updateProviderConfig(currentProvider.id, 'baseUrl', e.target.value)}
+                  className="h-8 font-mono text-xs"
+                  placeholder="https://api.example.com/v1"
+                />
+              </div>
+            )}
+
+            {/* Model name */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs">模型名称</Label>
+                  {openRouterModelUrl && (
+                    <a
+                      href={openRouterModelUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={openRouterModelUrl}
+                      className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                    >
+                      查看模型可用率
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                    </a>
+                  )}
+                </div>
+                {currentHealthProvider && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 gap-1 px-2 text-[11px]"
+                    disabled={testingAllModels || loadingOpenRouterModels || loadingDeepSeekModels || loadingGeminiModels}
+                    title={`绿色=可用，黄色=较慢，红色=不可用；本次最多消耗 ${currentModelCandidates.length} 次免费调用`}
+                    onClick={() => void handleTestAllModels()}
+                  >
+                    {testingAllModels ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                    {testingAllModels ? `测试中 ${testingProgress.completed}/${testingProgress.total}` : '测试全部'}
                   </Button>
                 )}
               </div>
-            )}
-            <div className="flex gap-2">
-              <div className="relative flex-1">
+              <Input
+                value={currentConfig.model}
+                onChange={(e) => updateProviderConfig(currentProvider.id, 'model', e.target.value)}
+                className="h-8 font-mono text-xs"
+                placeholder={currentProvider.defaultModel || '输入模型名称'}
+              />
+              {currentModelCandidates.length > 0 && (
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {currentModelCandidates.map((m) => {
+                    const resultKey = currentHealthProvider ? getModelHealthKey(currentHealthProvider, m) : ''
+                    const result = resultKey ? modelTestResults[resultKey] : undefined
+                    const testing = resultKey ? testingModels[resultKey] === true : false
+                    const status = getModelHealthStatus(result, testing)
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => updateProviderConfig(currentProvider.id, 'model', m)}
+                        className={getModelChipClass(result, currentConfig.model === m, testing)}
+                        aria-label={`${m}：${status.label}`}
+                        title={`${m}：${status.label}${result?.success && result.latencyMs !== undefined ? `（${result.latencyMs}ms）` : result && !result.success && result.error ? `：${result.error}` : ''}`}
+                      >
+                        {m}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* AI Parameters */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Temperature <span className="text-muted-foreground">{currentProvider.id === 'gemini' ? '(由模型管理)' : '(0-2)'}</span></Label>
                 <Input
-                  name={`ai-provider-api-key-${currentProvider.id}`}
-                  type={showApiKey ? 'text' : 'password'}
-                  autoComplete="new-password"
-                  value={currentConfig.apiKey}
-                  onChange={(e) => updateProviderConfig(currentProvider.id, 'apiKey', e.target.value)}
-                  disabled={sensitiveStatus !== 'ready'}
-                  className="h-8 pr-9 font-mono text-xs"
-                  placeholder="sk-..."
+                  type="number"
+                  value={currentProvider.id === 'gemini' ? '' : settings.ai_temperature}
+                  disabled={currentProvider.id === 'gemini'}
+                  onChange={(e) => updateSetting('ai_temperature', e.target.value)}
+                  className="h-8 text-xs"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  placeholder={currentProvider.id === 'gemini' ? '模型默认' : '0.2'}
                 />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Max Tokens <span className="text-muted-foreground">(1-65536)</span></Label>
+                <Input
+                  type="number"
+                  value={settings.ai_max_tokens}
+                  onChange={(e) => updateSetting('ai_max_tokens', e.target.value)}
+                  className="h-8 text-xs"
+                  min="1"
+                  max="65536"
+                  step="256"
+                  placeholder="2048"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">AI 并发数 <span className="text-muted-foreground">(1-10)</span></Label>
+                <Input
+                  type="number"
+                  value={settings.ai_concurrency}
+                  onChange={(e) => updateSetting('ai_concurrency', e.target.value)}
+                  className="h-8 text-xs"
+                  min="1"
+                  max="10"
+                  step="1"
+                  placeholder="1"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  OpenRouter 免费请求约间隔 3 秒，Gemini 约间隔 12 秒，均强制串行；实际额度以厂商账户为准。
+                </p>
+              </div>
+            </div>
+
+            {/* Test connection */}
+            <div className="flex items-center gap-3">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1.5 px-2.5 text-xs"
+                // 不因本地 apiKey 空而禁用：reveal 未回显(401)时本地虽空，但 test-ai
+                // 会从 DB 读真实 key；强制禁用会让无 token 用户连测试都点不动，卡死在
+                // 「留空=保留」的循环里。本地有无 key 都允许点，交给服务端兜底。
+                disabled={testingAI}
+                onClick={handleTestAI}
+              >
+                {testingAI ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}
+                测试连接
+              </Button>
+              {aiTestResult && (
+                <div className={`flex items-center gap-1.5 text-xs ${aiTestResult.success ? 'text-emerald-600' : 'text-destructive'}`}>
+                  {aiTestResult.success ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span>连接成功 ({aiTestResult.provider}/{aiTestResult.model})</span>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="h-4 w-4" />
+                      <span>{aiTestResult.error}</span>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {currentProvider.id === 'openrouter' && (
+              <div className="flex items-center gap-2">
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="absolute right-0 top-0 h-8 w-8 px-0"
-                  disabled={sensitiveStatus !== 'ready'}
-                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="h-6 gap-1 px-1.5 text-[11px]"
+                  disabled={loadingOpenRouterModels}
+                  onClick={handleRefreshOpenRouterModels}
                 >
-                  {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  <RefreshCw className={`h-3 w-3 ${loadingOpenRouterModels ? 'animate-spin' : ''}`} />
+                  {loadingOpenRouterModels ? '读取中' : '刷新免费模型'}
                 </Button>
+                <p className="text-[11px] text-muted-foreground">列表来自 OpenRouter Models API</p>
               </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              留空表示保持原值不变。
-            </p>
-          </div>
-        )}
-
-        {/* Base URL */}
-        {currentProvider.needsApiKey && (
-          <div className="space-y-1">
-            <Label className="text-xs">API 地址（默认已填充，可覆盖）</Label>
-            <Input
-              value={currentConfig.baseUrl}
-              onChange={(e) => updateProviderConfig(currentProvider.id, 'baseUrl', e.target.value)}
-              className="h-8 font-mono text-xs"
-              placeholder="https://api.example.com/v1"
-            />
-          </div>
-        )}
-
-        {/* Model name */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Label className="text-xs">模型名称</Label>
-              {openRouterModelUrl && (
-                <a
-                  href={openRouterModelUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={openRouterModelUrl}
-                  className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
-                >
-                  查看模型可用率
-                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                </a>
-              )}
-            </div>
-            {currentHealthProvider && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-6 gap-1 px-2 text-[11px]"
-                disabled={testingAllModels || loadingOpenCodeModels || loadingOpenRouterModels || loadingDeepSeekModels}
-                title={`绿色=可用，黄色=较慢，红色=不可用；本次最多消耗 ${currentModelCandidates.length} 次免费调用`}
-                onClick={() => void handleTestAllModels()}
-              >
-                {testingAllModels ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                {testingAllModels ? `测试中 ${testingProgress.completed}/${testingProgress.total}` : '测试全部'}
-              </Button>
             )}
-          </div>
-          <Input
-            value={currentConfig.model}
-            onChange={(e) => updateProviderConfig(currentProvider.id, 'model', e.target.value)}
-            className="h-8 font-mono text-xs"
-            placeholder={currentProvider.defaultModel || '输入模型名称'}
-          />
-          {currentModelCandidates.length > 0 && (
-            <div className="flex flex-wrap gap-1 pt-1">
-              {currentModelCandidates.map((m) => {
-                const resultKey = currentHealthProvider ? getModelHealthKey(currentHealthProvider, m) : ''
-                const result = resultKey ? modelTestResults[resultKey] : undefined
-                const testing = resultKey ? testingModels[resultKey] === true : false
-                const status = getModelHealthStatus(result, testing)
-                return (
-                  <button
-                    key={m}
+
+            {currentProvider.id === 'deepseek' && (
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-1.5 text-[11px]"
+                  disabled={loadingDeepSeekModels}
+                  onClick={handleRefreshDeepSeekModels}
+                >
+                  <RefreshCw className={`h-3 w-3 ${loadingDeepSeekModels ? 'animate-spin' : ''}`} />
+                  {loadingDeepSeekModels ? '读取中' : '刷新模型列表'}
+                </Button>
+                <p className="text-[11px] text-muted-foreground">进入此页时自动同步官方目录；需先保存 API Key</p>
+              </div>
+            )}
+
+            {currentProvider.id === 'gemini' && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Button
                     type="button"
-                    onClick={() => updateProviderConfig(currentProvider.id, 'model', m)}
-                    className={getModelChipClass(result, currentConfig.model === m, testing)}
-                    aria-label={`${m}：${status.label}`}
-                    title={`${m}：${status.label}${result?.success && result.latencyMs !== undefined ? `（${result.latencyMs}ms）` : result && !result.success && result.error ? `：${result.error}` : ''}`}
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 gap-1 px-1.5 text-[11px]"
+                    disabled={loadingGeminiModels}
+                    onClick={() => void loadGeminiModels(true)}
                   >
-                    {m}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </div>
+                    <RefreshCw className={`h-3 w-3 ${loadingGeminiModels ? 'animate-spin' : ''}`} />
+                    {loadingGeminiModels ? '读取中' : '刷新模型列表'}
+                  </Button>
+                  <p className="text-[11px] text-muted-foreground">保存 Key 后可同步官方文本模型目录；进入此配置时自动刷新</p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  默认地址和模型已填好，填写 API Key 后可先测试连接，再保存。免费额度、计费与可用地区以 Google 项目为准。
+                  <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="ml-1 text-primary underline">申请 API Key</a>
+                </p>
+              </div>
+            )}
 
-        {/* AI Parameters */}
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <div className="space-y-1">
-            <Label className="text-xs">Temperature <span className="text-muted-foreground">(0-2)</span></Label>
-            <Input
-              type="number"
-              value={settings.ai_temperature}
-              onChange={(e) => updateSetting('ai_temperature', e.target.value)}
-              className="h-8 text-xs"
-              min="0"
-              max="2"
-              step="0.1"
-              placeholder="0.2"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Max Tokens <span className="text-muted-foreground">(1-65536)</span></Label>
-            <Input
-              type="number"
-              value={settings.ai_max_tokens}
-              onChange={(e) => updateSetting('ai_max_tokens', e.target.value)}
-              className="h-8 text-xs"
-              min="1"
-              max="65536"
-              step="256"
-              placeholder="2048"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">AI 并发数 <span className="text-muted-foreground">(1-10)</span></Label>
-            <Input
-              type="number"
-              value={settings.ai_concurrency}
-              onChange={(e) => updateSetting('ai_concurrency', e.target.value)}
-              className="h-8 text-xs"
-              min="1"
-              max="10"
-              step="1"
-              placeholder="1"
-            />
-            <p className="text-[11px] text-muted-foreground">
-              OpenCode 免费请求约间隔 4 秒，OpenRouter 约间隔 3 秒并自动串行；其他服务商调高并发可缩短处理时间，但更容易触发限流。
-            </p>
-          </div>
-        </div>
-
-        {/* Test connection */}
-        <div className="flex items-center gap-3">
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 gap-1.5 px-2.5 text-xs"
-            // 不因本地 apiKey 空而禁用：reveal 未回显(401)时本地虽空，但 test-ai
-            // 会从 DB 读真实 key；强制禁用会让无 token 用户连测试都点不动，卡死在
-            // 「留空=保留」的循环里。本地有无 key 都允许点，交给服务端兜底。
-            disabled={testingAI}
-            onClick={handleTestAI}
-          >
-            {testingAI ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}
-            测试连接
-          </Button>
-          {aiTestResult && (
-            <div className={`flex items-center gap-1.5 text-xs ${aiTestResult.success ? 'text-emerald-600' : 'text-destructive'}`}>
-              {aiTestResult.success ? (
-                <>
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span>连接成功 ({aiTestResult.provider}/{aiTestResult.model})</span>
-                </>
-              ) : (
-                <>
-                  <XCircle className="h-4 w-4" />
-                  <span>{aiTestResult.error}</span>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Refresh OpenCode models */}
-        {currentProvider.id === 'opencode' && (
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1 px-1.5 text-[11px]"
-              disabled={loadingOpenCodeModels}
-              onClick={handleRefreshOpenCodeModels}
-            >
-              <RefreshCw className={`h-3 w-3 ${loadingOpenCodeModels ? 'animate-spin' : ''}`} />
-              {loadingOpenCodeModels ? '读取中' : '刷新推荐'}
-            </Button>
-            <p className="text-[11px] text-muted-foreground">推荐项来自 OpenCode 免费模型列表</p>
-          </div>
-        )}
-
-        {currentProvider.id === 'openrouter' && (
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1 px-1.5 text-[11px]"
-              disabled={loadingOpenRouterModels}
-              onClick={handleRefreshOpenRouterModels}
-            >
-              <RefreshCw className={`h-3 w-3 ${loadingOpenRouterModels ? 'animate-spin' : ''}`} />
-              {loadingOpenRouterModels ? '读取中' : '刷新免费模型'}
-            </Button>
-            <p className="text-[11px] text-muted-foreground">列表来自 OpenRouter Models API</p>
-          </div>
-        )}
-
-        {currentProvider.id === 'deepseek' && (
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1 px-1.5 text-[11px]"
-              disabled={loadingDeepSeekModels}
-              onClick={handleRefreshDeepSeekModels}
-            >
-              <RefreshCw className={`h-3 w-3 ${loadingDeepSeekModels ? 'animate-spin' : ''}`} />
-              {loadingDeepSeekModels ? '读取中' : '刷新模型列表'}
-            </Button>
-            <p className="text-[11px] text-muted-foreground">进入此页时自动同步官方目录；需先保存 API Key</p>
-          </div>
-        )}
-
-        {settings.ai_provider === 'opencode' && (
-          <p className="text-xs text-muted-foreground">
-            OpenCode Zen 仅允许免费模型调用，需先申请 API Key。申请地址：
-            <a href="https://opencode.ai/auth" target="_blank" rel="noopener noreferrer" className="text-primary underline ml-1">opencode.ai/auth</a>
-          </p>
-        )}
-        {settings.ai_provider === 'openrouter' && (
-          <p className="text-xs text-muted-foreground">
-            OpenRouter 默认使用 <code className="rounded bg-muted px-1">openrouter/free</code>，会自动选择可用的免费模型。请先填写 API Key；免费模型有速率限制。申请地址：
-            <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-primary underline ml-1">openrouter.ai/keys</a>
-          </p>
-        )}
-        {aiTestResult && !aiTestResult.success && aiTestResult.error?.includes('调用次数已用完') && (
-          <p className="text-xs text-amber-600">
-            今日调用次数已用完，请稍后重试或切换其他 AI 厂商。
-          </p>
+            {settings.ai_provider === 'openrouter' && (
+              <p className="text-xs text-muted-foreground">
+                OpenRouter 默认使用 <code className="rounded bg-muted px-1">openrouter/free</code>，会自动选择可用的免费模型。请先填写 API Key；免费模型有速率限制。申请地址：
+                <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-primary underline ml-1">openrouter.ai/keys</a>
+              </p>
+            )}
+            {aiTestResult && !aiTestResult.success && aiTestResult.error?.includes('调用次数已用完') && (
+              <p className="text-xs text-amber-600">
+                今日调用次数已用完，请稍后重试或切换其他 AI 厂商。
+              </p>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

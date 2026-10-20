@@ -4,6 +4,7 @@ import { getSettingDefinition } from './settings-catalog';
 import { PROMPT_VERSION_KEYS } from './prompts';
 import {
   AI_PROVIDERS,
+  DEFAULT_AI_PROVIDER_ID,
   isAIProviderId,
   isAIModelAllowed,
   providerSettingKey,
@@ -89,7 +90,7 @@ async function readAISettingsMap(): Promise<Record<string, string>> {
     ...AI_TRANSPORT_SETTING_KEYS,
     ...AI_ANALYSIS_SETTING_KEYS,
   ]);
-  const defaultProvider = Object.keys(AI_PROVIDERS)[0] as AIProviderId;
+  const defaultProvider = DEFAULT_AI_PROVIDER_ID;
   const requestedProvider = common[SETTING_KEYS.AI_PROVIDER];
   const provider: AIProviderId = requestedProvider && isAIProviderId(requestedProvider)
     ? requestedProvider as AIProviderId
@@ -140,7 +141,7 @@ export async function getAISettings(): Promise<AISettings> {
 
   const map = await readAISettingsMap();
   const requestedProvider = map[SETTING_KEYS.AI_PROVIDER];
-  const defaultProvider = Object.keys(AI_PROVIDERS)[0] as AIProviderId;
+  const defaultProvider = DEFAULT_AI_PROVIDER_ID;
   const provider: AIProviderId = requestedProvider && isAIProviderId(requestedProvider)
     ? requestedProvider as AIProviderId
     : defaultProvider;

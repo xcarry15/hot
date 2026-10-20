@@ -204,6 +204,7 @@ function aiProviderLabel(provider: string): string {
   if (provider === 'opencode') return 'OpenCode'
   if (provider === 'openrouter') return 'OpenRouter'
   if (provider === 'deepseek') return 'DeepSeek'
+  if (provider === 'gemini') return 'Google Gemini'
   return provider
 }
 

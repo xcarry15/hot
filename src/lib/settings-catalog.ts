@@ -7,7 +7,7 @@
  */
 
 import { z } from 'zod';
-import { AI_PROVIDERS, providerSettingKey, type AIProviderId } from '@/contracts/ai-provider';
+import { AI_PROVIDERS, DEFAULT_AI_PROVIDER_ID, providerSettingKey, type AIProviderId } from '@/contracts/ai-provider';
 import { PUSH_MODES } from '@/contracts/push';
 import { DEFAULT_QUIET_END, DEFAULT_QUIET_START } from './quiet-hours';
 import { proxyUrlSchema } from '@/contracts/proxy';
@@ -155,7 +155,7 @@ const definitions: SettingDefinition[] = [
   { key: SETTING_KEYS.SCHEDULER_LAST_PUSH_DATE, defaultValue: '', schema: text, sensitive: false, exportable: false, frontend: false, seed: false },
   { key: SETTING_KEYS.SCHEDULER_PUSH_JOB, defaultValue: '', schema: text, sensitive: false, exportable: false, frontend: false, seed: false },
 
-  { key: SETTING_KEYS.AI_PROVIDER, defaultValue: 'opencode', schema: z.enum(AI_PROVIDER_IDS), sensitive: false, exportable: true, frontend: true, seed: false },
+  { key: SETTING_KEYS.AI_PROVIDER, defaultValue: DEFAULT_AI_PROVIDER_ID, schema: z.enum(AI_PROVIDER_IDS), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_TEMPERATURE, defaultValue: '0.3', schema: decimalRange(0, 2, '温度'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_MAX_TOKENS, defaultValue: '8192', schema: intRange(1, 65536, '最大tokens'), sensitive: false, exportable: true, frontend: true, seed: false },
   { key: SETTING_KEYS.AI_SYSTEM_PROMPT, defaultValue: DEFAULT_SYSTEM_PROMPT, uiDefaultValue: '', schema: text, sensitive: false, exportable: true, frontend: true, seed: false },

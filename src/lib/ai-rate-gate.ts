@@ -1,8 +1,8 @@
 import { abortableDelay } from './shared/async';
-import { isFreeAIModel as isProviderFreeAIModel } from '@/contracts/ai-provider';
+import { isFreeAIModel as isProviderFreeAIModel, requiresConservativeAIRequests } from '@/contracts/ai-provider';
 
 /**
- * OpenCode / OpenRouter 免费模型的进程内请求闸门。
+ * 免费模型和 Gemini 的进程内请求闸门。
  *
  * 这里只做客户端侧的保守保护；OpenCode 官方没有公布固定 RPM/TPM，
  * 不能把下面的间隔当作服务商配额承诺。
@@ -14,6 +14,8 @@ export const OPENROUTER_FREE_REQUEST_INTERVAL_MS = 3_000;
 export const OPENROUTER_FREE_COOLDOWN_MS = 60_000;
 export const OPENCODE_FREE_REQUEST_INTERVAL_MS = 4_000;
 export const OPENCODE_FREE_COOLDOWN_MS = 60_000;
+// 5 次/分钟是应用自己的保守上限，不代表 Google 账户一定拥有该配额。
+export const GEMINI_REQUEST_INTERVAL_MS = 12_000;
 
 type RateGateState = {
   nextRequestAt: number;
@@ -45,12 +47,14 @@ export function waitForAIRequestSlot(
   model: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (!isFreeAIModel(provider, model)) return Promise.resolve();
+  if (!requiresConservativeAIRequests(provider, model)) return Promise.resolve();
 
   const state = getState(provider);
-  const intervalMs = provider === 'opencode'
-    ? OPENCODE_FREE_REQUEST_INTERVAL_MS
-    : OPENROUTER_FREE_REQUEST_INTERVAL_MS;
+  const intervalMs = provider === 'gemini'
+    ? GEMINI_REQUEST_INTERVAL_MS
+    : provider === 'opencode'
+      ? OPENCODE_FREE_REQUEST_INTERVAL_MS
+      : OPENROUTER_FREE_REQUEST_INTERVAL_MS;
 
   const run = state.requestQueue.then(async () => {
     const waitUntil = Math.max(state.nextRequestAt, state.cooldownUntil);
@@ -70,7 +74,7 @@ export function noteAIRateLimit(
   model: string,
   retryAfterMs?: number,
 ): void {
-  if (!isFreeAIModel(provider, model)) return;
+  if (!requiresConservativeAIRequests(provider, model)) return;
   const state = getState(provider);
   const defaultCooldownMs = provider === 'opencode'
     ? OPENCODE_FREE_COOLDOWN_MS
@@ -82,7 +86,7 @@ export function noteAIRateLimit(
 
 /** 返回免费模型当前剩余冷却时间；健康探测可据此快速失败，避免重复等待。 */
 export function getAIRateLimitCooldownRemainingMs(provider: string, model: string): number {
-  if (!isFreeAIModel(provider, model)) return 0;
+  if (!requiresConservativeAIRequests(provider, model)) return 0;
   const state = states.get(provider);
   return state ? Math.max(0, state.cooldownUntil - Date.now()) : 0;
 }

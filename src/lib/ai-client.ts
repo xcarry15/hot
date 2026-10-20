@@ -2,13 +2,14 @@
  * Unified AI Client — OpenAI-compatible Chat Completions / Responses.
  *
  * Supported providers (OpenAI-compatible):
- *   opencode (default, free) | deepseek | openrouter (free routing)
+ *   openrouter (default, free routing) | deepseek | gemini
+ *   opencode is retained for stored configuration only; external free-tier use is disabled.
  *
  * The ZAI SDK is NOT used for chat. It is imported separately by `parser-html.ts`
  * and `crawler.ts` for `page_reader` / `web_search` (see `./zai`).
  *
  * Settings stored in DB (Setting table):
- *   ai_provider  — opencode | deepseek | openrouter
+ *   ai_provider  — opencode | deepseek | openrouter | gemini
  *   {provider}_api_key / {provider}_base_url / {provider}_model
  *   ai_temperature — Temperature (0-2; default from settings catalog)
  *   ai_max_tokens  — Max tokens (1-65536; default from settings catalog)
@@ -26,11 +27,14 @@ import { getAIRateLimitCooldownRemainingMs, noteAIRateLimit, waitForAIRequestSlo
 import { clearAIProviderBackoff, getAIProviderBackoff, noteAIProviderFailure } from './ai-provider-backoff';
 import { recordAIInvocation } from './ai-invocation-service';
 import { getCurrentJobId } from './job-context';
+import { getGeminiConfigurationError, getGeminiRetryAfterMs } from './gemini-provider';
 import {
   AI_PROVIDERS,
   getAIModelValidationError,
+  getAIProviderUnavailableReason,
   getOpenCodeModelProtocol,
   providerSettingKey,
+  requiresConservativeAIRequests,
 } from '@/contracts/ai-provider';
 import type { AIProviderId } from '@/contracts/ai-provider';
 
@@ -187,8 +191,8 @@ export async function createChatCompletion(
 }
 
 /**
- * OpenAI-compatible API completion (opencode, deepseek, openrouter).
- * OpenCode 的 Responses 模型按官方端点单独编码。
+ * OpenAI-compatible API completion；停用厂商在进入网络请求前拒绝。
+ * 历史 OpenCode Responses 编码保留，暂停期间不会执行。
  */
 async function createOpenAICompatibleCompletion(
   settings: AISettings,
@@ -197,6 +201,10 @@ async function createOpenAICompatibleCompletion(
   retries = 2,
   parentSignal?: AbortSignal,
 ): Promise<ChatCompletionResponse> {
+  const unavailableReason = getAIProviderUnavailableReason(settings.provider);
+  if (unavailableReason) {
+    throw new AIClientError(unavailableReason, 'configuration', true, false);
+  }
   if (!settings.apiKey.trim()) {
     throw new AIClientError(`${settings.provider}: 未填写 API Key`, 'configuration', true, false);
   }
@@ -223,9 +231,8 @@ async function createOpenAICompatibleCompletion(
   const useResponses = settings.provider === 'opencode'
     && getOpenCodeModelProtocol(settings.model) === 'responses';
   const url = `${baseUrl}/${useResponses ? 'responses' : 'chat/completions'}`;
-  const isFreeModel = isFreeAIModel(settings.provider, settings.model);
-  // 免费模型的失败请求也可能消耗额度；不要在 429 后继续自动重试。
-  const effectiveRetries = isFreeModel ? 0 : retries;
+  // Gemini 和免费模型的失败请求也可能消耗额度；不要在 429 后立即重复发送。
+  const effectiveRetries = requiresConservativeAIRequests(settings.provider, settings.model) ? 0 : retries;
 
   const persistedBackoff = await getAIProviderBackoff(settings.provider);
   const persistedCooldownMs = persistedBackoff?.cooldownUntil
@@ -265,6 +272,14 @@ async function createOpenAICompatibleCompletion(
         // 结构化输出由 Prompt + 客户端 Schema 校验保证，不发送可触发兼容重试的
         // response_format。这样不会因格式兼容问题额外发起请求。
       };
+
+  if (settings.provider === 'gemini') {
+    // Gemini 3.8 已移除采样参数，且不支持 minimal；low 同时兼容当前 Flash 系列。
+    delete body.temperature;
+    delete body.max_tokens;
+    body.max_completion_tokens = options.maxTokens;
+    body.reasoning_effort = 'low';
+  }
 
   // 正文分析 prompt 较长，所有模型统一允许最多 5 分钟。
   // 单篇超时由 AI pipeline 记录为当前文章失败，不能因为一篇慢文章暂停整批。
@@ -309,6 +324,7 @@ async function createOpenAICompatibleCompletion(
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${settings.apiKey}`,
+            ...(settings.provider === 'gemini' ? { 'x-goog-api-client': 'site-selection-assistant-oai/1.0' } : {}),
           },
           body: JSON.stringify(body),
           signal,
@@ -376,6 +392,16 @@ async function createOpenAICompatibleCompletion(
       const content = typeof rawContent === 'string' ? rawContent : '';
 
       if (!content) {
+        const finishReason = settings.provider === 'gemini' && data && typeof data === 'object'
+          ? (data as { choices?: Array<{ finish_reason?: string }> }).choices?.[0]?.finish_reason
+          : undefined;
+        if (finishReason === 'length' || finishReason === 'content_filter') {
+          reportInvocation('error', 'content', response.status);
+          throw new AIClientError(
+            finishReason === 'length' ? 'Gemini 输出 token 上限不足，请提高最大 tokens 后重试' : '当前内容被 Gemini 安全策略拦截',
+            'content', false, false, response.status,
+          );
+        }
         reportInvocation('error', 'provider', response.status);
         throw await buildProviderPayloadError(
           settings,
@@ -406,9 +432,10 @@ async function createOpenAICompatibleCompletion(
     }
 
     const errorText = response.bodyText;
+    const geminiConfigurationError = settings.provider === 'gemini' ? getGeminiConfigurationError(errorText) : null;
     const errorKind: AIErrorKind = response.status === 429
       ? 'rate_limit'
-      : response.status === 401 || response.status === 402 || response.status === 403
+      : geminiConfigurationError || response.status === 401 || response.status === 402 || response.status === 403
         ? 'configuration'
         : response.status >= 500
           ? 'provider'
@@ -418,7 +445,9 @@ async function createOpenAICompatibleCompletion(
     reportInvocation('error', errorKind, response.status);
     console.error(`[ai-client] ${settings.provider} API error (${response.status}), kind=${errorKind}`);
 
-    const retryAfterMs = response.status === 429 ? parseRetryAfterMs(response.headers) : undefined;
+    const retryAfterMs = response.status === 429
+      ? parseRetryAfterMs(response.headers) ?? (settings.provider === 'gemini' ? getGeminiRetryAfterMs(errorText) : undefined)
+      : undefined;
     if (response.status === 429) {
       noteAIRateLimit(settings.provider, settings.model, retryAfterMs);
     }
@@ -455,8 +484,22 @@ async function createOpenAICompatibleCompletion(
       }
     }
 
-    if (response.status === 401 || response.status === 403) {
+    if (geminiConfigurationError) {
+      throw new AIClientError(geminiConfigurationError, 'configuration', true, false, response.status);
+    }
+
+    if (response.status === 401) {
       throw new AIClientError(`${settings.provider}: API Key 无效或鉴权失败`, 'configuration', true, false, response.status);
+    }
+
+    if (response.status === 403) {
+      // 只识别已知限制并返回固定文案，禁止把上游正文或凭据带入页面、日志和文章状态。
+      const accessError = /FreeTierError|free tier can only be used from within OpenCode/i.test(errorText)
+        ? '免费层限制在 OpenCode 客户端内使用，本项目无法直接调用'
+        : /not available in your country|unsupported_country|country.{0,30}not supported|region.{0,30}not supported/i.test(errorText)
+          ? '当前模型不向所在地区提供服务，请选择其他模型或厂商'
+          : '访问被拒绝，请检查模型权限、地区或服务商使用限制';
+      throw new AIClientError(`${settings.provider}: ${accessError}`, 'configuration', true, false, response.status);
     }
 
     if (response.status === 402) {
@@ -520,11 +563,23 @@ export async function testAIConnection(
 ): Promise<AIConnectionTestResult> {
   const saved = await getAISettings();
   const requestedProvider = overrides?.provider ?? saved.provider;
+  const unavailableReason = getAIProviderUnavailableReason(requestedProvider);
+  if (unavailableReason) {
+    return {
+      success: false,
+      provider: requestedProvider,
+      model: overrides?.model ?? AI_PROVIDERS[requestedProvider].defaultModel,
+      error: unavailableReason,
+      errorKind: 'configuration',
+    };
+  }
   const targetProviderSettings = requestedProvider !== saved.provider
     ? await readSettings(getAIProviderSettingKeys(requestedProvider))
     : {};
   const targetProvider = AI_PROVIDERS[requestedProvider];
-  const savedApiKey = targetProviderSettings[providerSettingKey(requestedProvider, 'api_key')] || saved.apiKey;
+  const savedApiKey = requestedProvider === saved.provider
+    ? saved.apiKey
+    : targetProviderSettings[providerSettingKey(requestedProvider, 'api_key')] || '';
   const savedBaseUrl = targetProviderSettings[providerSettingKey(requestedProvider, 'base_url')]
     || targetProvider.baseUrl;
   const savedModel = targetProviderSettings[providerSettingKey(requestedProvider, 'model')]
@@ -595,8 +650,9 @@ export async function testAIConnection(
       { role: 'user', content: options.prompt || '请回复"连接成功"' },
     ], {
       temperature: 0.7,
-      maxTokens: options.maxTokens ?? 100,
-      timeoutMs: options.timeoutMs ?? AI_CONNECTION_TEST_TIMEOUT_MS,
+      // 思考模型需要给推理和可见回复留出预算，不能沿用 16/100 tokens 的普通探测。
+      maxTokens: options.maxTokens ?? (settings.provider === 'gemini' ? 2048 : 100),
+      timeoutMs: options.timeoutMs ?? (settings.provider === 'gemini' ? 30_000 : AI_CONNECTION_TEST_TIMEOUT_MS),
       onRequestStart: () => {
         requestStartedAt = Date.now();
       },
@@ -641,6 +697,10 @@ export async function testSavedAIModel(
   options?: AIConnectionTestOptions,
 ): Promise<AIConnectionTestResult> {
   const normalizedModel = model.trim();
+  const unavailableReason = getAIProviderUnavailableReason(provider);
+  if (unavailableReason) {
+    return { success: false, provider, model: normalizedModel, error: unavailableReason, errorKind: 'configuration' };
+  }
   if (!isFreeAIModel(provider, normalizedModel)) {
     return {
       success: false,
