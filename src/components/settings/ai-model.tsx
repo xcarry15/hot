@@ -136,9 +136,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
     ? opencodeModels
     : currentProvider.id === 'openrouter'
       ? openrouterModels
-      : currentProvider.id === 'deepseek'
-        ? deepseekModels
-        : currentProvider.models
+      : deepseekModels
   const currentModelCandidates = [...new Set([
     ...(currentConfig.model.trim() ? [currentConfig.model.trim()] : []),
     ...discoveredModelCandidates,
