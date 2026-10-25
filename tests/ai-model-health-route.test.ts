@@ -43,7 +43,7 @@ describe('POST /api/settings/test-ai-model', () => {
 
     const emptyModel = await POST(new Request('http://localhost/api/settings/test-ai-model', {
       method: 'POST',
-      body: JSON.stringify({ provider: 'opencode', model: ' ' }),
+      body: JSON.stringify({ provider: 'openrouter', model: ' ' }),
     }));
     expect(emptyModel.status).toBe(400);
     expect(testSavedAIModel).not.toHaveBeenCalled();

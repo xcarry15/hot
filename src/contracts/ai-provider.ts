@@ -5,46 +5,12 @@
  * 不得导入数据库、Node API、缓存或网络客户端。
  */
 
-/**
- * OpenCode 历史 Zen 免费模型采用的协议（接入已暂停，保留历史配置元数据）。
- *
- * OpenCode 的 Models API 目前主要返回模型 ID，不返回统一的协议元数据，
- * 因此保留官方文档中唯一 Responses 免费模型的显式映射，其余免费模型走
- * OpenAI Chat Completions 兼容端点。
- */
-export type OpenCodeModelProtocol = 'chat' | 'responses';
-
-export const OPENCODE_RESPONSES_MODEL_IDS = [
-  'muse-spark-1.2-contributor-free',
-] as const;
-
-export function isOpenCodeFreeModel(model: string): boolean {
-  const normalizedModel = model.trim().toLowerCase();
-  return normalizedModel === 'big-pickle' || normalizedModel.endsWith('-free');
-}
-
 export function isOpenRouterFreeModel(model: string): boolean {
   const normalizedModel = model.trim().toLowerCase();
   return normalizedModel === 'openrouter/free' || normalizedModel.endsWith(':free');
 }
 
-export function getOpenCodeModelProtocol(model: string): OpenCodeModelProtocol {
-  const normalizedModel = model.trim().toLowerCase();
-  return OPENCODE_RESPONSES_MODEL_IDS.some((id) => id === normalizedModel)
-    ? 'responses'
-    : 'chat';
-}
-
 export const AI_PROVIDERS = {
-  opencode: {
-    id: 'opencode',
-    name: 'OpenCode（已停用）',
-    baseUrl: 'https://opencode.ai/zen/v1',
-    defaultModel: 'big-pickle',
-    // 免费层限制在 OpenCode 客户端内使用；保留元数据供已有配置和备份读取。
-    models: [] as string[],
-    needsApiKey: true,
-  },
   deepseek: {
     id: 'deepseek',
     name: 'DeepSeek',
@@ -99,22 +65,15 @@ export type AIProviderId = keyof typeof AI_PROVIDERS;
 
 export const DEFAULT_AI_PROVIDER_ID: AIProviderId = 'openrouter';
 
-export function getAIProviderUnavailableReason(provider: string): string | null {
-  return provider === 'opencode'
-    ? 'OpenCode 免费层当前限制在 OpenCode 客户端内使用，本项目已暂停接入；请选择其他厂商'
-    : null;
-}
-
 export function isAIProviderId(value: string): value is AIProviderId {
   return Object.prototype.hasOwnProperty.call(AI_PROVIDERS, value);
 }
 
-export const FREE_AI_PROVIDER_IDS = ['opencode', 'openrouter'] as const;
+export const FREE_AI_PROVIDER_IDS = ['openrouter'] as const;
 export type FreeAIProviderId = (typeof FREE_AI_PROVIDER_IDS)[number];
 
 /** Provider 的模型收费策略唯一事实源。 */
 export function isFreeAIModel(provider: string, model: string): boolean {
-  if (provider === 'opencode') return isOpenCodeFreeModel(model);
   if (provider === 'openrouter') return isOpenRouterFreeModel(model);
   return false;
 }

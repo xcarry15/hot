@@ -85,7 +85,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
           </Link>
 
           <article className="mt-3 break-words pb-5 pt-3 sm:px-8 sm:pb-7 sm:pt-4">
-            <div className="public-detail-intro flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--public-muted)]">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--public-muted)]">
               <time dateTime={effectiveDate}>{formatPublicDateTime(effectiveDate)}</time>
               <span className="text-[var(--public-hairline-strong)]">|</span>
               <span>{article.source.name}</span>
@@ -95,9 +95,9 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
               {originalUrl && <div className="ml-auto"><PublicOriginalLink href={originalUrl} articleId={article.id} /></div>}
             </div>
 
-            <h1 className="public-detail-block public-detail-delay-1 public-display mt-2 text-3xl leading-[1.25] text-[var(--public-ink)] sm:text-4xl">{article.title}</h1>
+            <h1 className="public-display mt-2 text-3xl leading-[1.25] text-[var(--public-ink)] sm:text-4xl">{article.title}</h1>
 
-            <div className="public-detail-block public-detail-delay-2 mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
               <span aria-label={`评分 ${article.score} 分`} className="inline-flex shrink-0 items-center"><ScoreBadge score={article.score} variant="compact-square" /></span>
               {brands.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -107,7 +107,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
             </div>
 
             {(hasSummary || hasKeyPoints) && (
-              <div className="public-detail-block public-detail-delay-3 mt-6 grid gap-4 border-t border-[var(--public-hairline)] pt-5 md:grid-cols-2 md:gap-5">
+              <div className="mt-6 grid gap-4 border-t border-[var(--public-hairline)] pt-5 md:grid-cols-2 md:gap-5">
                 {hasKeyPoints && (
                   <section className={!hasSummary ? 'md:col-span-2' : ''}>
                     <div className="h-full bg-[var(--public-surface-soft)] px-4 py-4 sm:px-5 sm:py-5">
@@ -130,7 +130,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
               </div>
             )}
 
-            <div className="public-detail-block public-detail-delay-3 mt-7 flex justify-center pt-2">
+            <div className="mt-7 flex justify-center pt-2">
               <PublicShareButton shareUrl={`${getPublicSiteUrl()}/news/${article.id}`} title={article.title} summary={article.summary || article.excerpt} publishedAt={formatPublicDateTime(effectiveDate)} />
             </div>
 
@@ -151,7 +151,7 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
                         <time dateTime={itemDate} className="w-14 shrink-0 pt-0.5 text-right font-mono text-xs tabular-nums text-[var(--public-muted)]">{formatDaysAgo(itemDate)}</time>
                         <div className="min-w-0 flex-1">
                           {item.relation === 'same_brand' ? (
-                            <Link href={`/news/${item.eventId}`} className="group/recent block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">{content}</Link>
+                            <Link prefetch={false} href={`/news/${item.eventId}`} className="group/recent block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">{content}</Link>
                           ) : (
                             <a href={item.url} target="_blank" rel="noreferrer" className="group/recent block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">{content}</a>
                           )}
@@ -167,13 +167,13 @@ export default async function PublicNewsDetailPage({ params }: { params: Promise
             <nav className="mt-5 border-t border-[var(--public-hairline)] pt-4" aria-label="文章导航">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
                 {article.navigation.previous && (
-                  <Link href={`/news/${article.navigation.previous.id}`} className="public-navigation-link group/navigation flex w-full min-w-0 items-center gap-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] sm:flex-1 sm:basis-0">
+                  <Link prefetch={false} href={`/news/${article.navigation.previous.id}`} className="public-navigation-link group/navigation flex w-full min-w-0 items-center gap-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] sm:flex-1 sm:basis-0">
                     <span className="shrink-0 text-xs text-[var(--public-muted-soft)]">上一篇：</span>
                     <span className="public-navigation-title truncate text-[var(--public-body)]">{article.navigation.previous.title}</span>
                   </Link>
                 )}
                 {article.navigation.next && (
-                  <Link href={`/news/${article.navigation.next.id}`} className="public-navigation-link group/navigation flex w-full min-w-0 items-center gap-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] sm:flex-1 sm:basis-0 sm:justify-end">
+                  <Link prefetch={false} href={`/news/${article.navigation.next.id}`} className="public-navigation-link group/navigation flex w-full min-w-0 items-center gap-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] sm:flex-1 sm:basis-0 sm:justify-end">
                     <span className="shrink-0 text-xs text-[var(--public-muted-soft)]">下一篇：</span>
                     <span className="public-navigation-title truncate text-[var(--public-body)]">{article.navigation.next.title}</span>
                   </Link>

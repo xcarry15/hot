@@ -136,7 +136,7 @@ export default function PublicArticleFeed({
 
   return (
     <>
-      <div className="public-section-enter mb-4 flex flex-wrap items-center justify-between gap-3 sm:mb-5 sm:gap-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 sm:mb-5 sm:gap-4">
         <h1 className="public-display hidden shrink-0 text-2xl leading-tight text-[var(--public-ink)] sm:block sm:text-4xl">行业资讯</h1>
         <form method="get" className="flex w-full min-w-0 items-center gap-2 sm:ml-auto sm:w-auto sm:flex-wrap sm:justify-end">
           <label className="min-w-0 flex-1 sm:w-[280px] sm:flex-none">
@@ -165,7 +165,7 @@ export default function PublicArticleFeed({
       {state.groups.length > 0 ? (
         <PublicArticleTimeline key={feedIdentity} groups={state.groups} />
       ) : (
-        <div className="public-section-enter border border-[var(--public-hairline)] bg-[var(--public-surface)] px-6 py-16 text-center">
+        <div className="border border-[var(--public-hairline)] bg-[var(--public-surface)] px-6 py-16 text-center">
           <p className="public-display text-2xl text-[var(--public-ink)]">{hasFilter ? '没有找到匹配文章' : '暂时没有公开文章'}</p>
           <p className="mx-auto mt-2 max-w-md text-sm leading-7 text-[var(--public-muted)]">{hasFilter ? '可以尝试更换或缩短搜索关键词。' : '符合公开条件的文章将在这里按日期整理。'}</p>
           {hasFilter && <Link href="/" className="public-pressable mt-5 inline-flex h-10 items-center border border-[var(--public-hairline-strong)] px-4 text-sm font-medium text-[var(--public-ink)] transition-colors hover:border-[var(--public-primary)] hover:text-[var(--public-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)]">清除筛选</Link>}

@@ -36,7 +36,7 @@ describe('project backup schema', () => {
   });
 
   it('拒绝缺少设置项或包含未知设置项的伪完整备份', () => {
-    expect(projectBackupSchema.safeParse({ ...validBackup, settings: { ai_provider: 'opencode' } }).success).toBe(false);
+    expect(projectBackupSchema.safeParse({ ...validBackup, settings: { ai_provider: 'openrouter' } }).success).toBe(false);
     expect(projectBackupSchema.safeParse({
       ...validBackup,
       settings: { ...validBackup.settings, obsolete_setting: '1' },

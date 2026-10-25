@@ -151,7 +151,7 @@ export async function testAiSettings(input: AiTestInput, signal?: AbortSignal): 
 }
 
 export async function testSavedAiModel(
-  provider: 'opencode' | 'openrouter',
+  provider: 'openrouter',
   model: string,
   signal?: AbortSignal,
 ): Promise<AiTestResult> {

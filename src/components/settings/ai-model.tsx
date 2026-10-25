@@ -31,7 +31,7 @@ import {
   ProviderConfigs,
   Settings,
 } from './types'
-import { AI_PROVIDERS, DEFAULT_AI_PROVIDER_ID, getAIProviderUnavailableReason, type AIProviderId, type FreeAIProviderId } from '@/contracts/ai-provider'
+import { AI_PROVIDERS, DEFAULT_AI_PROVIDER_ID, isAIProviderId, type AIProviderId, type FreeAIProviderId } from '@/contracts/ai-provider'
 
 interface Props {
   settings: Settings
@@ -43,7 +43,6 @@ interface Props {
 }
 
 const MODEL_CACHE_STORAGE_KEYS: Record<AIProviderId, string> = {
-  opencode: 'hot2:opencode-free-models:v1',
   openrouter: 'hot2:openrouter-free-models:v1',
   deepseek: 'hot2:deepseek-models:v1',
   gemini: 'hot2:gemini-models:v1',
@@ -130,7 +129,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
 
   const currentProvider = AI_PROVIDERS[settings.ai_provider as AIProviderId] || AI_PROVIDERS[DEFAULT_AI_PROVIDER_ID]
   const currentConfig = providerConfigs[currentProvider.id]
-  const providerUnavailableReason = getAIProviderUnavailableReason(currentProvider.id)
+  const providerUnavailableReason = settings.ai_provider && !isAIProviderId(settings.ai_provider) ? '当前模型厂商不受支持，请重新选择并保存' : null
   const currentHealthProvider: FreeAIProviderId | null = currentProvider.id === 'openrouter'
     ? currentProvider.id
     : null
@@ -207,26 +206,26 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   }, [])
 
   useEffect(() => {
-    if (currentProvider.id !== 'openrouter') return
+    if (providerUnavailableReason || currentProvider.id !== 'openrouter') return
     const cachedModels = readCachedModels('openrouter')
     if (cachedModels.length > 0) setOpenrouterModels(cachedModels)
     void loadOpenRouterModels(false)
-  }, [currentProvider.id, loadOpenRouterModels])
+  }, [currentProvider.id, providerUnavailableReason, loadOpenRouterModels])
 
   useEffect(() => {
-    if (currentProvider.id !== 'deepseek') return
+    if (providerUnavailableReason || currentProvider.id !== 'deepseek') return
     const cachedModels = readCachedModels('deepseek')
     if (cachedModels.length > 0) setDeepseekModels(cachedModels)
     // 切换到 DeepSeek 设置时通过服务端已保存的 API Key 同步官方目录。
     void loadDeepSeekModels(false)
-  }, [currentProvider.id, loadDeepSeekModels])
+  }, [currentProvider.id, providerUnavailableReason, loadDeepSeekModels])
 
   useEffect(() => {
-    if (currentProvider.id !== 'gemini') return
+    if (providerUnavailableReason || currentProvider.id !== 'gemini') return
     const cachedModels = readCachedModels('gemini')
     if (cachedModels.length > 0) setGeminiModels(cachedModels)
     void loadGeminiModels(false)
-  }, [currentProvider.id, loadGeminiModels])
+  }, [currentProvider.id, providerUnavailableReason, loadGeminiModels])
 
   const handleRefreshOpenRouterModels = () => {
     void loadOpenRouterModels(true)
@@ -250,7 +249,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   }
 
   const handleProviderChange = (providerId: string) => {
-    if (!AI_PROVIDERS[providerId as AIProviderId] || getAIProviderUnavailableReason(providerId)) return
+    if (!isAIProviderId(providerId)) return
     setSettings(prev => ({ ...prev, ai_provider: providerId }))
     setAiTestResult(null)
   }
@@ -397,9 +396,9 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
             </SelectTrigger>
             <SelectContent className="rounded-none shadow-sm">
               {Object.values(AI_PROVIDERS).map((p) => (
-                <SelectItem key={p.id} value={p.id} disabled={Boolean(getAIProviderUnavailableReason(p.id))} className="text-xs">
+                <SelectItem key={p.id} value={p.id} className="text-xs">
                   {p.name}
-                  {providerConfigs[p.id].apiKey && !getAIProviderUnavailableReason(p.id) ? ' ✓' : ''}
+                  {providerConfigs[p.id].apiKey ? ' ✓' : ''}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -408,7 +407,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
 
         {providerUnavailableReason && (
           <p role="alert" className="border border-amber-300 bg-amber-50 px-2 py-2 text-xs text-amber-800">
-            {providerUnavailableReason}。已保存配置仍予保留。
+            {providerUnavailableReason}。
           </p>
         )}
 

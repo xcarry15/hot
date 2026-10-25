@@ -32,10 +32,10 @@ describe('settings backup values', () => {
   });
 
   it('只查询可备份设置键并排除运行态键', async () => {
-    mocks.settingFindMany.mockResolvedValue([{ key: 'ai_provider', value: 'opencode' }]);
+    mocks.settingFindMany.mockResolvedValue([{ key: 'ai_provider', value: 'deepseek' }]);
 
     const settings = await exportSettingsValues();
-    expect(settings.ai_provider).toBe('opencode');
+    expect(settings.ai_provider).toBe('deepseek');
     expect('scheduler_last_crawl_at' in settings).toBe(false);
 
     const arg = mocks.settingFindMany.mock.calls[0][0];

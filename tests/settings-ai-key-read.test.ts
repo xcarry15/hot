@@ -24,29 +24,29 @@ describe('AI Provider API Key 运行时读取', () => {
     const encrypted = encryptSensitiveSetting('sk-encrypted');
     mocks.findUnique.mockResolvedValue({ value: encrypted });
     mocks.findMany.mockResolvedValue([
-      { key: 'opencode_api_key', value: encrypted },
-      { key: 'deepseek_api_key', value: 'sk-legacy-plaintext' },
+      { key: 'deepseek_api_key', value: encrypted },
+      { key: 'gemini_api_key', value: 'sk-legacy-plaintext' },
     ]);
 
-    await expect(getSetting('opencode_api_key')).resolves.toBe('sk-encrypted');
+    await expect(getSetting('deepseek_api_key')).resolves.toBe('sk-encrypted');
     await expect(readAllSettings()).resolves.toMatchObject({
-      opencode_api_key: 'sk-encrypted',
-      deepseek_api_key: 'sk-legacy-plaintext',
+      deepseek_api_key: 'sk-encrypted',
+      gemini_api_key: 'sk-legacy-plaintext',
     });
   });
 
   it('按需读取设置时只查询并解密请求的 key', async () => {
     const encrypted = encryptSensitiveSetting('sk-current');
     mocks.findMany.mockResolvedValue([
-      { key: 'opencode_api_key', value: encrypted },
-      { key: 'deepseek_api_key', value: 'sk-unrelated' },
+      { key: 'deepseek_api_key', value: encrypted },
+      { key: 'gemini_api_key', value: 'sk-unrelated' },
     ]);
 
-    await expect(readSettings(['opencode_api_key'])).resolves.toEqual({
-      opencode_api_key: 'sk-current',
+    await expect(readSettings(['deepseek_api_key'])).resolves.toEqual({
+      deepseek_api_key: 'sk-current',
     });
     expect(mocks.findMany).toHaveBeenCalledWith({
-      where: { key: { in: ['opencode_api_key'] } },
+      where: { key: { in: ['deepseek_api_key'] } },
     });
   });
 });

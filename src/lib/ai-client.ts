@@ -1,21 +1,21 @@
 /**
- * Unified AI Client — OpenAI-compatible Chat Completions / Responses.
+ * Unified AI Client — OpenAI-compatible Chat Completions.
  *
  * Supported providers (OpenAI-compatible):
  *   openrouter (default, free routing) | deepseek | gemini
- *   opencode is retained for stored configuration only; external free-tier use is disabled.
  *
  * The ZAI SDK is NOT used for chat. It is imported separately by `parser-html.ts`
  * and `crawler.ts` for `page_reader` / `web_search` (see `./zai`).
  *
  * Settings stored in DB (Setting table):
- *   ai_provider  — opencode | deepseek | openrouter | gemini
+ *   ai_provider  — deepseek | openrouter | gemini
  *   {provider}_api_key / {provider}_base_url / {provider}_model
  *   ai_temperature — Temperature (0-2; default from settings catalog)
  *   ai_max_tokens  — Max tokens (1-65536; default from settings catalog)
  */
 
 import { readSettings } from './settings';
+import { AIClientError, type AIErrorKind } from './ai-errors';
 import {
   getAIProviderSettingKeys,
   getAISettings,
@@ -31,8 +31,6 @@ import { getGeminiConfigurationError, getGeminiRetryAfterMs } from './gemini-pro
 import {
   AI_PROVIDERS,
   getAIModelValidationError,
-  getAIProviderUnavailableReason,
-  getOpenCodeModelProtocol,
   providerSettingKey,
   requiresConservativeAIRequests,
 } from '@/contracts/ai-provider';
@@ -41,21 +39,8 @@ import type { AIProviderId } from '@/contracts/ai-provider';
 export { AI_PROVIDERS, providerSettingKey } from '@/contracts/ai-provider';
 export type { AIProviderId } from '@/contracts/ai-provider';
 
-export type AIErrorKind = 'configuration' | 'rate_limit' | 'provider' | 'network' | 'timeout' | 'content';
-
-export class AIClientError extends Error {
-  constructor(
-    message: string,
-    public readonly kind: AIErrorKind,
-    public readonly global: boolean,
-    public readonly retryable: boolean,
-    public readonly status?: number,
-    public readonly retryAfterMs?: number,
-  ) {
-    super(message);
-    this.name = 'AIClientError';
-  }
-}
+export { AIClientError } from './ai-errors';
+export type { AIErrorKind } from './ai-errors';
 
 export interface AIConnectionTestResult {
   success: boolean;
@@ -129,44 +114,6 @@ export interface ChatCompletionResponse {
   model: string;
 }
 
-function toOpenAIResponsesInput(messages: ChatMessage[]): Array<Record<string, unknown>> {
-  return messages.map((message) => {
-    if (message.role === 'system') {
-      return { role: 'system', content: message.content };
-    }
-
-    return {
-      role: message.role,
-      content: [{
-        type: message.role === 'assistant' ? 'output_text' : 'input_text',
-        text: message.content,
-      }],
-    };
-  });
-}
-
-function extractResponsesContent(data: unknown): string {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return '';
-  const record = data as Record<string, unknown>;
-  if (typeof record.output_text === 'string' && record.output_text) return record.output_text;
-
-  if (!Array.isArray(record.output)) return '';
-  const chunks: string[] = [];
-  for (const item of record.output) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-    const content = (item as Record<string, unknown>).content;
-    if (!Array.isArray(content)) continue;
-    for (const part of content) {
-      if (!part || typeof part !== 'object' || Array.isArray(part)) continue;
-      const partRecord = part as Record<string, unknown>;
-      if (partRecord.type === 'output_text' && typeof partRecord.text === 'string') {
-        chunks.push(partRecord.text);
-      }
-    }
-  }
-  return chunks.join('');
-}
-
 // ── Unified Chat Completion ───────────────────────────────────────
 
 /**
@@ -191,8 +138,7 @@ export async function createChatCompletion(
 }
 
 /**
- * OpenAI-compatible API completion；停用厂商在进入网络请求前拒绝。
- * 历史 OpenCode Responses 编码保留，暂停期间不会执行。
+ * OpenAI-compatible Chat Completions。
  */
 async function createOpenAICompatibleCompletion(
   settings: AISettings,
@@ -201,10 +147,6 @@ async function createOpenAICompatibleCompletion(
   retries = 2,
   parentSignal?: AbortSignal,
 ): Promise<ChatCompletionResponse> {
-  const unavailableReason = getAIProviderUnavailableReason(settings.provider);
-  if (unavailableReason) {
-    throw new AIClientError(unavailableReason, 'configuration', true, false);
-  }
   if (!settings.apiKey.trim()) {
     throw new AIClientError(`${settings.provider}: 未填写 API Key`, 'configuration', true, false);
   }
@@ -228,9 +170,7 @@ async function createOpenAICompatibleCompletion(
   if (modelValidationError) {
     throw new AIClientError(modelValidationError, 'configuration', true, false);
   }
-  const useResponses = settings.provider === 'opencode'
-    && getOpenCodeModelProtocol(settings.model) === 'responses';
-  const url = `${baseUrl}/${useResponses ? 'responses' : 'chat/completions'}`;
+  const url = `${baseUrl}/chat/completions`;
   // Gemini 和免费模型的失败请求也可能消耗额度；不要在 429 后立即重复发送。
   const effectiveRetries = requiresConservativeAIRequests(settings.provider, settings.model) ? 0 : retries;
 
@@ -254,24 +194,14 @@ async function createOpenAICompatibleCompletion(
     );
   }
 
-  const body: Record<string, unknown> = useResponses
-    ? {
-        model: settings.model,
-        input: toOpenAIResponsesInput(messages),
-        temperature: options.temperature,
-        max_output_tokens: options.maxTokens,
-        // Responses API 的结构化输出字段并非 Zen 免费模型的通用能力；
-        // 这里依赖现有 prompt + 客户端 Schema 校验，避免发送不兼容参数。
-      }
-    : {
-        model: settings.model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-        stream: false,
-        temperature: options.temperature,
-        max_tokens: options.maxTokens,
-        // 结构化输出由 Prompt + 客户端 Schema 校验保证，不发送可触发兼容重试的
-        // response_format。这样不会因格式兼容问题额外发起请求。
-      };
+  const body: Record<string, unknown> = {
+    model: settings.model,
+    messages: messages.map((message) => ({ role: message.role, content: message.content })),
+    stream: false,
+    temperature: options.temperature,
+    max_tokens: options.maxTokens,
+    // 结构化输出由 Prompt + 客户端 Schema 校验保证，避免不兼容参数触发重试。
+  };
 
   if (settings.provider === 'gemini') {
     // Gemini 3.8 已移除采样参数，且不支持 minimal；low 同时兼容当前 Flash 系列。
@@ -384,9 +314,7 @@ async function createOpenAICompatibleCompletion(
           options.persistProviderFailures !== false,
         );
       }
-      const rawContent = useResponses
-        ? extractResponsesContent(data)
-        : data && typeof data === 'object' && !Array.isArray(data)
+      const rawContent = data && typeof data === 'object' && !Array.isArray(data)
           ? (((data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content))
           : undefined;
       const content = typeof rawContent === 'string' ? rawContent : '';
@@ -494,11 +422,9 @@ async function createOpenAICompatibleCompletion(
 
     if (response.status === 403) {
       // 只识别已知限制并返回固定文案，禁止把上游正文或凭据带入页面、日志和文章状态。
-      const accessError = /FreeTierError|free tier can only be used from within OpenCode/i.test(errorText)
-        ? '免费层限制在 OpenCode 客户端内使用，本项目无法直接调用'
-        : /not available in your country|unsupported_country|country.{0,30}not supported|region.{0,30}not supported/i.test(errorText)
-          ? '当前模型不向所在地区提供服务，请选择其他模型或厂商'
-          : '访问被拒绝，请检查模型权限、地区或服务商使用限制';
+      const accessError = /not available in your country|unsupported_country|country.{0,30}not supported|region.{0,30}not supported/i.test(errorText)
+        ? '当前模型不向所在地区提供服务，请选择其他模型或厂商'
+        : '访问被拒绝，请检查模型权限、地区或服务商使用限制';
       throw new AIClientError(`${settings.provider}: ${accessError}`, 'configuration', true, false, response.status);
     }
 
@@ -561,40 +487,21 @@ export async function testAIConnection(
   overrides?: Partial<Pick<AISettings, 'provider' | 'apiKey' | 'baseUrl' | 'model' | 'temperature' | 'maxTokens'>>,
   options: AIConnectionTestOptions = {},
 ): Promise<AIConnectionTestResult> {
-  const saved = await getAISettings();
-  const requestedProvider = overrides?.provider ?? saved.provider;
-  const unavailableReason = getAIProviderUnavailableReason(requestedProvider);
-  if (unavailableReason) {
+  let saved: AISettings;
+  try {
+    saved = await getAISettings(overrides?.provider);
+  } catch (error) {
+    if (!(error instanceof AIClientError)) throw error;
     return {
-      success: false,
-      provider: requestedProvider,
-      model: overrides?.model ?? AI_PROVIDERS[requestedProvider].defaultModel,
-      error: unavailableReason,
-      errorKind: 'configuration',
+      success: false, provider: overrides?.provider ?? '', model: overrides?.model ?? '',
+      error: error.message, errorKind: error.kind,
     };
   }
-  const targetProviderSettings = requestedProvider !== saved.provider
-    ? await readSettings(getAIProviderSettingKeys(requestedProvider))
-    : {};
-  const targetProvider = AI_PROVIDERS[requestedProvider];
-  const savedApiKey = requestedProvider === saved.provider
-    ? saved.apiKey
-    : targetProviderSettings[providerSettingKey(requestedProvider, 'api_key')] || '';
-  const savedBaseUrl = targetProviderSettings[providerSettingKey(requestedProvider, 'base_url')]
-    || targetProvider.baseUrl;
-  const savedModel = targetProviderSettings[providerSettingKey(requestedProvider, 'model')]
-    || targetProvider.defaultModel;
   const settings = {
     ...saved,
-    ...(requestedProvider !== saved.provider ? {
-      baseUrl: savedBaseUrl,
-      model: savedModel,
-    } : {}),
     ...overrides,
-    provider: requestedProvider,
-    // 未获 reveal 权限时前端看见的是空串；测试应继续使用数据库中的现有密钥。
-    // 切换 Provider 时只能读取目标 Provider 的已保存密钥，不能串用当前密钥。
-    apiKey: overrides?.apiKey?.trim() || savedApiKey,
+    // 切换厂商时只读取目标厂商配置；空串是未 reveal 的脱敏占位。
+    apiKey: overrides?.apiKey?.trim() || saved.apiKey,
   };
   const startedAt = Date.now();
   let requestStartedAt: number | undefined;
@@ -697,10 +604,6 @@ export async function testSavedAIModel(
   options?: AIConnectionTestOptions,
 ): Promise<AIConnectionTestResult> {
   const normalizedModel = model.trim();
-  const unavailableReason = getAIProviderUnavailableReason(provider);
-  if (unavailableReason) {
-    return { success: false, provider, model: normalizedModel, error: unavailableReason, errorKind: 'configuration' };
-  }
   if (!isFreeAIModel(provider, normalizedModel)) {
     return {
       success: false,

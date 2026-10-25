@@ -178,7 +178,7 @@ describe('analyzeAllPending Provider 全局异常', () => {
       errorKind: 'configuration',
       globalError: true,
       retryable: false,
-      globalMessage: 'opencode: API Key 无效或鉴权失败',
+      globalMessage: 'deepseek: API Key 无效或鉴权失败',
     });
 
     await expect(analyzeAllPending()).resolves.toMatchObject({

@@ -3,7 +3,6 @@ import { splitBrands } from '@/lib/shared/article-codecs'
 import { ScoreBadge } from '@/components/ui/score-badge'
 import type { PublicArticleListItemDto } from '@/contracts/public-articles'
 import { formatPublicTime } from '@/lib/shared/public-date'
-import type { CSSProperties } from 'react'
 
 type PublicArticleMetaItem = {
   label: string
@@ -12,10 +11,8 @@ type PublicArticleMetaItem = {
 
 export default function PublicArticleCard({
   article,
-  revealIndex = 0,
 }: {
   article: PublicArticleListItemDto
-  revealIndex?: number
 }) {
   const brands = splitBrands(article.brand)
   const effectiveDate = article.publishedAt || article.createdAt
@@ -31,11 +28,8 @@ export default function PublicArticleCard({
   const metaGroups = [brandItems, categoryItems, sourceItems].filter((group) => group.length > 0)
 
   return (
-    <li
-      className="public-article-item public-article-motion"
-      style={{ '--public-reveal-delay': `${Math.min(revealIndex, 7) * 35}ms` } as CSSProperties}
-    >
-      <Link href={`/news/${article.id}`} className="public-article-link group/article grid grid-cols-[2rem_minmax(0,1fr)] gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)] sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-5">
+    <li className="public-article-item">
+      <Link prefetch={false} href={`/news/${article.id}`} className="public-article-link group/article grid grid-cols-[2rem_minmax(0,1fr)] gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--public-primary)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--public-canvas)] sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-5">
         <time dateTime={effectiveDate} className="pt-3.5 pr-2 text-right font-mono text-[10px] tabular-nums text-[var(--public-muted)] sm:pt-6 sm:pr-2 sm:text-xs">
           {formatPublicTime(effectiveDate)}
         </time>

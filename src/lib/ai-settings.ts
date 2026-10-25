@@ -1,4 +1,5 @@
 import { createCache } from './cache';
+import { AIClientError } from './ai-errors';
 import { readSettings, SETTING_KEYS } from './settings';
 import { getSettingDefinition } from './settings-catalog';
 import { PROMPT_VERSION_KEYS } from './prompts';
@@ -84,22 +85,27 @@ export function getAIProviderSettingKeys(provider: AIProviderId): readonly strin
   ];
 }
 
-async function readAISettingsMap(): Promise<Record<string, string>> {
+function resolveAIProvider(value: string | undefined): AIProviderId {
+  if (!value) return DEFAULT_AI_PROVIDER_ID;
+  if (!isAIProviderId(value)) {
+    throw new AIClientError('当前 AI 厂商不受支持，请在设置中重新选择并保存', 'configuration', true, false);
+  }
+  return value;
+}
+
+async function readAISettingsMap(providerOverride?: AIProviderId): Promise<Record<string, string>> {
   const common = await readSettings([
     SETTING_KEYS.AI_PROVIDER,
     ...AI_TRANSPORT_SETTING_KEYS,
     ...AI_ANALYSIS_SETTING_KEYS,
   ]);
-  const defaultProvider = DEFAULT_AI_PROVIDER_ID;
-  const requestedProvider = common[SETTING_KEYS.AI_PROVIDER];
-  const provider: AIProviderId = requestedProvider && isAIProviderId(requestedProvider)
-    ? requestedProvider as AIProviderId
-    : defaultProvider;
+  const provider = resolveAIProvider(providerOverride ?? common[SETTING_KEYS.AI_PROVIDER]);
   const providerKeys = getAIProviderSettingKeys(provider);
   const providerSettings = await readSettings(providerKeys);
   return {
     ...common,
     ...providerSettings,
+    [SETTING_KEYS.AI_PROVIDER]: provider,
   };
 }
 
@@ -135,16 +141,12 @@ function parseAIAnalysisPolicy(map: Record<string, string>): AIAnalysisPolicy {
   };
 }
 
-export async function getAISettings(): Promise<AISettings> {
-  const cached = settingsCache.get();
+export async function getAISettings(providerOverride?: AIProviderId): Promise<AISettings> {
+  const cached = providerOverride ? undefined : settingsCache.get();
   if (cached) return cached;
 
-  const map = await readAISettingsMap();
-  const requestedProvider = map[SETTING_KEYS.AI_PROVIDER];
-  const defaultProvider = DEFAULT_AI_PROVIDER_ID;
-  const provider: AIProviderId = requestedProvider && isAIProviderId(requestedProvider)
-    ? requestedProvider as AIProviderId
-    : defaultProvider;
+  const map = await readAISettingsMap(providerOverride);
+  const provider = resolveAIProvider(map[SETTING_KEYS.AI_PROVIDER]);
   const providerDef = AI_PROVIDERS[provider];
   const rawTemperature = map[SETTING_KEYS.AI_TEMPERATURE]?.trim();
   const parsedTemperature = rawTemperature ? Number(rawTemperature) : Number.NaN;
@@ -169,7 +171,7 @@ export async function getAISettings(): Promise<AISettings> {
     maxTokens: Math.max(1, Math.min(65536, parseInt(map[SETTING_KEYS.AI_MAX_TOKENS]) || DEFAULT_MAX_TOKENS)),
     ...parseAIAnalysisPolicy(map),
   };
-  settingsCache.set(resolved);
+  if (!providerOverride) settingsCache.set(resolved);
   return resolved;
 }
 

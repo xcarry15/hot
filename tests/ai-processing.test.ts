@@ -144,7 +144,7 @@ describe('processWithAI 结果处理', () => {
   it('Provider 鉴权错误保留 pending，不消耗文章重试次数', async () => {
     const longContent = '这是一段足够长的内容用于测试 AI 流程。'.repeat(5);
     mocks.createChatCompletion.mockRejectedValueOnce(
-      new AIClientError('opencode: API Key 无效或鉴权失败', 'configuration', true, false),
+      new AIClientError('deepseek: API Key 无效或鉴权失败', 'configuration', true, false),
     );
 
     const result = await aiModule.processWithAI({
@@ -192,7 +192,7 @@ describe('processWithAI 结果处理', () => {
         key_points: ['行业增长逻辑发生变化'],
       }),
       model: 'audit-model',
-      provider: 'opencode',
+      provider: 'deepseek',
     });
     mocks.articleFindUnique.mockResolvedValueOnce({
       title: '便利店增长逻辑正在失效',
@@ -218,7 +218,7 @@ describe('processWithAI 结果处理', () => {
       aiStatus: 'done',
       skipReason: null,
       aiModel: 'audit-model',
-      aiProvider: 'opencode',
+      aiProvider: 'deepseek',
       eventKey: '',
       eventKeyConfidence: 0,
     });
@@ -227,7 +227,7 @@ describe('processWithAI 结果处理', () => {
       eventScore: 5,
       contentScore: 78,
       model: 'audit-model',
-      provider: 'opencode',
+      provider: 'deepseek',
     });
   });
 
@@ -251,7 +251,7 @@ describe('processWithAI 结果处理', () => {
         key_points: ['聚合稿含多个独立事件'],
       }),
       model: 'audit-model',
-      provider: 'opencode',
+      provider: 'deepseek',
     });
     mocks.articleFindUnique.mockResolvedValueOnce({
       title: '联商头条：杉杉奥莱首进西安；金粒门浙江首店落地',
@@ -277,7 +277,7 @@ describe('processWithAI 结果处理', () => {
       aiStatus: 'done',
       skipReason: null,
       aiModel: 'audit-model',
-      aiProvider: 'opencode',
+      aiProvider: 'deepseek',
       eventSubjects: '["杉杉奥莱"]',
       eventAction: '计划开店',
       eventObject: '西安首店',

@@ -1,11 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  OPENCODE_FREE_COOLDOWN_MS,
-  OPENCODE_FREE_REQUEST_INTERVAL_MS,
   OPENROUTER_FREE_COOLDOWN_MS,
   OPENROUTER_FREE_REQUEST_INTERVAL_MS,
   getAIRateLimitCooldownRemainingMs,
-  isFreeAIModel,
   noteAIRateLimit,
   resetAIRateGateForTests,
   waitForAIRequestSlot,
@@ -71,11 +68,6 @@ describe('OpenRouter 免费模型请求闸门', () => {
     expect(getAIRateLimitCooldownRemainingMs('openrouter', 'openrouter/free')).toBe(0);
   });
 
-  it('识别 OpenCode 免费模型，并拒绝付费模型', () => {
-    expect(isFreeAIModel('opencode', 'big-pickle')).toBe(true);
-    expect(isFreeAIModel('opencode', 'mimo-v2.5-free')).toBe(true);
-    expect(isFreeAIModel('opencode', 'deepseek-v4')).toBe(false);
-  });
 
   it('Provider 模型策略允许 DeepSeek，拒绝免费 Provider 的付费模型', () => {
     expect(isAIModelAllowed('deepseek', 'deepseek-v4-flash')).toBe(true);
@@ -88,28 +80,4 @@ describe('OpenRouter 免费模型请求闸门', () => {
     expect(getAIModelValidationError('constructor', 'anything')).toBe('不支持的 AI Provider');
   });
 
-  it('OpenCode 免费请求串行化，并在 429 后冷却 60 秒', async () => {
-    await waitForAIRequestSlot('opencode', 'big-pickle');
-    let secondFinished = false;
-    const second = waitForAIRequestSlot('opencode', 'big-pickle').then(() => {
-      secondFinished = true;
-    });
-
-    await vi.advanceTimersByTimeAsync(OPENCODE_FREE_REQUEST_INTERVAL_MS - 1);
-    expect(secondFinished).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    await second;
-
-    noteAIRateLimit('opencode', 'big-pickle');
-    let thirdFinished = false;
-    const third = waitForAIRequestSlot('opencode', 'big-pickle').then(() => {
-      thirdFinished = true;
-    });
-
-    await vi.advanceTimersByTimeAsync(OPENCODE_FREE_COOLDOWN_MS - 1);
-    expect(thirdFinished).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    await third;
-    expect(thirdFinished).toBe(true);
-  });
 });

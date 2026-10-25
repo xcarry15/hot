@@ -76,7 +76,7 @@ describe('AI Provider 持久化冷却与退避', () => {
 
   it('读取 Provider 状态，并且清理查询只覆盖已到期的冷却', async () => {
     const row = {
-      provider: 'opencode',
+      provider: 'deepseek',
       cooldownUntil: new Date('2026-09-01T00:01:00.000Z'),
       failureCount: 1,
       lastErrorKind: 'rate_limit',
@@ -85,12 +85,12 @@ describe('AI Provider 持久化冷却与退避', () => {
     };
     mocks.findUnique.mockResolvedValue(row);
 
-    await expect(getAIProviderBackoff('opencode')).resolves.toEqual(row);
-    await clearAIProviderBackoff('opencode');
+    await expect(getAIProviderBackoff('deepseek')).resolves.toEqual(row);
+    await clearAIProviderBackoff('deepseek');
 
     expect(mocks.updateMany).toHaveBeenCalledWith({
       where: {
-        provider: 'opencode',
+        provider: 'deepseek',
         failureCount: { gt: 0 },
         OR: [
           { cooldownUntil: null },

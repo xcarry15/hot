@@ -4,7 +4,7 @@ import { isFreeAIModel as isProviderFreeAIModel, requiresConservativeAIRequests 
 /**
  * 免费模型和 Gemini 的进程内请求闸门。
  *
- * 这里只做客户端侧的保守保护；OpenCode 官方没有公布固定 RPM/TPM，
+ * 这里只做应用侧的保守保护，
  * 不能把下面的间隔当作服务商配额承诺。
  * 单实例 PM2 / 单个开发进程内，同一 Provider 的免费请求共用一个时间序列，
  * 避免并发批次形成突发流量。
@@ -12,8 +12,6 @@ import { isFreeAIModel as isProviderFreeAIModel, requiresConservativeAIRequests 
 // OpenRouter 免费层约 20 RPM；3 秒间隔贴近上限，同时保留统一串行队列。
 export const OPENROUTER_FREE_REQUEST_INTERVAL_MS = 3_000;
 export const OPENROUTER_FREE_COOLDOWN_MS = 60_000;
-export const OPENCODE_FREE_REQUEST_INTERVAL_MS = 4_000;
-export const OPENCODE_FREE_COOLDOWN_MS = 60_000;
 // 5 次/分钟是应用自己的保守上限，不代表 Google 账户一定拥有该配额。
 export const GEMINI_REQUEST_INTERVAL_MS = 12_000;
 
@@ -52,9 +50,7 @@ export function waitForAIRequestSlot(
   const state = getState(provider);
   const intervalMs = provider === 'gemini'
     ? GEMINI_REQUEST_INTERVAL_MS
-    : provider === 'opencode'
-      ? OPENCODE_FREE_REQUEST_INTERVAL_MS
-      : OPENROUTER_FREE_REQUEST_INTERVAL_MS;
+    : OPENROUTER_FREE_REQUEST_INTERVAL_MS;
 
   const run = state.requestQueue.then(async () => {
     const waitUntil = Math.max(state.nextRequestAt, state.cooldownUntil);
@@ -76,10 +72,7 @@ export function noteAIRateLimit(
 ): void {
   if (!requiresConservativeAIRequests(provider, model)) return;
   const state = getState(provider);
-  const defaultCooldownMs = provider === 'opencode'
-    ? OPENCODE_FREE_COOLDOWN_MS
-    : OPENROUTER_FREE_COOLDOWN_MS;
-  const cooldownMs = Math.max(defaultCooldownMs, retryAfterMs || 0);
+  const cooldownMs = Math.max(OPENROUTER_FREE_COOLDOWN_MS, retryAfterMs || 0);
   state.cooldownUntil = Math.max(state.cooldownUntil, Date.now() + cooldownMs);
   state.nextRequestAt = Math.max(state.nextRequestAt, state.cooldownUntil);
 }

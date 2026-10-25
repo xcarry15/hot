@@ -9,7 +9,7 @@ import { AUTOMATIC_ARTICLE_SOURCE_FILTER } from '@/lib/pipeline/eligibility';
  * 历史：
  *   - 逻辑原先内联在 `crawler.ts.analyzeAllPending`；B13 抽离后保留：
  *     · MAX_BATCH_SIZE=100、CONCURRENCY=ai_concurrency(默认1)/DELAY_MS=300、timeout=300_000
- *     · OpenCode / OpenRouter 免费模型由 ai-rate-gate 统一串行并限速
+ *     · OpenRouter 免费模型由 ai-rate-gate 统一串行并限速
  *     · Provider 级限流、服务端与连接故障冷却由 ai-provider-backoff 持久化，并沿用到队列退避
  *     · 退避 where：OR[ nextAiRetryAt=null, nextAiRetryAt <= now ]
  *     · Promise.allSettled 把 rejected 计入 errors
@@ -45,7 +45,7 @@ function isTransientBatchError(reason: unknown): boolean {
 /**
  * Stage 3: Run AI for fetched, not-yet-clustered articles with aiStatus=pending or failed.
  * Batches with concurrency from settings.ai_concurrency (1-10, default 1)
- * and 300ms delay between batches. OpenCode / OpenRouter free models have an
+ * and 300ms delay between batches. OpenRouter free models have an
  * additional process-wide request gate in `ai-rate-gate`.
  */
 export async function analyzeAllPending(signal?: AbortSignal, jobId?: string, forceRetry = false): Promise<{

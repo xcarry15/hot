@@ -174,10 +174,8 @@
   text-wrap: wrap;
 }
 
+/* 文章阅读内容直接显示；其他公开页面及交互浮层保留轻量淡入。 */
 .public-section-enter,
-.public-detail-intro,
-.public-detail-block,
-.public-date-heading,
 .public-article-motion,
 .public-notice-enter,
 .public-popover-enter,
@@ -188,10 +186,6 @@
   animation-timing-function: var(--public-ease-out);
 }
 
-.public-detail-delay-1 {
-  animation-delay: 55ms;
-}
-
 .public-detail-delay-2 {
   animation-delay: 95ms;
 }
@@ -200,17 +194,13 @@
   animation-delay: 135ms;
 }
 
-.public-date-heading {
+.public-article-motion {
   animation-delay: var(--public-reveal-delay, 0ms);
 }
 
 .public-article-item {
   content-visibility: auto;
   contain-intrinsic-size: auto 152px;
-}
-
-.public-article-motion {
-  animation-delay: var(--public-reveal-delay, 0ms);
 }
 
 .public-article-surface {
@@ -297,9 +287,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .public-section-enter,
-  .public-detail-intro,
-  .public-detail-block,
-  .public-date-heading,
   .public-article-motion,
   .public-notice-enter,
   .public-popover-enter,
