@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: parsed.error.issues[0]?.message || '模型配置无效' }, { status: 400 });
     }
 
-    return NextResponse.json(await testSavedAIModel(parsed.data.provider, parsed.data.model));
+    return NextResponse.json(await testSavedAIModel(parsed.data.provider, parsed.data.model, { signal: request.signal }));
   } catch (error: unknown) {
     return apiError(error, 'AI 模型可用性测试失败');
   }

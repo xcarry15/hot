@@ -135,6 +135,7 @@ export interface AiTestResult {
   retryAfterMs?: number;
   latencyMs?: number;
   responsePreview?: string;
+  requestStarted?: boolean;
 }
 
 export interface AiTestInput {

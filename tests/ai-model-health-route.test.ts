@@ -25,7 +25,7 @@ describe('POST /api/settings/test-ai-model', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ success: true, latencyMs: 1200 });
-    expect(testSavedAIModel).toHaveBeenCalledWith('openrouter', 'example/model:free');
+    expect(testSavedAIModel).toHaveBeenCalledWith('openrouter', 'example/model:free', { signal: expect.any(AbortSignal) });
   });
 
   it('拒绝未知 Provider 或空模型', async () => {

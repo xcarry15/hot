@@ -519,6 +519,27 @@ describe('createChatCompletion', () => {
     expect(mocks.noteAIProviderFailure).not.toHaveBeenCalled();
   });
 
+  it('候选探测绕过模型错误造成的冷却，但保留真实限流冷却', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      openrouter_api_key: 'test-key',
+      openrouter_base_url: 'https://openrouter.ai/api/v1',
+    });
+    mocks.getAIProviderBackoff.mockResolvedValue({
+      cooldownUntil: new Date(Date.now() + 60_000), lastErrorKind: 'provider', lastStatus: 503,
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('ok'));
+    await expect(testSavedAIModel('openrouter', 'openrouter/free')).resolves.toMatchObject({ success: true });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    mocks.getAIProviderBackoff.mockResolvedValue({
+      cooldownUntil: new Date(Date.now() + 60_000), lastErrorKind: 'rate_limit', lastStatus: 429,
+    });
+    await expect(testSavedAIModel('openrouter', 'openrouter/free')).resolves.toMatchObject({
+      success: false, errorKind: 'rate_limit', requestStarted: false,
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('免费模型健康测试拒绝非免费模型且不发送请求', async () => {
     global.fetch = vi.fn();
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -24,14 +24,14 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { fetchDeepSeekModels, fetchGeminiModels, fetchOpenRouterModels, testAiSettings, testSavedAiModel, type AiTestResult } from '@/features/settings-api.client'
-import { isRequestJsonError } from '@/lib/request-json.client'
+import { fetchDeepSeekModels, fetchGeminiModels, fetchOpenRouterModels, testAiSettings, type AiTestResult } from '@/features/settings-api.client'
+import { healthProbeError, pollModelHealth, readModelHealth, type ModelHealthSnapshot } from '@/features/ai-model-health.client'
 import {
   ProviderConfig,
   ProviderConfigs,
   Settings,
 } from './types'
-import { AI_PROVIDERS, DEFAULT_AI_PROVIDER_ID, isAIProviderId, type AIProviderId, type FreeAIProviderId } from '@/contracts/ai-provider'
+import { AI_PROVIDERS, DEFAULT_AI_PROVIDER_ID, isAIProviderId, isOpenRouterFreeModel, type AIProviderId, type FreeAIProviderId } from '@/contracts/ai-provider'
 
 interface Props {
   settings: Settings
@@ -74,22 +74,12 @@ function cacheModels(provider: AIProviderId, models: string[]): void {
   }
 }
 
-const SLOW_MODEL_LATENCY_MS = 8_000
-
-function getModelHealthKey(provider: FreeAIProviderId, model: string): string {
-  return `${provider}:${model}`
-}
-
 function getModelHealthStatus(result: AiTestResult | undefined, testing: boolean): { label: string; className: string } {
   if (testing) return { label: '测试中', className: 'text-amber-600' }
   if (!result) return { label: '未测试', className: 'text-muted-foreground' }
-  if (result.success) {
-    if (result.latencyMs !== undefined && result.latencyMs >= SLOW_MODEL_LATENCY_MS) {
-      return { label: '较慢', className: 'text-amber-600' }
-    }
-    return { label: '可用', className: 'text-emerald-600' }
-  }
-  return { label: '不可用', className: 'text-destructive' }
+  if (result.success) return { label: '可用', className: 'text-emerald-600' }
+  if (result.errorKind === 'rate_limit' || result.status === 429) return { label: '限流', className: 'text-amber-600' }
+  return { label: '本次失败', className: 'text-destructive' }
 }
 
 function getModelChipClass(result: AiTestResult | undefined, selected: boolean, testing: boolean): string {
@@ -97,19 +87,13 @@ function getModelChipClass(result: AiTestResult | undefined, selected: boolean, 
   const selectedClass = selected ? 'ring-2 ring-primary/40' : ''
   if (testing) return `${baseClass} border-amber-300 bg-amber-50 text-amber-700 animate-pulse ${selectedClass}`
   if (!result) {
-    return `${baseClass} ${selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted'}`
+    return `${baseClass} border-border bg-muted/30 text-muted-foreground hover:bg-muted ${selectedClass}`
   }
-  if (!result.success) return `${baseClass} border-red-300 bg-red-50 text-red-700 hover:bg-red-100 ${selectedClass}`
-  if (result.latencyMs !== undefined && result.latencyMs >= SLOW_MODEL_LATENCY_MS) {
+  if (result.errorKind === 'rate_limit' || result.status === 429) {
     return `${baseClass} border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 ${selectedClass}`
   }
+  if (!result.success) return `${baseClass} border-red-300 bg-red-50 text-red-700 hover:bg-red-100 ${selectedClass}`
   return `${baseClass} border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 ${selectedClass}`
-}
-
-function isSharedHealthFailure(result: AiTestResult): boolean {
-  return result.errorKind === 'configuration'
-    || result.errorKind === 'network'
-    || (result.retryAfterMs ?? 0) > 0
 }
 
 export default function AiModelTab({ settings, setSettings, providerConfigs, setProviderConfigs, sensitiveStatus, onRetrySensitive }: Props) {
@@ -122,10 +106,33 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   const [loadingDeepSeekModels, setLoadingDeepSeekModels] = useState(false)
   const [geminiModels, setGeminiModels] = useState<string[]>(() => [...AI_PROVIDERS.gemini.models])
   const [loadingGeminiModels, setLoadingGeminiModels] = useState(false)
-  const [modelTestResults, setModelTestResults] = useState<Record<string, AiTestResult>>({})
-  const [testingModels, setTestingModels] = useState<Record<string, boolean>>({})
+  const [health, setHealth] = useState<ModelHealthSnapshot>({ models: [], completed: 0, results: {}, cooldownUntil: 0 })
+  const [testingModel, setTestingModel] = useState<string | null>(null)
   const [testingAllModels, setTestingAllModels] = useState(false)
-  const [testingProgress, setTestingProgress] = useState({ completed: 0, total: 0 })
+  const [now, setNow] = useState(0)
+  const healthRef = useRef(health)
+  const pollingRef = useRef<AbortController | null>(null)
+
+  const stopModelDetection = useCallback(() => {
+    pollingRef.current?.abort()
+    pollingRef.current = null
+    setTestingAllModels(false)
+    setTestingModel(null)
+  }, [])
+
+  useEffect(() => {
+    const cached = readModelHealth()
+    healthRef.current = cached
+    setHealth(cached)
+    setNow(Date.now())
+    return () => { pollingRef.current?.abort() }
+  }, [])
+
+  useEffect(() => {
+    if (!testingAllModels) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [testingAllModels])
 
   const currentProvider = AI_PROVIDERS[settings.ai_provider as AIProviderId] || AI_PROVIDERS[DEFAULT_AI_PROVIDER_ID]
   const currentConfig = providerConfigs[currentProvider.id]
@@ -141,9 +148,15 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
         ? geminiModels
         : []
   const currentModelCandidates = providerUnavailableReason ? [] : [...new Set([
-    ...(currentConfig.model.trim() ? [currentConfig.model.trim()] : []),
     ...discoveredModelCandidates,
-  ])]
+    ...(currentConfig.model.trim() ? [currentConfig.model.trim()] : []),
+  ])].sort((left, right) => currentHealthProvider
+    ? Number(health.results[right]?.success === true) - Number(health.results[left]?.success === true)
+    : 0)
+  const availableCount = currentModelCandidates.filter(model => health.results[model]?.success).length
+  const lastCheckedAt = currentModelCandidates.reduce((latest, model) => Math.max(latest, health.results[model]?.checkedAt ?? 0), 0)
+  const cooldownSeconds = Math.max(0, Math.ceil((health.cooldownUntil - now) / 1000))
+  const hasPendingDetection = health.completed < health.models.length
   const openRouterModelUrl = currentProvider.id === 'openrouter' && currentConfig.model.trim()
     ? `https://openrouter.ai/${currentConfig.model.trim().split('/').map(encodeURIComponent).join('/')}`
     : null
@@ -250,6 +263,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
 
   const handleProviderChange = (providerId: string) => {
     if (!isAIProviderId(providerId)) return
+    stopModelDetection()
     setSettings(prev => ({ ...prev, ai_provider: providerId }))
     setAiTestResult(null)
   }
@@ -280,102 +294,39 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
     }
   }
 
-  const testModelAvailability = useCallback(async (
-    provider: FreeAIProviderId,
-    model: string,
-  ): Promise<AiTestResult> => {
-    const resultKey = getModelHealthKey(provider, model)
-    setTestingModels((current) => ({ ...current, [resultKey]: true }))
-    try {
-      const result = await testSavedAiModel(provider, model)
-      setModelTestResults((current) => ({ ...current, [resultKey]: result }))
-      return result
-    } catch (error) {
-      const status = isRequestJsonError(error) ? error.status : undefined
-      let errorKind: AiTestResult['errorKind'] = 'provider'
-      if (status === 429) errorKind = 'rate_limit'
-      else if (status === 401 || status === 403) errorKind = 'configuration'
-      else if (status === 0 || (status !== undefined && status >= 500)) errorKind = 'network'
-      const result: AiTestResult = {
-        success: false,
-        provider,
-        model,
-        error: error instanceof Error ? error.message : '测试请求失败',
-        errorKind,
-        status,
-      }
-      setModelTestResults((current) => ({ ...current, [resultKey]: result }))
-      return result
-    } finally {
-      setTestingModels((current) => ({ ...current, [resultKey]: false }))
-    }
-  }, [])
-
   const handleTestAllModels = async () => {
-    if (!currentHealthProvider) return
-    const provider = currentHealthProvider
-    const models = currentModelCandidates
-      .slice()
-      .sort((left, right) => Number(right === currentConfig.model) - Number(left === currentConfig.model))
-      .map((model) => ({ provider, model }))
-    if (models.length === 0) {
-      toast.info(`${currentProvider.name} 暂未发现免费模型`)
-      return
-    }
-
+    if (!currentHealthProvider || pollingRef.current) return
+    const controller = new AbortController()
+    pollingRef.current = controller
+    const previous = healthRef.current
+    // 未完成的一轮保留模型顺序和冷却时间；完成后才开始新的一轮。
+    const snapshot: ModelHealthSnapshot = previous.completed < previous.models.length
+      ? previous
+      : {
+        models: currentModelCandidates.filter(isOpenRouterFreeModel),
+        completed: 0,
+        results: Object.fromEntries(currentModelCandidates
+          .filter(model => previous.results[model])
+          .map(model => [model, previous.results[model]])),
+        cooldownUntil: previous.cooldownUntil,
+      }
     setTestingAllModels(true)
-    setTestingProgress({ completed: 0, total: models.length })
-    let availableCount = 0
-    let slowCount = 0
-    let stoppedByRateLimit = false
-    let stoppedBySharedFailure = false
-    let sharedFailureWasCooldown = false
+    setNow(Date.now())
     try {
-      for (const [index, item] of models.entries()) {
-        const result = await testModelAvailability(item.provider, item.model)
-        setTestingProgress({ completed: index + 1, total: models.length })
-        if (result.success) {
-          availableCount++
-          if (result.latencyMs !== undefined && result.latencyMs >= SLOW_MODEL_LATENCY_MS) slowCount++
-          continue
-        }
-
-        // Key、余额、网络等属于厂商级故障，继续逐模型请求只会浪费时间和额度。
-        if (isSharedHealthFailure(result)) {
-          stoppedBySharedFailure = true
-          sharedFailureWasCooldown = (result.retryAfterMs ?? 0) > 0
-          const skippedResult = `${result.error || '厂商配置不可用'}；其余模型未继续请求`
-          setModelTestResults((current) => {
-            const next = { ...current }
-            for (const remaining of models.slice(index + 1)) {
-              const key = getModelHealthKey(remaining.provider, remaining.model)
-              next[key] = { ...result, model: remaining.model, error: skippedResult }
-            }
-            return next
-          })
-          setTestingProgress({ completed: models.length, total: models.length })
-          break
-        }
-
-        // 429 往往会触发 Provider 冷却；本轮停止，避免后续请求排队等待一分钟。
-        if (result.errorKind === 'rate_limit' || result.status === 429) {
-          stoppedByRateLimit = true
-          break
-        }
+      const result = await pollModelHealth(snapshot, controller.signal, (next, model) => {
+        if (pollingRef.current !== controller) return
+        healthRef.current = next
+        setHealth(next)
+        setTestingModel(model)
+        setNow(Date.now())
+      })
+      if (!controller.signal.aborted && result.completed === result.models.length) {
+        toast.success(`检测完成：${result.models.filter(model => result.results[model]?.success).length}/${result.models.length} 个模型可用`)
       }
-      if (stoppedBySharedFailure) {
-        if (sharedFailureWasCooldown) {
-          toast.warning(`${currentProvider.name} 正在冷却，已跳过剩余模型测试`)
-        } else {
-          toast.error(`${currentProvider.name} 配置或网络不可用，已跳过剩余模型测试`)
-        }
-      } else if (stoppedByRateLimit) {
-        toast.warning(`${currentProvider.name} 触发限流，已停止后续测试；剩余模型未测试`)
-      } else {
-        toast.success(`${currentProvider.name} 测试完成：${availableCount}/${models.length} 个模型可用${slowCount > 0 ? `，其中 ${slowCount} 个较慢` : ''}`)
-      }
+    } catch (error) {
+      if (!controller.signal.aborted) toast.error(healthProbeError(error))
     } finally {
-      setTestingAllModels(false)
+      if (pollingRef.current === controller) stopModelDetection()
     }
   }
 
@@ -494,12 +445,12 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                     size="sm"
                     variant="outline"
                     className="h-6 gap-1 px-2 text-[11px]"
-                    disabled={testingAllModels || loadingOpenRouterModels || loadingDeepSeekModels || loadingGeminiModels}
-                    title={`绿色=可用，黄色=较慢，红色=不可用；本次最多消耗 ${currentModelCandidates.length} 次免费调用`}
-                    onClick={() => void handleTestAllModels()}
+                    disabled={!testingAllModels && (loadingOpenRouterModels || loadingDeepSeekModels || loadingGeminiModels || currentModelCandidates.length === 0)}
+                    title="逐个检测；冷却结束后自动继续，测完一轮停止。使用已保存的 API Key。"
+                    onClick={() => testingAllModels ? stopModelDetection() : void handleTestAllModels()}
                   >
                     {testingAllModels ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                    {testingAllModels ? `测试中 ${testingProgress.completed}/${testingProgress.total}` : '测试全部'}
+                    {testingAllModels ? '停止检测' : hasPendingDetection ? '继续检测' : '开始检测'}
                   </Button>
                 )}
               </div>
@@ -509,12 +460,21 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                 className="h-8 font-mono text-xs"
                 placeholder={currentProvider.defaultModel || '输入模型名称'}
               />
+              {currentHealthProvider && (
+                <p aria-live="polite" className="text-[11px] text-muted-foreground">
+                  可用 {availableCount}/{currentModelCandidates.length}
+                  {health.models.length > 0 ? ` · 已检测 ${health.completed}/${health.models.length}` : ''}
+                  {testingAllModels && cooldownSeconds > 0 ? ` · 冷却中，${cooldownSeconds} 秒后继续` : ''}
+                  {!testingAllModels && lastCheckedAt > 0 ? ` · 最近检测 ${new Date(lastCheckedAt).toLocaleString()}` : ''}
+                  {!testingAllModels && hasPendingDetection ? ' · 已暂停' : ''}
+                  {' · 绿：可用，红：失败，黄：限流，灰：未测；仅代表检测当时'}
+                </p>
+              )}
               {currentModelCandidates.length > 0 && (
                 <div className="flex flex-wrap gap-1 pt-1">
                   {currentModelCandidates.map((m) => {
-                    const resultKey = currentHealthProvider ? getModelHealthKey(currentHealthProvider, m) : ''
-                    const result = resultKey ? modelTestResults[resultKey] : undefined
-                    const testing = resultKey ? testingModels[resultKey] === true : false
+                    const result = currentHealthProvider ? health.results[m] : undefined
+                    const testing = currentHealthProvider !== null && testingModel === m
                     const status = getModelHealthStatus(result, testing)
                     return (
                       <button
@@ -523,9 +483,9 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                         onClick={() => updateProviderConfig(currentProvider.id, 'model', m)}
                         className={getModelChipClass(result, currentConfig.model === m, testing)}
                         aria-label={`${m}：${status.label}`}
-                        title={`${m}：${status.label}${result?.success && result.latencyMs !== undefined ? `（${result.latencyMs}ms）` : result && !result.success && result.error ? `：${result.error}` : ''}`}
+                        title={`${m}：${status.label}${result?.checkedAt ? ` · ${new Date(result.checkedAt).toLocaleString()}` : ''}${result?.success && result.latencyMs !== undefined ? `（${result.latencyMs}ms）` : result && !result.success && result.error ? `：${result.error}` : ''}`}
                       >
-                        {m}
+                        {currentHealthProvider ? `${testing ? '◌' : !result ? '○' : result.success ? '✓' : result.errorKind === 'rate_limit' || result.status === 429 ? '…' : '×'} ` : ''}{m}
                       </button>
                     )
                   })}

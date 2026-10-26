@@ -52,6 +52,7 @@ export interface AIConnectionTestResult {
   retryAfterMs?: number;
   latencyMs?: number;
   responsePreview?: string;
+  requestStarted?: boolean;
 }
 
 export interface AIConnectionTestOptions {
@@ -59,6 +60,8 @@ export interface AIConnectionTestOptions {
   maxTokens?: number;
   timeoutMs?: number;
   failFastOnRateLimit?: boolean;
+  ignoreModelFailureCooldown?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface AIInvocationContext {
@@ -143,7 +146,7 @@ export async function createChatCompletion(
 async function createOpenAICompatibleCompletion(
   settings: AISettings,
   messages: ChatMessage[],
-  options: { temperature: number; maxTokens: number; timeoutMs?: number; onRequestStart?: () => void; persistProviderFailures?: boolean; invocation?: AIInvocationContext },
+  options: { temperature: number; maxTokens: number; timeoutMs?: number; onRequestStart?: () => void; persistProviderFailures?: boolean; ignoreModelFailureCooldown?: boolean; invocation?: AIInvocationContext },
   retries = 2,
   parentSignal?: AbortSignal,
 ): Promise<ChatCompletionResponse> {
@@ -178,7 +181,11 @@ async function createOpenAICompatibleCompletion(
   const persistedCooldownMs = persistedBackoff?.cooldownUntil
     ? Math.max(0, persistedBackoff.cooldownUntil.getTime() - Date.now())
     : 0;
-  if (persistedCooldownMs > 0) {
+  // 候选模型探测可以绕过模型错误引发的退避，但必须保留限流、网络等共享冷却。
+  const modelFailureCooldown = options.ignoreModelFailureCooldown
+    && persistedBackoff?.lastErrorKind === 'provider'
+    && persistedBackoff?.lastStatus !== 429;
+  if (persistedCooldownMs > 0 && !modelFailureCooldown) {
     const errorKind = persistedBackoff?.lastErrorKind === 'provider'
       ? 'provider'
       : persistedBackoff?.lastErrorKind === 'network'
@@ -565,7 +572,8 @@ export async function testAIConnection(
       },
       // 诊断请求不能因为某个候选模型的 5xx 污染正式文章队列的持久化冷却。
       persistProviderFailures: false,
-    }, 0);
+      ignoreModelFailureCooldown: options.ignoreModelFailureCooldown,
+    }, 0, options.signal);
 
     return {
       success: true,
@@ -589,6 +597,7 @@ export async function testAIConnection(
       errorKind: error instanceof AIClientError ? error.kind : 'provider',
       status: error instanceof AIClientError ? error.status : undefined,
       retryAfterMs: error instanceof AIClientError ? error.retryAfterMs : undefined,
+      requestStarted: requestStartedAt !== undefined,
       latencyMs: latencyMs(),
     };
   }
@@ -632,6 +641,7 @@ export async function testSavedAIModel(
     maxTokens: AI_HEALTH_TEST_MAX_TOKENS,
     timeoutMs: AI_HEALTH_TEST_TIMEOUT_MS,
     failFastOnRateLimit: true,
+    ignoreModelFailureCooldown: true,
     ...options,
   };
 
