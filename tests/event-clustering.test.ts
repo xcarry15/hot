@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors, sharedQuantifiedFacts } from '@/contracts/event-clustering';
+import { contentShingleSimilarity, hasEventIdentityQualifierConflict, hasEventPhaseConflict, hasLiteralContentOverlap, isMultiTopicTitle, normalizeDuplicateTitle, normalizeEventText, overlapCoefficient, sharedEventAnchors, sharedQuantifiedFacts } from '@/contracts/event-clustering';
 import { buildCanonicalEventKey, normalizeEventAction, normalizeEventIdentity } from '@/contracts/event-identity';
 import { buildClusterPendingWhere } from '@/lib/pipeline/cluster';
 import { buildRuleCandidateAuditEvidence, hasDuplicateReportEvidence, isNearExactReprint, isReviewWorthyCandidate, isStrongEventKeyDuplicate } from '@/lib/event-clustering-service';
@@ -39,6 +39,8 @@ function pairEvidence(article: ClusterArticle, member: ClusterArticle) {
 describe('轻量事件聚类规则', () => {
   it('统一标题中的空白、标点和大小写', () => {
     expect(normalizeEventText('  Luckin Coffee：发布 Q2 财报！ ')).toBe('luckincoffee发布q2财报');
+    expect(normalizeDuplicateTitle('营收 １.５ 亿元！')).toBe('营收1.5亿元');
+    expect(normalizeDuplicateTitle('营收 １５ 亿元！')).toBe('营收15亿元');
   });
 
   it('同一事件的改写标题保持较高覆盖度', () => {
@@ -196,13 +198,13 @@ describe('轻量事件聚类规则', () => {
 });
 
 describe('规则归并对抗样例', () => {
-  it('低置信同标题的不同季度不能被正文或标题相似度强行合并', () => {
+  it('规范化完全相同的标题优先于 AI 提取出的季度差异', () => {
     const base = { title: '瑞幸咖啡发布季度财报', eventSubjects: '["瑞幸咖啡"]',
       eventAction: '发布业绩', eventKeyConfidence: 50 };
     const first = makeClusterArticle({ ...base, eventObject: '2026年第一季度业绩', eventKey: '瑞幸咖啡/发布业绩/2026年第一季度业绩' });
     const second = makeClusterArticle({ ...base, eventObject: '2026年第二季度业绩', eventKey: '瑞幸咖啡/发布业绩/2026年第二季度业绩' });
     const decision = pairEvidence(first, second).decision;
-    expect(['exact', 'strong']).not.toContain(decision);
+    expect(decision).toBe('exact');
   });
 
   it('相同论坛名称的年份前缀差异仍能正常归并', () => {
@@ -223,11 +225,36 @@ describe('规则归并对抗样例', () => {
   it.each([
     ['2026中国餐饮产业大会', '2025中国餐饮产业大会'],
     ['第三届中国餐饮产业大会', '第四届中国餐饮产业大会'],
-  ])('主体的年份或届次冲突不能被场馆相同覆盖：%s / %s', (left, right) => {
-    const base = { title: '中国餐饮产业大会在广州举办', cleanContent: '', eventAction: '举办', eventObject: '广州会展中心' };
-    const first = makeClusterArticle({ ...base, eventSubjects: JSON.stringify([left]), eventKey: `${left}/举办/广州会展中心` });
-    const second = makeClusterArticle({ ...base, eventSubjects: JSON.stringify([right]), eventKey: `${right}/举办/广州会展中心` });
+  ])('不同标题的年份或届次冲突不能被场馆相同覆盖：%s / %s', (left, right) => {
+    const base = { cleanContent: '', eventAction: '举办', eventObject: '广州会展中心' };
+    const first = makeClusterArticle({ ...base, title: `${left}在广州举办`, eventSubjects: JSON.stringify([left]), eventKey: `${left}/举办/广州会展中心` });
+    const second = makeClusterArticle({ ...base, title: `${right}在广州举办`, eventSubjects: JSON.stringify([right]), eventKey: `${right}/举办/广州会展中心` });
     expect(['exact', 'strong']).not.toContain(pairEvidence(first, second).decision);
+  });
+
+  it('同标题超过14天不因标题自动归并', () => {
+    const first = makeClusterArticle({ eventKey: '', eventSubjects: '[]', eventAction: '', eventObject: '', cleanContent: '' });
+    const second = makeClusterArticle({ ...first, id: 'later', publishedAt: new Date('2026-07-25T08:00:00Z') });
+    expect(pairEvidence(first, second).decision).not.toBe('exact');
+  });
+
+  it('标题相似且正文高度重合时识别转载，阶段冲突仍阻止相似标题归并', () => {
+    const body = '该品牌在上海开设新门店，现场提供餐饮零售服务，消费者排队进店。'.repeat(10);
+    const first = makeClusterArticle({ title: '瑞幸咖啡上海新门店正式开业', cleanContent: body, eventKey: '', eventKeyConfidence: 0, eventSubjects: '[]', eventAction: '', eventObject: '' });
+    const reprint = makeClusterArticle({ ...first, id: 'reprint', title: '瑞幸咖啡上海新门店正式开业啦' });
+    expect(pairEvidence(first, reprint).decision).toBe('strong');
+    const planned = makeClusterArticle({ ...first, id: 'planned', title: '瑞幸咖啡上海新门店计划开业' });
+    expect(['exact', 'strong']).not.toContain(pairEvidence(first, planned).decision);
+  });
+
+  it('相似标题数字不同或缺少正文证据时不因新增规则自动归并', () => {
+    const base = { eventKey: '', eventKeyConfidence: 0, eventSubjects: '[]', eventAction: '', eventObject: '' };
+    const body = '该公司公布门店经营和扩张计划，介绍多个城市的经营情况。'.repeat(10);
+    const first = makeClusterArticle({ ...base, title: '某连锁品牌宣布关闭20家门店', cleanContent: body });
+    const differentNumber = makeClusterArticle({ ...base, id: 'other', title: '某连锁品牌宣布关闭30家门店', cleanContent: body });
+    expect(['exact', 'strong']).not.toContain(pairEvidence(first, differentNumber).decision);
+    const noBody = makeClusterArticle({ ...base, id: 'empty', title: '某连锁品牌宣布关闭20家门店啦', cleanContent: '' });
+    expect(['exact', 'strong']).not.toContain(pairEvidence(first, noBody).decision);
   });
 
   it.each([['第三届', '第3届'], ['第十届', '第10届'], ['第十一届', '第11届']])('相同届次不同数字写法仍能归并：%s / %s', (left, right) => {

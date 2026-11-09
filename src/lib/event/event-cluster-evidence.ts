@@ -23,6 +23,8 @@ import {
   isSpecificEventIdentity,
   isMultiTopicTitle,
   normalizeEventText,
+  normalizeDuplicateTitle,
+  titleEditSimilarity,
   overlapCoefficient,
   sharedQuantifiedFacts,
   sharedEventAnchors,
@@ -83,6 +85,7 @@ export interface PairEvidence {
 
   titleOverlap: number;
   exactTitle: boolean;
+  titleSimilarity: number;
 
   charContentOverlap: number;
   charContentJaccard: number;
@@ -462,12 +465,13 @@ function computePairEvidence(
   candidateEventId: string,
   includeContent = true,
 ): PairEvidence {
-  const normalizedTitle = normalizeEventText(article.title);
-  const memberNormalizedTitle = normalizeEventText(member.title);
+  const normalizedTitle = normalizeDuplicateTitle(article.title);
+  const memberNormalizedTitle = normalizeDuplicateTitle(member.title);
 
   const fingerprintMatch = article.contentHash.length > 0 && article.contentHash === member.contentHash;
   const eventKeyMatch = article.eventKey.length > 0 && article.eventKey === member.eventKey;
   const exactTitle = normalizedTitle.length > 0 && normalizedTitle === memberNormalizedTitle;
+  const titleSimilarity = exactTitle ? 1 : titleEditSimilarity(article.title, member.title);
 
   const identity = compareIdentity(article, member);
   const daysApart = Math.abs(articleDate(article).getTime() - articleDate(member).getTime()) / 86_400_000;
@@ -505,7 +509,7 @@ function computePairEvidence(
     const sameExactTitle = normalizedTitle.length > 0 && normalizedTitle === memberNormalizedTitle;
     // AI 主体可能因改写而不稳定；只要标题有稳定锚点，也允许正文证据参与。
     // 仍不对所有候选计算正文，避免同站点模板文案放大误合并。
-    if (fingerprintMatch || sameSubject || sameExactTitle || sharedAnchors.length > 0) {
+    if (fingerprintMatch || sameSubject || sameExactTitle || titleSimilarity >= 0.8 || sharedAnchors.length > 0) {
       contentSimilarity = contentShingleSimilarity(article.cleanContent, member.cleanContent);
     }
   }
@@ -526,7 +530,8 @@ function computePairEvidence(
   // P0-2: 每个 pair 独立决策
   let decision: PairEvidence['decision'] = 'reject';
 
-  const isExact = daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS
+  const titleDuplicate = exactTitle && daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS;
+  const isExact = titleDuplicate || (daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS
     && !phaseConflict
     && !identity.qualifierConflict
     && !qualifierConflictOnPair
@@ -534,7 +539,7 @@ function computePairEvidence(
       exactTitle
       && !identity.identityConflict
       && (eventKeyMatch || identity.identityScore >= EVENT_CLUSTER_STRONG_IDENTITY_SCORE)
-    ));
+    )));
   if (isExact) {
     decision = 'exact';
   } else if (!multiTopic) {
@@ -590,8 +595,17 @@ function computePairEvidence(
 
     // 正文高度相似本身不足以证明同一事件：同品牌页面常有相同模板、简介或背景。
     // 它只能作为 nearExactReprint 或 identityConfirmed 的补强证据，不能单独自动归并。
+    const articleNumbers = article.title.normalize('NFKC').match(/\d+(?:\.\d+)?/gu) ?? [];
+    const memberNumbers = member.title.normalize('NFKC').match(/\d+(?:\.\d+)?/gu) ?? [];
+    const titleNumbersConflict = articleNumbers.length > 0 && memberNumbers.length > 0
+      && articleNumbers.join('|') !== memberNumbers.join('|');
+    const similarTitleReprint = normalizedTitle.length >= 8 && memberNormalizedTitle.length >= 8
+      && titleSimilarity >= 0.8 && daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS
+      && !identity.subjectConflict && !identity.namedEventConflict && !titleNumbersConflict
+      && ((contentSimilarity.charOverlap >= 0.78 && contentSimilarity.charJaccard >= 0.5)
+        || (contentSimilarity.tokenOverlap >= 0.78 && contentSimilarity.tokenJaccard >= 0.5));
     const standardRuleMatch = !phaseConflict && !identity.qualifierConflict && !qualifierConflictOnPair
-      && (nearExactReprint || (!identity.identityConflict && (keyConfirmed || identityConfirmed || titleConfirmed)));
+      && (nearExactReprint || similarTitleReprint || (!identity.identityConflict && (keyConfirmed || identityConfirmed || titleConfirmed)));
     const looseRuleMatch = !identity.namedEventConflict && isLooseSameEventMatch({
       daysApart,
       phaseConflict,
@@ -664,6 +678,7 @@ function computePairEvidence(
     qualifierConflict: identity.qualifierConflict,
     titleOverlap,
     exactTitle,
+    titleSimilarity,
     charContentOverlap: contentSimilarity.charOverlap,
     charContentJaccard: contentSimilarity.charJaccard,
     tokenContentOverlap: contentSimilarity.tokenOverlap,
@@ -719,6 +734,8 @@ export function bestPairEvidenceForCandidate(
 }
 
 export function isStrongPushedDuplicate(pair: PairEvidence): boolean {
+  if (pair.exactTitle && pair.daysApart <= EVENT_CLUSTER_FOLLOW_UP_DAYS) return true;
+  if (pair.decision === 'strong' && pair.titleSimilarity >= 0.8) return true;
   if (pair.fingerprintMatch) return true;
   if (pair.phaseConflict || pair.identityConflict) return false;
   if (pair.preciseIdentity) return true;

@@ -95,6 +95,20 @@ describe('pushAllUnpushed', () => {
     expect(mocks.eventFindMany).toHaveBeenCalledTimes(2);
   });
 
+  it('同批事件按顺序完成推送，后一个检查可观察前一个的投递结果', async () => {
+    mocks.eventFindMany.mockResolvedValueOnce([event('first', 90), event('duplicate', 80)]).mockResolvedValueOnce([]);
+    let firstFinished = false;
+    mocks.pushEvent.mockImplementation(async (id: string) => {
+      if (id === 'first') {
+        await Promise.resolve();
+        firstFinished = true;
+        return { status: 'completed' };
+      }
+      return { status: firstFinished ? 'failed' : 'completed' };
+    });
+    await expect(pushAllUnpushed(undefined, settings)).resolves.toEqual({ success: 1, failed: 1, skipped: 0 });
+  });
+
   it('推送调用出现未收口异常时交给 Job 重试，避免 while 重复处理同一 Event', async () => {
     mocks.eventFindMany.mockResolvedValue([event('broken')]);
     mocks.pushEvent.mockRejectedValue(new Error('database unavailable'));

@@ -5,7 +5,7 @@ export const EVENT_CLUSTER_CONTENT_RECALL_CANDIDATES = 120;
 export const EVENT_CLUSTER_MAX_CANDIDATES = 15;
 export const EVENT_CLUSTER_MAX_MEMBER_ARTICLES = 12;
 export const EVENT_CLUSTER_MAX_RETRIES = 5;
-export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v12';
+export const EVENT_CLUSTER_RULE_VERSION = 'event-cluster-v13';
 /** 高置信结构化身份可直接驱动自动归并，无需再请求 AI。 */
 export const EVENT_CLUSTER_AUTO_MERGE_CONFIDENCE = 85;
 export const EVENT_CLUSTER_AUTO_MERGE_IDENTITY_SCORE = 0.86;
@@ -86,6 +86,32 @@ export function normalizeEventText(value: string): string {
     .toLowerCase()
     .replace(/[\s\p{P}\p{S}]+/gu, '')
     .trim();
+}
+
+/** 标题中的小数点属于数字内容，不能当作普通标点删除。 */
+export function normalizeDuplicateTitle(value: string): string {
+  return value.normalize('NFKC').toLowerCase()
+    .replace(/(?<=\d)\.(?=\d)/gu, '\uE000')
+    .replace(/[\s\p{P}\p{S}]+/gu, '')
+    .replace(/\uE000/gu, '.')
+    .trim();
+}
+
+/** 标题编辑相似度：以较长标题为分母；长度上限或不足 80% 的长度比直接返回 0。 */
+export function titleEditSimilarity(left: string, right: string): number {
+  const a = Array.from(normalizeDuplicateTitle(left));
+  const b = Array.from(normalizeDuplicateTitle(right));
+  if (!a.length || !b.length || a.length > 256 || b.length > 256) return 0;
+  if (Math.min(a.length, b.length) / Math.max(a.length, b.length) < 0.8) return 0;
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + Number(a[i - 1] !== b[j - 1]));
+    }
+    previous = current;
+  }
+  return 1 - previous[b.length] / Math.max(a.length, b.length);
 }
 
 export function buildCharacterNgrams(value: string, sizes: readonly number[] = [2, 3, 4]): Set<string> {

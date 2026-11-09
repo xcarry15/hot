@@ -5,7 +5,8 @@ import { isWithinConfiguredQuietHours, PUSH_MAX_RETRIES, pushableWhere, readPush
 import { getWebhookConfigs } from '@/lib/settings'
 
 const PUSH_EVENT_BATCH_SIZE = 100
-const PUSH_CONCURRENCY = 3
+// 按事件串行：后一条的跨事件防重必须能看到前一条已完成的投递。
+const PUSH_CONCURRENCY = 1
 
 export interface PushExecutionOptions {
   respectQuietHours?: boolean;

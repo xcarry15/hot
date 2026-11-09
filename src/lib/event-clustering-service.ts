@@ -9,6 +9,8 @@ import {
   EVENT_CLUSTER_WINDOW_DAYS,
   hasLiteralContentOverlap,
   isMultiTopicTitle,
+  normalizeDuplicateTitle,
+  titleEditSimilarity,
 } from '@/contracts/event-clustering';
 import { parseEventSubjects } from '@/contracts/event-identity';
 import { db } from '@/lib/db';
@@ -54,9 +56,35 @@ const eventCandidateSelect = {
 } satisfies Prisma.EventSelect;
 
 async function loadCandidateRows(
-  article: { eventKey: string; contentHash: string; title: string },
+  article: { id: string; eventKey: string; contentHash: string; title: string; publishedAt: Date | null; createdAt: Date },
   baseWhere: Prisma.EventWhereInput,
 ) {
+  // 规范化标题不能通过 SQLite 的原始 title 等值查询召回。分页只读取标题和 ID，
+  // 先筛选再加载正文，避免近期文章超过候选窗口时漏掉非代表转载。
+  const center = articleDate(article).getTime();
+  const start = new Date(center - EVENT_CLUSTER_FOLLOW_UP_DAYS * 86_400_000);
+  const end = new Date(center + EVENT_CLUSTER_FOLLOW_UP_DAYS * 86_400_000);
+  const normalized = normalizeDuplicateTitle(article.title);
+  const matchedIds: string[] = [];
+  let cursor: string | undefined;
+  if (normalized) {
+    do {
+      const page = await db.article.findMany({
+        where: {
+          id: { not: article.id }, aiStatus: 'done', clusterStatus: { in: ['clustered', 'needs_review'] },
+          event: { is: baseWhere },
+          OR: [{ publishedAt: { gte: start, lte: end } }, { publishedAt: null, createdAt: { gte: start, lte: end } }],
+        },
+        select: { id: true, title: true }, orderBy: { id: 'asc' }, take: 500,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      for (const row of page) {
+        const other = normalizeDuplicateTitle(row.title);
+        if (other && (other === normalized || (normalized.length >= 8 && other.length >= 8 && titleEditSimilarity(normalized, other) >= 0.8))) matchedIds.push(row.id);
+      }
+      cursor = page.length === 500 ? page[page.length - 1].id : undefined;
+    } while (cursor);
+  }
   const matches: Prisma.ArticleWhereInput[] = [
     ...(article.contentHash ? [{ contentHash: article.contentHash }] : []),
     ...(article.eventKey ? [{ eventKey: article.eventKey }] : []),
@@ -64,6 +92,10 @@ async function loadCandidateRows(
   ];
   // 分别召回同稿、同身份、同标题成员。宽泛 key 命中不能挤掉旧成员的同稿强证据。
   const groups = await Promise.all([
+    ...(matchedIds.length ? [db.event.findMany({
+      where: { ...baseWhere, articles: { some: { id: { in: matchedIds } } } },
+      select: { ...eventCandidateSelect, articles: { ...eventCandidateSelect.articles, where: { id: { in: matchedIds } }, take: matchedIds.length } },
+    })] : []),
     ...matches.map((match) => {
       const where = { ...eventCandidateSelect.articles.where, ...match };
       return db.event.findMany({
@@ -111,7 +143,11 @@ export async function findRecentPushedEventDuplicate(articleId: string, eventId:
   const baseWhere = {
       id: { not: eventId },
       status: 'active',
-      pushedAt: { not: null, gte: cutoff },
+      OR: [
+        { pushedAt: { not: null, gte: cutoff } },
+        // 只要有一个目标成功，部分投递的事件也不能被另一篇重复稿再次发送。
+        { deliveries: { some: { status: 'succeeded', sentAt: { gte: cutoff } } } },
+      ],
   } satisfies Prisma.EventWhereInput;
   const rows = await loadCandidateRows(article, baseWhere);
   const matches = rows
@@ -309,22 +345,6 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
   }
 
   const multiTopic = isMultiTopicTitle(article.title);
-  if (multiTopic) {
-    assertNotAborted(signal);
-    const eventId = await commitClusterMutation((tx) => createEventForArticle(tx, article, {
-      action: 'create',
-      decisionSource: 'rule',
-      confidence: null,
-      evidence: {
-        eventKey: article.eventKey,
-        multiTopic,
-        standalone: true,
-        reason: '标题包含多个独立主体与动作，不强行归入其中一个子事件，自动按单篇建立独立 Event',
-        ...buildRuleCandidateAuditEvidence([], null),
-      },
-    }));
-    return { eventId, action: 'create' };
-  }
   const referenceAt = articleDate(article);
   const windowMs = EVENT_CLUSTER_FOLLOW_UP_DAYS * 24 * 60 * 60 * 1000;
   const windowStart = new Date(referenceAt.getTime() - windowMs);
@@ -408,11 +428,20 @@ export async function clusterArticle(articleId: string, signal?: AbortSignal): P
     .slice(0, EVENT_CLUSTER_MAX_CANDIDATES);
 
   // P0-2: 每位候选使用其最佳成员证据的决策
-  const exact = ranked.find(({ evidence }) => evidence.decision === 'exact');
+  const exact = ranked.find(({ evidence }) => evidence.decision === 'exact' && (!multiTopic || evidence.exactTitle));
   if (exact) {
     assertNotAborted(signal);
     const eventId = await commitClusterMutation((tx) => attachArticle(tx, article, exact.candidate, exact.evidence, 'exact', null));
     return { eventId, action: 'attach' };
+  }
+
+  if (multiTopic) {
+    const eventId = await commitClusterMutation((tx) => createEventForArticle(tx, article, {
+      action: 'create', decisionSource: 'rule', confidence: null,
+      evidence: { eventKey: article.eventKey, multiTopic, standalone: true,
+        reason: '多事件标题没有同标题转载，保持独立事件', ...buildRuleCandidateAuditEvidence([], null) },
+    }));
+    return { eventId, action: 'create' };
   }
 
   const strong = ranked.find(({ evidence }) => evidence.decision === 'strong');

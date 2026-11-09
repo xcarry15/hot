@@ -21,6 +21,7 @@ describe('缺少单一事件身份的转载归并', () => {
     vi.clearAllMocks();
     vi.mocked(db.$transaction).mockImplementation((async (operation: (client: typeof db) => Promise<unknown>) => operation(db)) as never);
     vi.mocked(db.article.findUnique).mockResolvedValue(article() as never);
+    vi.mocked(db.article.findMany).mockResolvedValue([] as never);
     vi.mocked(db.event.findUnique).mockResolvedValue({ firstSeenAt: now, lastSeenAt: now } as never);
     vi.mocked(db.event.create).mockResolvedValue({ id: 'independent' } as never);
     vi.mocked(db.event.findMany).mockResolvedValue([{
@@ -38,15 +39,55 @@ describe('缺少单一事件身份的转载归并', () => {
     }));
   });
 
-  it('同标题但正文不同的无身份稿保持独立，不以空eventKey作合并依据', async () => {
+  it('规范化标题相同的无身份稿即使正文不同也归入已有事件', async () => {
     vi.mocked(db.article.findUnique).mockResolvedValue(article({ cleanContent: '新的文章介绍消费者购买习惯，与旧稿事实完全不同。'.repeat(10) }) as never);
-    await expect(clusterArticle('new')).resolves.toEqual({ eventId: 'independent', action: 'create' });
+    await expect(clusterArticle('new')).resolves.toEqual({ eventId: 'existing', action: 'attach' });
   });
 
   it('多事件快讯仍保持单篇独立，不并入一个子事件', async () => {
     vi.mocked(db.article.findUnique).mockResolvedValue(article({ title: '行业快讯：品牌A收购公司；品牌B上海首店开业' }) as never);
     await expect(clusterArticle('new')).resolves.toEqual({ eventId: 'independent', action: 'create' });
-    expect(db.event.findMany).not.toHaveBeenCalled();
+    expect(db.event.findMany).toHaveBeenCalled();
+  });
+
+  it('多事件快讯的规范化同标题转载仍归入已有事件', async () => {
+    const title = '行业快讯：品牌A收购公司；品牌B上海首店开业';
+    vi.mocked(db.article.findUnique).mockResolvedValue(article({ title }) as never);
+    vi.mocked(db.event.findMany).mockResolvedValue([{
+      id: 'existing', representativeArticleId: 'old', clusterReviewStatus: 'confirmed',
+      representativeArticle: article({ id: 'old', title: '行业快讯 品牌Ａ收购公司 品牌Ｂ上海首店开业' }), articles: [],
+    }] as never);
+    await expect(clusterArticle('new')).resolves.toEqual({ eventId: 'existing', action: 'attach' });
+  });
+
+  it('规范化标题从分页候选召回旧非代表文章，也阻止近期重复推送', async () => {
+    const old = article({ id: 'old-match', title: '手作奶茶杀疯了，等一杯4小时，品牌却加速狂飙？', cleanContent: '不同正文', eventKey: '' });
+    vi.mocked(db.article.findMany).mockResolvedValue([{ id: old.id, title: old.title }] as never);
+    vi.mocked(db.event.findMany).mockImplementation((async (args: { select: { articles: { where: { id?: unknown } } } }) => {
+      if (args.select.articles.where.id) return [{ id: 'old-event', representativeArticleId: 'other', clusterReviewStatus: 'confirmed', representativeArticle: null, articles: [old] }] as never;
+      return [] as never;
+    }) as never);
+    await expect(clusterArticle('new')).resolves.toEqual({ eventId: 'old-event', action: 'attach' });
+    await expect(findRecentPushedEventDuplicate('new', 'new-event')).resolves.toMatchObject({ eventId: 'old-event', evidence: { exactTitle: true } });
+    expect(db.article.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ event: { is: expect.objectContaining({
+        OR: expect.arrayContaining([expect.objectContaining({ deliveries: expect.objectContaining({ some: expect.objectContaining({ status: 'succeeded' }) }) })]),
+      }) } }),
+    }));
+  });
+
+  it('分页超过500篇时仍能召回第二页的标题转载', async () => {
+    const old = article({ id: 'z-match', title: '手作奶茶杀疯了，等一杯4小时，品牌却加速狂飙？' });
+    vi.mocked(db.article.findMany)
+      .mockResolvedValueOnce(Array.from({ length: 500 }, (_, i) => ({ id: `a${i}`, title: '无关' })) as never)
+      .mockResolvedValueOnce([{ id: old.id, title: old.title }] as never);
+    vi.mocked(db.event.findMany).mockImplementation((async (args: { select: { articles: { where: { id?: unknown } } } }) => (
+      args.select.articles.where.id
+        ? [{ id: 'old-event', representativeArticleId: null, clusterReviewStatus: 'confirmed', representativeArticle: null, articles: [old] }]
+        : []
+    )) as never);
+    await expect(clusterArticle('new')).resolves.toEqual({ eventId: 'old-event', action: 'attach' });
+    expect(db.article.findMany).toHaveBeenCalledTimes(2);
   });
 
   it('精确命中的旧非代表成员超过最新12篇窗口时仍参与归并', async () => {
