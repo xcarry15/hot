@@ -570,3 +570,40 @@ model ExportJob {
   @@index([expiresAt, status])
   @@map("export_jobs")
 }
+
+model VisitSession {
+  id        String   @id @default(cuid())
+  visitorId String
+  startedAt DateTime @default(now())
+  lastAt    DateTime @default(now())
+  dateKey   String
+  region    String
+  city      String
+  channel   String
+  events    VisitEvent[]
+  @@index([visitorId, lastAt])
+  @@index([dateKey])
+  @@map("visit_sessions")
+}
+
+model VisitEvent {
+  id        String   @id @default(cuid())
+  sessionId String
+  visitorId String
+  dateKey   String
+  kind      String
+  createdAt DateTime @default(now())
+  session   VisitSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  @@index([dateKey, kind])
+  @@index([visitorId, dateKey])
+  @@map("visit_events")
+}
+
+model VisitToolDaily {
+  dateKey String
+  toolId  String
+  toolName String
+  clicks  Int @default(0)
+  @@id([dateKey, toolId])
+  @@map("visit_tool_daily")
+}

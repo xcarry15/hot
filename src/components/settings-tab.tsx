@@ -34,6 +34,8 @@ const loadDashboard = () => import('@/components/dashboard-tab')
 const loadSources = () => import('@/components/sources-tab')
 const loadPublic = () => import('@/components/settings/public')
 const loadToolDirectory = () => import('@/components/settings/tool-directory')
+const loadVisitAnalytics = () => import('@/components/settings/visit-analytics')
+const VisitAnalytics = dynamic(loadVisitAnalytics, { loading: sectionLoading })
 const loadProxy = () => import('@/components/settings/proxy')
 const AiModelTab = dynamic(loadAiModel, { loading: sectionLoading })
 const PromptsTab = dynamic(loadPrompts, { loading: sectionLoading })
@@ -63,6 +65,7 @@ const sectionLoaders: Record<string, () => Promise<unknown>> = {
   data: loadData,
   backup: loadBackup,
   tools: loadToolDirectory,
+  analytics: loadVisitAnalytics,
   proxy: loadProxy,
 }
 
@@ -458,6 +461,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
             <TabsTrigger value="data" data-value="data" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">维护</TabsTrigger>
             <TabsTrigger value="backup" data-value="backup" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">备份</TabsTrigger>
             <TabsTrigger value="tools" data-value="tools" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">工具中心</TabsTrigger>
+            <TabsTrigger value="analytics" data-value="analytics" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">访问统计</TabsTrigger>
           </TabsList>
         </div>
 
@@ -525,6 +529,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         <TabsContent value="tools" className="m-0 min-h-0 flex-1 overflow-auto">
           <ToolDirectoryManagement />
         </TabsContent>
+        <TabsContent value="analytics" className="m-0 min-h-0 flex-1 overflow-auto"><VisitAnalytics /></TabsContent>
       </Tabs>
 
       {hasUnsavedChanges && (

@@ -1,3 +1,4 @@
+import { cleanupVisitAnalytics } from '@/lib/visit-analytics-service';
 /**
  * In-process scheduler — runs inside the Next.js server.
  *
@@ -37,6 +38,7 @@ const LAST_CRAWL_AT_KEY = SETTING_KEYS.SCHEDULER_LAST_CRAWL_AT;
 const LAST_PUSH_DATE_KEY = SETTING_KEYS.SCHEDULER_LAST_PUSH_DATE;
 const PUSH_JOB_MARKER_KEY = SETTING_KEYS.SCHEDULER_PUSH_JOB || 'scheduler_push_job';
 let schedulerTickPromise: Promise<void> | null = null;
+let lastVisitCleanupAt = 0;
 
 interface ZonedClock {
   date: string;
@@ -320,6 +322,10 @@ async function runSchedulerTickInternal(): Promise<void> {
   // sending 租约到期后结果无法确定，必须及时转为人工确认，不能只等进程重启。
   await cleanupExpiredSendingDeliveries();
   await cleanupExpiredExportJobs();
+  if (Date.now() - lastVisitCleanupAt >= 86_400_000) {
+    try { await cleanupVisitAnalytics(); lastVisitCleanupAt = Date.now(); }
+    catch (error) { console.error('[scheduler] visit cleanup failed:', error); }
+  }
   const settings = await readAllSettings();
   await maybeEnqueueSettingsRebuild();
   await maybeEnqueueCrawl(settings);

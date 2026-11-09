@@ -78,6 +78,15 @@ describe('proxy auth', () => {
     expect(proxy(makeRequest('POST', '/api/health')).status).toBe(405);
   });
 
+  it('访客采集只开放 POST，看板查询仍需后台鉴权', async () => {
+    process.env.API_TOKEN = 'secret123';
+    (process.env as Record<string, string>).NODE_ENV = 'production';
+    const { proxy } = await import('@/proxy');
+    expect(proxy(makeRequest('POST', '/api/public/visits')).status).toBe(200);
+    expect(proxy(makeRequest('GET', '/api/public/visits')).status).toBe(405);
+    expect(proxy(makeRequest('GET', '/api/visit-analytics')).status).toBe(401);
+  });
+
   it('公开分享海报无需后台 Token，但只允许 POST', async () => {
     process.env.API_TOKEN = 'secret123';
     (process.env as Record<string,string>).NODE_ENV = 'production';

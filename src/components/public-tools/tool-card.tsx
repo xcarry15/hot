@@ -1,3 +1,6 @@
+'use client';
+
+import { sendVisit } from '@/features/visit-analytics.client';
 import type { CSSProperties } from 'react';
 import { isToolDirectoryLinkableStatus } from '@/contracts/tool-directory';
 import PublicToolIcon from './tool-icons';
@@ -44,6 +47,8 @@ export default function PublicToolCard({
         </div>
       ) : (
         <a
+          onClick={() => sendVisit('tool', tool.id)}
+          onAuxClick={(event) => { if (event.button === 1) sendVisit('tool', tool.id); }}
           href={tool.href ?? undefined}
           target="_blank"
           rel="noopener noreferrer"
