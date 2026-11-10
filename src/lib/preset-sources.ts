@@ -76,6 +76,23 @@ export const PRESET_SOURCES: PresetSource[] = [
     description: '亿邦动力最新电商、零售与品牌资讯',
   },
 
+  {
+    id: '36kr-consumption',
+    name: '36氪-关于消费的一切',
+    type: 'html',
+    url: 'https://www.36kr.com/motif/356',
+    parserConfig: JSON.stringify({
+      listItem: '.kr-flow-article-item',
+      link: 'a.article-item-title[href^="/p/"]',
+      title: 'a.article-item-title[href^="/p/"]',
+      summary: '.article-item-description',
+      content: '.kr-rich-text-wrapper',
+      fetchDetailPublishedAt: true,
+      strictList: true,
+    }),
+    description: '消费品牌、餐饮零售和行业趋势',
+  },
+
 ];
 
 /**

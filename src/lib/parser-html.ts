@@ -23,6 +23,7 @@ interface HtmlConfig {
   content?: string;
   headers?: Record<string, string>;
   fetchDetailPublishedAt?: boolean;
+  strictList?: boolean;
 }
 
 const DIRECT_FETCH_TIMEOUT_MS = 20_000;
@@ -109,7 +110,16 @@ export async function parseHtml(url: string, parserConfigStr: string, signal?: A
     const items = extractLinksFromHtml(html, url, config).map((item) => ({
       ...item,
       url: normalizeWinshangUrl(item.url),
-    }));
+    })).filter((item) => {
+      const sourceUrl = new URL(url);
+      if (sourceUrl.hostname !== 'www.36kr.com' || sourceUrl.pathname !== '/motif/356') return true;
+      const articleUrl = new URL(item.url);
+      return articleUrl.origin === sourceUrl.origin && /^\/p\/\d+$/.test(articleUrl.pathname)
+        && !articleUrl.search && !articleUrl.hash;
+    });
+    if (config.strictList && items.length === 0) {
+      return { success: false, items: [], error: '配置的文章列表未匹配到有效条目' };
+    }
     return { success: true, items };
   } catch (error: unknown) {
     if (signal?.aborted) throw error;
@@ -202,7 +212,7 @@ function extractLinksFromHtml(
 ): Array<{ title: string; url: string; summary?: string; publishedAt?: string }> {
   if (config.listItem) {
     const structured = extractStructuredItems(html, baseUrl, config);
-    if (structured.length > 0) return structured;
+    if (structured.length > 0 || config.strictList) return structured;
   }
 
   return extractAllLinks(html, baseUrl);
@@ -224,7 +234,7 @@ function extractStructuredItems(
       const href = $el.find(config.link).attr('href') || $el.closest('a').attr('href');
       if (href) item.url = resolveUrl(href, baseUrl);
     }
-    if (!item.url) {
+    if (!item.url && !config.strictList) {
       const $a = $el.find('a').first();
       const href = $a.attr('href');
       if (href) item.url = resolveUrl(href, baseUrl);
@@ -234,7 +244,7 @@ function extractStructuredItems(
       const $title = $el.find(config.title).first();
       if ($title.length) item.title = $title.text().trim();
     }
-    if (!item.title) {
+    if (!item.title && !config.strictList) {
       const $a = $el.find('a').first();
       if ($a.length) item.title = $a.text().trim();
     }

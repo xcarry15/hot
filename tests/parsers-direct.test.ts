@@ -41,6 +41,7 @@ vi.mock('@/lib/zai', () => ({
 import { parseHtml } from '@/lib/parser-html';
 import { parseRss } from '@/lib/parser-rss';
 import { parseCanyin88 } from '@/lib/parser-canyin88';
+import { getPresetSourceById } from '@/lib/preset-sources';
 
 it('解析器和注册表只依赖 crawl 纯契约，不反向依赖 crawler', () => {
   const libDir = path.resolve(__dirname, '../src/lib');
@@ -75,6 +76,27 @@ beforeEach(() => {
 });
 
 describe('direct parser behavior', () => {
+  it('36氪预设只采集栏目文章，结构失效时不回退到导航链接', async () => {
+    const preset = getPresetSourceById('36kr-consumption')!;
+    mocks.fetchHtml.mockResolvedValue(`
+      <a href="/p/777">导航中的文章链接</a>
+      <div class="kr-flow-article-item">
+        <a class="article-item-title" href="/p/123456">连锁咖啡品牌开设新门店</a>
+        <a class="article-item-description" href="/p/123456">拓店摘要</a>
+      </div>
+      <div class="kr-flow-article-item"><a class="article-item-title" href="/p/../user/1">伪造文章链接</a></div>
+      <div class="kr-flow-article-item"><a href="/p/789">缺少标题类名的链接</a></div>
+    `);
+    const result = await parseHtml(preset.url, preset.parserConfig);
+    expect(result).toMatchObject({ success: true, items: [{
+      title: '连锁咖啡品牌开设新门店', url: 'https://www.36kr.com/p/123456', summary: '拓店摘要',
+    }] });
+    expect(result.items).toHaveLength(1);
+
+    mocks.fetchHtml.mockResolvedValue('<a href="/p/777">导航中的文章链接</a>');
+    expect(await parseHtml(preset.url, preset.parserConfig)).toMatchObject({ success: false, items: [] });
+  });
+
   it('upgrades Winshang article URLs to HTTPS', async () => {
     mocks.fetchHtml.mockImplementation(async (url: string) => (
       url.includes('/list')
