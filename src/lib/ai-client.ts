@@ -2,13 +2,13 @@
  * Unified AI Client — OpenAI-compatible Chat Completions.
  *
  * Supported providers (OpenAI-compatible):
- *   openrouter (default, free routing) | deepseek | gemini
+ *   openrouter (default, free routing) | deepseek | gemini | siliconflow
  *
  * The ZAI SDK is NOT used for chat. It is imported separately by `parser-html.ts`
  * and `crawler.ts` for `page_reader` / `web_search` (see `./zai`).
  *
  * Settings stored in DB (Setting table):
- *   ai_provider  — deepseek | openrouter | gemini
+ *   ai_provider  — deepseek | openrouter | gemini | siliconflow
  *   {provider}_api_key / {provider}_base_url / {provider}_model
  *   ai_temperature — Temperature (0-2; default from settings catalog)
  *   ai_max_tokens  — Max tokens (1-65536; default from settings catalog)
@@ -565,8 +565,8 @@ export async function testAIConnection(
     ], {
       temperature: 0.7,
       // 思考模型需要给推理和可见回复留出预算，不能沿用 16/100 tokens 的普通探测。
-      maxTokens: options.maxTokens ?? (settings.provider === 'gemini' ? 2048 : 100),
-      timeoutMs: options.timeoutMs ?? (settings.provider === 'gemini' ? 30_000 : AI_CONNECTION_TEST_TIMEOUT_MS),
+      maxTokens: options.maxTokens ?? (settings.provider === 'gemini' || settings.provider === 'siliconflow' ? 2048 : 100),
+      timeoutMs: options.timeoutMs ?? (settings.provider === 'gemini' || settings.provider === 'siliconflow' ? 30_000 : AI_CONNECTION_TEST_TIMEOUT_MS),
       onRequestStart: () => {
         requestStartedAt = Date.now();
       },

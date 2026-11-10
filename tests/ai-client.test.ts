@@ -138,6 +138,35 @@ describe('createChatCompletion', () => {
     expect((requestInit.headers as Headers).get('authorization')).toBe('Bearer test-key');
   });
 
+  it('硅基流动使用自己的密钥、模型和 OpenAI 兼容接口', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      ai_provider: 'siliconflow',
+      siliconflow_api_key: 'siliconflow-test-key',
+      siliconflow_base_url: 'https://api.siliconflow.cn/v1',
+      siliconflow_model: 'XingChenAGI/Xing4.0-29B',
+      ai_temperature: '0.2', ai_max_tokens: '2048',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse('分析结果'));
+    await expect(createChatCompletion([{ role: 'user', content: '文章分析' }])).resolves.toMatchObject({
+      provider: 'siliconflow', model: 'XingChenAGI/Xing4.0-29B', content: '分析结果',
+    });
+    const [url, request] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [RequestInfo, RequestInit];
+    expect(String(url)).toBe('https://api.siliconflow.cn/v1/chat/completions');
+    expect((request.headers as Headers).get('authorization')).toBe('Bearer siliconflow-test-key');
+    expect(JSON.parse(String(request.body)).model).toBe('XingChenAGI/Xing4.0-29B');
+  });
+
+  it('硅基流动限流时不立即重复发送请求', async () => {
+    mocks.readAllSettings.mockResolvedValue({
+      ai_provider: 'siliconflow', siliconflow_api_key: 'test-key',
+      siliconflow_base_url: 'https://api.siliconflow.cn/v1', siliconflow_model: 'XingChenAGI/Xing4.0-29B',
+      ai_temperature: '0.2', ai_max_tokens: '2048',
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response('rate limit', { status: 429 }));
+    await expect(createChatCompletion([{ role: 'user', content: '文章分析' }])).rejects.toMatchObject({ kind: 'rate_limit', status: 429 });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('OpenRouter 免费模型收到 429 时不重复发送重试请求', async () => {
     mocks.readAllSettings.mockResolvedValue({
       ai_provider: 'openrouter',

@@ -46,6 +46,7 @@ const MODEL_CACHE_STORAGE_KEYS: Record<AIProviderId, string> = {
   openrouter: 'hot2:openrouter-free-models:v1',
   deepseek: 'hot2:deepseek-models:v1',
   gemini: 'hot2:gemini-models:v1',
+  siliconflow: 'hot2:siliconflow-models:v1',
 }
 const MAX_CACHED_MODELS = 50
 
@@ -146,7 +147,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
       ? deepseekModels
       : currentProvider.id === 'gemini'
         ? geminiModels
-        : []
+        : [...AI_PROVIDERS.siliconflow.models]
   const currentModelCandidates = providerUnavailableReason ? [] : [...new Set([
     ...discoveredModelCandidates,
     ...(currentConfig.model.trim() ? [currentConfig.model.trim()] : []),
@@ -633,6 +634,13 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
               <p className="text-xs text-muted-foreground">
                 OpenRouter 默认使用 <code className="rounded bg-muted px-1">openrouter/free</code>，会自动选择可用的免费模型。请先填写 API Key；免费模型有速率限制。申请地址：
                 <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-primary underline ml-1">openrouter.ai/keys</a>
+              </p>
+            )}
+            {currentProvider.id === 'siliconflow' && (
+              <p className="text-xs text-muted-foreground">
+                填写硅基流动 API Key 和模型名称；候选模型价格及可用性会变化，请在调用前核对官方价格，其他模型可能收费。
+                <a href="https://siliconflow.cn/pricing" target="_blank" rel="noopener noreferrer" className="ml-1 text-primary underline">查看模型价格</a>
+                <a href="https://cloud.siliconflow.cn/account/ak" target="_blank" rel="noopener noreferrer" className="ml-1 text-primary underline">申请 API Key</a>
               </p>
             )}
             {aiTestResult && !aiTestResult.success && aiTestResult.error?.includes('调用次数已用完') && (

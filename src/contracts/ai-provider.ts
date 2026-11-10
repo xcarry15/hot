@@ -11,6 +11,14 @@ export function isOpenRouterFreeModel(model: string): boolean {
 }
 
 export const AI_PROVIDERS = {
+  siliconflow: {
+    id: 'siliconflow',
+    name: '硅基流动',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    defaultModel: 'XingChenAGI/Xing4.0-29B',
+    models: ['XingChenAGI/Xing4.0-29B'],
+    needsApiKey: true,
+  },
   deepseek: {
     id: 'deepseek',
     name: 'DeepSeek',
@@ -80,12 +88,12 @@ export function isFreeAIModel(provider: string, model: string): boolean {
 
 export function isAIModelAllowed(provider: string, model: string): boolean {
   if (!isAIProviderId(provider)) return false;
-  return provider === 'deepseek' || provider === 'gemini' || isFreeAIModel(provider, model);
+  return provider === 'deepseek' || provider === 'gemini' || provider === 'siliconflow' || isFreeAIModel(provider, model);
 }
 
 /** Gemini 的账户层级无法从模型 ID 判断；统一保守限速，不把付费 Key 宣称为免费。 */
 export function requiresConservativeAIRequests(provider: string, model: string): boolean {
-  return provider === 'gemini' || isFreeAIModel(provider, model);
+  return provider === 'gemini' || provider === 'siliconflow' || isFreeAIModel(provider, model);
 }
 
 export function getAIModelValidationError(provider: string, model: string): string | null {

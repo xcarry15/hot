@@ -73,6 +73,8 @@ describe('OpenRouter 免费模型请求闸门', () => {
     expect(isAIModelAllowed('deepseek', 'deepseek-v4-flash')).toBe(true);
     expect(isAIModelAllowed('openrouter', 'openai/gpt-4o')).toBe(false);
     expect(isProviderFreeAIModel('openrouter', 'openrouter/free')).toBe(true);
+    expect(isAIModelAllowed('siliconflow', 'XingChenAGI/Xing4.0-29B')).toBe(true);
+    expect(isProviderFreeAIModel('siliconflow', 'XingChenAGI/Xing4.0-29B')).toBe(false);
   });
 
   it('拒绝对象原型名称，避免损坏 Provider 配置解析', () => {

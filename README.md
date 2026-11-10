@@ -211,6 +211,8 @@ AI 运行时配置按需读取：模型请求只加载当前 Provider 的连接�
 
 在 `设置 → AI 模型` 选择 `Google Gemini`，填写 [Google AI Studio API Key](https://aistudio.google.com/apikey)，点击“测试连接”，成功后保存即可。API 地址默认 `https://generativelanguage.googleapis.com/v1beta/openai`，默认模型 `gemini-3.8-flash`，备用候选为 `gemini-3.5-flash-lite`，无需额外 SDK 或手动配置请求参数。Gemini 使用模型默认采样参数、`reasoning_effort=low` 与 `max_completion_tokens`；连接测试留出 2048 tokens 和 30 秒，避免思考模型因探测预算过小而返回空内容。测试只使用目标厂商的 Key，目标厂商未配置时不会借用其他厂商的密钥。
 
+在 `设置 → AI 模型` 选择 `硅基流动`，填写个人 API Key 和模型名称，可先测试连接再保存；默认地址为 `https://api.siliconflow.cn/v1`。候选模型的价格和可用性会变化，请在调用前查询[官方价格](https://siliconflow.cn/pricing)，本项目不保证候选或手动填写的模型免费；需要时先完成实名认证。请求使用保守串行间隔和有限退避，连接成功不代表适合文章分析。
+
 保存 Key 后，进入 Gemini 配置时会自动同步模型目录，也可手动刷新。受保护的 `GET /api/settings/gemini-models` 在服务端通过固定 Google 官方地址读取分页目录，保留支持 `generateContent` 的 Gemini 文本候选并排除图像、语音、实时、嵌入等专用模型；失败时保留浏览器缓存与内置候选。Key 使用现有加密、按需解密和整机备份机制；目录 URL 与响应均不含 Key，编辑页仍通过受保护路径按需解密。无需新增数据库迁移。
 
 Gemini 请求强制串行、至少间隔 12 秒，这是应用的保守策略，不是 Google 配额承诺。429 不立即重复发送，支持 Google `RetryInfo` 和 HTTP `Retry-After`，并沿用现有持久化冷却、恢复队列和概览统计。免费额度、是否计费、模型权限与可用地区由 Google 项目决定；已开通计费的 Key 不会因接入本项目而变成免费。连接失败时会区分 Key 无效、地区限制、免费层不可用、API 未启用与模型不可用。官方说明：[OpenAI 兼容接口](https://ai.google.dev/gemini-api/docs/openai)、[价格与免费层](https://ai.google.dev/gemini-api/docs/pricing)、[支持地区](https://ai.google.dev/gemini-api/docs/available-regions)。
