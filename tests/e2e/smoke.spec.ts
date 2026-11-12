@@ -16,6 +16,28 @@ test('admin login reaches the protected workbench', async ({ page }) => {
   await expect(page.getByRole('button', { name: '设置' })).toBeVisible();
 });
 
+test('访问统计展示指标、趋势与文章排行，并随日期筛选更新', async ({ page }) => {
+  await page.route('**/api/visit-analytics?*', async (route) => {
+    await route.fulfill({ json: {
+      geoConfigured: true, visitors: 2, visits: 3, views: 5, clicks: 1, articleViews: 4, originalClicks: 2,
+      daily: [], channels: [{ label: '直接访问', visits: 3, visitors: 2 }], regions: [], tools: [{ label: '工具', count: 1 }],
+      topViewedArticles: [{ id: 'article-1', title: '测试资讯', viewCount: 4, publishedAt: null, score: 80, sourceName: '测试来源' }],
+    } });
+  });
+  await login(page);
+  await page.getByRole('button', { name: '设置' }).click();
+  await page.getByRole('tab', { name: '访问统计' }).click();
+  await expect(page.getByText('资讯确认浏览', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '公开浏览 Top 20' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /测试资讯/ })).toBeVisible();
+  await page.getByText('查看每日明细').click();
+  await expect(page.getByRole('columnheader', { name: '页面浏览' })).toBeVisible();
+  const nextRequest = page.waitForRequest((request) => request.url().includes('/api/visit-analytics?') && request.method() === 'GET');
+  await page.getByRole('button', { name: '近 7 天' }).click();
+  await nextRequest;
+  await expect(page.getByRole('heading', { name: '公开浏览 Top 20' })).toBeVisible();
+});
+
 test('public news page loads its empty or populated feed', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveTitle(/资讯/);

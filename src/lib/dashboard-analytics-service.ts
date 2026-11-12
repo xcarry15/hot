@@ -360,7 +360,6 @@ async function buildDashboardAnalytics(
     discardedItems,
     fetchLogs,
     interactionBySource,
-    interactionByEvent,
     eventActivities,
     aiInvocations,
     aiJobHistory,
@@ -415,14 +414,6 @@ async function buildDashboardAnalytics(
         ...(sourceId ? { sourceId } : {}),
       },
       by: ['sourceId'],
-      _sum: { viewCount: true, originalClickCount: true },
-    }),
-    db.eventInteractionDaily.groupBy({
-      where: {
-        dateKey: interactionDateWhere,
-        ...(sourceId ? { sourceId } : {}),
-      },
-      by: ['eventId'],
       _sum: { viewCount: true, originalClickCount: true },
     }),
     db.event.findMany({
@@ -673,60 +664,6 @@ async function buildDashboardAnalytics(
     }
   }
 
-  const rankedInteractionEvents = interactionByEvent
-    .map((row) => ({
-      eventId: row.eventId,
-      viewCount: row._sum.viewCount ?? 0,
-      originalClickCount: row._sum.originalClickCount ?? 0,
-    }))
-    .filter((row) => row.viewCount > 0 || row.originalClickCount > 0)
-    .sort((left, right) => right.viewCount - left.viewCount
-      || right.originalClickCount - left.originalClickCount
-      || right.eventId.localeCompare(left.eventId));
-  // 已合并的历史 Event 没有代表 Article。分块继续读取直到得到 20 篇，既避免
-  // SQLite IN 参数上限，也不会因前 100 条都已合并而错误显示空 Top 榜。
-  const topViewedArticles: Array<{
-    id: string;
-    title: string;
-    viewCount: number;
-    publishedAt: string | null;
-    score: number;
-    sourceName: string;
-  }> = [];
-  const TOP_EVENT_QUERY_CHUNK_SIZE = 100;
-  for (let offset = 0; offset < rankedInteractionEvents.length && topViewedArticles.length < 20; offset += TOP_EVENT_QUERY_CHUNK_SIZE) {
-    const rankedChunk = rankedInteractionEvents.slice(offset, offset + TOP_EVENT_QUERY_CHUNK_SIZE);
-    const eventRows = await db.event.findMany({
-      where: { id: { in: rankedChunk.map((row) => row.eventId) }, representativeArticleId: { not: null } },
-      select: {
-        id: true,
-        representativeArticle: {
-          select: {
-            id: true,
-            title: true,
-            publishedAt: true,
-            score: true,
-            source: { select: { name: true } },
-          },
-        },
-      },
-    });
-    const eventById = new Map(eventRows.map((event) => [event.id, event]));
-    for (const interaction of rankedChunk) {
-      if (topViewedArticles.length >= 20) break;
-      const article = eventById.get(interaction.eventId)?.representativeArticle;
-      if (!article) continue;
-      topViewedArticles.push({
-        id: article.id,
-        title: article.title,
-        viewCount: interaction.viewCount,
-        publishedAt: article.publishedAt?.toISOString() ?? null,
-        score: article.score,
-        sourceName: article.source.name,
-      });
-    }
-  }
-
   return {
     range,
     sourceId: sourceId ?? null,
@@ -738,7 +675,6 @@ async function buildDashboardAnalytics(
     },
     ai,
     sources: sourceRows,
-    topViewedArticles,
     dailyNewArticles: dailyArticleKeys.map((date) => ({
       date,
       count: dailyArticleCounts.get(date)?.newCount ?? 0,

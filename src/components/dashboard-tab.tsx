@@ -19,7 +19,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { AiInvocationCard, CrawlTimeCard, DailyNewArticlesCard, DailyPublicArticlesCard, DailyPushedArticlesCard, TopViewedArticlesCard } from './dashboard/dashboard-cards'
+import { AiInvocationCard, CrawlTimeCard, DailyNewArticlesCard, DailyPublicArticlesCard, DailyPushedArticlesCard } from './dashboard/dashboard-cards'
 import { formatNumber, formatPercent } from './dashboard/format'
 import { isRequestAborted } from '@/lib/request-json.client'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -177,12 +177,6 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
     void fetchData()
   }
 
-  const openPopularArticle = useCallback((articleId: string) => {
-    if (typeof window === 'undefined') return
-    const url = new URL('/admin', window.location.origin)
-    url.searchParams.set('articleId', articleId)
-    window.location.assign(url.toString())
-  }, [])
 
   useEffect(() => {
     if (!active) return
@@ -531,11 +525,6 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
             />
 
             <PushLogPanel active={active} refreshToken={refreshToken} startAt={analytics.startAt} endAt={analytics.endAt} />
-
-            <TopViewedArticlesCard
-              articles={analytics.topViewedArticles}
-              onArticleClick={openPopularArticle}
-            />
 
             <div className="grid min-w-0 max-w-full gap-1">
               <DailyNewArticlesCard articles={analytics.dailyNewArticles} />

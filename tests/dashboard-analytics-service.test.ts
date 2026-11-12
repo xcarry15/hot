@@ -77,23 +77,13 @@ describe('运营统计时间与 Event 口径', () => {
       // 即使旧 Article 上残留大数，也不能影响概览时间范围。
       viewCount: 999, originalClickCount: 888,
     }]);
-    mocks.interactionGroupBy
-      .mockResolvedValueOnce([{ sourceId: 'source-1', _sum: { viewCount: 3, originalClickCount: 1 } }])
-      .mockResolvedValueOnce([{ eventId: 'e1', _sum: { viewCount: 3, originalClickCount: 1 } }]);
-    mocks.eventFindMany
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{
-        id: 'e1',
-        representativeArticle: {
-          id: 'representative', title: '浏览最多', publishedAt: now, score: 85, source: { name: '测试源' },
-        },
-      }]);
+    mocks.interactionGroupBy.mockResolvedValueOnce([{ sourceId: 'source-1', _sum: { viewCount: 3, originalClickCount: 1 } }]);
 
     const result = await getDashboardAnalytics('today');
 
     expect(result.summary.views).toBe(3);
     expect(result.summary.originalClicks).toBe(1);
-    expect(result.topViewedArticles).toMatchObject([{ id: 'representative', viewCount: 3 }]);
+    expect(mocks.interactionGroupBy).toHaveBeenCalledTimes(1);
   });
 
   it('每日公开与推送按 Event 实际动作时间归档', async () => {

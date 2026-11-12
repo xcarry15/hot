@@ -137,11 +137,13 @@ function crawlStatusLabel(status: DashboardAnalytics["crawlRecords"][number]["st
   return "等待中"
 }
 
+export type TopViewedArticle = { id: string; title: string; viewCount: number; publishedAt: string | null; score: number; sourceName: string }
+
 export function TopViewedArticlesCard({
   articles,
   onArticleClick,
 }: {
-  articles: DashboardAnalytics['topViewedArticles']
+  articles: TopViewedArticle[]
   onArticleClick: (articleId: string) => void
 }) {
   const maxViews = Math.max(1, ...articles.map((article) => article.viewCount))

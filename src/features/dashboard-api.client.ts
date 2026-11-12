@@ -138,14 +138,6 @@ export interface DashboardAnalytics {
     originalClicks: number;
     clickRate: number;
   }>;
-  topViewedArticles: Array<{
-    id: string;
-    title: string;
-    viewCount: number;
-    publishedAt: string | null;
-    score: number;
-    sourceName: string;
-  }>;
   dailyNewArticles: Array<{ date: string; count: number; publicCount: number; pushedCount: number }>;
   crawlRecords: Array<{
     id: string;

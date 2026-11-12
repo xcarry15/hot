@@ -1,5 +1,11 @@
 'use client';
 
+import { requestJson } from '@/lib/request-json.client';
+
+export function fetchVisitAnalytics<T>(start: string, end: string, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>('GET', `/api/visit-analytics?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, { signal });
+}
+
 const KEY = 'hot_visitor_id';
 function visitorId(): string | null {
   try {
