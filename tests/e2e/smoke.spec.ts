@@ -20,6 +20,7 @@ test('访问统计展示指标、趋势与文章排行，并随日期筛选更�
   await page.route('**/api/visit-analytics?*', async (route) => {
     await route.fulfill({ json: {
       geoConfigured: true, visitors: 2, visits: 3, views: 5, clicks: 1, articleViews: 4, originalClicks: 2,
+      previous: { start: '2026-01-01', end: '2026-01-30', visitors: 1, visits: 3, views: 0, clicks: 1, articleViews: 2, originalClicks: 1 },
       daily: [], channels: [{ label: '直接访问', visits: 3, visitors: 2 }], regions: [], tools: [{ label: '工具', count: 1 }],
       topViewedArticles: [{ id: 'article-1', title: '测试资讯', viewCount: 4, publishedAt: null, score: 80, sourceName: '测试来源' }],
     } });
@@ -28,6 +29,10 @@ test('访问统计展示指标、趋势与文章排行，并随日期筛选更�
   await page.getByRole('button', { name: '设置' }).click();
   await page.getByRole('tab', { name: '访问统计' }).click();
   await expect(page.getByText('资讯确认浏览', { exact: true })).toBeVisible();
+  await expect(page.getByText('较上期 +100.0%').first()).toBeVisible();
+  await expect(page.getByText('上期 0 · 不计算增幅')).toBeVisible();
+  await page.getByRole('button', { name: '资讯浏览', exact: true }).click();
+  await expect(page.getByRole('img', { name: /每日资讯浏览趋势/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: '公开浏览 Top 20' })).toBeVisible();
   await expect(page.getByRole('button', { name: /测试资讯/ })).toBeVisible();
   await page.getByText('查看每日明细').click();

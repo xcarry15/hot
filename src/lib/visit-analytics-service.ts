@@ -65,3 +65,13 @@ export function validVisitRange(start: string, end: string, now = new Date()): b
   const oldest = getPublicDateKey(now.getTime() - (RETENTION_DAYS - 1) * DAY);
   return valid(start) && valid(end) && start >= oldest && end <= today && start <= end;
 }
+
+/** 等长上一时段必须完整落在保留期内，不能把缺失历史伪装成零。 */
+export function previousVisitRange(start: string, end: string, now = new Date()): { start: string; end: string } | null {
+  if (!validVisitRange(start, end, now)) return null;
+  const first = Date.parse(`${start}T00:00:00Z`);
+  const last = Date.parse(`${end}T00:00:00Z`);
+  const count = Math.round((last - first) / DAY) + 1;
+  const previous = { start: new Date(first - count * DAY).toISOString().slice(0, 10), end: new Date(first - DAY).toISOString().slice(0, 10) };
+  return validVisitRange(previous.start, previous.end, now) ? previous : null;
+}
