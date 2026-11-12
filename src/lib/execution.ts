@@ -392,13 +392,15 @@ async function executeFullJob(
     });
   }
 
+  const stageDurationsMs: Record<string, number> = {};
   const stages = await runStages(tasks, {
     signal,
+    onStageDuration: (stage, durationMs) => { stageDurationsMs[stage] = durationMs; },
     beforeStage: async () => {
       if (jobId) await assertJobNotCancelled(jobId);
     },
   });
-  const result: Record<string, unknown> = { stages, recoveredAiArticles };
+  const result: Record<string, unknown> = { stages, stageDurationsMs, recoveredAiArticles };
   if (!pushEnabled) {
     result.pushSkipped = true;
     result.reason = 'push_mode is not realtime';

@@ -10,27 +10,35 @@ export function useJobWriteGuard(enabled: boolean): boolean {
     if (!enabled) return;
     let cancelled = false;
     let inFlight = false;
+    let timer: number | undefined;
+    let currentlyBusy = false;
     const controller = new AbortController();
     const refresh = async () => {
-      if (inFlight || document.visibilityState === 'hidden') return;
+      if (cancelled || inFlight || document.visibilityState === 'hidden') return;
+      window.clearTimeout(timer);
       inFlight = true;
       try {
         const result = await fetchCrawlLogJobStatus(controller.signal);
-        if (!cancelled) setBusy(result.activeJob !== null);
+        if (!cancelled) {
+          currentlyBusy = result.activeJob !== null;
+          setBusy(currentlyBusy);
+        }
       } catch {
         // 提示请求失败时保留原状态，写入由服务端保护。
       } finally {
         inFlight = false;
+        if (!cancelled) {
+          timer = window.setTimeout(() => void refresh(), currentlyBusy ? 3000 : 15_000);
+        }
       }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 15_000);
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => {
       cancelled = true;
       controller.abort();
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
       window.removeEventListener('focus', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };

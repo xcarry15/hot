@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { runStages } from '@/lib/pipeline/stage-runner';
 
 describe('pipeline stage runner', () => {
+  it('记录实际运行阶段的耗时并保留原有结果', async () => {
+    const durations: Record<string, number> = {};
+    const result = await runStages([
+      { key: 'ai', run: async () => 'done' },
+      { key: 'skip', shouldRun: () => false, run: async () => null },
+    ], { onStageDuration: (stage, duration) => { durations[stage] = duration; } });
+    expect(result).toEqual({ ai: 'done' });
+    expect(durations.ai).toEqual(expect.any(Number));
+    expect(durations.ai).toBeGreaterThanOrEqual(0);
+    expect(durations.skip).toBeUndefined();
+  });
   it('按声明顺序执行并跳过不满足条件的阶段', async () => {
     const order: string[] = [];
     const result = await runStages([

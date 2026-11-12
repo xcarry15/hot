@@ -12,6 +12,7 @@ export interface PipelineStageTask {
 export interface RunStagesOptions {
   signal?: AbortSignal;
   beforeStage?: () => Promise<void>;
+  onStageDuration?: (stage: string, durationMs: number) => void;
 }
 
 /**
@@ -29,6 +30,7 @@ export async function runStages(
     if (task.shouldRun && !task.shouldRun()) continue;
     assertNotAborted(options.signal);
     await options.beforeStage?.();
+    const startedAt = performance.now();
     try {
       results[task.key] = await task.run();
     } catch (error) {
@@ -41,6 +43,8 @@ export async function runStages(
         }
       }
       throw error;
+    } finally {
+      options.onStageDuration?.(task.key, Math.max(0, Math.round(performance.now() - startedAt)));
     }
   }
   return results;
