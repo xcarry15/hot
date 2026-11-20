@@ -73,6 +73,9 @@ db/custom.db-shm
 db/custom.db-journal
 db/exports/
 
+# Local backup archives (may contain source snapshots / credentials; never commit)
+备份/
+
 # Windows reserved device name accidentally created by cmd redirection
 /nul
 

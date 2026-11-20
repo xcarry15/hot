@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
 import { revealSensitiveSettings } from '@/lib/settings-service';
 
 /**
@@ -13,7 +14,9 @@ import { revealSensitiveSettings } from '@/lib/settings-service';
  *
  * 注：仅回显当前配置目录声明且由调用方请求的敏感字段，不兼容已移除的旧版全局 AI key。
  */
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const denied = requireAdminAuth(request);
+  if (denied) return denied;
   try {
     const body = await request.json().catch(() => ({}));
     const requestedKeys = Array.isArray(body?.keys)
