@@ -66,6 +66,7 @@ test-run.*
 .worktrees/
 
 # Development database
+db/*.db*
 db/custom.db
 /.db-migration-backup.*/
 db/custom.db-wal

@@ -800,11 +800,14 @@ describe('真实 SQLite 的发布日期修复', () => {
     } });
     const readState = () => Promise.all([db.article.findUnique({ where: { id: 'a1' } }), db.event.findUnique({ where: { id: 'e1' } })]);
     const before = await readState();
-    if (fail) await db.$executeRawUnsafe(`
-      CREATE TRIGGER reject_publication_update
-      BEFORE UPDATE OF publicSortAt ON events
-      BEGIN SELECT RAISE(ABORT, 'publication date failure'); END
-    `);
+    if (fail) {
+      await db.$executeRawUnsafe('DROP TRIGGER IF EXISTS reject_publication_update');
+      await db.$executeRawUnsafe(`
+        CREATE TRIGGER reject_publication_update
+        BEFORE UPDATE OF publicSortAt ON events
+        BEGIN SELECT RAISE(ABORT, 'publication date failure'); END
+      `);
+    }
     await (await import('@/lib/pipeline/process')).repairPublishedDates();
     if (fail) {
       expect(await readState()).toEqual(before);

@@ -34,7 +34,9 @@ jobs:
       - run: npm run db:generate
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm test
+      # 单 worker 串行：多个测试共享 CI 的 SQLite 文件，并发会触发同名 trigger 竞态
+      # （reject_publication_update already exists）。与 migration smoke 的 --maxWorkers=1 一致。
+      - run: npm test -- --maxWorkers=1
 
   migrations:
     name: Migration smoke
