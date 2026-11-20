@@ -349,7 +349,11 @@ export function startScheduler(): void {
   if (nodeCron.validate('* * * * *') === false) return;
 
   // Reset orphaned 'running' jobs left by a previous process crash / HMR.
-  void resetOrphanedJobs().then(() => resumeQueuedJob());
+  void resetOrphanedJobs()
+    .then(() => resumeQueuedJob())
+    .catch((error) => {
+      console.error('[scheduler] initial orphaned-job recovery failed:', error);
+    });
   // 启动即先清理一次；之后由每分钟 tick 持续清理。
   void cleanupExpiredSendingDeliveries().catch((error) => {
     console.error('[scheduler] initial delivery cleanup failed:', error);

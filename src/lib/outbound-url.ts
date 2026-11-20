@@ -185,13 +185,22 @@ export function getSafeOutboundDispatcher(): typeof safeOutboundDispatcher {
   return safeOutboundDispatcher;
 }
 
-/** 获取出站代理的 Dispatcher。限制缓存大小，避免测速大量失效节点时持续增长。 */
-export function getOutboundProxyDispatcher(proxyUrl: string): Dispatcher {
-  const normalized = proxyUrl.trim();
-  const parsed = new URL(normalized);
-  if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || !parsed.hostname) {
+/**
+ * 校验出站代理地址。代理 URL 允许携带认证信息，但主机本身必须和出站目标一样
+ * 经过静态主机黑名单与 DNS 逐地址拦截，否则「启用代理」会绕过连接级 SSRF 防护。
+ */
+export async function assertSafeProxyUrl(proxyUrl: string): Promise<URL> {
+  const url = new URL(proxyUrl.trim());
+  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) {
     throw new Error('出站代理只支持 http/https');
   }
+  return assertSafeOutboundUrl(url.toString(), { allowCredentials: true });
+}
+
+/** 获取出站代理的 Dispatcher。限制缓存大小，避免测速大量失效节点时持续增长。 */
+export async function getOutboundProxyDispatcher(proxyUrl: string): Promise<Dispatcher> {
+  const safeUrl = await assertSafeProxyUrl(proxyUrl);
+  const normalized = safeUrl.toString();
 
   const cached = proxyDispatcherCache.get(normalized);
   if (cached) {
@@ -214,12 +223,16 @@ export function getOutboundProxyDispatcher(proxyUrl: string): Dispatcher {
  * 校验服务器出站地址。来源配置阶段做静态主机拦截；实际请求阶段再解析 DNS，
  * 并在每一次重定向后重新检查，阻断内网/云元数据 SSRF。
  */
-export async function assertSafeOutboundUrl(rawUrl: string): Promise<URL> {
+export async function assertSafeOutboundUrl(
+  rawUrl: string,
+  options: { allowCredentials?: boolean } = {},
+): Promise<URL> {
   const url = new URL(rawUrl);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('仅允许 http/https 出站地址');
   }
-  if (url.username || url.password || isBlockedOutboundHostname(url.hostname)) {
+  if ((!options.allowCredentials && (url.username || url.password))
+    || isBlockedOutboundHostname(url.hostname)) {
     throw new Error('出站地址指向受限主机');
   }
 

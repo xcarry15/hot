@@ -1,9 +1,12 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { applyTuningSuggestion, dismissTuningSuggestion, generateTuningSuggestions, listTuningSuggestions } from '@/lib/feedback-service';
 import { MutationConflictError, runExclusiveMutation } from '@/lib/mutation-guard';
 
 export async function POST(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     if (body.action === 'generate') {

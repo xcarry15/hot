@@ -1,11 +1,22 @@
 import { db } from '@/lib/db';
 import { KEYWORD_BLACKLIST_CATEGORY } from '@/contracts/keywords';
+import type { KeywordFilterDecision } from '@/contracts/keywords';
 import type { KeywordMatchResult } from '@/lib/filter';
 import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 
 export const KEYWORD_HIT_COUNT_WINDOW_DAYS = 90;
 
 type KeywordDb = Pick<typeof db, 'keyword' | 'keywordHit'>;
+
+export type ArticleKeywordDecision = Pick<
+  KeywordFilterDecision,
+  'industryTitleMatched' | 'retentionReason'
+>;
+
+const DEFAULT_ARTICLE_KEYWORD_DECISION: ArticleKeywordDecision = {
+  industryTitleMatched: false,
+  retentionReason: '',
+};
 
 export async function replaceArticleKeywordHits(
   articleId: string,
@@ -29,18 +40,30 @@ export async function replaceArticleKeywordHits(
   });
 }
 
-/** Commit the processing result and its hit details together, including cancellation. */
+/**
+ * 提交关键词判定结果与命中明细（含取消检查）。
+ *
+ * keywordMatched 仍然只表示「白名单命中」，不改成 retained，避免改变既有评分与
+ * 导出语义；P1-21 新增 industryTitleMatched / keywordRetentionReason 两个审计字段，
+ * 把「行业标题信号救回」「未配置白名单」「黑名单」「未命中」等决策落库，
+ * 供 Excel 与后续排查解释。评分策略仍只对 keywordMatched=true 施加确定性加分。
+ */
 export async function persistArticleKeywordMatch(
   articleId: string,
   match: Pick<KeywordMatchResult, 'matched' | 'matchedWords'>,
   signal?: AbortSignal,
+  decision: ArticleKeywordDecision = DEFAULT_ARTICLE_KEYWORD_DECISION,
 ): Promise<void> {
   await assertWorkerCanWrite(signal);
   await db.$transaction(async (transaction) => {
     await assertWorkerCanWrite(signal);
     await transaction.article.update({
       where: { id: articleId },
-      data: { keywordMatched: match.matched },
+      data: {
+        keywordMatched: match.matched,
+        industryTitleMatched: decision.industryTitleMatched,
+        keywordRetentionReason: decision.retentionReason,
+      },
     });
     await replaceArticleKeywordHits(articleId, match.matchedWords, transaction);
     await assertWorkerCanWrite(signal);

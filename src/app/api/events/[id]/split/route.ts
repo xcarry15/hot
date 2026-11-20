@@ -1,9 +1,12 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { splitEventArticles } from '@/lib/event-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await context.params;
     const body = await request.json().catch(() => ({}));

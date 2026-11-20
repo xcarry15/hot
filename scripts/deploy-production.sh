@@ -8,6 +8,7 @@ SITE_URL="${SITE_URL:-https://hot.kfxz.cn}"
 BACKUP_ROOT="${BACKUP_ROOT:-/www/backup/h2-hot2}"
 RESET_PRODUCTION="${RESET_PRODUCTION:-NO}"
 RESET_PRODUCTION="${RESET_PRODUCTION^^}"
+RESET_PRODUCTION_CONFIRM="${RESET_PRODUCTION_CONFIRM:-}"
 SHARED_DIR="${SHARED_DIR:-$APP_DIR/shared}"
 RELEASES_DIR="${RELEASES_DIR:-$APP_DIR/releases}"
 CURRENT_LINK="${CURRENT_LINK:-$APP_DIR/current}"
@@ -58,7 +59,11 @@ wait_for_health() {
 
 restore_database_backup() {
   local database_file="$SHARED_DIR/db/custom.db"
-  [[ -n "$BACKUP_DIR" && -f "$BACKUP_DIR/custom.db" ]] || return 1
+  local backup_integrity
+  # 覆盖生产库前必须确认备份非空且通过完整性检查，否则宁可放弃回滚。
+  [[ -n "$BACKUP_DIR" && -f "$BACKUP_DIR/custom.db" && -s "$BACKUP_DIR/custom.db" ]] || return 1
+  backup_integrity="$(sqlite3 "$BACKUP_DIR/custom.db" "PRAGMA integrity_check;" 2>/dev/null || true)"
+  [[ "$backup_integrity" == "ok" ]] || return 1
   rm -f -- "$database_file" "$database_file-journal" "$database_file-wal" "$database_file-shm"
   cp -a -- "$BACKUP_DIR/custom.db" "$database_file"
 }
@@ -115,10 +120,17 @@ cleanup() {
 
   if [[ "$DEPLOY_SUCCEEDED" -ne 1 ]]; then
     if [[ "$DATABASE_ROLLBACK_AVAILABLE" -eq 1 ]]; then
-      restore_database_backup || true
-      if [[ "$CURRENT_LINK_CHANGED" -eq 1 ]]; then
-        restore_current_link || true
+      # 覆盖 DB 文件前先停 PM2：健康检查失败路径里 restart_service 已把服务拉起，
+      # 运行中的连接会在 rm/cp 之后继续写入旧 inode，导致数据错乱。
+      if pm2 stop "$APP_NAME" >/dev/null 2>&1; then
+        restore_database_backup || true
+      else
+        echo "[deploy] WARNING: could not stop PM2 before database restore; skipping restore to avoid overwriting a live database." >&2
       fi
+    fi
+    # current 软链失败时一律回到 previous，不依赖是否存在有效 DB 备份。
+    if [[ "$CURRENT_LINK_CHANGED" -eq 1 ]]; then
+      restore_current_link || true
     fi
     if [[ "$SERVICE_WAS_STOPPED" -eq 1 ]]; then
       restart_service || true
@@ -138,10 +150,21 @@ for command in node npm pm2 sqlite3 tar curl; do
   command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; exit 1; }
 done
 
+# 迁移链隐式依赖 SQLite JSON1（json_valid / json_each / json_group_array）。
+# 生产已实测支持；这里作为显式前置检查，避免在不支持的构建上跑一半才失败。
+if [[ "$(sqlite3 :memory: "SELECT json_valid('[]');" 2>/dev/null || true)" != "1" ]]; then
+  echo "SQLite JSON1 extension is required (migration chain uses json_* functions)." >&2
+  exit 1
+fi
+
 [[ -d "$APP_DIR" ]] || { echo "Application directory does not exist: $APP_DIR" >&2; exit 1; }
 [[ -f "$RELEASE_ARCHIVE" ]] || { echo "Release archive does not exist: $RELEASE_ARCHIVE" >&2; exit 1; }
 [[ "$RESET_PRODUCTION" == "YES" || "$RESET_PRODUCTION" == "NO" ]] \
   || { echo 'RESET_PRODUCTION must be YES or NO.' >&2; exit 1; }
+if [[ "$RESET_PRODUCTION" == "YES" ]]; then
+  [[ "$RESET_PRODUCTION_CONFIRM" == "RESET-PRODUCTION-DATA" ]] \
+    || { echo 'RESET_PRODUCTION=YES requires RESET_PRODUCTION_CONFIRM=RESET-PRODUCTION-DATA (explicit approval to lose production data).' >&2; exit 1; }
+fi
 [[ "$RELEASE_KEEP_COUNT" =~ ^[2-9][0-9]*$ ]] \
   || { echo 'RELEASE_KEEP_COUNT must be an integer greater than or equal to 2.' >&2; exit 1; }
 [[ "$RELEASE_ID" =~ ^[A-Za-z0-9._-]+$ ]] \
@@ -228,10 +251,30 @@ if [[ "$RESET_PRODUCTION" == "NO" ]]; then
   BASELINE_MIGRATION="${EXPECTED_MIGRATIONS[0]}"
   BASELINE_APPLIED="$(sqlite3 "$STATE_DB_DIR/custom.db" "SELECT COUNT(*) FROM _prisma_migrations WHERE migration_name = '$BASELINE_MIGRATION' AND finished_at IS NOT NULL;")"
   if [[ "$INVALID_MIGRATIONS" != "0" || "$BASELINE_APPLIED" != "1" ]]; then
-    echo "Production database uses an obsolete migration history; refusing an in-place compatibility upgrade." >&2
+    echo "Production database uses an obsolete or incomplete migration history; refusing an in-place compatibility upgrade." >&2
+    echo "Unknown/unfinished migrations=$INVALID_MIGRATIONS, baseline=$BASELINE_APPLIED." >&2
     echo "Run the manual Deploy production workflow with reset_production=yes after explicit approval." >&2
     exit 1
   fi
+  # 已应用历史必须是 release 迁移链的严格前缀；末尾允许存在本次待应用的 migration。
+  # 旧逻辑要求「已应用数 == release 迁移总数」，会让任何新增 migration 的 in-place 发布被误拒。
+  mapfile -t APPLIED_MIGRATIONS < <(
+    sqlite3 "$STATE_DB_DIR/custom.db" \
+      "SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL ORDER BY migration_name;"
+  )
+  if [[ "${#APPLIED_MIGRATIONS[@]}" -eq 0 || "${#APPLIED_MIGRATIONS[@]}" -gt "${#EXPECTED_MIGRATIONS[@]}" ]]; then
+    echo "Production migration history is not a prefix of the release migration set." >&2
+    echo "Expected prefix of ${#EXPECTED_MIGRATIONS[@]} migrations, found ${#APPLIED_MIGRATIONS[@]} applied." >&2
+    exit 1
+  fi
+  for ((i = 0; i < ${#APPLIED_MIGRATIONS[@]}; i++)); do
+    if [[ "${APPLIED_MIGRATIONS[$i]}" != "${EXPECTED_MIGRATIONS[$i]}" ]]; then
+      echo "Production migration history diverges from the release migration set at index $i." >&2
+      echo "Expected '${EXPECTED_MIGRATIONS[$i]}', found '${APPLIED_MIGRATIONS[$i]}'." >&2
+      exit 1
+    fi
+  done
+  echo "[deploy] migration history is a valid prefix (${#APPLIED_MIGRATIONS[@]}/${#EXPECTED_MIGRATIONS[@]} applied; $((${#EXPECTED_MIGRATIONS[@]} - ${#APPLIED_MIGRATIONS[@]})) pending)"
 fi
 
 SERVICE_WAS_STOPPED=1
@@ -244,15 +287,26 @@ fi
 link_release_state "$RELEASE_DIR" "$SHARED_DIR/.env" "$SHARED_DIR/db"
 DATABASE_FILE="$SHARED_DIR/db/custom.db"
 
+# 无论是否重置，都先做一份有效的一致性备份：reset 分支过去直接删库且无回滚点，
+# 现在删除前同样留档，并让失败回滚能覆盖 reset 路径。
+echo "[deploy] backing up production SQLite"
+BACKUP_DIR="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)"
+mkdir -p -- "$BACKUP_DIR"
+sqlite3 "$DATABASE_FILE" ".timeout 5000" ".backup '$BACKUP_DIR/custom.db'"
+if [[ ! -s "$BACKUP_DIR/custom.db" ]]; then
+  echo "[deploy] FATAL: production database backup is empty: $BACKUP_DIR/custom.db" >&2
+  exit 1
+fi
+BACKUP_INTEGRITY="$(sqlite3 "$BACKUP_DIR/custom.db" "PRAGMA integrity_check;" 2>/dev/null || true)"
+if [[ "$BACKUP_INTEGRITY" != "ok" ]]; then
+  echo "[deploy] FATAL: production database backup failed integrity_check (${BACKUP_INTEGRITY:-no result}): $BACKUP_DIR/custom.db" >&2
+  exit 1
+fi
+DATABASE_ROLLBACK_AVAILABLE=1
+
 if [[ "$RESET_PRODUCTION" == "YES" ]]; then
-  echo "RESET_PRODUCTION=YES: existing production SQLite will be deleted without backup."
+  echo "RESET_PRODUCTION=YES: deleting existing production SQLite (a validated backup exists at $BACKUP_DIR)."
   rm -f -- "$DATABASE_FILE" "$DATABASE_FILE-journal" "$DATABASE_FILE-wal" "$DATABASE_FILE-shm"
-else
-  echo "[deploy] backing up production SQLite"
-  BACKUP_DIR="$BACKUP_ROOT/$(date +%Y%m%d-%H%M%S)"
-  mkdir -p -- "$BACKUP_DIR"
-  sqlite3 "$DATABASE_FILE" ".timeout 5000" ".backup '$BACKUP_DIR/custom.db'"
-  DATABASE_ROLLBACK_AVAILABLE=1
 fi
 
 cd "$RELEASE_DIR"

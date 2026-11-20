@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { getArticleDetail, deleteArticleById, updateArticleEditorial } from '@/lib/article-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
@@ -12,9 +13,11 @@ function scoreValue(value: unknown): number | null | undefined {
 
 // GET /api/articles/[id] - Get article detail
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await params;
     const article = await getArticleDetail(id);
@@ -33,6 +36,8 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await params;
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -85,9 +90,11 @@ export async function PATCH(
 
 // DELETE /api/articles/[id] - Delete an article
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await params;
     await runExclusiveMutation('删除文章', () => deleteArticleById(id));

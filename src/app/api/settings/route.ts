@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { getSettings, updateSettings } from '@/lib/settings-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
@@ -7,7 +8,9 @@ import { previewPushDelivery, previewPublicPublication, previewScorePolicy } fro
 import { z } from 'zod';
 
 // GET /api/settings - Get all settings (sensitive keys are redacted)
-export async function GET() {
+export async function GET(request?: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     return NextResponse.json(await getSettings());
   } catch (error: unknown) {
@@ -17,6 +20,8 @@ export async function GET() {
 
 // PUT /api/settings - Update settings
 export async function PUT(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const result = await runExclusiveMutation('更新设置', async () => updateSettings(await request.json()));
     if (!result.ok) {
@@ -62,6 +67,8 @@ const previewSchema = z.discriminatedUnion('action', [
 
 // POST /api/settings - 设置相关的只读预演操作
 export async function POST(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const parsed = previewSchema.safeParse(await request.json());
     if (!parsed.success) {

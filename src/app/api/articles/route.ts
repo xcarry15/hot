@@ -1,10 +1,11 @@
+import { requireAdminAuth } from '@/lib/require-admin-auth';
 /**
  * /api/articles Route 适配器。
  *
  * 只保留：解析 query/body → 调用 article-service 用例 → 映射响应。
  * 任何 where 拼装、事务、批处理、worker 调用都不得在此文件中实现。
  */
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import {
   deleteArticlesByFilter,
@@ -17,6 +18,8 @@ import type { ArticleListSort } from '@/contracts/articles';
 
 // GET /api/articles - List articles with filters and pagination
 export async function GET(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(request.url);
     const filter = {
@@ -58,6 +61,8 @@ function parseFetchStatus(raw: string | null): 'pending' | 'fetched' | 'failed' 
 
 // DELETE /api/articles - Batch delete articles
 export async function DELETE(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(request.url);
     const ids = searchParams.get('ids');

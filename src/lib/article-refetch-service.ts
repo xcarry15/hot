@@ -5,7 +5,7 @@ import { buildAiResetDataForArticle } from '@/lib/article-ai-reset';
 import { invalidatePublicArticleCache } from '@/lib/public-article-cache';
 import { refreshEventPublicPublication, refreshPublicPublication } from '@/lib/public-publication-service';
 import { recalculateEventsInTransaction } from '@/lib/event-service';
-import { evaluateKeywordMatch } from '@/lib/filter';
+import { evaluateKeywordFilterDecision, evaluateKeywordMatch } from '@/lib/filter';
 import { persistArticleKeywordMatch, replaceArticleKeywordHits } from '@/lib/keyword-hit-service';
 import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 import { assertNotAborted } from '@/lib/worker-stop';
@@ -44,6 +44,8 @@ export async function refetchArticle(articleId: string, signal?: AbortSignal) {
     fetchRetryCount: 0,
     nextFetchRetryAt: null,
     keywordMatched: false,
+    industryTitleMatched: false,
+    keywordRetentionReason: '',
     technicalIgnoredAt: null,
     event: { disconnect: true },
     clusterStatus: 'pending',
@@ -95,6 +97,7 @@ export async function refetchArticle(articleId: string, signal?: AbortSignal) {
       matchedWords: [],
     };
   });
-  await persistArticleKeywordMatch(articleId, keywordMatch, signal);
+  const decision = evaluateKeywordFilterDecision(keywordMatch, article.title);
+  await persistArticleKeywordMatch(articleId, keywordMatch, signal, decision);
   return { success: true, contentLength: content.length };
 }

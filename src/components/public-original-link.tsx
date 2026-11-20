@@ -3,6 +3,7 @@
 import { ExternalLink, Share2 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { useEffect, useRef, useState } from 'react'
+import { requestJson } from '@/lib/request-json.client'
 
 const PublicSharePoster = dynamic(() => import('@/components/public-share-poster'))
 
@@ -22,10 +23,10 @@ export default function PublicOriginalLink({ href, articleId, className }: Props
   const containerRef = useRef<HTMLDivElement>(null)
 
   const handleClick = () => {
-    void fetch(`/api/public/articles/${articleId}/click`, {
-      method: 'POST',
+    void requestJson('POST', `/api/public/articles/${articleId}/click`, {
       keepalive: true,
-    })
+      timeoutMs: 8000,
+    }).catch(() => undefined)
   }
 
   useEffect(() => {

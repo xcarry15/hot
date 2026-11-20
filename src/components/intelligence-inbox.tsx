@@ -354,10 +354,10 @@ export default function IntelligenceInbox({
           if (isArticleRevisionConflict(error)) {
             try {
               await refreshArticleDetail(id);
+              toast.warning("文章已被其他操作更新，已刷新当前版本");
             } catch {
-              // 主错误仍由下面的提示交代，避免刷新失败覆盖冲突原因。
+              toast.error("文章已被其他操作更新，请刷新后重试");
             }
-            toast.warning("文章已被其他操作更新，已刷新当前版本");
             return;
           }
           toast.error(errorMessage(error, "更新失败"));

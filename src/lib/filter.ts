@@ -1,6 +1,6 @@
 import { db } from './db';
 import { createCache } from './cache';
-import { KEYWORD_BLACKLIST_CATEGORY } from '@/contracts/keywords';
+import { KEYWORD_BLACKLIST_CATEGORY, type KeywordFilterDecision } from '@/contracts/keywords';
 
 /**
  * 关键词过滤 — 单一白名单
@@ -88,6 +88,27 @@ export async function evaluateKeywordMatch(text: string): Promise<KeywordMatchRe
 export function matchIndustryTitleSignal(title: string): boolean {
   const normalized = title.normalize('NFKC').toLowerCase();
   return INDUSTRY_TITLE_SIGNALS.some((signal) => normalized.includes(signal));
+}
+
+/**
+ * 把「白名单命中 / 无关键词配置 / 行业标题信号 / 黑名单」统一成一个可落库的决策。
+ * process 与单篇重跑共用，避免 keywordMatched 与 retained 口径再次分叉。
+ */
+export function evaluateKeywordFilterDecision(
+  match: KeywordMatchResult,
+  title: string,
+): KeywordFilterDecision {
+  const industryTitleMatched = matchIndustryTitleSignal(title);
+  const retentionReason: KeywordFilterDecision['retentionReason'] =
+    match.blacklisted === true ? 'blacklisted'
+      : !match.configured ? 'unconfigured'
+        : match.matched ? 'whitelist'
+          : industryTitleMatched ? 'industry_title'
+            : 'rejected';
+  const retained = match.blacklisted !== true && (
+    !match.configured || match.matched || industryTitleMatched
+  );
+  return { retained, industryTitleMatched, retentionReason };
 }
 
 export function invalidateKeywordCache(): void {

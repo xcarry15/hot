@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { AI_PROVIDERS } from '@/contracts/ai-provider';
 import { fetchModelCatalog } from '@/lib/model-discovery';
 
@@ -47,7 +48,9 @@ function getFreeModelIds(payload: unknown): string[] {
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request?: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const response = await fetchModelCatalog(OPENROUTER_MODELS_URL, 'OpenRouter 模型列表请求超时');
     if (!response.ok) {

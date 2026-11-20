@@ -276,7 +276,37 @@ async function runPipeline(
     console.error(`[execution] ${cancelled ? 'cancelled' : 'failed'} job ${jobId} (${type}):`, msg);
 
     if (error instanceof JobLeaseLostError) {
-      // 过期执行器只退出；任务的恢复或终态由当前持有者负责。
+      // 续期失败**不必然**代表所有权已转移：runnerLease.renew() 用本地缓存
+      // 判过期、renewJobLease 在 SQLite 瞬时 busy 时也返回 false（与 P0-1 联动）。
+      // 若什么都不做，Job 行会停在 running + 未过期 leaseOwner(5min)，而
+      // resetOrphanedJobs 只查 leaseExpiresAt:null|<now、resumeQueuedJob 只查
+      // status:'queued'，都接不住 → 幽灵任务阻塞 auto key `crawl:${hour}` 一小时。
+      // 用条件更新确保只收口「仍由本轮持有」的 Job，绝不覆盖新持有者的状态；
+      // availableAt 给 15s 缓冲，避免 SQLite 持续 busy 时形成忙循环重试。
+      try {
+        const requeued = await db.job.updateMany({
+          where: { id: jobId, status: 'running', leaseOwner: jobLease.owner },
+          data: {
+            status: 'queued',
+            error: 'Lease renewal failed; requeued for recovery',
+            currentStage: null,
+            currentItemLabel: '执行权续期失败，任务已重新入队等待恢复',
+            heartbeatAt: new Date(),
+            leaseOwner: '',
+            leaseExpiresAt: null,
+            availableAt: new Date(Date.now() + 15_000),
+            startedAt: null,
+            completedAt: null,
+          },
+        });
+        if (requeued.count === 0) {
+          console.warn(`[execution] lease lost for ${jobId}; ownership already transferred`);
+        } else {
+          console.warn(`[execution] lease renewal failed for ${jobId}; requeued for recovery`);
+        }
+      } catch (requeueError) {
+        console.error(`[execution] failed to requeue ${jobId} after lease loss:`, requeueError);
+      }
     } else if (cancelled) await markJobCancelled(jobId, 'Stopped by user');
     else {
       try {
@@ -328,6 +358,25 @@ const JOB_EXECUTORS: Record<JobType, JobExecutor> = {
   maintenance: executeMaintenanceJob,
 };
 
+/**
+ * 补偿阶段的可执行性判定。
+ *
+ * assertWorkerCanWrite 抛的是 DB 取消（普通 Error 'Job cancelled'）或租约丢失，
+ * 而 startJobCancellationWatcher 每 1s 才把取消反映到 AbortSignal。只判
+ * signal.aborted 会在取消已写入、signal 尚未置位的窗口内继续执行 analyze +
+ * cluster 写库。这里直接查持久化状态，并把任何「不可写」异常都视为跳过补偿。
+ */
+async function canRunCompensation(signal?: AbortSignal, jobId?: string): Promise<boolean> {
+  if (signal?.aborted) return false;
+  if (!jobId) return true;
+  try {
+    await assertJobNotCancelled(jobId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function executeFullJob(
   payload: Record<string, unknown>,
   signal?: AbortSignal,
@@ -357,11 +406,11 @@ async function executeFullJob(
       onError: async () => {
         // 详情抓取在中途遇到进程级异常时，已成功抓完的文章仍可继续走 AI/聚类。
         // 任务本身会进入有限重试，但不让本轮已完成工作白白滞留。
-        if (signal?.aborted) return;
+        if (!await canRunCompensation(signal, jobId)) return;
         try {
           await analyzeAllPending(signal, jobId, forceRetry);
         } finally {
-          if (!signal?.aborted) await clusterAllPending(signal, jobId, forceRetry);
+          if (await canRunCompensation(signal, jobId)) await clusterAllPending(signal, jobId, forceRetry);
         }
       },
     },
@@ -371,7 +420,7 @@ async function executeFullJob(
       onError: async () => {
         // AI 阶段的异常不应阻止已经完成 AI 的文章进入聚类；这是唯一明确
         // 声明的阶段补偿策略，不能再散落在多个执行分支的 try/catch 中。
-        if (!signal?.aborted) await clusterAllPending(signal, jobId, forceRetry);
+        if (await canRunCompensation(signal, jobId)) await clusterAllPending(signal, jobId, forceRetry);
       },
     },
     {

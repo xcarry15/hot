@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { apiError } from '@/lib/api-helpers';
 import { testSavedAIModel } from '@/lib/ai-client';
@@ -11,6 +12,8 @@ const schema = z.object({
 
 /** POST /api/settings/test-ai-model - 测试一个已保存配置下的免费模型。 */
 export async function POST(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const parsed = schema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) {

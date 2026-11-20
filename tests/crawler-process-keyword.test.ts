@@ -208,7 +208,11 @@ describe('processAllPending 全文关键字匹配', () => {
     expect(mocks.discardedItemUpsert).not.toHaveBeenCalled();
     expect(mocks.articleUpdate).toHaveBeenCalledWith({
       where: { id: 'art-001' },
-      data: { keywordMatched: true },
+      data: {
+        keywordMatched: true,
+        industryTitleMatched: false,
+        keywordRetentionReason: 'whitelist',
+      },
     });
     expect(mocks.keywordHitDeleteMany).toHaveBeenCalledWith({ where: { articleId: 'art-001' } });
     expect(mocks.keywordHitCreateMany).toHaveBeenCalledWith({
@@ -277,7 +281,11 @@ describe('processAllPending 全文关键字匹配', () => {
     expect(mocks.discardedItemUpsert).not.toHaveBeenCalled();
     expect(mocks.articleUpdate).toHaveBeenCalledWith({
       where: { id: 'art-001' },
-      data: { keywordMatched: false },
+      data: {
+        keywordMatched: false,
+        industryTitleMatched: true,
+        keywordRetentionReason: 'industry_title',
+      },
     });
   });
 });

@@ -53,7 +53,14 @@ export function isWithinQuietHours(
   return current >= startMinutes || current < endMinutes;
 }
 
-/** 返回指定时刻之后最近一次免打扰结束时间；不在免打扰时段时返回 null。 */
+/**
+ * 返回指定时刻之后最近一次免打扰结束时间；不在免打扰时段时返回 null。
+ *
+ * 口径说明（供调度器顺延逻辑参照）：本函数只在 now 处于免打扰时给出结束时刻，
+ * 返回 null 表示「当前不在免打扰」，不能据此判定「全天静默」；是否静默统一以
+ * isWithinQuietHours 为准。顺延目标 end 是静默区间的右开边界，到达 end 时
+ * isWithinQuietHours 已为 false，顺延与静默判定叠加不应把任务无限后推。
+ */
 export function getQuietHoursEndAt(
   now: Date,
   start: string | null | undefined,

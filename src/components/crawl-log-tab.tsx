@@ -80,6 +80,13 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     enabled: active,
   })
   const sources: SourceProgress[] = useMemo(() => snapshot?.sources ?? [], [snapshot?.sources])
+  // 手动刷新成功后 toast 要显示刷新后的数据源数量；handleRefresh 是异步回调，
+  // 直接闭包捕获 sources.length 会拿到发起刷新时的旧值，用 ref 读取最新值。
+  // 在 effect 中同步，避免渲染期间写 ref（react-hooks/refs 规则）。
+  const sourcesCountRef = useRef(sources.length)
+  useEffect(() => {
+    sourcesCountRef.current = sources.length
+  }, [sources.length])
   const [keywordCategories, setKeywordCategories] = useState<string[]>(() => Array.from(new Set([
     KEYWORD_DEFAULT_CATEGORY,
     KEYWORD_BLACKLIST_CATEGORY,
@@ -615,13 +622,13 @@ export default function CrawlLogTab({ active = true }: { active?: boolean }) {
     try {
       const refreshed = await refreshSnapshot()
       if (!refreshed) throw new Error('refresh failed')
-      toast.success(`已刷新 ${sources.length} 个数据源的状态`, { duration: 1500 })
+      toast.success(`已刷新 ${sourcesCountRef.current} 个数据源的状态`, { duration: 1500 })
     } catch {
       toast.error('刷新失败')
     } finally {
       setRefreshing(false)
     }
-  }, [refreshSnapshot, sources.length])
+  }, [refreshSnapshot])
 
   const handleDiscardedRetried = useCallback(() => {
     void refreshSnapshot()

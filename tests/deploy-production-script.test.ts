@@ -75,10 +75,20 @@ if [[ "$joined" == *".backup"* ]]; then
   target="\${joined#*.backup }"
   target="\${target//\\'/}"
   mkdir -p "$(dirname "$target")"
-  cp "$database" "$target"
+  if [[ "\${FAKE_EMPTY_BACKUP:-0}" == "1" ]]; then
+    : > "$target"
+  else
+    cp "$database" "$target"
+  fi
   exit 0
 fi
-if [[ "$joined" == *"sqlite_master"* ]]; then
+if [[ "$joined" == *"SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL ORDER BY migration_name"* ]]; then
+  printf '%s\\n' "\${FAKE_APPLIED_MIGRATIONS:-20260731120000_current_schema_baseline}"
+elif [[ "$joined" == *"integrity_check"* ]]; then
+  echo "\${FAKE_INTEGRITY:-ok}"
+elif [[ "$joined" == *"json_valid"* ]]; then
+  echo "\${FAKE_JSON1:-1}"
+elif [[ "$joined" == *"sqlite_master"* ]]; then
   echo 1
 elif [[ "$joined" == *"NOT IN"* ]]; then
   echo "\${FAKE_INVALID_MIGRATIONS:-0}"
@@ -102,6 +112,7 @@ function createReleaseArchive(): void {
   const source = path.join(TEST_TMP, 'release-source');
   rmSync(source, { recursive: true, force: true });
   mkdirSync(path.join(source, 'prisma', 'migrations', '20260731120000_current_schema_baseline'), { recursive: true });
+  mkdirSync(path.join(source, 'prisma', 'migrations', '20261120160000_article_keyword_filter_audit'), { recursive: true });
   writeFileSync(path.join(source, 'package.json'), '{}');
   writeFileSync(path.join(source, 'package-lock.json'), '{}');
   mkdirSync(path.join(source, 'scripts'), { recursive: true });
@@ -113,11 +124,21 @@ function createReleaseArchive(): void {
     path.join(source, 'prisma', 'migrations', '20260731120000_current_schema_baseline', 'migration.sql'),
     '-- test migration',
   );
+  writeFileSync(
+    path.join(source, 'prisma', 'migrations', '20261120160000_article_keyword_filter_audit', 'migration.sql'),
+    '-- pending test migration',
+  );
   rmSync(ARCHIVE_PATH, { force: true });
   execFileSync('tar', ['-czf', ARCHIVE_PATH, '-C', source.replace(/\\/g, '/'), '.']);
 }
 
-function runDeploy(releaseId: string, options: { failHealth?: boolean; invalidMigrations?: boolean } = {}): void {
+function runDeploy(releaseId: string, options: {
+  failHealth?: boolean;
+  invalidMigrations?: boolean;
+  emptyBackup?: boolean;
+  badBackup?: boolean;
+  appliedMigrations?: string;
+} = {}): void {
   const pathSeparator = ':';
   try {
     execFileSync('bash', [bashPath(DEPLOY_SCRIPT)], {
@@ -138,6 +159,10 @@ function runDeploy(releaseId: string, options: { failHealth?: boolean; invalidMi
       SITE_URL: 'https://example.test',
         FAKE_CURL_FAIL: options.failHealth ? '1' : '0',
         FAKE_INVALID_MIGRATIONS: options.invalidMigrations ? '1' : '0',
+        FAKE_EMPTY_BACKUP: options.emptyBackup ? '1' : '0',
+        FAKE_INTEGRITY: options.badBackup ? 'corrupt' : 'ok',
+        FAKE_JSON1: '1',
+        FAKE_APPLIED_MIGRATIONS: options.appliedMigrations ?? '20260731120000_current_schema_baseline',
       },
       stdio: 'pipe',
     });
@@ -218,5 +243,51 @@ deployDescribe('production release deployment', () => {
       normalizedPath(path.join(APP_DIR, 'releases', 'release-one')),
     );
     expect(existsSync(path.join(APP_DIR, 'releases', 'release-invalid-history'))).toBe(false);
+  });
+
+  it('迁移历史不是 release 链前缀时 fail-fast', () => {
+    createReleaseArchive();
+
+    expect(() => runDeploy('release-non-prefix-history', {
+      appliedMigrations: '20261120160000_article_keyword_filter_audit',
+    })).toThrow();
+
+    expect(normalizedPath(readlinkSync(path.join(APP_DIR, 'current')))).toBe(
+      normalizedPath(path.join(APP_DIR, 'releases', 'release-one')),
+    );
+    expect(existsSync(path.join(APP_DIR, 'releases', 'release-non-prefix-history'))).toBe(false);
+  });
+
+  it('空备份或完整性校验失败的备份不得继续部署', () => {
+    const databaseFile = path.join(APP_DIR, 'shared', 'db', 'custom.db');
+    const originalDb = readFileSync(databaseFile, 'utf8');
+    const currentLink = path.join(APP_DIR, 'current');
+
+    createReleaseArchive();
+    expect(() => runDeploy('release-empty-backup', { emptyBackup: true })).toThrow();
+    expect(normalizedPath(readlinkSync(currentLink))).toBe(
+      normalizedPath(path.join(APP_DIR, 'releases', 'release-one')),
+    );
+    expect(existsSync(path.join(APP_DIR, 'releases', 'release-empty-backup'))).toBe(false);
+    expect(readFileSync(databaseFile, 'utf8')).toBe(originalDb);
+
+    createReleaseArchive();
+    expect(() => runDeploy('release-bad-backup', { badBackup: true })).toThrow();
+    expect(normalizedPath(readlinkSync(currentLink))).toBe(
+      normalizedPath(path.join(APP_DIR, 'releases', 'release-one')),
+    );
+    expect(existsSync(path.join(APP_DIR, 'releases', 'release-bad-backup'))).toBe(false);
+    expect(readFileSync(databaseFile, 'utf8')).toBe(originalDb);
+  });
+
+  it('release 末尾新增 migration 时允许 in-place 增量应用', () => {
+    createReleaseArchive();
+    expect(() => runDeploy('release-pending-migration', {
+      appliedMigrations: '20260731120000_current_schema_baseline',
+    })).not.toThrow();
+    expect(normalizedPath(readlinkSync(path.join(APP_DIR, 'current')))).toBe(
+      normalizedPath(path.join(APP_DIR, 'releases', 'release-pending-migration')),
+    );
+    expect(readFileSync(LOG_PATH, 'utf8')).toContain('npm run db:migrate:deploy');
   });
 });

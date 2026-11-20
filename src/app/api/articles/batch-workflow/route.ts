@@ -1,9 +1,12 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { runJob, validateBatchArticleRegeneration } from '@/lib/execution';
 
 /** POST /api/articles/batch-workflow - 批量重跑低分析置信文章的 AI 与聚类。 */
 export async function POST(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const articleIds = Array.isArray(body.articleIds)

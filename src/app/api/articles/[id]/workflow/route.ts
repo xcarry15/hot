@@ -1,10 +1,13 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { runJob, validateSingleArticleWorkflow, type JobType } from '@/lib/execution';
 
 type StartAt = 'process' | 'cluster' | 'ai' | 'push';
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await context.params;
     const body = await request.json().catch(() => ({}));

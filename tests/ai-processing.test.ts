@@ -55,10 +55,6 @@ vi.mock('@/lib/ai-helpers', () => ({
   extractJsonObject: vi.fn().mockImplementation((value: string) => JSON.parse(value)),
 }));
 
-vi.mock('@/lib/dedup', () => ({
-  dedupAfterAI: vi.fn().mockResolvedValue({ isDuplicate: false, sharedCount: 0, sharedValues: [], skipReason: '' }),
-}));
-
 import * as aiModule from '@/lib/ai';
 import { AIClientError } from '@/lib/ai-client';
 

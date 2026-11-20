@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 import {
@@ -11,6 +12,8 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await params;
     const parsed = toolUpdateSchema.safeParse(await request.json().catch(() => ({})));
@@ -25,9 +28,11 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await params;
     const item = await runExclusiveMutation('下架工具', () => archiveToolDirectoryItem(id));

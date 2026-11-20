@@ -12,6 +12,17 @@ export { PUSH_MAX_RETRIES } from '@/contracts/push';
 
 export const PUSH_RETRY_DELAY_MS = 6 * 60 * 60 * 1000; // 6h
 
+/**
+ * 单条 PushDelivery 记录的累计投递尝试上限（跨 Job），防止 repush_all /
+ * manual_force 反复领取 succeeded/unknown 记录后无限真实重发飞书消息。
+ * 默认 20，可用环境变量 PUSH_DELIVERY_MAX_ATTEMPTS 调整；非法值回退默认值。
+ * normal / retry_failed 受 PUSH_MAX_RETRIES(5) 约束，远不会触及此上限。
+ */
+const configuredMaxDeliveryAttempts = Number.parseInt(process.env.PUSH_DELIVERY_MAX_ATTEMPTS ?? '', 10);
+export const PUSH_DELIVERY_MAX_ATTEMPTS = Number.isFinite(configuredMaxDeliveryAttempts) && configuredMaxDeliveryAttempts > 0
+  ? configuredMaxDeliveryAttempts
+  : 20;
+
 export interface PushSettings {
   pushMode: PushMode;
   minScore: number;

@@ -1001,3 +1001,25 @@ describe('单篇重跑的事务执行权', () => {
     }
   });
 });
+
+
+describe('P1-21 关键词过滤审计字段', () => {
+  it('新字段由 migration 创建并可持久化', async () => {
+    const row = await db.article.create({
+      data: {
+        id: 'keyword-audit-1',
+        sourceId: 's1',
+        url: 'https://example.com/keyword-audit-1',
+        title: '便利店行业观察',
+        industryTitleMatched: true,
+        keywordRetentionReason: 'industry_title',
+      },
+      select: { id: true, industryTitleMatched: true, keywordRetentionReason: true },
+    });
+    expect(row).toEqual({
+      id: 'keyword-audit-1',
+      industryTitleMatched: true,
+      keywordRetentionReason: 'industry_title',
+    });
+  });
+});

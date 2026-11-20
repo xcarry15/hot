@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { runJob } from '@/lib/execution';
 import { readPushSettings } from '@/lib/push/policy';
@@ -14,6 +15,8 @@ type CrawlStage = 'collect' | 'process' | 'ai' | 'cluster' | 'push' | 'all';
 //   { stage: 'push' }                     → run push job (async)
 //   { stage: 'all' } (default)            → run full pipeline job (async)
 export async function POST(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const sourceId = typeof body.sourceId === 'string' ? body.sourceId.trim() : undefined;

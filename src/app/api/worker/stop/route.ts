@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { abortRunningJob } from '@/lib/execution';
 
@@ -9,7 +10,9 @@ import { abortRunningJob } from '@/lib/execution';
  *   - abort 当前 job 的 AbortController（进程内立即生效）
  *   - 把所有处于 running 状态的 Job 记录标记为 cancel_requested
  */
-export async function POST() {
+export async function POST(request?: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { resetCount } = await abortRunningJob();
     return NextResponse.json({ stopped: true, resetCount });

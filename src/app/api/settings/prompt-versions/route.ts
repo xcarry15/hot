@@ -1,9 +1,12 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 import { createPromptVersion, deletePromptVersion, listPromptVersions } from '@/lib/prompt-version-service';
 
-export async function GET() {
+export async function GET(request?: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     return NextResponse.json({ versions: await listPromptVersions() });
   } catch (error: unknown) {
@@ -12,6 +15,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const input: unknown = await request.json();
     const version = await runExclusiveMutation('保存提示词版本', () => createPromptVersion(input));
@@ -22,6 +27,8 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const body: unknown = await request.json().catch(() => null);
     const id = body && typeof body === 'object' && 'id' in body && typeof body.id === 'string'

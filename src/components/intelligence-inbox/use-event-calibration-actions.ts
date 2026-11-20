@@ -16,6 +16,10 @@ import { invalidateArticleDetailCache } from '@/features/articles-api.client';
 import type { EventDetail, EventOption } from './types';
 import { errorMessage, timeLabel } from './utils';
 
+// 事件校准（改代表 / 合并 / 移动 / 确认独立）会同时改变多篇、乃至目标事件
+// 文章的 eventId、代表标记与公开态，前端无法枚举全部受影响文章。写成功后统一
+// 清空文章详情缓存（TTL 15s），避免随后打开其它文章时看到旧值；与
+// triggerBatchArticleRegeneration 的 invalidateArticleDetailCache() 用法一致。
 interface UseEventCalibrationActionsOptions {
   detail: ArticleDetailDto | null;
   eventDetail: EventDetail | null;
@@ -66,6 +70,7 @@ export function useEventCalibrationActions({
     setEventAction('representative');
     try {
       await updateEventRepresentative(detail.eventId, articleId);
+      invalidateArticleDetailCache();
       await refreshCurrentArticle();
       toast.success('代表文章已更新');
     } catch (error) {
@@ -125,6 +130,7 @@ export function useEventCalibrationActions({
     try {
       await mergeEvents(detail.eventId, targetEventId);
       setMergeTargetId('');
+      invalidateArticleDetailCache();
       await refreshCurrentArticle();
       toast.success('事件已合并，不会补推或撤回历史消息');
     } catch (error) {
@@ -163,6 +169,7 @@ export function useEventCalibrationActions({
     setEventAction(actionKey);
     try {
       await moveEventArticle(detail.eventId, detail.id, targetEventId);
+      invalidateArticleDetailCache();
       setEventOptions([]);
       setMergeTargetId('');
       setEventSearch('');
@@ -192,6 +199,7 @@ export function useEventCalibrationActions({
     setEventAction(`move-candidate:${candidate.id}`);
     try {
       await moveEventArticle(candidate.eventId, candidate.id, eventDetail.id);
+      invalidateArticleDetailCache();
       await refreshCurrentArticle();
       toast.success('候选文章已并入当前事件');
     } catch (error) {
@@ -215,6 +223,7 @@ export function useEventCalibrationActions({
     setEventAction('confirm');
     try {
       await confirmEventIndependent(detail.eventId, detail.id);
+      invalidateArticleDetailCache();
       await refreshCurrentArticle();
       toast.success('已确认这是独立事件');
     } catch (error) {

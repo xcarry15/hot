@@ -43,6 +43,8 @@ export function applyScorePolicy(
     : Math.round((normalizedAdProbability - 20) * 0.15);
   // 内容可用性只做小幅修正，避免文笔和篇幅压过事件本身的影响。
   const contentBonus = contentScore >= 90 ? 4 : contentScore >= 80 ? 2 : 0;
+  // keywordMatched 仅代表白名单命中；行业标题信号与保留原因已落库用于可解释性，
+  // 但按既有评分策略不享受确定性关键词加分。
   const appliedKeywordBonus = keywordMatched
     ? Math.max(0, Math.min(100, Math.round(keywordBonus)))
     : 0;

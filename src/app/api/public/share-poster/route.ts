@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   const limited = enforcePublicRateLimit(request)
   if (limited) return limited
 
-  const body = await readLimitedJson(request, MAX_SMALL_JSON_BODY_BYTES, '请求正文过大').catch(() => null)
+  const body = await readLimitedJson(request, MAX_SMALL_JSON_BODY_BYTES, '请求正文过大', { timeoutMs: 10_000 }).catch(() => null)
   const parsed = requestSchema.safeParse(body)
   if (!parsed.success) return Response.json({ error: '参数错误' }, { status: 400 })
 

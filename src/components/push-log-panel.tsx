@@ -46,6 +46,27 @@ interface PushLogStats {
   webhooks: { remark: string; isEmpty: boolean; count: number }[]
 }
 
+function isPushLogResponse(value: unknown): value is PushLogResponse {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  return Array.isArray(record.items)
+    && typeof record.total === 'number'
+    && typeof record.page === 'number'
+    && typeof record.totalPages === 'number'
+}
+
+function isPushLogStats(value: unknown): value is PushLogStats {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  const status = record.status
+  return typeof status === 'object' && status !== null
+    && typeof (status as Record<string, unknown>).all === 'number'
+    && typeof (status as Record<string, unknown>).success === 'number'
+    && typeof (status as Record<string, unknown>).failure === 'number'
+    && Array.isArray(record.sources)
+    && Array.isArray(record.webhooks)
+}
+
 function formatPushTime(value: string): string {
   const date = new Date(value)
   return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
@@ -126,10 +147,10 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
         if (controller.signal.aborted) return
         result = await fetchPushLog(params, controller.signal)
       }
-      if (!controller.signal.aborted) {
-        setData(result as unknown as PushLogResponse)
-        if (!background) setLoadError(null)
-      }
+      if (controller.signal.aborted) return
+      if (!isPushLogResponse(result)) throw new Error('推送记录响应格式异常')
+      setData(result)
+      if (!background) setLoadError(null)
     } catch (error) {
       if (isRequestAborted(error) || controller.signal.aborted) return
       if (!background) {
@@ -152,7 +173,9 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
     const controller = new AbortController()
     void fetchPushLogStats({ startAt: startAt ?? undefined, endAt: endAt ?? undefined }, controller.signal)
       .then((result) => {
-        if (!controller.signal.aborted) setStats(result as unknown as PushLogStats)
+        if (controller.signal.aborted) return
+        if (!isPushLogStats(result)) return
+        setStats(result)
       })
       .catch(() => undefined)
     return () => controller.abort()
@@ -161,10 +184,18 @@ export default function PushLogPanel({ active = true, refreshToken = 0, startAt 
   useEffect(() => {
     if (!active) return
     const handle = setTimeout(() => { void fetchLogs() }, 0)
-    const interval = setInterval(() => { void fetchLogs(true) }, 30000)
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'hidden') return
+      void fetchLogs(true)
+    }, 30000)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void fetchLogs(true)
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
     return () => {
       clearTimeout(handle)
       clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibility)
       logRequestRef.current?.abort()
     }
   }, [active, fetchLogs])

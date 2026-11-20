@@ -13,6 +13,7 @@ import {
 } from '@/contracts/ai-provider';
 import { parseWebhookConfigsForServer, serializeWebhookConfigsForServer } from '@/contracts/webhook';
 import {
+  containsEncryptedSettingValue,
   decryptSensitiveSetting,
   decryptWebhookConfigsForRuntime,
   encryptSensitiveSetting,
@@ -251,4 +252,41 @@ export async function updateSettings(input: unknown): Promise<SettingsUpdateResu
   );
   if (result.ok) invalidateSettingsRuntimeCaches();
   return result;
+}
+
+/**
+ * 启动自检：遍历库内所有敏感设置的 enc:v1 密文，确认当前密钥可解密。
+ *
+ * 仅检查敏感键且含 envelope 的值；脱敏占位值（空串 / "[]"）与非敏感键跳过。
+ * 失败时抛出的错误只包含设置键名，绝不包含密钥、密文或明文。
+ * 供 instrumentation 层在启动时 fail-fast 调用，避免轮换密钥后敏感设置不可读却静默运行。
+ */
+export async function assertSettingsCryptoHealthy(): Promise<void> {
+  const rows = await db.setting.findMany({
+    where: { key: { in: Array.from(SENSITIVE_SETTING_KEYS) } },
+    select: { key: true, value: true },
+  });
+
+  const failures: string[] = [];
+  for (const row of rows) {
+    const value = row.value.trim();
+    // 脱敏占位值与尚未填写的配置跳过；只有真正的 envelope 才需要密钥校验。
+    if (!value || value === '[]' || !containsEncryptedSettingValue(row.value)) continue;
+    try {
+      if (row.key === SETTING_KEYS.FEISHU_WEBHOOK_URL) {
+        decryptWebhookConfigsForRuntime(row.value);
+      } else {
+        decryptSensitiveSetting(row.value);
+      }
+    } catch {
+      failures.push(row.key);
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      `设置加密自检失败：${failures.join(', ')} 无法用当前 SETTINGS_ENCRYPTION_KEY 解密；`
+      + '请确认密钥正确，或执行 settings:rotate-key 完成密钥轮换',
+    );
+  }
 }

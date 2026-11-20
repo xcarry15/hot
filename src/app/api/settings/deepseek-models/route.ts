@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { providerSettingKey } from '@/contracts/ai-provider';
 import { fetchSafe, readResponseText } from '@/lib/http';
 import { getSetting } from '@/lib/settings';
@@ -37,7 +38,9 @@ function getDeepSeekModelIds(payload: unknown): string[] {
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request?: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const apiKey = await getSetting(providerSettingKey('deepseek', 'api_key'));
     if (!apiKey.trim()) {

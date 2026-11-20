@@ -31,6 +31,11 @@ export interface RequestJsonInit<B = unknown> {
   signal?: AbortSignal;
   keepalive?: boolean;
   headers?: Record<string, string>;
+  /**
+   * 请求超时（毫秒），默认不启用，避免打断备份恢复、模型探测等长请求。
+   * 显式传正整数启用；0 / 负数 / 不传均表示不启用。超时只覆盖等待响应头阶段。
+   */
+  timeoutMs?: number;
 }
 
 function makeError(status: number, body: unknown, fallbackMessage: string): RequestJsonError {
@@ -50,7 +55,7 @@ export async function requestJson<T = unknown>(
   url: string,
   init: RequestJsonInit = {},
 ): Promise<T> {
-  const { body, signal, keepalive, headers } = init;
+  const { body, signal, keepalive, headers, timeoutMs } = init;
   // DELETE 同样允许 JSON body；提示词版本等资源删除需要携带明确 id。
   // 只有 GET 不发送 body，避免浏览器/代理对 GET body 的兼容性差异。
   const hasBody = body !== undefined && body !== null && method !== 'GET';
@@ -58,9 +63,34 @@ export async function requestJson<T = unknown>(
   if (hasBody && !finalHeaders.has('Content-Type')) {
     finalHeaders.set('Content-Type', 'application/json');
   }
+
+  // 组合「调用方 signal」与「可选超时」：不覆盖调用方 signal，外部取消仍透传；
+  // 未启用超时时 requestInit.signal 就是调用方 signal，与原行为完全一致。
+  const timeoutEnabled = typeof timeoutMs === 'number' && timeoutMs > 0;
+  let controller: AbortController | undefined;
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onExternalAbort: (() => void) | undefined;
+  let effectiveSignal = signal;
+  if (timeoutEnabled) {
+    controller = new AbortController();
+    effectiveSignal = controller.signal;
+    if (signal) {
+      if (signal.aborted) controller.abort();
+      else {
+        onExternalAbort = () => controller?.abort();
+        signal.addEventListener('abort', onExternalAbort, { once: true });
+      }
+    }
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller?.abort();
+    }, timeoutMs);
+  }
+
   const requestInit: RequestInit = {
     method,
-    signal,
+    signal: effectiveSignal,
     keepalive,
     headers: finalHeaders,
   };
@@ -72,6 +102,8 @@ export async function requestJson<T = unknown>(
   try {
     res = await fetch(url, requestInit);
   } catch (err) {
+    // 超时不是「上层取消」：用 status=0 的网络类错误交还业务队列（可重试）。
+    if (timedOut) throw makeError(0, { error: '请求超时' }, '请求超时');
     // 浏览器切页、开发环境热更新或上层主动取消时，fetch 会抛原生
     // AbortError。不要把 DOMException 继续抛给 React/Next 运行时，否则
     // 会触发错误覆盖层；统一包装后由业务队列决定跳过或重试。
@@ -80,6 +112,9 @@ export async function requestJson<T = unknown>(
       throw makeError(499, { error: '请求已取消' }, 'Request aborted');
     }
     throw makeError(0, undefined, err instanceof Error ? err.message : 'Network error');
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (onExternalAbort && signal) signal.removeEventListener('abort', onExternalAbort);
   }
 
   if (res.status === 204) {

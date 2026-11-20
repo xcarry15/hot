@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { retryDiscardedItemWithKeyword } from '@/lib/discarded-retry-service';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
@@ -13,6 +14,8 @@ import { runExclusiveMutation } from '@/lib/mutation-guard';
  * Response: { success: true, articleId, title, auditId }
  */
 export async function POST(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const body = (await request.json()) as { id?: unknown; keyword?: unknown; category?: unknown };
     const id = typeof body.id === 'string' ? body.id.trim() : '';

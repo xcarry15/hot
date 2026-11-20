@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { listPushLogs } from '@/lib/push-log-service';
 import { parsePositiveInt } from '@/lib/pagination';
@@ -6,6 +7,8 @@ import { parseOptionalDate } from '@/lib/shared/date';
 
 // GET /api/push-log?startAt=...&endAt=... - List push history
 export async function GET(request?: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const searchParams = request ? new URL(request.url).searchParams : new URLSearchParams();
     const page = parsePositiveInt(searchParams.get('page'), 1);

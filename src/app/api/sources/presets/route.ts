@@ -1,9 +1,12 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { addPresetSources, listPresetSources } from '@/lib/source-actions';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 
-export async function GET() {
+export async function GET(request?: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     return NextResponse.json(await listPresetSources());
   } catch (error: unknown) {
@@ -12,6 +15,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const result = await runExclusiveMutation('添加预设数据源', async () =>
       addPresetSources(await request.json()),

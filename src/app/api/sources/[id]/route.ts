@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { DuplicateSourceIdentityError, InvalidParserConfigError, SourceNotFoundError, getSourceDetail, softDeleteSource, updateSource } from '@/lib/source-service';
 import { formatSourceSchemaError, sourceUpdateSchema } from '@/lib/source-schema';
@@ -6,9 +7,11 @@ import { runExclusiveMutation } from '@/lib/mutation-guard';
 
 // GET /api/sources/[id]
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await params;
     const source = await getSourceDetail(id);
@@ -26,6 +29,8 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await params;
     const parsed = sourceUpdateSchema.safeParse(await request.json().catch(() => ({})));
@@ -54,9 +59,11 @@ export async function PUT(
 
 // DELETE /api/sources/[id] - Soft delete
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await params;
     const source = await runExclusiveMutation('删除数据源', () => softDeleteSource(id));

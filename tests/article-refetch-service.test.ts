@@ -60,7 +60,12 @@ describe('article-refetch-service', () => {
     await refetchArticle('a1');
 
     expect(mocks.article.update).toHaveBeenLastCalledWith({
-      where: { id: 'a1' }, data: { keywordMatched: true },
+      where: { id: 'a1' },
+      data: {
+        keywordMatched: true,
+        industryTitleMatched: false,
+        keywordRetentionReason: 'whitelist',
+      },
     });
     expect(mocks.keywordHit.createMany).toHaveBeenCalledWith({ data: [{ articleId: 'a1', keywordId: 'k1' }] });
   });
@@ -115,12 +120,18 @@ describe('article-refetch-service', () => {
         aiStatus: 'pending',
         eventScore: null,
         clusterStatus: 'pending',
+        industryTitleMatched: false,
+        keywordRetentionReason: '',
         event: { disconnect: true },
       }),
     }));
     expect(mocks.article.update).toHaveBeenLastCalledWith({
       where: { id: 'a1' },
-      data: { keywordMatched: false },
+      data: {
+        keywordMatched: false,
+        industryTitleMatched: false,
+        keywordRetentionReason: 'unconfigured',
+      },
     });
     expect(mocks.keywordHit.deleteMany).toHaveBeenCalledWith({ where: { articleId: 'a1' } });
   });

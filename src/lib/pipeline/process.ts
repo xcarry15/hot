@@ -15,7 +15,7 @@ import { AUTOMATIC_ARTICLE_SOURCE_FILTER } from '@/lib/pipeline/eligibility';
  */
 import type { Article } from '@prisma/client';
 import { db } from '@/lib/db';
-import { evaluateKeywordMatch, matchIndustryTitleSignal } from '@/lib/filter';
+import { evaluateKeywordFilterDecision, evaluateKeywordMatch } from '@/lib/filter';
 import { ARTICLE_FETCH_TIMEOUT_MS, fetchArticleDetail, markArticleFetchFailure } from '@/lib/detail-fetcher';
 import { abortableDelay, withTimeout } from '@/lib/shared/async';
 import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
@@ -105,13 +105,9 @@ export async function processAllPending(signal?: AbortSignal, jobId?: string, fo
             // 品牌白名单命中，或标题本身已是明确的餐饮/零售业态事件，均保留。
             // 便利店、超市、餐厅等行业报道不应因未提及已知品牌而在 AI 前被误删。
             const keywordMatch = await evaluateKeywordMatch(text);
-            const retained = keywordMatch.blacklisted !== true && (
-              !keywordMatch.configured
-              || keywordMatch.matched
-              || matchIndustryTitleSignal(article.title)
-            );
-            await persistArticleKeywordMatch(article.id, keywordMatch, signal);
-            if (!retained) {
+            const decision = evaluateKeywordFilterDecision(keywordMatch, article.title);
+            await persistArticleKeywordMatch(article.id, keywordMatch, signal, decision);
+            if (!decision.retained) {
               try {
                 await assertWorkerCanWrite(signal);
                 await recordKeywordCandidates(article.title);

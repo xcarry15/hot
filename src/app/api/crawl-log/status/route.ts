@@ -1,3 +1,4 @@
+import { requireAdminAuth } from '@/lib/require-admin-auth';
 /**
  * GET /api/crawl-log/status
  *
@@ -15,13 +16,15 @@
  *   - 普通窗口默认 400、上限 500，按 createdAt desc → id desc 排序，并返回 hasMore 标记。
  *   - 响应禁缓存：Next.js / 代理不得返回旧任务状态。
  */
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { CRAWL_LOG_DEFAULT_LIMIT, CRAWL_LOG_MAX_LIMIT } from '@/contracts/crawl-log';
 import { apiError } from '@/lib/api-helpers';
 import { clampCrawlLogLimit, getCrawlLogJobStatus, getCrawlLogSnapshot } from '@/lib/crawl-log-service';
 import { parsePositiveInt } from '@/lib/pagination';
 
 export async function GET(request: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { searchParams } = new URL(request.url);
     if (searchParams.get('mode') === 'job') {

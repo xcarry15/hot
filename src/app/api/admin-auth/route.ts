@@ -35,6 +35,7 @@ export async function POST(request: Request) {
       request,
       MAX_SMALL_JSON_BODY_BYTES,
       '请求正文过大',
+      { timeoutMs: 10_000 },
     );
   } catch {
     return NextResponse.json({ error: '无效的请求格式' }, { status: 400 });

@@ -4,14 +4,24 @@ on:
   workflow_call:
   workflow_dispatch:
     inputs:
+      ci_gate_confirm:
+        description: "手动部署仅允许 master 最新提交：输入 CI-PASSED 确认该修订已通过 CI 门禁"
+        required: true
+        default: ""
+        type: string
       reset_production:
-        description: "仅在已明确授权时重置生产 SQLite（删除现有业务数据且不备份）"
+        description: "仅在已明确授权时重置生产 SQLite（会先做一致性备份，再删除生产数据）"
         required: false
         default: "no"
         type: choice
         options:
           - "no"
           - "yes"
+      reset_production_confirm:
+        description: "仅当 reset_production=yes 时必填：输入 RESET-PRODUCTION-DATA 显式确认删除生产数据"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -23,7 +33,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 手动触发会内联复跑 CI 关键门禁，放宽超时；workflow_call 路径不受影响。
+    timeout-minutes: 60
     environment:
       name: production
       url: https://hot.kfxz.cn
@@ -35,6 +46,10 @@ jobs:
       DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS || secrets.DEPLOY_KNOWN_HOSTS }}
       APP_NAME: hot
       APP_DIR: /www/wwwroot/hot.kfxz.cn
+      # 用 env 传递自由文本输入，避免把 inputs 直接插值进 shell 脚本。
+      RESET_PRODUCTION_CONFIRM: ${{ inputs.reset_production_confirm }}
+      CI_GATE_CONFIRM: ${{ inputs.ci_gate_confirm }}
+      RESET_PRODUCTION_INPUT: ${{ inputs.reset_production }}
     steps:
       - name: Validate deployment secrets
         shell: bash
@@ -45,8 +60,82 @@ jobs:
           test -n "$DEPLOY_SSH_KEY"
           test -n "$DEPLOY_KNOWN_HOSTS"
 
+      - name: Guard manual workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 手动部署只允许 master 分支的最新提交，拒绝任意 ref / tag / 旧 commit，
+          # 避免绕过 CI 的 lint/typecheck/test/migration/build 门禁。
+          if [[ "$GITHUB_REF" != "refs/heads/master" ]]; then
+            echo "Manual deploy only allows refs/heads/master (got $GITHUB_REF)." >&2
+            exit 1
+          fi
+          if [[ "$CI_GATE_CONFIRM" != "CI-PASSED" ]]; then
+            echo "Set ci_gate_confirm=CI-PASSED to confirm this revision passed CI gates." >&2
+            exit 1
+          fi
+          if [[ "$RESET_PRODUCTION_INPUT" == "yes" && "$RESET_PRODUCTION_CONFIRM" != "RESET-PRODUCTION-DATA" ]]; then
+            echo "reset_production=yes requires reset_production_confirm=RESET-PRODUCTION-DATA." >&2
+            exit 1
+          fi
+
       - name: Checkout verified revision
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Setup Node.js for manual CI gates
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies for manual CI gates
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@10.9.8 --no-audit --no-fund
+          bash scripts/install-dependencies.sh
+          npm run db:generate
+
+      - name: Quality gates for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          DATABASE_URL: file:../db/ci-gate-quality.db
+          API_TOKEN: ci-only-token
+          NEXT_PUBLIC_SITE_URL: https://hot.kfxz.cn
+        run: |
+          set -euo pipefail
+          npm run lint
+          npm run typecheck
+          npm test
+
+      - name: Migration smoke for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          DATABASE_URL: file:../db/ci-gate-migrations.db
+        run: |
+          set -euo pipefail
+          npm run test:migrations
+
+      - name: Production build for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          DATABASE_URL: file:../db/ci-gate-build.db
+          API_TOKEN: ci-only-token
+          SETTINGS_ENCRYPTION_KEY: ci-only-settings-encryption-key-for-e2e
+          NEXT_PUBLIC_SITE_URL: https://hot.kfxz.cn
+        run: |
+          set -euo pipefail
+          npm run db:migrate:deploy
+          npm run db:seed
+          npm run build
 
       - name: Configure SSH
         shell: bash
@@ -104,7 +193,7 @@ jobs:
           scp "${SSH_OPTS[@]}" -P "$DEPLOY_PORT" "/tmp/$RELEASE_ARCHIVE_NAME" \
             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/$RELEASE_ARCHIVE_NAME"
           ssh "${SSH_OPTS[@]}" -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "APP_DIR='$APP_DIR' RELEASE_ARCHIVE='/tmp/$RELEASE_ARCHIVE_NAME' RESET_PRODUCTION='$RESET_PRODUCTION' bash -s" \
+            "APP_DIR='$APP_DIR' RELEASE_ARCHIVE='/tmp/$RELEASE_ARCHIVE_NAME' RESET_PRODUCTION='$RESET_PRODUCTION' RESET_PRODUCTION_CONFIRM='$RESET_PRODUCTION_CONFIRM' bash -s" \
             < scripts/deploy-production.sh
 
       - name: Verify deployed revision

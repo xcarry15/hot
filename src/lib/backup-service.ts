@@ -1,3 +1,4 @@
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { db } from '@/lib/db';
 import {
   PROJECT_BACKUP_TYPE,
@@ -31,6 +32,72 @@ export class ProjectBackupValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ProjectBackupValidationError';
+  }
+}
+
+const BACKUP_SIGNATURE_FIELD = 'signature';
+const BACKUP_SIGNING_DOMAIN = '1-hot:backup-signature:v1';
+
+/** 稳定的键排序序列化：签名与校验双方必须对同一份字节串计算 HMAC。 */
+function canonicalizeBackupPayload(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(canonicalizeBackupPayload).join(',')}]`;
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object).sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalizeBackupPayload(object[key])}`)
+    .join(',')}}`;
+}
+
+function getBackupSigningSecrets(): string[] {
+  const secrets: string[] = [];
+  const dedicated = process.env.BACKUP_SIGNING_KEY?.trim();
+  if (dedicated) secrets.push(dedicated);
+  const configured = process.env.SETTINGS_ENCRYPTION_KEY?.trim();
+  if (configured) secrets.push(configured);
+  const previous = process.env.SETTINGS_ENCRYPTION_KEY_PREVIOUS?.trim();
+  if (previous) secrets.push(previous);
+  if (secrets.length === 0) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('生产环境必须配置 BACKUP_SIGNING_KEY 或 SETTINGS_ENCRYPTION_KEY');
+    }
+    secrets.push(`hot2-local-backup:${process.env.DATABASE_URL || 'file:./db/custom.db'}`);
+  }
+  return [...new Set(secrets)];
+}
+
+function backupHmac(secret: string, material: string): Buffer {
+  const key = createHash('sha256').update(`${BACKUP_SIGNING_DOMAIN}:${secret}`).digest();
+  return createHmac('sha256', key).update(material, 'utf8').digest();
+}
+
+/** 导出签名：对经过 schema 归一化的载荷计算 HMAC，不把密钥写入备份。 */
+function signBackupPayload(payload: ProjectBackupPayload): string {
+  const normalized = projectBackupSchema.parse(payload);
+  return backupHmac(getBackupSigningSecrets()[0], canonicalizeBackupPayload(normalized)).toString('hex');
+}
+
+/**
+ * 导入签名校验。旧版本备份没有签名字段，按警告兼容；
+ * 有签名但校验失败时明确拒绝，且不输出载荷内容或密钥。
+ */
+function verifyBackupSignature(input: unknown, backup: ProjectBackupPayload): void {
+  const raw = input && typeof input === 'object' && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : null;
+  const signature = raw?.[BACKUP_SIGNATURE_FIELD];
+  if (typeof signature !== 'string' || !signature.trim()) {
+    console.warn('[backup] 备份文件缺少 HMAC 签名，按旧格式兼容导入；建议重新导出以生成签名');
+    return;
+  }
+
+  const material = canonicalizeBackupPayload(backup);
+  const provided = Buffer.from(signature.trim(), 'hex');
+  const valid = getBackupSigningSecrets().some((secret) => {
+    const expected = backupHmac(secret, material);
+    return provided.length === expected.length && timingSafeEqual(provided, expected);
+  });
+  if (!valid) {
+    throw new ProjectBackupValidationError('备份签名校验失败：文件可能被篡改，或使用了不同的签名密钥');
   }
 }
 
@@ -74,7 +141,7 @@ export async function exportProjectBackup(): Promise<ProjectBackupPayload> {
     getToolDirectorySnapshot(),
   ]);
 
-  return {
+  const payload: ProjectBackupPayload = {
     type: PROJECT_BACKUP_TYPE,
     version: PROJECT_BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
@@ -95,12 +162,20 @@ export async function exportProjectBackup(): Promise<ProjectBackupPayload> {
     },
     toolDirectory,
   };
+  // 签名字段不属于 projectBackupSchema（顶层 strict），因此只在返回时附加。
+  return { ...payload, [BACKUP_SIGNATURE_FIELD]: signBackupPayload(payload) } as ProjectBackupPayload;
 }
 
 export async function restoreProjectBackup(input: unknown): Promise<ProjectBackupRestoreResult> {
-  const parsed = projectBackupSchema.safeParse(input);
+  // 先剥离签名字段再走 strict schema；校验使用归一化后的载荷，与导出侧一致。
+  const raw = input && typeof input === 'object' && !Array.isArray(input)
+    ? { ...(input as Record<string, unknown>) }
+    : input;
+  if (raw && typeof raw === 'object') delete (raw as Record<string, unknown>)[BACKUP_SIGNATURE_FIELD];
+  const parsed = projectBackupSchema.safeParse(raw);
   if (!parsed.success) throw new ProjectBackupValidationError(formatProjectBackupError(parsed.error));
   const backup = parsed.data as ProjectBackupPayload;
+  verifyBackupSignature(input, backup);
   let sources: ProjectBackupSource[];
   try {
     sources = backup.sources.map((source) => ({

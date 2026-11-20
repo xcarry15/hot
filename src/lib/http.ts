@@ -211,7 +211,7 @@ async function fetchSafeWithCookieJar(
       headers: requestHeadersWithCookies(target, requestHeaders, cookieJar),
       redirect: 'manual',
       dispatcher: effectiveProxyUrl
-        ? getOutboundProxyDispatcher(effectiveProxyUrl)
+        ? await getOutboundProxyDispatcher(effectiveProxyUrl)
         : getSafeOutboundDispatcher(),
     } as RequestInit);
     if (![301, 302, 303, 307, 308].includes(response.status)) {

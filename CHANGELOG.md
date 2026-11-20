@@ -19,6 +19,23 @@
 - 移除重复的 VBS 打包启动器，保留 `bat/run.bat` 入口。
 - 更新代码质量审计范围说明，避免过期计数被误读为当前结论。
 
+### 稳定性与数据一致性（全量技术债修复）
+
+- SQLite 并发写事务改为全局串行队列 + 瞬态冲突重试，消除线上持续的 P1008 / P2028 / Transaction already closed；嵌套事务透传避免自锁。
+- 流水线取消/租约丢失后不再在补偿阶段写库或真实推送；cluster 的 `forceRetry` 保留本 Job 退避；租约续期失败时 Job 条件重新入队。
+- `technical-status` 纳入独占写门禁与路由层鉴权，带请求体上限；关键词过滤决策新增 `industryTitleMatched` / `keywordRetentionReason` 落库字段与 migration，Excel 导出增列、格式版本升至 6。
+
+### 安全
+
+- 敏感设置 envelope 增加 keyId + AAD 按字段绑定，兼容旧格式；新增 `npm run settings:rotate-key` 原子轮换工具（默认 dry-run）；启动时自检密文可解密，失败 fail-fast。
+- 路由层 `requireAdminAuth` 覆盖全部 54 个受保护路由；备份导出加 HMAC 签名；请求体增加大小上限与超时区分 408/413；代理路径补齐 SSRF 校验。
+- 生产依赖升级：`xlsx` 换官方 CDN 0.20.3，`next`/`undici`/`zod`/`effect` 升级，生产 audit 高危漏洞清零。
+
+### 发布与运维
+
+- 发布脚本备份做 `integrity_check` 校验、回滚前停 PM2、migration 预检改为严格前缀（允许待应用的新迁移）、reset 需显式确认；CI 手动部署路径补齐全套门禁。
+- 新增 PM2 日志轮转配置与 rawContent 手动归档脚本（默认 dry-run）；校正 `AGENTS.md` 的 reset 备份说明。
+
 ## 2026-11-12
 
 - feat: 重设计访问统计分析页面；完善访问统计与浏览排行。

@@ -1,12 +1,15 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/api-helpers';
 import { runExclusiveMutation } from '@/lib/mutation-guard';
 import { restoreToolDirectoryItem } from '@/lib/tool-directory-service';
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const { id } = await params;
     const item = await runExclusiveMutation('恢复工具', () => restoreToolDirectoryItem(id));

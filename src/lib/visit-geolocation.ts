@@ -48,11 +48,13 @@ export async function lookupVisitRegion(ip: string): Promise<{ region: string; c
   const cached = lookupFromCache(ip, now);
   if (cached) return cached;
 
-  const file = process.env.VISIT_GEOIP_DB;
-  if (!file || !existsSync(file)) {
-    warnOnce('unconfigured', 'VISIT_GEOIP_DB 未配置或文件不存在；地区统计将返回“未知”');
+  // 先统一判定配置是否可用（DB 文件 + mmdblookup 可执行），避免只配了 DB
+  // 却在每次查询时都 spawn 失败；未配置时直接降级，不进入子进程路径。
+  if (!isVisitGeoConfigured()) {
+    warnOnce('unconfigured', '地区解析未完整配置（VISIT_GEOIP_DB 或 mmdblookup 缺失），返回“未知”');
     return UNKNOWN;
   }
+  const file = process.env.VISIT_GEOIP_DB as string;
   if (!isIP(ip)) return UNKNOWN;
   if (running >= 4) {
     warnOnce('concurrency', '并发查询达到上限（4），本次地区解析降级为“未知”');

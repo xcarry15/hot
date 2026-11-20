@@ -29,7 +29,10 @@ it('真实 SQLite 按自然日汇总本期与上期，跨日会话和仅工具�
     { id: 'p2', sessionId: 'current', visitorId: 'v2', dateKey: day(0), kind: 'page' },
   ] });
   await db.visitToolDaily.create({ data: { dateKey: day(1), toolId: 't1', toolName: '工具', clicks: 3 } });
-  const response = await GET(new Request(`http://localhost/api/visit-analytics?start=${day(1)}&end=${day(0)}`));
+  // 路由层已有 requireAdminAuth（P0-7），业务测试需带合法 Bearer token 才能到达统计逻辑。
+  const response = await GET(new Request(`http://localhost/api/visit-analytics?start=${day(1)}&end=${day(0)}`, {
+    headers: { authorization: `Bearer ${process.env.API_TOKEN ?? ''}` },
+  }));
   expect(response.status).toBe(200);
   const data = await response.json();
   expect(data).toMatchObject({ visitors: 1, views: 1, visits: 1, clicks: 3, previous: { start: day(3), end: day(2), visitors: 1, views: 1, visits: 2, clicks: 0 } });

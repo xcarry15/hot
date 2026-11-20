@@ -40,3 +40,21 @@ describe('关键词写入的事务取消检查', () => {
     expect(db.keywordHit.createMany).toHaveBeenCalledOnce();
   });
 });
+
+describe('P1-21 关键词过滤审计字段', () => {
+  it('记录行业标题信号与保留原因，不改变 keywordMatched 语义', async () => {
+    await persistArticleKeywordMatch('a1', { matched: false, matchedWords: [] }, undefined, {
+      industryTitleMatched: true,
+      retentionReason: 'industry_title',
+    });
+
+    expect(db.article.update).toHaveBeenCalledWith({
+      where: { id: 'a1' },
+      data: {
+        keywordMatched: false,
+        industryTitleMatched: true,
+        keywordRetentionReason: 'industry_title',
+      },
+    });
+  });
+});

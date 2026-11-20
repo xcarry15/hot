@@ -6,7 +6,7 @@ import {
   PUBLIC_STATUS_CODEC,
 } from '@/contracts/state';
 
-export const EXPORT_FORMAT_VERSION = 5;
+export const EXPORT_FORMAT_VERSION = 6;
 export const EXPORT_DATE_FIELDS = ['createdAt', 'publishedAt', 'updatedAt'] as const;
 export const EXPORT_REPRESENTATIVE_FILTERS = ['all', 'yes', 'no'] as const;
 export const EXPORT_PUSH_FILTERS = ['all', 'yes', 'no'] as const;

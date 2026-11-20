@@ -46,6 +46,8 @@ export async function normalizeAiRecoveryBacklog(
             fetchRetryCount: 0,
             nextFetchRetryAt: null,
             keywordMatched: false,
+            industryTitleMatched: false,
+            keywordRetentionReason: '',
           },
         });
       }

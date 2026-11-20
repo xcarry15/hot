@@ -15,7 +15,7 @@ import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 import { getRelatedArticles } from '@/lib/article-related-service';
 import { getWebhookConfigs, type WebhookConfig } from '@/lib/settings';
 import { findRecentPushedEventDuplicate } from '@/lib/event-clustering-service';
-import { PUSH_MAX_RETRIES, PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/push/policy';
+import { PUSH_DELIVERY_MAX_ATTEMPTS, PUSH_MAX_RETRIES, PUSH_RETRY_DELAY_MS, readPushSettings } from '@/lib/push/policy';
 import { getPushUrgency, buildFeishuCard } from '@/lib/push/feishu-card';
 import { sendFeishuWebhook, type SingleWebhookPushResult } from '@/lib/push/feishu-transport';
 import { getEventReleaseBlockReason, type EventReleaseBlockReason } from '@/lib/event-release-policy';
@@ -443,6 +443,7 @@ async function pushToSingleTarget(
         targetId,
         contentVersion: contentVersionStr,
         mode,
+        attempt: { lt: PUSH_DELIVERY_MAX_ATTEMPTS },
         OR: [
           { status: { in: retryableStatuses } },
           ...((mode === 'manual_force' || mode === 'repush_all') ? [{

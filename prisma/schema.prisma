@@ -72,6 +72,8 @@ model Article {
   keyPoints                    String      @default("[]") // JSON array
   score                        Int         @default(0) // 0-100
   keywordMatched               Boolean     @default(false) // 处理阶段是否命中已配置关键词；用于确定性特殊加分
+  industryTitleMatched         Boolean     @default(false) // 标题是否命中餐饮/零售行业信号；用于解释保留原因，不参与加分
+  keywordRetentionReason       String      @default("") // 过滤决策：blacklisted/unconfigured/whitelist/industry_title/rejected；空为历史数据
   eventScore                   Int? // AI 原始事件影响力分；策略调整时用于零成本重算
   contentScore                 Int? // AI 原始内容质量分；策略调整时用于零成本重算
   rawScore                     Int? // 应用广告规则前的确定性加权分

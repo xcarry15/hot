@@ -1,11 +1,14 @@
-import { NextResponse } from 'next/server';
+import { requireAdminAuth } from '@/lib/require-admin-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 import { providerSettingKey } from '@/contracts/ai-provider';
 import { fetchGeminiModelIds, GeminiModelsError } from '@/lib/gemini-provider';
 import { getSetting } from '@/lib/settings';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request?: Request) {
+  const denied = request ? requireAdminAuth(request as NextRequest) : null;
+  if (denied) return denied;
   try {
     const apiKey = (await getSetting(providerSettingKey('gemini', 'api_key'))).trim();
     if (!apiKey) return NextResponse.json({ error: '请先保存 Gemini API Key' }, { status: 400 });

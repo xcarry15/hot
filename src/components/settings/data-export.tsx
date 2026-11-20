@@ -166,22 +166,26 @@ export default function DataExportPanel() {
   const [creating, setCreating] = useState(false)
   const [actionId, setActionId] = useState<string | null>(null)
 
-  const loadJobs = useCallback(async () => {
+  const loadJobs = useCallback(async (signal?: AbortSignal) => {
     try {
-      setJobs(await listDataExportJobs())
+      const next = await listDataExportJobs(signal)
+      if (!signal?.aborted) setJobs(next)
     } catch {
-      toast.error('导出任务加载失败')
+      if (!signal?.aborted) toast.error('导出任务加载失败')
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    let active = true
-    void Promise.all([loadJobs(), fetchSources().then((items) => {
-      if (active) setSources(items.filter((item) => item.id && item.name).map((item) => ({ id: item.id, name: item.name })))
-    }).catch(() => undefined)])
-    return () => { active = false }
+    const controller = new AbortController()
+    void Promise.all([
+      loadJobs(controller.signal),
+      fetchSources(controller.signal).then((items) => {
+        if (!controller.signal.aborted) setSources(items.filter((item) => item.id && item.name).map((item) => ({ id: item.id, name: item.name })))
+      }).catch(() => undefined),
+    ])
+    return () => controller.abort()
   }, [loadJobs])
 
   const hasActiveJob = useMemo(() => jobs.some((job) => job.status === 'queued' || job.status === 'running'), [jobs])
@@ -189,8 +193,21 @@ export default function DataExportPanel() {
 
   useEffect(() => {
     if (!hasActiveJob) return undefined
-    const timer = window.setInterval(() => { void loadJobs() }, 2000)
-    return () => window.clearInterval(timer)
+    const controller = new AbortController()
+    const tick = () => {
+      if (controller.signal.aborted || document.visibilityState === 'hidden') return
+      void loadJobs(controller.signal)
+    }
+    const timer = window.setInterval(tick, 2000)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') tick()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      controller.abort()
+    }
   }, [hasActiveJob, loadJobs])
 
   const updateFilter = <K extends keyof ExportFilter>(key: K, value: ExportFilter[K]) => {

@@ -59,7 +59,7 @@
 - Routine production migration uses `npm run db:migrate:deploy`. Never use `db:push` or `db:danger:reset` in production.
 - Deployment archives are built in versioned release directories under the app root; `.env` and `db/` live in shared state, and the `current` symlink is switched atomically only after the release build and normal migration backup succeed. Keep the previous releases for rollback. PM2 runs one `hot` instance.
 - Stop PM2 and create a consistent SQLite `.backup` before normal production migrations; a failed normal release restores that backup and the previous `current` target when possible.
-- `reset_production=yes` deletes production SQLite without backup. Use it only after explicit approval to lose production data.
+- `reset_production=yes` is a destructive, explicit-confirmation operation: the script always creates and validates a SQLite backup first, then removes the live database; use it only after explicit approval to lose production data.
 - Routine application releases do not clear the server-wide Nginx cache or reload Nginx.
 
 ## Formal Server Operations
@@ -80,6 +80,7 @@
 - `npm run verify` — lint, typecheck, all tests, and production build.
 - `npm run build` / `npm run start` — production build and port `3011` service.
 - `npm run db:migrate:status`, `npm run db:migrate:deploy`, `npm run db:generate`, and `npm run db:optimize` — routine database operations.
+- `npm run settings:rotate-key` — encrypted settings key rotation; dry-run by default, explicit apply required.
 - The server development baseline is Node.js 20.20.2 from `.nvmrc`; keep CI on the same version unless a runtime upgrade is intentional.
 
 ## Code and Delivery Style

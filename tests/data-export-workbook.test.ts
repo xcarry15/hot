@@ -80,6 +80,8 @@ describe('Excel 导出工作簿', () => {
       keyPoints: '["关键点"]',
       score: 88,
       keywordMatched: true,
+      industryTitleMatched: false,
+      keywordRetentionReason: 'whitelist',
       eventScore: 90,
       contentScore: 86,
       rawScore: 82,
@@ -188,6 +190,8 @@ describe('Excel 导出工作簿', () => {
       综合评分: 88,
       实际命中关键词: '测试品牌',
       '命中关键词 ID': '["keyword-1"]',
+      '是否命中行业标题信号': false,
+      '关键词过滤保留原因（原值）': 'whitelist',
       事件状态说明: '有效',
       链接: 'https://example.com/article?id=1',
     });
@@ -220,7 +224,7 @@ describe('Excel 导出工作簿', () => {
     expect(workbook.SheetNames).not.toContain('文章正文');
     expect(workbook.SheetNames).not.toContain('长文本分片');
     expect(meta.some((row) => row[0] === '导出任务 ID' && row[1] === 'export-1')).toBe(true);
-    expect(meta.some((row) => row[0] === '导出格式版本' && row[1] === 5)).toBe(true);
+    expect(meta.some((row) => row[0] === '导出格式版本' && row[1] === 6)).toBe(true);
     expect(meta.some((row) => row[0] === '错误数量' && row[1] === 0)).toBe(true);
     expect(meta.some((row) => String(row[0]).includes('ISO'))).toBe(false);
   });

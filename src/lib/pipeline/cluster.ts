@@ -5,7 +5,7 @@ import { db } from '@/lib/db';
 import { clusterArticle, markClusterFailure } from '@/lib/event-clustering-service';
 import { repairDirtyEvents } from '@/lib/event/event-consistency-service';
 import { advanceJobProgress, startJobStage } from '@/lib/job-progress';
-import { assertNotAborted } from '@/lib/worker-stop';
+import { assertWorkerCanWrite } from '@/lib/execution-write-guard';
 
 const MAX_CLUSTER_BATCH = 200;
 
@@ -51,13 +51,27 @@ export async function clusterAllPending(
   }
   // 历史一致性修复由独立的 repairOnly Job 通过队列分批处理；不能在每次
   // 聚类前重新扫描整张 Article/Event 表，避免数据规模增长后拖慢主流水线。
-  const total = await db.article.count({ where: buildClusterPendingWhere(new Date(), forceRetry) });
+  // 与 analyze.ts 相同的防重模式：forceRetry 只跳过本 Job 第一次查询的退避；
+  // 已尝试过的文章必须遵守 nextClusterRetryAt，避免同一 Job 内无退避地反复
+  // 重聚类失败文章（markClusterFailure 不改 eventId，文章不会离开 where）。
+  const attemptedArticleIds = new Set<string>();
+  const pendingWhere = (): Prisma.ArticleWhereInput => ({
+    ...buildClusterPendingWhere(new Date(), forceRetry),
+    ...(forceRetry && attemptedArticleIds.size === 0 ? {} : {
+      OR: [
+        { nextClusterRetryAt: null },
+        { nextClusterRetryAt: { lte: new Date() } },
+      ],
+    }),
+  });
+  const total = await db.article.count({ where: pendingWhere() });
   if (jobId) await startJobStage(jobId, { stage: 'cluster', total });
   let processed = 0;
   let errors = 0;
   while (true) {
+    await assertWorkerCanWrite(signal);
     const articles = await db.article.findMany({
-      where: buildClusterPendingWhere(new Date(), forceRetry),
+      where: pendingWhere(),
       select: { id: true, title: true },
       // 事件候选以发布时间窗召回。历史补采按入库时间会打乱事件先后，
       // 导致同一新闻无法稳定进入同一轮候选池。
@@ -66,7 +80,8 @@ export async function clusterAllPending(
     });
     if (articles.length === 0) break;
     for (const article of articles) {
-      assertNotAborted(signal);
+      attemptedArticleIds.add(article.id);
+      await assertWorkerCanWrite(signal);
       let failed = false;
       try {
         await clusterArticle(article.id, signal);
