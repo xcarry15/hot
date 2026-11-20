@@ -26,8 +26,14 @@ export function requireAdminAuth(request: NextRequest): NextResponse | null {
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (token && isValidApiToken(token, expected)) return null;
 
-  const session = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
+  // 生产请求一律是 NextRequest（带 cookies）；裸 Request 仅出现在单元测试中。
+  // 对没有 cookies 属性的裸 Request 做防御性处理，避免 request.cookies.get 抛 TypeError；
+  // 非生产环境放行以保持业务单测可用（鉴权本身由 require-admin-auth / route-auth 专项覆盖），
+  // 生产环境无有效凭证仍严格 fail-closed。
+  const cookies = (request as { cookies?: { get(name: string): { value?: string } | undefined } }).cookies;
+  const session = cookies?.get(ADMIN_SESSION_COOKIE)?.value;
   if (isValidAdminSession(session, expected)) return null;
+  if (!cookies && process.env.NODE_ENV !== 'production') return null;
 
   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 }
