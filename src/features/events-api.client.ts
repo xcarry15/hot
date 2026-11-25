@@ -53,6 +53,25 @@ export async function confirmEventIndependent(eventId: string, articleId: string
   });
 }
 
+export interface ConfirmBatchFailure {
+  articleId: string;
+  title: string;
+  reason: string;
+}
+
+export interface ConfirmBatchResult {
+  total: number;
+  succeeded: number;
+  failed: ConfirmBatchFailure[];
+  truncated: boolean;
+}
+
+export async function confirmIndependentBatch(articleIds: string[]): Promise<ConfirmBatchResult> {
+  return requestJson<ConfirmBatchResult>('POST', '/api/events/confirm-independent-batch', {
+    body: { articleIds },
+  });
+}
+
 export function pushEvent(
   eventId: string,
   mode: EventPushMode,

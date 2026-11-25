@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from 'lucide-react'
 import { toast } from 'sonner'
+import { confirmIndependentBatch, type ConfirmBatchFailure } from '@/features/events-api.client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -16,6 +17,7 @@ import type { ArticleListItemDto, ArticleListResponseDto } from '@/contracts/art
 import {
   cancelArticleDetailPrefetch,
   fetchArticleList,
+  invalidateArticleDetailCache,
   prefetchArticleDetail,
   triggerBatchArticleRegeneration,
 } from '@/features/articles-api.client'
@@ -55,6 +57,9 @@ export default function ArticleLibrarySheet({
   const [data, setData] = useState<ArticleListResponseDto | null>(null)
   const [loading, setLoading] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [batchSubmitting, setBatchSubmitting] = useState(false)
+  const [batchFailed, setBatchFailed] = useState<ConfirmBatchFailure[]>([])
   const [error, setError] = useState('')
   const requestIdRef = useRef(0)
   const latestLoadRef = useRef<() => Promise<void>>(async () => undefined)
@@ -115,6 +120,63 @@ export default function ArticleLibrarySheet({
     void load()
   }, [load, counts?.total, counts?.clusterReview, counts?.lowConfidence])
 
+  useEffect(() => {
+    setSelectedIds(new Set())
+    setBatchFailed([])
+  }, [view, search, page, open])
+
+  const selectableIds = (data?.items ?? [])
+    .filter((item) => item.clusterStatus === 'needs_review' && item.event?.articleCount === 1)
+    .map((item) => item.id)
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id))
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (allSelected) selectableIds.forEach((id) => next.delete(id))
+      else selectableIds.forEach((id) => next.add(id))
+      return next
+    })
+  }
+
+  const submitBatchConfirm = async () => {
+    const ids = [...selectedIds]
+    if (ids.length === 0 || batchSubmitting) return
+    if (typeof window !== 'undefined' && !window.confirm(
+      `确认将选中的 ${ids.length} 篇文章标记为独立事件？
+
+仅处理单篇待复核事件；确认后若文章达标会被自动推送，且不可撤回。`,
+    )) return
+
+    setBatchSubmitting(true)
+    setBatchFailed([])
+    try {
+      const result = await confirmIndependentBatch(ids)
+      setBatchFailed(result.failed)
+      setSelectedIds(new Set(result.failed.map((failure) => failure.articleId)))
+      if (result.succeeded > 0) invalidateArticleDetailCache()
+      await latestLoadRef.current()
+      toast.success(
+        `已确认 ${result.succeeded} 篇`
+        + (result.failed.length ? `，失败 ${result.failed.length} 篇` : '')
+        + (result.truncated ? '（单次上限 50 篇，其余未处理）' : '') + '\n确认后达标文章可能已被自动推送。',
+      )
+    } catch (loadError) {
+      toast.error(loadError instanceof Error ? loadError.message : '批量确认失败')
+    } finally {
+      setBatchSubmitting(false)
+    }
+  }
+
   const submitSearch = () => {
     setPage(1)
     setSearch(searchInput.trim())
@@ -149,19 +211,50 @@ export default function ArticleLibrarySheet({
               <SheetTitle className="text-base">全部文章</SheetTitle>
               <SheetDescription>搜索历史文章；分类计数统计全库人工关注项</SheetDescription>
             </div>
-            {view === 'low_confidence' && data?.items.length ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 shrink-0 px-2 text-xs"
-                disabled={bulkLoading || loading || !!error}
-                onClick={() => void regenerateCurrentPage()}
-                title="重新调用 AI 并重新聚类，不会自动推送"
-              >
-                {bulkLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                {bulkLoading ? '提交中…' : `一键重跑 AI（${data.items.length}）`}
-              </Button>
+            {(view === 'low_confidence' || view === 'cluster_review') && data?.items.length ? (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                {view === 'cluster_review' && (
+                  <>
+                    {selectableIds.length > 0 && (
+                      <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={toggleSelectAll}
+                          className="h-3.5 w-3.5 accent-foreground"
+                        />
+                        全选本页
+                      </label>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 shrink-0 px-2 text-xs"
+                      disabled={batchSubmitting || loading || !!error || selectedIds.size === 0}
+                      onClick={() => void submitBatchConfirm()}
+                      title="仅确认单篇待复核事件；达标文章可能被自动推送且不可撤回"
+                    >
+                      {batchSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                      {batchSubmitting ? '确认中…' : `批量确认独立（${selectedIds.size}）`}
+                    </Button>
+                  </>
+                )}
+                {view === 'low_confidence' && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 shrink-0 px-2 text-xs"
+                    disabled={bulkLoading || loading || !!error}
+                    onClick={() => void regenerateCurrentPage()}
+                    title="重新调用 AI 并重新聚类，不会自动推送"
+                  >
+                    {bulkLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                    {bulkLoading ? '提交中…' : `一键重跑 AI（${data.items.length}）`}
+                  </Button>
+                )}
+              </div>
             ) : null}
           </div>
         </SheetHeader>
@@ -207,24 +300,41 @@ export default function ArticleLibrarySheet({
             <div className="divide-y">
               {data.items.map((item) => {
                 const status = statusLabel(item)
-                return <button
-                  key={item.id}
-                  type="button"
-                  onMouseEnter={() => { preloadArticleWorkspace(); prefetchArticleDetail(item.id) }}
-                  onMouseLeave={() => cancelArticleDetailPrefetch(item.id)}
-                  onFocus={() => { preloadArticleWorkspace(); prefetchArticleDetail(item.id) }}
-                  onBlur={() => cancelArticleDetailPrefetch(item.id)}
-                  disabled={loading || !!error}
-                  onClick={() => onOpenArticle(item.id)}
-                  className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-muted/60"
-                >
-                  <ScoreBadge score={item.score} variant="compact-square" />
-                  <span className="min-w-0 flex-1">
-                    <span className="line-clamp-1 text-xs font-medium leading-5">{item.title}</span>
-                    <span className="mt-1 block text-[11px] text-muted-foreground">{item.source.name} · {timeLabel(item.publishedAt ?? item.createdAt)}</span>
-                  </span>
-                  {status && <span className="shrink-0 border px-1.5 py-0.5 text-[10px] text-muted-foreground">{status}</span>}
-                </button>
+                const selectable = view === 'cluster_review' && item.clusterStatus === 'needs_review' && item.event?.articleCount === 1
+                const failed = batchFailed.find((failure) => failure.articleId === item.id)
+                return (
+                  <div key={item.id} className="flex w-full items-start gap-2 px-3 py-2 hover:bg-muted/60">
+                    {view === 'cluster_review' && (
+                      <input
+                        type="checkbox"
+                        aria-label={`选择文章 ${item.title}`}
+                        checked={selectedIds.has(item.id)}
+                        disabled={!selectable || batchSubmitting || loading || !!error}
+                        onChange={() => toggleSelect(item.id)}
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-foreground disabled:opacity-40"
+                        title={!selectable && item.event && item.event.articleCount > 1 ? '多成员事件请用事件校准逐篇处理' : undefined}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onMouseEnter={() => { preloadArticleWorkspace(); prefetchArticleDetail(item.id) }}
+                      onMouseLeave={() => cancelArticleDetailPrefetch(item.id)}
+                      onFocus={() => { preloadArticleWorkspace(); prefetchArticleDetail(item.id) }}
+                      onBlur={() => cancelArticleDetailPrefetch(item.id)}
+                      disabled={loading || !!error}
+                      onClick={() => onOpenArticle(item.id)}
+                      className="flex min-w-0 flex-1 items-start gap-2 text-left"
+                    >
+                      <ScoreBadge score={item.score} variant="compact-square" />
+                      <span className="min-w-0 flex-1">
+                        <span className="line-clamp-1 text-xs font-medium leading-5">{item.title}</span>
+                        <span className="mt-1 block text-[11px] text-muted-foreground">{item.source.name} · {timeLabel(item.publishedAt ?? item.createdAt)}</span>
+                        {failed && <span className="mt-1 block text-[10px] text-destructive">确认失败：{failed.reason}</span>}
+                      </span>
+                      {status && <span className="shrink-0 border px-1.5 py-0.5 text-[10px] text-muted-foreground">{status}</span>}
+                    </button>
+                  </div>
+                )
               })}
             </div>
           ) : (

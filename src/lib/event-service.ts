@@ -290,3 +290,57 @@ export async function splitEventArticles(eventId: string, articleIds: string[]):
   }
   return newEventId;
 }
+
+/** 单次批量确认最多处理的文章数，避免长事务与超大响应。 */
+export const CONFIRM_INDEPENDENT_BATCH_LIMIT = 50;
+
+export interface ConfirmIndependentBatchFailure {
+  articleId: string;
+  title: string;
+  reason: string;
+}
+
+export interface ConfirmIndependentBatchResult {
+  total: number;
+  succeeded: number;
+  failed: ConfirmIndependentBatchFailure[];
+}
+
+/**
+ * 批量确认单篇待复核事件为独立事件。
+ *
+ * 逐篇复用 confirmIndependentArticle（各自事务+审计+公开投影重算），
+ * 单篇失败不影响其余；因此传多篇会拆成多个短事务，而非一个大事务。
+ * 并发写由调用方 runExclusiveMutation 统一占位，这里不重复加锁。
+ */
+export async function confirmIndependentBatch(articleIds: string[]): Promise<ConfirmIndependentBatchResult> {
+  const uniqueIds = [...new Set(articleIds)].slice(0, CONFIRM_INDEPENDENT_BATCH_LIMIT);
+  const articles = uniqueIds.length > 0
+    ? await db.article.findMany({
+        where: { id: { in: uniqueIds } },
+        select: { id: true, eventId: true, title: true },
+      })
+    : [];
+  const byId = new Map(articles.map((article) => [article.id, article]));
+  const result: ConfirmIndependentBatchResult = { total: uniqueIds.length, succeeded: 0, failed: [] };
+
+  for (const articleId of uniqueIds) {
+    const article = byId.get(articleId);
+    if (!article?.eventId) {
+      result.failed.push({ articleId, title: article?.title ?? '', reason: '文章不存在或未归属事件' });
+      continue;
+    }
+    try {
+      const ok = await confirmIndependentArticle(article.eventId, articleId);
+      if (ok) result.succeeded += 1;
+      else result.failed.push({ articleId, title: article.title, reason: '状态已变更或不符合单篇待复核条件' });
+    } catch (error) {
+      result.failed.push({
+        articleId,
+        title: article.title,
+        reason: error instanceof Error ? error.message : '确认失败',
+      });
+    }
+  }
+  return result;
+}
