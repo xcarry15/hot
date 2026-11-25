@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 
 function computeUrlHash(url: string): string {
@@ -41,6 +41,7 @@ vi.mock('@/lib/push/feishu-transport', () => ({ sendFeishuWebhook: mocks.sendWeb
 
 import { getPushTargetStatesForEvents, pushArticleToFeishu, pushEventToFeishu } from '@/lib/push/delivery';
 import { pushableWhere } from '@/lib/push/policy';
+import { verifyFeishuOriginalLink } from '@/lib/push/feishu-original-link';
 
 function representative(overrides: Record<string, unknown> = {}) {
   return {
@@ -64,6 +65,8 @@ function representative(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Event 推送门禁', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.webhookConfigs = [];
@@ -127,6 +130,35 @@ describe('Event 推送门禁', () => {
       create: { name: 'A', urlHash: computeUrlHash('https://hook/a') },
       update: { name: 'A' },
     }));
+  });
+
+  it.each(['https://example.com/news?article=1', 'file:///tmp/article'])('飞书卡片按原文链接 %s 构建按钮，正文隐藏来源', async (url) => {
+    vi.stubEnv('SESSION_SECRET', 'test-feishu-signing-key');
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://hot.kfxz.cn');
+    mocks.webhookConfigs = [{ url: 'https://hook/a', remark: 'A', enabled: true }];
+    mocks.eventFindUnique.mockResolvedValue({
+      id: 'e1', status: 'active', clusterReviewStatus: 'confirmed', pushedAt: null,
+      representativeArticleId: 'a1', pushRetryCount: 0, nextPushRetryAt: null,
+      representativeArticle: representative({ url, originalSource: '原文媒体' }),
+    });
+
+    await pushEventToFeishu('e1', 'manual_force');
+
+    expect(mocks.sendWebhook).toHaveBeenCalledTimes(1);
+    const { card } = mocks.sendWebhook.mock.calls[0][1];
+    expect(card.elements[0].text.content).not.toMatch(/原文媒体|测试源/);
+    const buttons = card.elements[1].actions.map((action: { text: { content: string }; url: string }) => ({
+      label: action.text.content,
+      url: action.url,
+    }));
+    const expected = [{ label: '选址助手', url: 'https://hot.kfxz.cn/' }];
+    if (url.startsWith('https:')) {
+      const trackingUrl = new URL(buttons[1].url);
+      expect(trackingUrl.origin + trackingUrl.pathname).toBe('https://hot.kfxz.cn/go/feishu/a1');
+      expect(verifyFeishuOriginalLink('a1', trackingUrl.searchParams.get('sig'))).toBe(true);
+      expected.push({ label: '查看原文', url: trackingUrl.href });
+    }
+    expect(buttons).toEqual(expected);
   });
 
   it('没有 Event 的 Article 不能直接推送', async () => {

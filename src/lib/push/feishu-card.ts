@@ -14,12 +14,13 @@
 import { parseJsonArray, splitBrands } from '@/lib/shared/article-codecs';
 import { formatDaysAgo } from '@/lib/shared/date';
 import { getScoreStyle } from '@/lib/shared/score-style';
+import { isHttpUrl } from '@/lib/url-utils';
+import { buildFeishuOriginalUrl } from './feishu-original-link';
 
 export type PushUrgency = 'urgent' | 'normal';
 
 export interface FeishuCardArticleInput {
   id: string;
-  publicEventId: string;
   title: string;
   summary: string;
   brand: string;
@@ -31,8 +32,6 @@ export interface FeishuCardArticleInput {
   aiStatus: string;
   isAd: boolean;
   createdAt?: string | Date;
-  originalSource?: string | null;
-  source?: { name: string };
 }
 
 export interface FeishuCardRelated {
@@ -69,7 +68,7 @@ export function getPushUrgency(article: { score: number; aiStatus: string }): Pu
  * - Header: article title with urgency-colored background
  * - Metadata + score tag (one tight row, no divider)
  * - 要点 / 洞察 merged into a single lark_md block (no section headers/dividers)
- * - Action: "查看原文" button
+ * - Actions: project homepage and article source link
  */
 export function buildFeishuCard(
   article: FeishuCardArticleInput,
@@ -105,12 +104,11 @@ export function buildFeishuCard(
   // 全部塞进一个 lark_md,用换行和 emoji 分隔,避免多个 div/hr 撑高卡片。
   const lines: string[] = [];
 
-  // 元信息行:时间 · 品牌 · 分类 · 中文来源名
+  // 元信息行:时间 · 品牌 · 分类
   const metaParts = [
     timeStr,
     brandLabel ? `**${escapeLarkMarkdown(brandLabel)}**` : '',
     escapeLarkMarkdown(article.category),
-    escapeLarkMarkdown(article.originalSource || article.source?.name || ''),
   ].filter(Boolean);
   if (metaParts.length > 0) {
     lines.push(`<font color='grey'>${metaParts.join(' · ')}</font>`);
@@ -145,6 +143,23 @@ export function buildFeishuCard(
     }
   }
 
+  const actions = [
+    {
+      tag: 'button',
+      text: { tag: 'plain_text', content: '选址助手' },
+      type: 'default',
+      url: 'https://hot.kfxz.cn/',
+    },
+  ];
+  if (isHttpUrl(article.url)) {
+    actions.push({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '查看原文' },
+      type: 'primary',
+      url: buildFeishuOriginalUrl(article.id, article.url),
+    });
+  }
+
   const elements: Record<string, unknown>[] = [
     {
       tag: 'div',
@@ -156,14 +171,7 @@ export function buildFeishuCard(
     // Action button 紧贴正文
     {
       tag: 'action',
-      actions: [
-        {
-          tag: 'button',
-          text: { tag: 'plain_text', content: '查看原文' },
-          type: 'primary',
-          url: `${process.env.NEXT_PUBLIC_SITE_URL || ''}/news/${article.publicEventId}`,
-        },
-      ],
+      actions,
     },
   ];
 

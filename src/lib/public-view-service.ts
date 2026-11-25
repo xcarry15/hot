@@ -65,3 +65,12 @@ export async function recordPublicEventView(eventId: string, sourceId: string): 
 export async function recordPublicEventOriginalClick(eventId: string, sourceId: string): Promise<void> {
   await recordPublicEventInteraction(eventId, sourceId, 'originalClick');
 }
+
+export async function recordFeishuEventOriginalClick(eventId: string, sourceId: string): Promise<void> {
+  const dateKey = getPublicDateKey(new Date());
+  await db.eventInteractionDaily.upsert({
+    where: { eventId_sourceId_dateKey: { eventId, sourceId, dateKey } },
+    create: { eventId, sourceId, dateKey, feishuClickCount: 1 },
+    update: { feishuClickCount: { increment: 1 } },
+  });
+}

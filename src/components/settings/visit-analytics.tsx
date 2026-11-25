@@ -5,9 +5,9 @@ import { getPublicDateKey } from '@/lib/shared/public-date';
 import { TopViewedArticlesCard, type TopViewedArticle } from '@/components/dashboard/dashboard-cards';
 import { fetchVisitAnalytics } from '@/features/visit-analytics.client';
 
-type Daily = { day: string; visitors: number; visits: number; views: number; articleViews: number; originalClicks: number; clicks: number };
+type Daily = { day: string; visitors: number; visits: number; views: number; articleViews: number; originalClicks: number; feishuClicks: number; clicks: number };
 type Group = { label: string; visits: number; visitors: number };
-type MetricKey = 'visitors' | 'visits' | 'views' | 'clicks' | 'articleViews' | 'originalClicks';
+type MetricKey = 'visitors' | 'visits' | 'views' | 'clicks' | 'articleViews' | 'originalClicks' | 'feishuClicks';
 type Previous = Record<MetricKey, number> & { start: string; end: string };
 type Data = Record<MetricKey, number> & { previous: Previous | null; geoConfigured: boolean; daily: Daily[]; channels: Group[]; regions: Group[]; tools: { label: string; count: number }[]; topViewedArticles: TopViewedArticle[] };
 const today = () => getPublicDateKey(Date.now());
@@ -34,7 +34,7 @@ export default function VisitAnalytics() {
     const result: Daily[] = [];
     for (let time = Date.parse(`${start}T00:00:00Z`), last = Date.parse(`${end}T00:00:00Z`); time <= last && result.length < 365; time += 86400000) {
       const day = new Date(time).toISOString().slice(0, 10);
-      result.push(lookup.get(day) ?? { day, visitors: 0, visits: 0, views: 0, articleViews: 0, originalClicks: 0, clicks: 0 });
+      result.push(lookup.get(day) ?? { day, visitors: 0, visits: 0, views: 0, articleViews: 0, originalClicks: 0, feishuClicks: 0, clicks: 0 });
     }
     return result;
   }, [data, start, end]);
@@ -52,19 +52,20 @@ export default function VisitAnalytics() {
       {!data.geoConfigured && <p role="status" className="text-amber-700">城市数据库或查询工具不可用，地区暂显示未知。</p>}
       <section aria-label="关键指标" className="space-y-1.5">
         <div className="flex flex-wrap items-baseline justify-between gap-1"><h3 className="text-sm font-semibold">关键指标</h3><span className="text-[11px] text-muted-foreground">{data.previous ? `参考上期 ${data.previous.start} 至 ${data.previous.end}` : '上期超出保留期或历史记录不足'}</span></div>
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-7">
           <Metric label="访客数" value={data.visitors} previous={data.previous?.visitors} detail="浏览器去重" />
           <Metric label="访问次数" value={data.visits} previous={data.previous?.visits} detail="按开始日期" />
           <Metric label="页面浏览量" value={data.views} previous={data.previous?.views} detail={`每位访客 ${data.visitors ? (data.views / data.visitors).toFixed(1) : '—'} 次`} />
           <Metric label="资讯确认浏览" value={data.articleViews} previous={data.previous?.articleViews} detail="停留 800 毫秒" />
-          <Metric label="查看原文" value={data.originalClicks} previous={data.previous?.originalClicks} detail="资讯原文入口点击" />
+          <Metric label="查看原文" value={data.originalClicks} previous={data.previous?.originalClicks} detail="本站资讯详情入口" />
+          <Metric label="飞书原文点击" value={data.feishuClicks} previous={data.previous?.feishuClicks} detail="飞书卡片快捷入口" />
           <Metric label="工具入口点击" value={data.clicks} previous={data.previous?.clicks} detail="本站工具入口" />
         </div>
         <p className="text-[11px] text-muted-foreground">上期为等长日期区间；统计上线初期或浏览器拦截可能导致历史不完整。今天尚未结束，和完整上期不完全可比。</p>
       </section>
       <Section title="每日趋势" detail="选择指标查看走势；无记录日期按 0 展示。访客按日去重，不可直接相加。">
         <div className="mb-2 flex flex-wrap gap-1" role="group" aria-label="趋势指标">
-          {([['views', '页面浏览'], ['visitors', '访客'], ['visits', '访问'], ['articleViews', '资讯浏览'], ['originalClicks', '查看原文'], ['clicks', '工具点击']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={trendMetric === key} onClick={() => setTrendMetric(key)} className={`border px-2 py-1 ${trendMetric === key ? 'bg-foreground text-background' : 'hover:bg-muted'}`}>{label}</button>)}
+          {([['views', '页面浏览'], ['visitors', '访客'], ['visits', '访问'], ['articleViews', '资讯浏览'], ['originalClicks', '查看原文'], ['feishuClicks', '飞书原文点击'], ['clicks', '工具点击']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={trendMetric === key} onClick={() => setTrendMetric(key)} className={`border px-2 py-1 ${trendMetric === key ? 'bg-foreground text-background' : 'hover:bg-muted'}`}>{label}</button>)}
         </div>
         <DailyTrend days={days} metric={trendMetric} />
       </Section>
@@ -93,9 +94,9 @@ function Section({ title, detail, children }: { title: string; detail?: string; 
 }
 function DailyTrend({ days, metric }: { days: Daily[]; metric: MetricKey }) {
   const max = Math.max(1, ...days.map((row) => row[metric]));
-  const label = { views: '页面浏览', visitors: '访客', visits: '访问', articleViews: '资讯浏览', originalClicks: '查看原文', clicks: '工具点击' }[metric];
+  const label = { views: '页面浏览', visitors: '访客', visits: '访问', articleViews: '资讯浏览', originalClicks: '查看原文', feishuClicks: '飞书原文点击', clicks: '工具点击' }[metric];
   const empty = days.every((row) => row[metric] === 0);
-  return <><div className={`relative flex h-28 items-end border-b overflow-hidden ${days.length > 90 ? 'gap-0' : 'gap-px'}`} role="img" aria-label={`每日${label}趋势，详细数值见下方表格`}>{empty && <span className="absolute inset-0 flex items-center justify-center text-muted-foreground">所选范围暂无{label}数据</span>}{days.map((row) => <span key={row.day} title={`${row.day}：${format(row[metric])} ${label}`} className="min-w-0 flex-1 bg-primary/60" style={{ height: `${row[metric] ? Math.max(2, row[metric] / max * 100) : 0}%` }} />)}</div><div className="mt-1 flex justify-between tabular-nums text-muted-foreground"><span>{days[0]?.day}</span><span>峰值 {format(empty ? 0 : max)}</span><span>{days.at(-1)?.day}</span></div><details className="mt-2"><summary className="cursor-pointer">查看每日明细</summary><div className="mt-1 max-h-64 overflow-auto"><table className="w-full min-w-[560px] text-left tabular-nums"><thead><tr><th>日期</th><th>访客</th><th>访问</th><th>页面浏览</th><th>资讯浏览</th><th>查看原文</th><th>工具点击</th></tr></thead><tbody>{[...days].reverse().map((row) => <tr key={row.day} className="border-t"><td>{row.day}</td><td>{format(row.visitors)}</td><td>{format(row.visits)}</td><td>{format(row.views)}</td><td>{format(row.articleViews)}</td><td>{format(row.originalClicks)}</td><td>{format(row.clicks)}</td></tr>)}</tbody></table></div></details></>;
+  return <><div className={`relative flex h-28 items-end border-b overflow-hidden ${days.length > 90 ? 'gap-0' : 'gap-px'}`} role="img" aria-label={`每日${label}趋势，详细数值见下方表格`}>{empty && <span className="absolute inset-0 flex items-center justify-center text-muted-foreground">所选范围暂无{label}数据</span>}{days.map((row) => <span key={row.day} title={`${row.day}：${format(row[metric])} ${label}`} className="min-w-0 flex-1 bg-primary/60" style={{ height: `${row[metric] ? Math.max(2, row[metric] / max * 100) : 0}%` }} />)}</div><div className="mt-1 flex justify-between tabular-nums text-muted-foreground"><span>{days[0]?.day}</span><span>峰值 {format(empty ? 0 : max)}</span><span>{days.at(-1)?.day}</span></div><details className="mt-2"><summary className="cursor-pointer">查看每日明细</summary><div className="mt-1 max-h-64 overflow-auto"><table className="w-full min-w-[560px] text-left tabular-nums"><thead><tr><th>日期</th><th>访客</th><th>访问</th><th>页面浏览</th><th>资讯浏览</th><th>查看原文</th><th>飞书原文点击</th><th>工具点击</th></tr></thead><tbody>{[...days].reverse().map((row) => <tr key={row.day} className="border-t"><td>{row.day}</td><td>{format(row.visitors)}</td><td>{format(row.visits)}</td><td>{format(row.views)}</td><td>{format(row.articleViews)}</td><td>{format(row.originalClicks)}</td><td>{format(row.feishuClicks)}</td><td>{format(row.clicks)}</td></tr>)}</tbody></table></div></details></>;
 }
 function List({ title, rows, total }: { title: string; rows: { label: string; value: number; extra?: string }[]; total: number }) {
   return <Section title={title}>{rows.length ? <ul className="max-h-72 overflow-auto">{rows.map((row, index) => <li key={`${row.label}-${index}`} className="relative overflow-hidden border-t py-1.5"><span aria-hidden="true" className="absolute inset-y-0 left-0 bg-primary/5" style={{ width: `${total > 0 ? Math.min(100, row.value / total * 100) : 0}%` }} /><div className="relative flex justify-between gap-2"><span className="min-w-0 break-words">{row.label}</span><span className="shrink-0 tabular-nums">{format(row.value)}{total > 0 ? ` · ${(row.value / total * 100).toFixed(1)}%` : ''}{row.extra ? ` · ${row.extra}` : ''}</span></div></li>)}</ul> : <p className="text-muted-foreground">暂无数据</p>}</Section>;

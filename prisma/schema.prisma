@@ -183,6 +183,7 @@ model EventInteractionDaily {
   dateKey            String
   viewCount          Int      @default(0)
   originalClickCount Int      @default(0)
+  feishuClickCount   Int      @default(0)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

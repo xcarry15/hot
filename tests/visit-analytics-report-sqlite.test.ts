@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { buildFeishuOriginalUrl } from '@/lib/push/feishu-original-link';
 import { getPublicDateKey } from '@/lib/shared/public-date';
 
 const dir = mkdtempSync(path.join(tmpdir(), 'hot-visit-report-'));
@@ -11,6 +12,7 @@ const url = `file:${dir}/report.db`;
 const db = new PrismaClient({ datasources: { db: { url } } });
 vi.mock('@/lib/db', () => ({ db }));
 const { GET } = await import('@/app/api/visit-analytics/route');
+const { GET: openFeishuOriginal, HEAD: probeFeishuOriginal } = await import('@/app/go/feishu/[id]/route');
 
 beforeAll(() => {
   execFileSync(process.execPath, [path.join(process.cwd(), 'node_modules/prisma/build/index.js'), 'migrate', 'deploy'], { env: { ...process.env, DATABASE_URL: url }, stdio: 'pipe', timeout: 60_000 });
@@ -37,7 +39,43 @@ it('真实 SQLite 按自然日汇总本期与上期，跨日会话和仅工具�
   const data = await response.json();
   expect(data).toMatchObject({ visitors: 1, views: 1, visits: 1, clicks: 3, previous: { start: day(3), end: day(2), visitors: 1, views: 1, visits: 2, clicks: 0 } });
   expect(data.daily).toEqual([
-    { day: day(1), visitors: 0, views: 0, visits: 1, clicks: 3, articleViews: 0, originalClicks: 0 },
-    { day: day(0), visitors: 1, views: 1, visits: 0, clicks: 0, articleViews: 0, originalClicks: 0 },
+    { day: day(1), visitors: 0, views: 0, visits: 1, clicks: 3, articleViews: 0, originalClicks: 0, feishuClicks: 0 },
+    { day: day(0), visitors: 1, views: 1, visits: 0, clicks: 0, articleViews: 0, originalClicks: 0, feishuClicks: 0 },
   ]);
+});
+
+it('飞书签名链接直达卡片文章，访问统计单独记录实际跳转请求', async () => {
+  vi.stubEnv('SESSION_SECRET', 'test-feishu-signing-key');
+  try {
+    const original = 'https://example.com/article?edition=2';
+    const now = new Date();
+    const dateKey = getPublicDateKey(now);
+    const source = await db.source.create({ data: { name: '测试源', url: 'https://example.com', publicEnabled: false } });
+    const event = await db.event.create({ data: { firstSeenAt: now, lastSeenAt: now } });
+    const article = await db.article.create({ data: { title: '测试文章', url: original, sourceId: source.id, eventId: event.id } });
+    const url = buildFeishuOriginalUrl(article.id, original);
+    const context = { params: Promise.resolve({ id: article.id }) };
+
+    expect(probeFeishuOriginal().status).toBe(204);
+    expect((await openFeishuOriginal(new Request(url), { params: Promise.resolve({ id: 'different-article' }) })).status).toBe(404);
+    const preview = await openFeishuOriginal(new Request(url, { headers: { 'sec-purpose': 'prefetch;prerender' } }), context);
+    expect(preview.headers.get('location')).toBe(original);
+    expect(await db.eventInteractionDaily.count({ where: { eventId: event.id } })).toBe(0);
+
+    const response = await openFeishuOriginal(new Request(url), context);
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe(original);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+
+    const report = await GET(new Request(`http://localhost/api/visit-analytics?start=${dateKey}&end=${dateKey}`, {
+      headers: { authorization: `Bearer ${process.env.API_TOKEN ?? ''}` },
+    }));
+    expect(await report.json()).toMatchObject({
+      feishuClicks: 1,
+      originalClicks: 0,
+      daily: [{ day: dateKey, feishuClicks: 1, originalClicks: 0 }],
+    });
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

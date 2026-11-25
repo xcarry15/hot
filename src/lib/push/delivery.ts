@@ -330,11 +330,7 @@ async function pushEventToFeishuInternal(
 
   const urgency = getPushUrgency(article);
   const relatedArticles = (await getRelatedArticles(article.id, undefined, { visibility: 'pushed' })) ?? [];
-  const card = buildFeishuCard(
-    { ...article, publicEventId: eventId },
-    urgency,
-    { relatedArticles },
-  );
+  const card = buildFeishuCard(article, urgency, { relatedArticles });
 
   let attemptSucceeded = 0;
   for (const config of enabled) {
