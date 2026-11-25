@@ -147,7 +147,7 @@ export function buildFeishuCard(
     {
       tag: 'button',
       text: { tag: 'plain_text', content: '选址助手' },
-      type: 'default',
+      type: 'primary',
       url: 'https://hot.kfxz.cn/',
     },
   ];
@@ -155,7 +155,7 @@ export function buildFeishuCard(
     actions.push({
       tag: 'button',
       text: { tag: 'plain_text', content: '查看原文' },
-      type: 'primary',
+      type: 'default',
       url: buildFeishuOriginalUrl(article.id, article.url),
     });
   }
