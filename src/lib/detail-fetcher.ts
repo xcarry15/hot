@@ -25,6 +25,39 @@ export const FETCH_MAX_RETRIES = 5;
 export const FETCH_RETRY_DELAY_MS = 2 * 60 * 60 * 1000;
 
 /**
+ * 判断本轮所有 HTTP 诊断是否一致指向『源站永久下线』（404/410）。
+ *
+ * 保守口径：必须至少有一条 404/410，且不存在任何其他 HTTP 状态
+ * （5xx/429/null 网络错误等可恢复失败）。zai 兜底诊断无 status，不参与判断；
+ * 只有连 zai 都没救回正文、整轮抓取失败时才会调用本函数，避免瞬时 404 误杀。
+ */
+export function isPermanentSourceGone(diagnostics: FetchDiagnostic[]): boolean {
+  const httpDiagnostics = diagnostics.filter((item) => item.method === 'http');
+  // 任何一次 HTTP 请求没有明确状态码（网络错误/超时）都说明抓取过程不稳定，
+  // 不能据其它 404 判定永久下线，否则 404+网络抖动会误杀文章。
+  if (httpDiagnostics.length === 0 || httpDiagnostics.some((item) => item.status == null)) return false;
+  return httpDiagnostics.every((item) => item.status === 404 || item.status === 410);
+}
+
+/**
+ * 若本轮诊断一致指向源站永久下线，则写入 technicalIgnoredAt 让其退出技术队列。
+ * 返回是否执行了忽略。保留 fetchStatus=failed/fetchError 以便后台查看原因。
+ */
+export async function autoIgnoreIfSourceGone(
+  articleId: string,
+  diagnostics: FetchDiagnostic[],
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (!isPermanentSourceGone(diagnostics)) return false;
+  await assertWorkerCanWrite(signal);
+  const result = await db.article.updateMany({
+    where: { id: articleId },
+    data: { technicalIgnoredAt: new Date() },
+  });
+  return result.count === 1;
+}
+
+/**
  * 将未完成的正文抓取收口为可恢复失败。
  *
  * `withTimeout` 会中止请求，但底层操作可能在极端情况下晚于调用方返回；
@@ -125,6 +158,11 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
     try {
       assertNotAborted(signal);
       if (attempt > 0) {
+        // 前一轮已确认源站永久下线（404/410）时不再做无效重试。
+        if (isPermanentSourceGone(diagnostics)) {
+          console.log(`[fetchArticleDetail] article=${articleId} permanent source gone, stop retrying at attempt=${attempt}`);
+          break;
+        }
         const delay = Math.pow(2, attempt) * 1000;
         await abortableDelay(delay, signal);
       }
@@ -239,6 +277,12 @@ export async function fetchArticleDetail(articleId: string, maxRetries = 2, sign
   console.error(`[fetchArticleDetail] article=${articleId} all ${maxRetries + 1} attempts failed:`, failureMessage);
   await assertWorkerCanWrite(signal);
   await markArticleFetchFailure(articleId, new Error(failureMessage));
+
+  // 源站已永久下线（404/410）：自动转入技术忽略，避免 scheduler 反复无效重试。
+  // 仅在本轮所有尝试都失败、且 HTTP 状态一致指向 404/410 时才忽略；
+  // fetchError/fetchStatus 仍保留为 failed，便于在后台看到原因，只是不再进技术队列。
+  const ignored = await autoIgnoreIfSourceGone(articleId, diagnostics, signal);
+  if (ignored) console.log(`[fetchArticleDetail] article=${articleId} permanent source gone (404/410), auto-ignored`);
 
   // 失败时不能把旧的短正文当作本次抓取成功的结果返回。
   // 否则单篇重跑会继续进入 AI / 聚类，批处理也可能把失败文章计为已处理。
