@@ -27,6 +27,7 @@ test('访问统计展示指标、趋势与文章排行，并随日期筛选更�
   });
   await login(page);
   await page.getByRole('button', { name: '设置' }).click();
+  await page.getByRole('tab', { name: '数据看板' }).click();
   await page.getByRole('tab', { name: '访问统计' }).click();
   await expect(page.getByText('资讯确认浏览', { exact: true })).toBeVisible();
   const metrics = page.getByRole('region', { name: '关键指标' });
@@ -70,7 +71,8 @@ test('backup encrypts the snapshot and decrypts it before restore confirmation',
   const passphrase = 'ci-backup-passphrase';
   await login(page);
   await page.getByRole('button', { name: '设置' }).click();
-  await page.getByRole('tab', { name: '备份' }).click();
+  await page.getByRole('tab', { name: '运维' }).click();
+  await page.getByRole('tab', { name: '备份恢复' }).click();
   await expect(page.getByText('完整配置备份')).toBeVisible();
 
   await page.getByRole('button', { name: '下载备份', exact: true }).click();
