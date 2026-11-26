@@ -279,6 +279,7 @@ export default function BackupTab() {
                 event.preventDefault()
                 void handleBackupRestore()
               }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {backupBusy === 'restore' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
               {backupBusy === 'restore' ? '恢复中…' : '确认覆盖恢复'}

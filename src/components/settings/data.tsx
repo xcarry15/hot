@@ -30,8 +30,10 @@ import {
 
 export default function DataTab() {
   const [cleanupStats, setCleanupStats] = useState<Record<string, number> | null>(null)
+  const [statsError, setStatsError] = useState(false)
   const [cleanupLoading, setCleanupLoading] = useState<string | null>(null)
   const [refreshingStats, setRefreshingStats] = useState(false)
+  const [pendingAction, setPendingAction] = useState<{ action: string; label: string; count: number | null } | null>(null)
   const [deleteAllOpen, setDeleteAllOpen] = useState(false)
   const [deleteAllLoading, setDeleteAllLoading] = useState(false)
   const [purgeAllOpen, setPurgeAllOpen] = useState(false)
@@ -44,8 +46,10 @@ export default function DataTab() {
     try {
       const data = await loadCleanupStats()
       setCleanupStats(data as unknown as Record<string, number>)
+      setStatsError(false)
       if (typeof data.dbSizeBytes === 'number') setDbSize(data.dbSizeBytes)
     } catch (err) {
+      setStatsError(true)
       toast.error('清理统计加载失败')
       console.error('[data-tab] fetchCleanupStats failed:', err)
     } finally {
@@ -127,6 +131,18 @@ export default function DataTab() {
     }
   }
 
+  const requestCleanup = (action: string, label: string, count: number | null) => {
+    setPendingAction({ action, label, count })
+  }
+
+  const confirmCleanup = async () => {
+    if (!pendingAction) return
+    const { action, label } = pendingAction
+    setPendingAction(null)
+    if (action === 'low-quality') await handleDeleteLowQuality()
+    else await executeCleanup(action, label)
+  }
+
   const formatDbSize = (bytes: number | null): string => {
     if (bytes == null) return '—'
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -160,7 +176,13 @@ export default function DataTab() {
               <span className="text-sm font-semibold">数据</span>
             </div>
             <div className="flex items-center gap-3">
-              {cleanupStats && <span className="text-xs text-muted-foreground">{cleanupStats.articlesTotal} 篇文章</span>}
+              {statsError ? (
+                <button type="button" onClick={loadAllCleanupStats} className="text-xs text-destructive underline decoration-dotted" title="点击重试">统计加载失败 · 重试</button>
+              ) : cleanupStats ? (
+                <span className="text-xs text-muted-foreground">{cleanupStats.articlesTotal} 篇文章</span>
+              ) : (
+                <span className="text-xs text-muted-foreground">统计加载中…</span>
+              )}
               <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1.5" onClick={loadAllCleanupStats} disabled={refreshingStats}>
                 <RefreshCcw className={`h-3.5 w-3.5 ${refreshingStats ? 'animate-spin' : ''}`} />
                 刷新
@@ -175,9 +197,9 @@ export default function DataTab() {
               文章
             </div>
             <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
-              <CleanupButton loading={cleanupLoading === 'low-quality'} onClick={handleDeleteLowQuality} label="低质量文章" count={cleanupStats ? cleanupStats.articlesLowQuality : null} unit="篇" />
-              <CleanupButton loading={cleanupLoading === 'pushed-articles'} onClick={() => executeCleanup('pushed-articles', '清理已推送文章')} label="已推送文章" count={cleanupStats ? cleanupStats.articlesPushed : null} unit="篇" />
-              <CleanupButton loading={cleanupLoading === 'reset-ai'} onClick={() => executeCleanup('reset-ai', '重置AI状态')} label="重置AI状态" icon={<RefreshCcw className="h-3.5 w-3.5" />} customLabel={cleanupStats ? `${cleanupStats.articlesTotal - cleanupStats.articlesPending} 篇已处理` : null} />
+              <CleanupButton loading={cleanupLoading === 'low-quality'} onClick={() => requestCleanup('low-quality', '删除低质量文章', cleanupStats?.articlesLowQuality ?? null)} label="低质量文章" count={cleanupStats ? cleanupStats.articlesLowQuality : null} unit="篇" />
+              <CleanupButton loading={cleanupLoading === 'pushed-articles'} onClick={() => requestCleanup('pushed-articles', '清理已推送文章', cleanupStats?.articlesPushed ?? null)} label="已推送文章" count={cleanupStats ? cleanupStats.articlesPushed : null} unit="篇" />
+              <CleanupButton loading={cleanupLoading === 'reset-ai'} onClick={() => requestCleanup('reset-ai', '重置AI状态', cleanupStats ? cleanupStats.articlesTotal - cleanupStats.articlesPending : null)} label="重置AI状态" icon={<RefreshCcw className="h-3.5 w-3.5" />} customLabel={cleanupStats ? `${cleanupStats.articlesTotal - cleanupStats.articlesPending} 篇已处理` : null} />
             </div>
           </div>
 
@@ -188,8 +210,8 @@ export default function DataTab() {
               日志
             </div>
             <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
-              <CleanupButton loading={cleanupLoading === 'dedup-logs'} onClick={() => executeCleanup('dedup-logs', '清理去重日志')} label="去重日志" count={cleanupStats ? cleanupStats.dedupLogs : null} unit="条" />
-              <CleanupButton loading={cleanupLoading === 'fetch-logs'} onClick={() => executeCleanup('fetch-logs', '清理抓取日志')} label="抓取日志" count={cleanupStats ? cleanupStats.fetchLogs : null} unit="条" />
+              <CleanupButton loading={cleanupLoading === 'dedup-logs'} onClick={() => requestCleanup('dedup-logs', '清理去重日志', cleanupStats?.dedupLogs ?? null)} label="去重日志" count={cleanupStats ? cleanupStats.dedupLogs : null} unit="条" />
+              <CleanupButton loading={cleanupLoading === 'fetch-logs'} onClick={() => requestCleanup('fetch-logs', '清理抓取日志', cleanupStats?.fetchLogs ?? null)} label="抓取日志" count={cleanupStats ? cleanupStats.fetchLogs : null} unit="条" />
             </div>
           </div>
 
@@ -266,6 +288,29 @@ export default function DataTab() {
             >
               {purgeAllLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               确认清空
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 单项清理二次确认 */}
+      <AlertDialog open={pendingAction !== null} onOpenChange={(open) => { if (!open) setPendingAction(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认{pendingAction?.label ?? '执行此操作'}？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingAction?.count != null
+                ? `将处理 ${pendingAction.count} 条数据，此操作不可撤销。`
+                : '此操作不可撤销，请确认继续。'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void confirmCleanup()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              确认执行
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

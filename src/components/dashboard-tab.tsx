@@ -221,10 +221,15 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
 
   if (loading) {
     return (
-      <div className="space-y-1 pt-1">
-        <div className="flex min-h-9 items-center justify-between gap-2 border bg-border">
-          <Skeleton className="h-5 w-16" />
+      <div className="space-y-1 pt-0">
+        <div className="flex min-h-10 items-center justify-between gap-2 border bg-border px-1.5">
+          <Skeleton className="h-5 w-24" />
           <Skeleton className="h-7 w-20" />
+        </div>
+        <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-4">
+          {[0, 1, 2, 3].map((item) => (
+            <Card key={item} className="py-0"><CardContent className="space-y-2 p-2"><Skeleton className="h-4 w-20" /><Skeleton className="h-12 w-full" /></CardContent></Card>
+          ))}
         </div>
         <Card className="py-0"><CardContent className="space-y-2 p-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-32 w-full" /></CardContent></Card>
       </div>
@@ -526,7 +531,7 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
 
             <PushLogPanel active={active} refreshToken={refreshToken} startAt={analytics.startAt} endAt={analytics.endAt} />
 
-            <div className="grid min-w-0 max-w-full gap-1">
+            <div className="grid min-w-0 max-w-full grid-cols-1 gap-1 sm:grid-cols-3 xl:col-span-2">
               <DailyNewArticlesCard articles={analytics.dailyNewArticles} />
               <DailyPublicArticlesCard articles={analytics.dailyNewArticles} />
               <DailyPushedArticlesCard articles={analytics.dailyNewArticles} />
@@ -534,12 +539,15 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
 
           </div>
 
-          <Card><CardContent className="p-2"><div className="mb-1 flex items-center gap-2"><span className="text-sm font-medium">人工反馈建议</span>{suggestions.length > 0 && <Badge variant="secondary" className="rounded-none text-[10px]">需确认</Badge>}<Button size="sm" variant="ghost" className="ml-auto h-6 rounded-none px-2 text-[11px]" disabled={generatingSuggestions} onClick={() => void handleGenerateSuggestions()}>{generatingSuggestions ? '生成中…' : '生成建议'}</Button></div>{suggestions.length > 0 ? <div className="divide-y border-t">{suggestions.slice(0, 5).map((item) => <div key={item.id} className="py-1.5"><div className="flex items-center gap-2"><span className="text-xs font-medium">{item.title}</span><span className="ml-auto text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span></div><p className="mt-0.5 text-[11px] text-muted-foreground">{item.detail}</p><div className="mt-1 flex gap-1"><Button size="sm" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'apply')}>确认应用</Button><Button size="sm" variant="ghost" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'dismiss')}>忽略</Button></div></div>)}</div> : <p className="border-t pt-1.5 text-[11px] text-muted-foreground">默认不自动分析人工修正记录，点击“生成建议”后才会检查。</p>}</CardContent></Card>
+          <Card><CardContent className="p-2"><div className="mb-1 flex items-center gap-2"><span className="text-sm font-medium">人工反馈建议</span>{suggestions.length > 0 && <Badge variant="secondary" className="rounded-none text-[10px]">需确认 {suggestions.length}{suggestions.length > 5 ? '（下方显示前 5 条）' : ''}</Badge>}<Button size="sm" variant="ghost" className="ml-auto h-6 rounded-none px-2 text-[11px]" disabled={generatingSuggestions} onClick={() => void handleGenerateSuggestions()}>{generatingSuggestions ? '生成中…' : '生成建议'}</Button></div>{suggestions.length > 0 ? <div className="divide-y border-t">{suggestions.slice(0, 5).map((item) => <div key={item.id} className="py-1.5"><div className="flex items-center gap-2"><span className="text-xs font-medium">{item.title}</span><span className="ml-auto text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span></div><p className="mt-0.5 text-[11px] text-muted-foreground">{item.detail}</p><div className="mt-1 flex gap-1"><Button size="sm" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'apply')}>确认应用</Button><Button size="sm" variant="ghost" className="h-6 rounded-none px-2 text-[11px]" onClick={() => void handleSuggestion(item.id, 'dismiss')}>忽略</Button></div></div>)}</div> : <p className="border-t pt-1.5 text-[11px] text-muted-foreground">默认不自动分析人工修正记录，点击“生成建议”后才会检查。</p>}</CardContent></Card>
 
           {tooltipInfo && SOURCE_FIELD_HELP[tooltipInfo.field] && (
             <div
               className="fixed z-50 w-64 rounded-md border bg-popover p-2.5 text-[10px] text-popover-foreground shadow-lg"
-              style={{ left: tooltipInfo.x + 12, top: tooltipInfo.y + 8 }}
+              style={{
+                left: Math.max(8, Math.min(tooltipInfo.x + 12, (typeof window !== 'undefined' ? window.innerWidth : 0) - 272)),
+                top: Math.max(8, Math.min(tooltipInfo.y + 8, (typeof window !== 'undefined' ? window.innerHeight : 0) - 120)),
+              }}
             >
               <div className="font-medium mb-1">{tooltipInfo.field}</div>
               <div className="text-muted-foreground">计算：{SOURCE_FIELD_HELP[tooltipInfo.field].formula}</div>
@@ -547,6 +555,11 @@ export default function DashboardTab({ active = true }: { active?: boolean }) {
             </div>
           )}
       </section>
+
+      <div className="flex items-center gap-1.5 border bg-background px-2 py-1 text-[10px] text-muted-foreground">
+        <HelpCircle className="h-3 w-3 shrink-0" />
+        <span>后台访问已授权：使用 HttpOnly Cookie 保存临时会话，API Token 不写入浏览器 localStorage。</span>
+      </div>
 
     </div>
   )

@@ -28,7 +28,6 @@ const loadPrompts = () => import('@/components/settings/prompts')
 const loadPush = () => import('@/components/settings/push')
 const loadData = () => import('@/components/settings/data')
 const loadBackup = () => import('@/components/settings/backup')
-const loadAccount = () => import('@/components/settings/account')
 const loadKeywords = () => import('@/components/keywords-tab')
 const loadDashboard = () => import('@/components/dashboard-tab')
 const loadSources = () => import('@/components/sources-tab')
@@ -42,7 +41,6 @@ const PromptsTab = dynamic(loadPrompts, { loading: sectionLoading })
 const PushTab = dynamic(loadPush, { loading: sectionLoading })
 const DataTab = dynamic(loadData, { loading: sectionLoading })
 const BackupTab = dynamic(loadBackup, { loading: sectionLoading })
-const AccountTab = dynamic(loadAccount, { loading: sectionLoading })
 const KeywordsTab = dynamic(loadKeywords, { loading: sectionLoading })
 const DashboardTab = dynamic(loadDashboard, { loading: sectionLoading })
 const SourcesManagement = dynamic(
@@ -61,7 +59,6 @@ const sectionLoaders: Record<string, () => Promise<unknown>> = {
   'ai-model': loadAiModel,
   prompts: loadPrompts,
   push: loadPush,
-  account: loadAccount,
   data: loadData,
   backup: loadBackup,
   tools: loadToolDirectory,
@@ -93,6 +90,37 @@ function buildSettingsSavePayload(
   return payload
 }
 
+function SubViewSwitch<T extends string>({
+  value, options, onChange,
+}: {
+  value: T
+  options: Array<{ value: T; label: string }>
+  onChange: (value: T) => void
+}) {
+  return (
+    <div className="mb-2 flex shrink-0 items-center gap-2 border-b bg-background px-2 py-1">
+      <div role="tablist" className="inline-flex items-center border bg-background">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="tab"
+            aria-selected={value === option.value}
+            onClick={() => onChange(option.value)}
+            className={`border-r px-2.5 py-1 text-xs transition-colors last:border-r-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              value === option.value
+                ? 'bg-foreground font-medium text-background'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function SettingsTab({ active = true }: { active?: boolean }) {
   const [settings, setSettings] = useState<SettingsType>(() => (
     getFrontendSettingDefaults() as unknown as SettingsType
@@ -112,6 +140,20 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
   const jobBusy = useJobWriteGuard(active)
   const [saving, setSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('dashboard')
+  const [dashboardView, setDashboardView] = useState<'content' | 'analytics'>('content')
+  const [opsView, setOpsView] = useState<'cleanup' | 'backup'>('cleanup')
+
+  // 从「访问统计 → 文章详情」整页跳转后，恢复设置页原来的标签位置。
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const tab = params.get('settingsTab')
+    const view = params.get('dashboardView')
+    const validTabs = ['dashboard', 'public', 'sources', 'keywords', 'ai-model', 'prompts', 'push', 'proxy', 'data', 'tools']
+    if (tab && validTabs.includes(tab)) setActiveTab(tab)
+    if (view === 'analytics' || view === 'content') setDashboardView(view)
+  }, [])
+
   const settingsBaselineRef = useRef<string | null>(null)
   const settingsBaselineStateRef = useRef<SettingsType | null>(null)
   const providerBaselineRef = useRef<ProviderConfigs | null>(null)
@@ -449,7 +491,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
               if (value) void sectionLoaders[value]?.()
             }}
           >
-            <TabsTrigger value="dashboard" data-value="dashboard" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">概览</TabsTrigger>
+            <TabsTrigger value="dashboard" data-value="dashboard" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">数据看板</TabsTrigger>
             <TabsTrigger value="public" data-value="public" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">公开</TabsTrigger>
             <TabsTrigger value="sources" data-value="sources" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">源管理</TabsTrigger>
             <TabsTrigger value="keywords" data-value="keywords" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">关键词</TabsTrigger>
@@ -457,32 +499,43 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
             <TabsTrigger value="prompts" data-value="prompts" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">提示词</TabsTrigger>
             <TabsTrigger value="push" data-value="push" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">推送</TabsTrigger>
             <TabsTrigger value="proxy" data-value="proxy" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">代理</TabsTrigger>
-            <TabsTrigger value="account" data-value="account" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">账户</TabsTrigger>
-            <TabsTrigger value="data" data-value="data" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">维护</TabsTrigger>
-            <TabsTrigger value="backup" data-value="backup" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">备份</TabsTrigger>
+            <TabsTrigger value="data" data-value="data" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">运维</TabsTrigger>
             <TabsTrigger value="tools" data-value="tools" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">工具中心</TabsTrigger>
-            <TabsTrigger value="analytics" data-value="analytics" className="h-7 rounded-none border-0 border-b-2 px-3 text-xs shadow-none data-[state=active]:border-foreground data-[state=active]:shadow-none">访问统计</TabsTrigger>
           </TabsList>
         </div>
 
-        <TabsContent value="dashboard" className="flex-1 m-0 min-h-0 overflow-auto px-2 pb-2">
-          <DashboardTab active={active && activeTab === 'dashboard'} />
+        <TabsContent value="dashboard" className="flex-1 m-0 min-h-0 flex flex-col overflow-hidden px-2 pb-2">
+          <SubViewSwitch
+            value={dashboardView}
+            options={[{ value: 'content', label: '内容概览' }, { value: 'analytics', label: '访问统计' }]}
+            onChange={setDashboardView}
+          />
+          <div className="min-h-0 flex-1 overflow-auto">
+            {dashboardView === 'content'
+              ? <DashboardTab active={active && activeTab === 'dashboard'} />
+              : <VisitAnalytics />}
+          </div>
         </TabsContent>
 
         <TabsContent value="public" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
           <PublicTab settings={settings} setSettings={setSettings} />
         </TabsContent>
 
-        <TabsContent value="data" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
-          <DataTab />
+        <TabsContent value="data" className="m-0 min-h-0 flex-1 flex flex-col overflow-hidden px-2 pb-2">
+          <SubViewSwitch
+            value={opsView}
+            options={[{ value: 'cleanup', label: '数据清理' }, { value: 'backup', label: '备份恢复' }]}
+            onChange={setOpsView}
+          />
+          <div className="min-h-0 flex-1 overflow-auto">
+            {opsView === 'cleanup' ? <DataTab /> : <BackupTab />}
+          </div>
         </TabsContent>
 
-        <TabsContent value="backup" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
-          <BackupTab />
-        </TabsContent>
+
 
         <TabsContent value="sources" className="flex-1 m-0 min-h-0 overflow-hidden">
-          <SourcesManagement />
+          <SourcesManagement settings={settings} setSettings={setSettings} />
         </TabsContent>
 
         <TabsContent value="ai-model" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
@@ -518,9 +571,7 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
           />
         </TabsContent>
 
-        <TabsContent value="account" className="m-0 min-h-0 flex-1 overflow-auto px-2 pb-2">
-          <AccountTab />
-        </TabsContent>
+
 
         <TabsContent value="keywords" className="m-0 min-h-0 flex-1 overflow-auto">
           <KeywordsTab />
@@ -529,7 +580,6 @@ export default function SettingsTab({ active = true }: { active?: boolean }) {
         <TabsContent value="tools" className="m-0 min-h-0 flex-1 overflow-auto">
           <ToolDirectoryManagement />
         </TabsContent>
-        <TabsContent value="analytics" className="m-0 min-h-0 flex-1 overflow-auto"><VisitAnalytics /></TabsContent>
       </Tabs>
 
       {hasUnsavedChanges && (

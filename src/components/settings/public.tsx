@@ -42,6 +42,13 @@ export default function PublicTab({ settings, setSettings }: Props) {
     setSettings((prev) => ({ ...prev, [key]: value }))
   }
 
+  const clampScore = (value: string) => {
+    if (value === '') return ''
+    const number = Number(value)
+    if (!Number.isFinite(number)) return ''
+    return String(Math.max(0, Math.min(100, Math.trunc(number))))
+  }
+
   const previewRules = useCallback(async () => {
     setPreviewing(true)
     try {
@@ -111,11 +118,11 @@ export default function PublicTab({ settings, setSettings }: Props) {
             控制哪些内容进入公开端；单篇例外请在工作台的文章抽屉中处理。
           </p>
         </div>
-        {preview && (
-          <span className="shrink-0 text-[11px] text-muted-foreground">
-            按当前编辑值预览 · {preview.hideAds ? '隐藏软文' : '允许软文'}
-          </span>
-        )}
+        <span className="min-h-4 shrink-0 text-[11px] text-muted-foreground">
+          {preview
+            ? `按当前编辑值预览 · ${preview.hideAds ? '隐藏软文' : '允许软文'}`
+            : '规则预览加载中…'}
+        </span>
       </div>
 
       <Card className="gap-0 py-0">
@@ -149,7 +156,7 @@ export default function PublicTab({ settings, setSettings }: Props) {
                   min={0}
                   max={100}
                   value={settings.public_min_score}
-                  onChange={(event) => updateSetting('public_min_score', event.target.value)}
+                  onChange={(event) => updateSetting('public_min_score', clampScore(event.target.value))}
                   className="h-8 w-20 text-center text-xs"
                 />
               </div>
@@ -165,7 +172,7 @@ export default function PublicTab({ settings, setSettings }: Props) {
                   min={0}
                   max={100}
                   value={settings.public_min_relevance}
-                  onChange={(event) => updateSetting('public_min_relevance', event.target.value)}
+                  onChange={(event) => updateSetting('public_min_relevance', clampScore(event.target.value))}
                   className="h-8 w-20 text-center text-xs"
                 />
               </div>
@@ -246,7 +253,7 @@ export default function PublicTab({ settings, setSettings }: Props) {
                     <Switch
                       checked={source.publicEnabled}
                       onCheckedChange={() => void toggleSource(source)}
-                      disabled={updatingSourceId !== null}
+                      disabled={updatingSourceId === source.id}
                       aria-label={`${source.name}公开开关`}
                       className="scale-75"
                     />

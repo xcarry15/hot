@@ -41,7 +41,12 @@ export default function VisitAnalytics() {
   return <div className="space-y-3 p-2 text-xs">
     <div className="flex flex-wrap items-center gap-2">
       <strong className="text-sm">访问统计</strong>
-      {([['今天', 0], ['昨天', 1], ['近 7 天', 6], ['近 30 天', 29]] as const).map(([label, days]) => <button type="button" key={label} className="border px-2 py-1 hover:bg-muted" onClick={() => { setStart(ago(days)); setEnd(label === '昨天' ? ago(1) : today()); }}>{label}</button>)}
+      {([['今天', 0], ['昨天', 1], ['近 7 天', 6], ['近 30 天', 29]] as const).map(([label, days]) => {
+        const rangeStart = ago(days);
+        const rangeEnd = label === '昨天' ? ago(1) : today();
+        const active = start === rangeStart && end === rangeEnd;
+        return <button type="button" key={label} aria-pressed={active} className={`border px-2 py-1 ${active ? 'bg-foreground text-background' : 'hover:bg-muted'}`} onClick={() => { setStart(rangeStart); setEnd(rangeEnd); }}>{label}</button>;
+      })}
       <input aria-label="开始日期" className="border p-1" type="date" min={ago(364)} max={end} value={start} onChange={(event) => { if (event.target.value) setStart(event.target.value); }} /><span>至</span>
       <input aria-label="结束日期" className="border p-1" type="date" min={start} max={today()} value={end} onChange={(event) => { if (event.target.value) setEnd(event.target.value); }} />
       <button type="button" className="border px-2 py-1 hover:bg-muted" onClick={() => setRefresh((value) => value + 1)}>刷新</button>
@@ -70,7 +75,7 @@ export default function VisitAnalytics() {
         <DailyTrend days={days} metric={trendMetric} />
       </Section>
       <p className="text-muted-foreground">资讯排行按所选日期内的确认浏览排序，点击文章打开工作台详情。</p>
-      <TopViewedArticlesCard articles={data.topViewedArticles} onArticleClick={(articleId) => { const url = new URL('/admin', window.location.origin); url.searchParams.set('articleId', articleId); window.location.assign(url.toString()); }} />
+      <TopViewedArticlesCard articles={data.topViewedArticles} onArticleClick={(articleId) => { const url = new URL('/admin', window.location.origin); url.searchParams.set('articleId', articleId); url.searchParams.set('settingsTab', 'dashboard'); url.searchParams.set('dashboardView', 'analytics'); window.location.assign(url.toString()); }} />
       <div className="grid gap-3 md:grid-cols-2">
         <List title="工具入口点击排行" rows={data.tools.map((row) => ({ label: row.label, value: row.count }))} total={data.clicks} />
         <List title="入口渠道" rows={data.channels.map((row) => ({ label: row.label, value: row.visits, extra: `${format(row.visitors)} 访客` }))} total={data.visits} />

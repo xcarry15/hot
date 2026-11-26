@@ -64,6 +64,13 @@ import {
 
 // ========== Source Management (CRUD + Test + Batch) ==========
 
+const TYPE_LABELS: Record<string, string> = {
+  html: 'HTML',
+  rss: 'RSS',
+  websearch: '网页搜索',
+  canyin88: '餐饮88',
+}
+
 export function SourceManagement() {
   const [sources, setSources] = useState<Source[]>([])
   const [loading, setLoading] = useState(true)
@@ -283,7 +290,7 @@ export function SourceManagement() {
       <div className="space-y-1.5 border-b p-2">
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            placeholder="搜索..."
+            placeholder="搜索来源名称 / URL"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="h-7 w-40 text-xs"
@@ -362,7 +369,7 @@ export function SourceManagement() {
                 <button
                   className="shrink-0"
                   onClick={() => setExpandedErrors(expandedErrors === source.id ? null : source.id)}
-                  title="点击查看错误"
+                  title={source.recentErrors.length > 0 ? `查看最近 ${source.recentErrors.length} 条错误` : '暂无错误记录'}
                 >
                   <StatusLight
                     status={source.enabled ? source.status : 'disabled'}
@@ -373,7 +380,7 @@ export function SourceManagement() {
                 {/* Name & Type */}
                 <div className="flex min-w-0 flex-1 items-center gap-1.5">
                   <span className="font-medium truncate">{source.name}</span>
-                  <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 shrink-0">{source.type}</Badge>
+                  <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 shrink-0">{TYPE_LABELS[source.type] ?? source.type}</Badge>
                 </div>
 
                 {/* Stats */}
@@ -388,6 +395,7 @@ export function SourceManagement() {
                 <Switch
                   checked={source.enabled}
                   onCheckedChange={() => handleToggleEnabled(source)}
+                  aria-label={`${source.name} 启用状态`}
                   className="scale-75"
                 />
 
@@ -444,16 +452,20 @@ export function SourceManagement() {
                 </div>
 
                 {/* Expanded Errors */}
-                {expandedErrors === source.id && source.recentErrors.length > 0 && (
-                  <div className="w-full space-y-0.5 border-t pl-6 pt-1.5">
-                    {source.recentErrors.map((err, i) => (
-                      <div key={i} className="text-[10px] text-red-500 flex items-start gap-1">
-                        <XCircle className="h-2.5 w-2.5 shrink-0 mt-0.5" />
-                        <span className="truncate flex-1">{err.message}</span>
-                        <span className="text-muted-foreground shrink-0">{formatRelativeTime(err.time)}</span>
-                      </div>
-                    ))}
-                  </div>
+                {expandedErrors === source.id && (
+                  source.recentErrors.length > 0 ? (
+                    <div className="w-full space-y-0.5 border-t pl-6 pt-1.5">
+                      {source.recentErrors.map((err, i) => (
+                        <div key={i} className="text-[10px] text-red-500 flex items-start gap-1">
+                          <XCircle className="h-2.5 w-2.5 shrink-0 mt-0.5" />
+                          <span className="truncate flex-1">{err.message}</span>
+                          <span className="text-muted-foreground shrink-0">{formatRelativeTime(err.time)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="w-full border-t pl-6 pt-1.5 text-[10px] text-muted-foreground">该来源暂无错误记录</div>
+                  )
                 )}
               </div>
             ))}

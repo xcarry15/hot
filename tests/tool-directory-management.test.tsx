@@ -214,7 +214,7 @@ describe('分类维护弹窗', () => {
     const geoInput = document.querySelector<HTMLInputElement>('input[aria-label="地理位置分类名称"]');
     expect(geoInput).not.toBeNull();
     const geoRow = geoInput!.parentElement;
-    const geoDelete = geoRow?.querySelector<HTMLButtonElement>('button[title="删除分类"]');
+    const geoDelete = geoRow?.querySelector<HTMLButtonElement>('button[title^="删除分类"]');
     expect(geoDelete).not.toBeNull();
     expect(geoDelete!.disabled).toBe(false);
 
@@ -233,7 +233,7 @@ describe('分类维护弹窗', () => {
     const bizInput = document.querySelector<HTMLInputElement>('input[aria-label="业务支持分类名称"]');
     expect(bizInput).not.toBeNull();
     const bizRow = bizInput!.parentElement;
-    const bizDelete = bizRow?.querySelector<HTMLButtonElement>('button[title="删除分类"]');
+    const bizDelete = bizRow?.querySelector<HTMLButtonElement>('button[title^="删除分类"]');
     expect(bizDelete).not.toBeNull();
     expect(bizDelete!.disabled).toBe(true);
   });
@@ -245,7 +245,7 @@ describe('分类维护弹窗', () => {
     const geoInput = document.querySelector<HTMLInputElement>('input[aria-label="地理位置分类名称"]');
     expect(geoInput).not.toBeNull();
     const geoRow = geoInput!.parentElement;
-    const geoDelete = geoRow?.querySelector<HTMLButtonElement>('button[title="删除分类"]');
+    const geoDelete = geoRow?.querySelector<HTMLButtonElement>('button[title^="删除分类"]');
     expect(geoDelete).not.toBeNull();
     await clickAndSettle(geoDelete!);
     expect(document.body.textContent).toContain('确认删除分类');

@@ -25,6 +25,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
+  ChevronDown,
+  ChevronRight,
   History,
   MessageSquareText,
   RefreshCcw,
@@ -95,6 +97,21 @@ export default function PromptsTab({ settings, setSettings }: Props) {
   const [versionName, setVersionName] = useState('')
   const [versionToLoad, setVersionToLoad] = useState<PromptVersion | null>(null)
   const [versionToCompare, setVersionToCompare] = useState<PromptVersion | null>(null)
+  const [collapsedBlocks, setCollapsedBlocks] = useState<Set<PromptBlockId>>(new Set())
+
+  const toggleBlock = (blockId: PromptBlockId) => {
+    setCollapsedBlocks((current) => {
+      const next = new Set(current)
+      if (next.has(blockId)) next.delete(blockId)
+      else next.add(blockId)
+      return next
+    })
+  }
+
+  const allCollapsed = collapsedBlocks.size === PROMPT_BLOCK_ORDER.length
+  const toggleAllBlocks = () => {
+    setCollapsedBlocks(allCollapsed ? new Set() : new Set(PROMPT_BLOCK_ORDER))
+  }
 
   const updateSetting = (key: keyof Settings, value: string) => {
     setSettings(prev => ({ ...prev, [key]: value }))
@@ -214,7 +231,7 @@ export default function PromptsTab({ settings, setSettings }: Props) {
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b pb-1.5">
             <MessageSquareText className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-semibold">提示词</span>
-            <span className="text-xs text-muted-foreground">— 手动编辑需点底部「保存设置」；完整备份统一前往「备份」页</span>
+            <span className="text-xs text-muted-foreground">— 手动编辑需点底部「保存设置」；完整备份统一前往「运维 → 备份恢复」</span>
             <div className="ml-auto flex flex-wrap items-center gap-1">
               <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={openVersionDialog}>
                 <History className="h-3 w-3" />
@@ -325,21 +342,39 @@ export default function PromptsTab({ settings, setSettings }: Props) {
 
           {/* 评判块 */}
           <div className="space-y-1.5">
-            <p className="text-[11px] text-muted-foreground">9 个评判块只描述字段判断标准；执行顺序、事件键和 JSON 结构由代码维护。</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[11px] text-muted-foreground">9 个评判块只描述字段判断标准；执行顺序、事件键和 JSON 结构由代码维护。</p>
+              <Button type="button" variant="ghost" size="sm" className="ml-auto h-6 shrink-0 gap-1 px-2 text-[11px]" onClick={toggleAllBlocks}>
+                {allCollapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                {allCollapsed ? '全部展开' : '全部折叠'}
+              </Button>
+            </div>
             {PROMPT_BLOCK_ORDER.map((blockId) => {
               const meta = PROMPT_BLOCK_META[blockId]
               const isCustom = !!settings[meta.key] && settings[meta.key] !== meta.defaultBlock
+              const collapsed = collapsedBlocks.has(blockId)
               return (
                 <div key={blockId} className="space-y-1 border p-2">
                   <div className="flex min-w-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      aria-label={collapsed ? `展开${meta.label}` : `折叠${meta.label}`}
+                      aria-expanded={!collapsed}
+                      onClick={() => toggleBlock(blockId)}
+                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                    >
+                      {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                    </button>
                     <span className="text-xs font-medium">{meta.label}</span>
                     {!isCustom && <span className="bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">默认</span>}
-                    <span className="hidden min-w-0 truncate text-[11px] text-muted-foreground sm:block" title={meta.scoreHint}>{meta.scoreHint}</span>
-                    <Button type="button" variant="ghost" size="sm" className="ml-auto h-6 shrink-0 gap-1 px-2 text-[11px]" onClick={() => resetBlock(blockId)} disabled={!isCustom}>
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={meta.scoreHint}>{meta.scoreHint}</span>
+                    <Button type="button" variant="ghost" size="sm" className="h-6 shrink-0 gap-1 px-2 text-[11px]" onClick={() => resetBlock(blockId)} disabled={!isCustom}>
                       <RefreshCcw className="h-3 w-3" />恢复
                     </Button>
                   </div>
-                  <Textarea value={settings[meta.key] || meta.defaultBlock} onChange={(e) => updateSetting(meta.key as keyof Settings, e.target.value)} className="min-h-[92px] max-h-[220px] text-xs !field-sizing-fixed resize-y overflow-y-auto font-mono" />
+                  {!collapsed && (
+                    <Textarea value={settings[meta.key] || meta.defaultBlock} onChange={(e) => updateSetting(meta.key as keyof Settings, e.target.value)} className="min-h-[92px] max-h-[220px] text-xs !field-sizing-fixed resize-y overflow-y-auto font-mono" />
+                  )}
                 </div>
               )
             })}

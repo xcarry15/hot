@@ -21,7 +21,6 @@ import {
   serializeWebhookConfigsForEditor,
 } from '@/contracts/webhook'
 import { previewPushSettings, testWebhook as testWebhookApi, type PushPreviewResult } from '@/features/settings-api.client'
-import { DEFAULT_QUIET_END, DEFAULT_QUIET_START } from '@/lib/quiet-hours'
 
 
 interface Props {
@@ -172,7 +171,7 @@ export default function PushTab({ settings, setSettings, sensitiveStatus, onRetr
               {webhooks.map((webhook, index) => {
                 const ts = testStates[index]
                 return (
-                  <div key={index} className={`flex items-center gap-1.5 border p-1.5 ${webhook.enabled ? '' : 'opacity-50 bg-muted/20'}`}>
+                  <div key={index} className={`flex flex-wrap items-center gap-1.5 border p-1.5 ${webhook.enabled ? '' : 'opacity-50 bg-muted/20'}`}>
                     <Switch
                       checked={webhook.enabled}
                       onCheckedChange={(checked) => updateWebhook(index, 'enabled', checked)}
@@ -213,7 +212,7 @@ export default function PushTab({ settings, setSettings, sensitiveStatus, onRetr
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                     {ts?.result && (
-                      <span className={`text-xs shrink-0 ${ts.result.success ? 'text-emerald-600' : 'text-destructive'}`}>
+                      <span className={`min-w-0 flex-1 break-all text-xs ${ts.result.success ? 'text-emerald-600' : 'text-destructive'}`}>
                         {ts.result.success ? '✓' : `✕ ${ts.result.error}`}
                       </span>
                     )}
@@ -261,12 +260,26 @@ export default function PushTab({ settings, setSettings, sensitiveStatus, onRetr
             {settings.push_mode === 'batch' ? (
               <div className="space-y-1.5">
                 <Label className="text-xs">推送时间</Label>
-                <Input
-                  type="time"
-                  value={settings.push_time.startsWith('cron:') ? '08:30' : settings.push_time}
-                  onChange={(e) => updateSetting('push_time', e.target.value)}
-                  className="h-8 text-xs"
-                />
+                {settings.push_time.startsWith('cron:') ? (
+                  <>
+                    <Input
+                      type="text"
+                      value={settings.push_time}
+                      onChange={(e) => updateSetting('push_time', e.target.value)}
+                      className="h-8 text-xs font-mono"
+                      placeholder="cron:0 9 * * *"
+                      aria-label="推送 cron 表达式"
+                    />
+                    <p className="text-[11px] text-muted-foreground">当前为 cron 表达式；如需改回固定时间，请直接填写 HH:mm（如 09:00）。</p>
+                  </>
+                ) : (
+                  <Input
+                    type="time"
+                    value={settings.push_time}
+                    onChange={(e) => updateSetting('push_time', e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                )}
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -308,63 +321,6 @@ export default function PushTab({ settings, setSettings, sensitiveStatus, onRetr
         </CardContent>
       </Card>
 
-      {/* 抓取配置 */}
-      <Card className="py-0">
-        <CardContent className="space-y-2 p-3">
-          <span className="text-sm font-semibold">抓取配置</span>
-          <div className="flex items-center justify-between gap-3 border-b pb-2">
-            <div>
-              <Label htmlFor="auto-crawl-enabled" className="text-xs">启用自动抓取</Label>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">关闭后仍可手动执行抓取；默认关闭。</p>
-            </div>
-            <Switch
-              id="auto-crawl-enabled"
-              checked={settings.auto_crawl_enabled === 'true'}
-              onCheckedChange={(checked) => updateSetting('auto_crawl_enabled', checked ? 'true' : 'false')}
-              aria-label="启用自动抓取"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="crawl-interval-min" className="text-xs">抓取间隔（分钟）</Label>
-            <Input
-              id="crawl-interval-min"
-              type="number"
-              value={settings.crawl_interval_min}
-              onChange={(e) => updateSetting('crawl_interval_min', e.target.value)}
-              className="h-8 w-28 text-xs"
-              min="5"
-              max="10080"
-            />
-            <p className="text-[11px] text-muted-foreground">自动抓取开启后，调度器按此间隔检查并创建全流程任务。</p>
-          </div>
-          <div className="space-y-1.5 border-t pt-2">
-            <Label className="text-xs">免打扰时段</Label>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label htmlFor="crawl-quiet-start" className="text-[11px] text-muted-foreground">开始</Label>
-                <Input
-                  id="crawl-quiet-start"
-                  type="time"
-                  value={settings.crawl_quiet_start || DEFAULT_QUIET_START}
-                  onChange={(e) => updateSetting('crawl_quiet_start', e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="crawl-quiet-end" className="text-[11px] text-muted-foreground">结束</Label>
-                <Input
-                  id="crawl-quiet-end"
-                  type="time"
-                  value={settings.crawl_quiet_end || DEFAULT_QUIET_END}
-                  onChange={(e) => updateSetting('crawl_quiet_end', e.target.value)}
-                  className="h-8 text-xs"
-                />
-              </div>
-            </div>
-            <p className="text-[11px] text-muted-foreground">时段内暂停自动抓取、自动恢复和自动推送；手动操作不受影响。支持跨午夜，默认 22:00–08:00；起止时间相同表示关闭免打扰。</p>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 }

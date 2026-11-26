@@ -111,6 +111,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
   const [testingModel, setTestingModel] = useState<string | null>(null)
   const [testingAllModels, setTestingAllModels] = useState(false)
   const [now, setNow] = useState(0)
+  const [modelsExpanded, setModelsExpanded] = useState(false)
   const healthRef = useRef(health)
   const pollingRef = useRef<AbortController | null>(null)
 
@@ -379,8 +380,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                     )}
                   </div>
                 )}
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
+                <div className="relative flex-1">
                     <Input
                       name={`ai-provider-api-key-${currentProvider.id}`}
                       type={showApiKey ? 'text' : 'password'}
@@ -401,7 +401,6 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                     >
                       {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                     </Button>
-                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   留空表示保持原值不变。
@@ -473,7 +472,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
               )}
               {currentModelCandidates.length > 0 && (
                 <div className="flex flex-wrap gap-1 pt-1">
-                  {currentModelCandidates.map((m) => {
+                  {(modelsExpanded ? currentModelCandidates : currentModelCandidates.slice(0, 12)).map((m) => {
                     const result = currentHealthProvider ? health.results[m] : undefined
                     const testing = currentHealthProvider !== null && testingModel === m
                     const status = getModelHealthStatus(result, testing)
@@ -490,6 +489,15 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                       </button>
                     )
                   })}
+                  {currentModelCandidates.length > 12 && (
+                    <button
+                      type="button"
+                      onClick={() => setModelsExpanded((value) => !value)}
+                      className="border border-dashed px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                    >
+                      {modelsExpanded ? '收起' : `展开其余 ${currentModelCandidates.length - 12} 个`}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -566,7 +574,7 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                   ) : (
                     <>
                       <XCircle className="h-4 w-4" />
-                      <span>{aiTestResult.error}</span>
+                      <span>{aiTestResult.error?.includes('调用次数已用完') ? '今日调用次数已用完' : aiTestResult.error}</span>
                     </>
                   )}
                 </div>
@@ -586,7 +594,10 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
                   <RefreshCw className={`h-3 w-3 ${loadingOpenRouterModels ? 'animate-spin' : ''}`} />
                   {loadingOpenRouterModels ? '读取中' : '刷新免费模型'}
                 </Button>
-                <p className="text-[11px] text-muted-foreground">列表来自 OpenRouter Models API</p>
+                <p className="text-[11px] text-muted-foreground">
+                  列表来自 OpenRouter Models API；默认 <code className="rounded bg-muted px-1">openrouter/free</code> 自动选免费模型（有速率限制）。
+                  <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="ml-1 text-primary underline">申请 API Key</a>
+                </p>
               </div>
             )}
 
@@ -630,12 +641,6 @@ export default function AiModelTab({ settings, setSettings, providerConfigs, set
               </div>
             )}
 
-            {settings.ai_provider === 'openrouter' && (
-              <p className="text-xs text-muted-foreground">
-                OpenRouter 默认使用 <code className="rounded bg-muted px-1">openrouter/free</code>，会自动选择可用的免费模型。请先填写 API Key；免费模型有速率限制。申请地址：
-                <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-primary underline ml-1">openrouter.ai/keys</a>
-              </p>
-            )}
             {currentProvider.id === 'siliconflow' && (
               <p className="text-xs text-muted-foreground">
                 填写硅基流动 API Key 和模型名称；候选模型价格及可用性会变化，请在调用前核对官方价格，其他模型可能收费。

@@ -121,15 +121,22 @@ export default function ProxyTab({ settings, setSettings, sensitiveStatus, onRet
     return (
       <div className="space-y-2 pt-2">
         <Card className="py-0">
-          <CardContent className="flex items-center justify-between gap-3 p-3 text-xs">
-            <span className="text-muted-foreground">
-              {sensitiveStatus === 'error' ? '代理配置读取失败，已锁定编辑，避免覆盖已有配置。' : '正在安全读取代理配置，暂不可编辑。'}
-            </span>
-            {sensitiveStatus === 'error' && (
-              <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={onRetrySensitive}>
-                重试
-              </Button>
-            )}
+          <CardContent className="space-y-2 p-3">
+            <div className="flex items-center gap-2 border-b pb-2">
+              <Globe2 className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-semibold">代理</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="text-muted-foreground">
+                {sensitiveStatus === 'error' ? '代理配置读取失败，已锁定编辑，避免覆盖已有配置。' : '正在安全读取代理配置，暂不可编辑。'}
+              </span>
+              {sensitiveStatus === 'error' && (
+                <Button type="button" size="sm" variant="outline" className="h-7 shrink-0 px-2 text-xs" onClick={onRetrySensitive}>
+                  重试
+                </Button>
+              )}
+            </div>
+            <div className="h-16 animate-pulse bg-muted/50" aria-hidden="true" />
           </CardContent>
         </Card>
       </div>
@@ -259,9 +266,12 @@ export default function ProxyTab({ settings, setSettings, sensitiveStatus, onRet
               </p>
             )}
             {sourceErrors.length > 0 && (
-              <p className="text-[11px] text-muted-foreground">
-                部分列表源暂不可用：{sourceErrors.join('、')}；已继续使用其他来源。
-              </p>
+              <details className="text-[11px] text-muted-foreground">
+                <summary className="cursor-pointer">部分列表源暂不可用（{sourceErrors.length} 个），已继续使用其他来源 · 点击展开</summary>
+                <ul className="mt-1 list-inside list-disc space-y-0.5 pl-1">
+                  {sourceErrors.map((error, index) => <li key={`${error}-${index}`}>{error}</li>)}
+                </ul>
+              </details>
             )}
             <p className="text-[11px] text-amber-700">
               免费节点来自实时公开列表，可能随时失效或被拦截。测试完成后可点击“使用最快”，再保存；不要用于传输敏感数据。

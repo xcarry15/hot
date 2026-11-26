@@ -280,6 +280,7 @@ export default function KeywordsTab() {
     const count = isKeyword ? item.hitCount : item.occurrences
     const countLabel = isKeyword ? '命中' : '出现'
     const handleItemDelete = () => {
+      if (typeof window !== 'undefined' && !window.confirm(`确认删除「${word}」？`)) return
       if (isKeyword) void handleDelete(item.id)
       else void handleDeleteCandidate(item)
     }
@@ -369,7 +370,7 @@ export default function KeywordsTab() {
           <Tag className="h-3.5 w-3.5 text-primary shrink-0" />
           <span className="text-xs font-semibold">关键词管理</span>
           <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">{keywords.length}</Badge>
-          <span className="hidden text-[10px] text-muted-foreground sm:inline">黑名单命中直接拦截；其余关键词命中即抓取；未命中丢弃</span>
+          <span className="text-[10px] text-muted-foreground">黑名单命中直接拦截；其余关键词命中即抓取；未命中丢弃</span>
           <div className="flex-1" />
           <div className="flex items-center gap-1 flex-wrap">
             <Button
@@ -409,8 +410,8 @@ export default function KeywordsTab() {
 
       <ScrollArea className="flex-1 min-h-0">
         <div className="flex min-h-full flex-col gap-1.5 p-1.5">
-          <section className="flex items-center gap-1.5">
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <section className="flex flex-wrap items-center gap-1.5">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
               <Textarea
                 rows={1}
                 placeholder="输入关键词（每行一个）..."

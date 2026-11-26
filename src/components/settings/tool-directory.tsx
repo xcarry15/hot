@@ -350,7 +350,7 @@ export default function ToolDirectoryManagement() {
       <div className="flex flex-wrap items-center gap-2 border-b pb-2">
         <div className="mr-auto">
           <p className="font-medium">工具中心目录</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">管理公开工具入口、分类和标签；备份恢复统一前往“备份”页。</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">管理公开工具入口、分类和标签；备份恢复统一前往「运维 → 备份恢复」。</p>
         </div>
         <Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={openCategoryManagement}>
           <FolderCog className="h-3.5 w-3.5" />
@@ -369,7 +369,9 @@ export default function ToolDirectoryManagement() {
       <div className="space-y-4">
         {categories.map((category) => {
           const categoryTools = visibleTools.filter((tool) => tool.category === category.id);
-          if (categoryTools.length === 0 && !(showArchived && tools.some((tool) => tool.category === category.id))) return null;
+          const hasAnyTool = tools.some((tool) => tool.category === category.id);
+          // 空分类也要显示，否则用户找不到它、无法维护；仅隐藏态分类不展示。
+          if (category.hidden) return null;
           const activeCategoryTools = categoryTools.filter((tool) => !tool.archivedAt);
           return (
             <section key={category.id} className="space-y-1.5">
@@ -377,6 +379,11 @@ export default function ToolDirectoryManagement() {
                 <h2 className="font-medium">{category.name}</h2>
                 <span className="text-[11px] text-muted-foreground">{activeCategoryTools.length} 项</span>
               </div>
+              {categoryTools.length === 0 ? (
+                <p className="border border-dashed px-2 py-3 text-center text-[11px] text-muted-foreground">
+                  {hasAnyTool ? '该分类下仅有已下架工具，可点上方「查看已下架」显示' : '该分类暂无工具'}
+                </p>
+              ) : (
               <div className="grid grid-cols-1 gap-1.5 lg:grid-cols-2">
                 {categoryTools.map((tool) => {
                   const activeIndex = activeCategoryTools.findIndex((activeTool) => activeTool.id === tool.id);
@@ -440,6 +447,7 @@ export default function ToolDirectoryManagement() {
                   );
                 })}
               </div>
+              )}
             </section>
           );
         })}
@@ -600,7 +608,7 @@ export default function ToolDirectoryManagement() {
                   variant="ghost"
                   className="h-7 w-7 p-0 text-destructive hover:text-destructive"
                   disabled={categoryBusyKey !== null || tools.some((tool) => tool.category === category.id)}
-                  title="删除分类"
+                  title={tools.some((tool) => tool.category === category.id) ? '删除分类：该分类下仍有工具，无法删除' : '删除分类'}
                   onClick={() => setCategoryDeleteTarget(category)}
                 >
                   <Archive className="h-3.5 w-3.5" />
