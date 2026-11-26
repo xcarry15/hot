@@ -18,9 +18,11 @@ test('admin login reaches the protected workbench', async ({ page }) => {
 
 test('访问统计展示指标、趋势与文章排行，并随日期筛选更新', async ({ page }) => {
   await page.route('**/api/visit-analytics?*', async (route) => {
+    const allAvailable = { visitors: true, visits: true, views: true, clicks: true, articleViews: true, originalClicks: true, feishuClicks: true };
     await route.fulfill({ json: {
       geoConfigured: true, visitors: 2, visits: 3, views: 5, clicks: 1, articleViews: 4, originalClicks: 2, feishuClicks: 6,
-      previous: { start: '2026-01-01', end: '2026-01-30', visitors: 1, visits: 3, views: 0, clicks: 1, articleViews: 2, originalClicks: 1, feishuClicks: 4 },
+      compareMode: 'previous', generatedAt: new Date().toISOString(), available: allAvailable,
+      previous: { start: '2026-01-01', end: '2026-01-30', visitors: 1, visits: 3, views: 0, clicks: 1, articleViews: 2, originalClicks: 1, feishuClicks: 4, available: allAvailable },
       daily: [], channels: [{ label: '直接访问', visits: 3, visitors: 2 }], regions: [], tools: [{ label: '工具', count: 1 }],
       topViewedArticles: [{ id: 'article-1', title: '测试资讯', viewCount: 4, publishedAt: null, score: 80, sourceName: '测试来源' }],
     } });
@@ -29,21 +31,21 @@ test('访问统计展示指标、趋势与文章排行，并随日期筛选更�
   await page.getByRole('button', { name: '设置' }).click();
   await page.getByRole('tab', { name: '数据看板' }).click();
   await page.getByRole('tab', { name: '访问统计' }).click();
-  await expect(page.getByText('资讯确认浏览', { exact: true })).toBeVisible();
+  await expect(page.getByText('资讯有效阅读', { exact: true }).first()).toBeVisible();
   const metrics = page.getByRole('region', { name: '关键指标' });
   await expect(metrics.getByText('飞书原文点击', { exact: true })).toBeVisible();
   await expect(metrics.getByText('6', { exact: true })).toBeVisible();
-  await expect(page.getByText('较上期 +100.0%').first()).toBeVisible();
-  await expect(page.getByText('上期 0 · 不计算增幅')).toBeVisible();
-  await page.getByRole('button', { name: '资讯浏览', exact: true }).click();
-  await expect(page.getByRole('img', { name: /每日资讯浏览趋势/ })).toBeVisible();
-  await page.getByRole('button', { name: '飞书原文点击', exact: true }).click();
+  await expect(page.getByText('↑ 100.0%').first()).toBeVisible();
+  await expect(page.getByText('上期为 0 · 不计算增幅')).toBeVisible();
+  await page.getByRole('button', { name: '资讯阅读', exact: true }).click();
+  await expect(page.getByRole('img', { name: /每日资讯有效阅读趋势/ })).toBeVisible();
+  await page.getByRole('button', { name: '飞书原文', exact: true }).click();
   await expect(page.getByRole('img', { name: /每日飞书原文点击趋势/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: '公开浏览 Top 20' })).toBeVisible();
   await expect(page.getByRole('button', { name: /测试资讯/ })).toBeVisible();
   await page.getByText('查看每日明细').click();
   await expect(page.getByRole('columnheader', { name: '页面浏览' })).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: '飞书原文点击' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: '飞书原文' })).toBeVisible();
   const nextRequest = page.waitForRequest((request) => request.url().includes('/api/visit-analytics?') && request.method() === 'GET');
   await page.getByRole('button', { name: '近 7 天' }).click();
   await nextRequest;
