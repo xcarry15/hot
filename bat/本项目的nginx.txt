@@ -68,6 +68,13 @@ server
 
     # 反向代理 - 动态请求指向 Next.js 3011 端口
     location / {
+        # 外部扫描器会用伪造的 Server Action id 试探接口（线上全是 Next-Action: x），
+        # 正常 action id 是长 hash，不会是这种占位值。在反代层直接 403，
+        # 避免 "Server Reference ID did not match" 刷屏 error.log。
+        if ($http_next_action ~* "^(x|test|1|true|false|null|undefined|abc)$") {
+            return 403;
+        }
+
         proxy_pass http://127.0.0.1:3011;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

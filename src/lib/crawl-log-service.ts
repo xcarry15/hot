@@ -45,7 +45,9 @@ import {
 import { getPushTargetStatesForEvents } from '@/lib/push/delivery';
 import { ACTIVE_JOB_STATUSES, TERMINAL_JOB_STATUSES } from '@/lib/job-status';
 
-const ACTIVE_JOBS_LIMIT = 5;
+// UI 只展示一条 activeJob，但并发告警需要足够大的扫描范围，
+// 避免被更新的 cancel_requested 任务挤掉真正 running 的那几条。
+const ACTIVE_JOBS_LIMIT = 20;
 const LATEST_JOBS_LIMIT = 5;
 
 const crawlLogArticleSelect = {
@@ -161,6 +163,45 @@ export interface GetCrawlLogSnapshotParams {
   limit?: number;
 }
 
+/**
+ * 真正「正在运行」的判定。
+ * ACTIVE_JOB_STATUSES 同时包含 cancel_requested（已收到停止指令、等待执行器收尾），
+ * 它不是新启动的并发任务，不计入告警。
+ * 租约过期的 running 仍计入：租约过期不等于进程已死，慢任务可能还在执行，
+ * 把它排除会把真实并发漏报。
+ */
+function genuinelyRunningJobs(jobs: readonly Job[]): Job[] {
+  const now = Date.now();
+  const freshHeartbeatBefore = now - 60_000;
+  return jobs.filter((job) => {
+    if (job.status !== 'running') return false;
+    const leaseValid = (job.leaseExpiresAt?.getTime() ?? 0) > now;
+    const heartbeatFresh = (job.heartbeatAt?.getTime() ?? 0) > freshHeartbeatBefore;
+    // 租约有效、或租约虽过期但心跳仍新鲜（慢任务仍在执行），才算真实并发。
+    // 两者都失效的纯孤儿任务留给 resetOrphanedJobs 处理，不刷并发告警。
+    return leaseValid || heartbeatFresh;
+  });
+}
+
+let lastConcurrentWarningKey = '';
+let lastConcurrentWarningAt = 0;
+const CONCURRENT_WARNING_COOLDOWN_MS = 5 * 60 * 1000;
+
+/** 同一组并发任务在冷却窗口内只告警一次，避免 UI 轮询刷屏，又不永久抑制新一轮并发。 */
+function warnOnConcurrentJobs(jobs: readonly Job[]): void {
+  const running = genuinelyRunningJobs(jobs);
+  if (running.length <= 1) return;
+  const key = running.map((job) => job.id).sort().join('|');
+  const now = Date.now();
+  if (key === lastConcurrentWarningKey && now - lastConcurrentWarningAt < CONCURRENT_WARNING_COOLDOWN_MS) return;
+  lastConcurrentWarningKey = key;
+  lastConcurrentWarningAt = now;
+  console.error(
+    `[crawl-log-service] invariant violation: ${running.length} running jobs`,
+    running.map((job) => job.id),
+  );
+}
+
 export async function getCrawlLogJobStatus(): Promise<CrawlLogJobStatusSnapshot> {
   const [activeJobs, latestJobs] = await Promise.all([
     db.job.findMany({
@@ -174,9 +215,7 @@ export async function getCrawlLogJobStatus(): Promise<CrawlLogJobStatusSnapshot>
       take: 1,
     }),
   ]);
-  if (activeJobs.length > 1) {
-    console.error(`[crawl-log-service] invariant violation: ${activeJobs.length} running jobs`);
-  }
+  warnOnConcurrentJobs(activeJobs);
   const activeJobRaw = activeJobs[0] ?? null;
   return {
     activeJob: activeJobRaw ? toJobSnapshot(activeJobRaw) : null,
@@ -282,12 +321,7 @@ export async function getCrawlLogSnapshot(
     articles.flatMap((article) => article.eventId ? [article.eventId] : []),
   );
 
-  if (activeJobs.length > 1) {
-    console.error(
-      `[crawl-log-service] invariant violation: ${activeJobs.length} running jobs`,
-      activeJobs.map((j) => j.id),
-    );
-  }
+  warnOnConcurrentJobs(activeJobs);
   const activeJobRaw = activeJobs[0] ?? null;
   const latestJobRaw = activeJobRaw ? null : (latestJobs[0] ?? null);
   // 主查询只保留 5 条供 UI 展示；独立查询负责避免被后续非采集任务挤掉。

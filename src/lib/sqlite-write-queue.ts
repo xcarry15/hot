@@ -51,6 +51,37 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export interface TransientRetryOptions {
+  maxRetries?: number;
+  baseDelayMs?: number;
+}
+
+/**
+ * 独立读写语句的瞬态错误重试。
+ *
+ * 写队列只串行化回调式 $transaction；线上 P1008 仍来自 `article.update()`、
+ * `keywordCandidate.upsert()`、`setting.updateMany()`、`article.count()` 等
+ * 未经队列的独立语句。这里提供统一的重试入口，与队列共用同一瞬态判定。
+ */
+export async function withTransientSqliteRetry<T>(
+  operation: () => Promise<T>,
+  options: TransientRetryOptions = {},
+): Promise<T> {
+  const maxRetries = options.maxRetries ?? MAX_RETRIES;
+  const baseDelayMs = options.baseDelayMs ?? BASE_DELAY_MS;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientSqliteError(error) || attempt === maxRetries) throw error;
+      await delay(baseDelayMs * (attempt + 1));
+    }
+  }
+  throw lastError;
+}
+
 type RawTransaction = (a: unknown, b?: unknown) => Promise<unknown>;
 const GUARD_FLAG = Symbol.for('hot2.sqliteWriteQueue.installed');
 
@@ -60,6 +91,84 @@ const GUARD_FLAG = Symbol.for('hot2.sqliteWriteQueue.installed');
  * 内层直接走原始实现（Prisma 会为它分配另一条连接），不入队。
  */
 const inQueuedTransaction = new AsyncLocalStorage<boolean>();
+
+export function isInsideQueuedTransaction(): boolean {
+  return inQueuedTransaction.getStore() === true;
+}
+
+/**
+ * create / createMany 若「写入成功但响应超时」后重试会产生重复记录，
+ * $executeRaw 的幂等性由调用方保证，统一不重试。
+ * 队列事务内部的语句由外层队列负责重试，此处不再叠加。
+ */
+const NON_RETRYABLE_PRISMA_ACTIONS = new Set([
+  'create',
+  'createMany',
+  'createManyAndReturn',
+  // delete 重试时若首次已提交，第二次会抛 P2025，把成功的操作误报为失败。
+  'delete',
+  // raw 查询不经 $allModels 扩展，保留在此只为显式声明意图。
+  '$executeRaw',
+  '$executeRawUnsafe',
+]);
+
+function containsAtomicIncrement(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if ('increment' in value || 'decrement' in value || 'multiply' in value) return true;
+  return Object.values(value as Record<string, unknown>).some(containsAtomicIncrement);
+}
+
+const NESTED_WRITE_OPERATORS = new Set([
+  'create',
+  'createMany',
+  'connectOrCreate',
+  'upsert',
+  'delete',
+  'deleteMany',
+]);
+
+function containsUnsafeNestedWrite(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (NESTED_WRITE_OPERATORS.has(key)) return true;
+    if (nested && typeof nested === 'object' && containsUnsafeNestedWrite(nested)) return true;
+  }
+  return false;
+}
+
+function normalizedPayload(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(normalizedPayload);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, normalizedPayload((value as Record<string, unknown>)[key])]),
+    );
+  }
+  return value;
+}
+
+export function shouldRetryPrismaAction(action: string, args?: unknown): boolean {
+  if (isInsideQueuedTransaction() || NON_RETRYABLE_PRISMA_ACTIONS.has(action)) return false;
+  // 「写入成功但响应超时」后重试只有幂等写才安全：
+  // 原子自增会重复计数，嵌套 create/connectOrCreate 会产生重复子记录。
+  // update 的载荷在 data 下，其他操作的载荷可能在 create/update 下，一并检查。
+  const payload = args && typeof args === 'object'
+    ? args as { data?: unknown; update?: unknown; create?: unknown }
+    : {};
+  const writes = [payload.data, payload.update, payload.create];
+  if (writes.some((write) => containsAtomicIncrement(write) || containsUnsafeNestedWrite(write))) {
+    return false;
+  }
+  // upsert 首次写入后超时，重试会命中 update 分支。只有 create/update
+  // 写值完全等价时结果才一致（例如离线统计回填），否则禁止重试以避免静默改值。
+  if (action === 'upsert') {
+    return JSON.stringify(normalizedPayload(payload.create))
+      === JSON.stringify(normalizedPayload(payload.update));
+  }
+  return true;
+}
 
 /**
  * 在 PrismaClient 实例上安装队列。幂等：Next.js HMR / 多模块 import 只生效一次。
@@ -73,7 +182,7 @@ export function installSqliteWriteQueue<T extends PrismaClient>(db: T): T {
 
   const wrapped = (first: unknown, second?: unknown): Promise<unknown> => {
     // 数组式事务、或已在队列事务上下文内的嵌套调用：透传，不入队（防自锁）。
-    if (typeof first !== 'function' || inQueuedTransaction.getStore() === true) {
+    if (typeof first !== 'function' || isInsideQueuedTransaction()) {
       return original(first, second);
     }
 

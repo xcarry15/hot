@@ -241,6 +241,148 @@ describe('crawl-log-service', () => {
       );
     });
 
+    it('cancel_requested 不算并发运行，不刷告警', async () => {
+      const running = {
+        id: 'run-1',
+        type: 'full',
+        status: 'running',
+        currentStage: 'collect',
+        progressTotal: 1,
+        progressDone: 0,
+        progressErrors: 0,
+        currentItemLabel: '',
+        heartbeatAt: new Date(),
+        startedAt: new Date(),
+        completedAt: null,
+        error: '',
+        result: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const cancelling = { ...running, id: 'cancel-1', status: 'cancel_requested' };
+      setupTxMock([running, cancelling], []);
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const snapshot = await getCrawlLogSnapshot();
+
+      expect(snapshot.activeJob?.id).toBe('run-1');
+      expect(consoleSpy.mock.calls.filter(([msg]) => String(msg).includes('invariant violation'))).toHaveLength(0);
+    });
+
+    it('租约过期且心跳陈旧的 running 视为孤儿，不刷告警', async () => {
+      const live = {
+        id: 'live-1',
+        type: 'full',
+        status: 'running',
+        currentStage: 'collect',
+        progressTotal: 1,
+        progressDone: 0,
+        progressErrors: 0,
+        currentItemLabel: '',
+        heartbeatAt: new Date(),
+        startedAt: new Date(),
+        completedAt: null,
+        error: '',
+        result: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const stale = {
+        ...live,
+        id: 'stale-1',
+        leaseExpiresAt: new Date(Date.now() - 60_000),
+        heartbeatAt: new Date(Date.now() - 300_000),
+      };
+      setupTxMock([live, stale], []);
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await getCrawlLogSnapshot();
+
+      expect(consoleSpy.mock.calls.filter(([msg]) => String(msg).includes('invariant violation'))).toHaveLength(0);
+    });
+
+    it('无租约且心跳陈旧的 running 视为孤儿，不刷告警', async () => {
+      const live = {
+        id: 'no-lease-live-1',
+        type: 'full',
+        status: 'running',
+        currentStage: 'collect',
+        progressTotal: 1,
+        progressDone: 0,
+        progressErrors: 0,
+        currentItemLabel: '',
+        heartbeatAt: new Date(),
+        startedAt: new Date(),
+        completedAt: null,
+        error: '',
+        result: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const orphan = { ...live, id: 'no-lease-orphan', heartbeatAt: new Date(Date.now() - 300_000) };
+      setupTxMock([live, orphan], []);
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await getCrawlLogSnapshot();
+
+      expect(consoleSpy.mock.calls.filter(([msg]) => String(msg).includes('invariant violation'))).toHaveLength(0);
+    });
+
+    it('租约过期但心跳仍新鲜的 running 计入并发，避免漏报慢任务', async () => {
+      const live = {
+        id: 'slow-live-1',
+        type: 'full',
+        status: 'running',
+        currentStage: 'collect',
+        progressTotal: 1,
+        progressDone: 0,
+        progressErrors: 0,
+        currentItemLabel: '',
+        heartbeatAt: new Date(),
+        startedAt: new Date(),
+        completedAt: null,
+        error: '',
+        result: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const slow = { ...live, id: 'slow-live-2', leaseExpiresAt: new Date(Date.now() - 60_000) };
+      setupTxMock([live, slow], []);
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await getCrawlLogSnapshot();
+
+      expect(consoleSpy.mock.calls.filter(([msg]) => String(msg).includes('invariant violation'))).toHaveLength(1);
+    });
+
+    it('同一组并发任务只告警一次，避免轮询刷屏', async () => {
+      const first = {
+        id: 'dup-1',
+        type: 'full',
+        status: 'running',
+        currentStage: 'collect',
+        progressTotal: 1,
+        progressDone: 0,
+        progressErrors: 0,
+        currentItemLabel: '',
+        heartbeatAt: new Date(),
+        startedAt: new Date(),
+        completedAt: null,
+        error: '',
+        result: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const second = { ...first, id: 'dup-2' };
+      setupTxMock([first, second], []);
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await getCrawlLogSnapshot();
+      await getCrawlLogSnapshot();
+
+      expect(consoleSpy.mock.calls.filter(([msg]) => String(msg).includes('invariant violation'))).toHaveLength(1);
+    });
+
     it('坏 JSON result → null，不抛错', async () => {
       const latest = {
         id: 'jd',
