@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ record: vi.fn() }));
-vi.mock('@/lib/visit-analytics-service', () => ({ recordVisit: mocks.record }));
+vi.mock('@/lib/visit-analytics-service', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/visit-analytics-service')>(),
+  recordVisit: mocks.record,
+}));
 import { POST } from '@/app/api/public/visits/route';
 const payload = { visitorId: 'cf9f99cc-bc24-4cc5-9db0-9b58e8e9470b', kind: 'page', referrer: '' };
 function request(body: string, headers: Record<string, string> = {}) { return new Request('http://localhost/api/public/visits', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body }); }

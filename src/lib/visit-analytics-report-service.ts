@@ -1,11 +1,21 @@
 import { db } from '@/lib/db';
 import { isVisitGeoConfigured } from '@/lib/visit-geolocation';
-import { previousVisitRange } from '@/lib/visit-analytics-service';
+import { comparisonRange, type CompareMode } from '@/lib/visit-analytics-service';
+import type { Availability } from '@/lib/visit-analytics-presentation';
 
 const numeric = (v: bigint | number) => Number(v);
+/** 各指标是否有任何采集记录：0 与"从未采集"必须区分，否则会把采集故障显示成下跌 100%。 */
+function metricAvailability(hasEvents: boolean, hasSessions: boolean, hasTools: boolean, hasInteractions: boolean): Availability {
+  return {
+    visitors: hasEvents, views: hasEvents,
+    visits: hasSessions,
+    clicks: hasTools,
+    articleViews: hasInteractions, originalClicks: hasInteractions, feishuClicks: hasInteractions,
+  };
+}
 type CountRow = { label: string; visits: bigint; visitors: bigint };
-export async function getVisitAnalyticsReport(start: string, end: string) {
-  const previousRange = previousVisitRange(start, end);
+export async function getVisitAnalyticsReport(start: string, end: string, compare: CompareMode = 'previous') {
+  const previousRange = comparisonRange(start, end, compare);
   const previousPromise = previousRange ? (async () => {
     const [pages, sessionCount, toolCount, interactions, firstSession] = await Promise.all([
       db.$queryRaw<Array<{ visitors: bigint; views: bigint | null }>>`SELECT COUNT(DISTINCT "visitorId") AS visitors, SUM(CASE WHEN kind = 'page' THEN 1 ELSE 0 END) AS views FROM visit_events WHERE "dateKey" >= ${previousRange.start} AND "dateKey" <= ${previousRange.end}`,
@@ -25,6 +35,12 @@ export async function getVisitAnalyticsReport(start: string, end: string) {
       articleViews: interactions._sum.viewCount ?? 0,
       originalClicks: interactions._sum.originalClickCount ?? 0,
       feishuClicks: interactions._sum.feishuClickCount ?? 0,
+      available: metricAvailability(
+        pages[0]?.views != null,
+        sessionCount > 0,
+        toolCount._sum.clicks != null,
+        interactions._sum.viewCount != null || interactions._sum.originalClickCount != null || interactions._sum.feishuClickCount != null,
+      ),
     };
   })() : Promise.resolve(null);
   const [counts, daily, channels, regions, tools, articles, dailyArticles, dailyTools, previous] = await Promise.all([
@@ -63,8 +79,15 @@ export async function getVisitAnalyticsReport(start: string, end: string) {
   const toolDays = new Map(dailyTools.map((row) => [row.dateKey, row._sum.clicks ?? 0]));
   const days = [...new Set([...dailyByDate.keys(), ...sessionDays.keys(), ...articleDays.keys(), ...toolDays.keys()])].sort();
   const c = counts[0];
+  const hasEvents = daily.length > 0;
+  const hasSessions = sessions.length > 0;
+  const hasTools = dailyTools.length > 0;
+  const hasInteractions = dailyArticles.length > 0;
   return {
     geoConfigured: isVisitGeoConfigured(),
+    compareMode: compare,
+    generatedAt: new Date().toISOString(),
+    available: metricAvailability(hasEvents, hasSessions, hasTools, hasInteractions),
     previous,
     visitors: numeric(c?.visitors ?? 0),
     views: numeric(c?.views ?? 0),
@@ -73,16 +96,29 @@ export async function getVisitAnalyticsReport(start: string, end: string) {
     articleViews: articles.reduce((n, row) => n + (row._sum.viewCount ?? 0), 0),
     originalClicks: articles.reduce((n, row) => n + (row._sum.originalClickCount ?? 0), 0),
     feishuClicks: dailyArticles.reduce((n, row) => n + (row._sum.feishuClickCount ?? 0), 0),
-    daily: days.map((day) => ({
-      day,
-      visitors: numeric(dailyByDate.get(day)?.visitors ?? 0),
-      views: numeric(dailyByDate.get(day)?.views ?? 0),
-      visits: sessionDays.get(day) ?? 0,
-      articleViews: articleDays.get(day)?.viewCount ?? 0,
-      originalClicks: articleDays.get(day)?.originalClickCount ?? 0,
-      feishuClicks: articleDays.get(day)?.feishuClickCount ?? 0,
-      clicks: toolDays.get(day) ?? 0,
-    })),
+    daily: days.map((day) => {
+      const interactions = articleDays.get(day);
+      return {
+        day,
+        visitors: numeric(dailyByDate.get(day)?.visitors ?? 0),
+        views: numeric(dailyByDate.get(day)?.views ?? 0),
+        visits: sessionDays.get(day) ?? 0,
+        articleViews: interactions?.viewCount ?? 0,
+        originalClicks: interactions?.originalClickCount ?? 0,
+        feishuClicks: interactions?.feishuClickCount ?? 0,
+        clicks: toolDays.get(day) ?? 0,
+        /** 每个指标当天是否有独立采集来源，供趋势图区分"无采集"与"真 0"。 */
+        recorded: {
+          visitors: dailyByDate.has(day),
+          views: dailyByDate.has(day),
+          visits: sessionDays.has(day),
+          articleViews: Boolean(interactions && interactions.viewCount != null),
+          originalClicks: Boolean(interactions && interactions.originalClickCount != null),
+          feishuClicks: Boolean(interactions && interactions.feishuClickCount != null),
+          clicks: toolDays.has(day),
+        },
+      };
+    }),
     channels: channels.map((x) => ({ label: x.label, visits: numeric(x.visits), visitors: numeric(x.visitors) })),
     regions: regions.map((x) => ({ label: x.label, visits: numeric(x.visits), visitors: numeric(x.visitors) })),
     tools: tools.slice(0, 30).map((x) => ({ label: x.label, count: numeric(x.count) })),

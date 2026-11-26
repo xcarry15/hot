@@ -75,3 +75,29 @@ export function previousVisitRange(start: string, end: string, now = new Date())
   const previous = { start: new Date(first - count * DAY).toISOString().slice(0, 10), end: new Date(first - DAY).toISOString().slice(0, 10) };
   return validVisitRange(previous.start, previous.end, now) ? previous : null;
 }
+
+export type CompareMode = 'previous' | 'week' | 'off';
+
+export function isCompareMode(value: string): value is CompareMode {
+  return value === 'previous' || value === 'week' || value === 'off';
+}
+
+/**
+ * 对比基准：
+ * - previous：紧邻的等长区间（默认）
+ * - week：整体平移 7 天，即"上周同日"，单日/区间都适用
+ * - off：不对比
+ * 三者都必须完整落在保留期内，越界返回 null 而不是伪造零。
+ */
+export function comparisonRange(start: string, end: string, mode: CompareMode, now = new Date()): { start: string; end: string } | null {
+  if (mode === 'off') return null;
+  if (mode === 'week') {
+    if (!validVisitRange(start, end, now)) return null;
+    const week = {
+      start: new Date(Date.parse(`${start}T00:00:00Z`) - 7 * DAY).toISOString().slice(0, 10),
+      end: new Date(Date.parse(`${end}T00:00:00Z`) - 7 * DAY).toISOString().slice(0, 10),
+    };
+    return validVisitRange(week.start, week.end, now) ? week : null;
+  }
+  return previousVisitRange(start, end, now);
+}

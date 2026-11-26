@@ -1,9 +1,10 @@
 'use client';
 
 import { requestJson } from '@/lib/request-json.client';
+import type { CompareMode } from '@/lib/visit-analytics-service';
 
-export function fetchVisitAnalytics<T>(start: string, end: string, signal?: AbortSignal): Promise<T> {
-  return requestJson<T>('GET', `/api/visit-analytics?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, { signal });
+export function fetchVisitAnalytics<T>(start: string, end: string, compare: CompareMode, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>('GET', `/api/visit-analytics?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&compare=${encodeURIComponent(compare)}`, { signal });
 }
 
 const KEY = 'hot_visitor_id';

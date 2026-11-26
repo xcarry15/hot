@@ -38,9 +38,10 @@ it('真实 SQLite 按自然日汇总本期与上期，跨日会话和仅工具�
   expect(response.status).toBe(200);
   const data = await response.json();
   expect(data).toMatchObject({ visitors: 1, views: 1, visits: 1, clicks: 3, previous: { start: day(3), end: day(2), visitors: 1, views: 1, visits: 2, clicks: 0 } });
+  const noRecord = { views: false, visitors: false, visits: false, clicks: false, articleViews: false, originalClicks: false, feishuClicks: false };
   expect(data.daily).toEqual([
-    { day: day(1), visitors: 0, views: 0, visits: 1, clicks: 3, articleViews: 0, originalClicks: 0, feishuClicks: 0 },
-    { day: day(0), visitors: 1, views: 1, visits: 0, clicks: 0, articleViews: 0, originalClicks: 0, feishuClicks: 0 },
+    { day: day(1), visitors: 0, views: 0, visits: 1, clicks: 3, articleViews: 0, originalClicks: 0, feishuClicks: 0, recorded: { ...noRecord, visits: true, clicks: true } },
+    { day: day(0), visitors: 1, views: 1, visits: 0, clicks: 0, articleViews: 0, originalClicks: 0, feishuClicks: 0, recorded: { ...noRecord, views: true, visitors: true } },
   ]);
 });
 

@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 const dir = mkdtempSync(path.join(tmpdir(), 'visit-analytics-'));
 const db = new PrismaClient({ datasources: { db: { url: `file:${dir}/test.db` } } });
 vi.mock('@/lib/db', () => ({ db }));
-const { recordVisit, cleanupVisitAnalytics, classifyVisitChannel, validVisitRange, previousVisitRange } = await import('@/lib/visit-analytics-service');
+const { recordVisit, cleanupVisitAnalytics, classifyVisitChannel, validVisitRange, previousVisitRange, comparisonRange, isCompareMode } = await import('@/lib/visit-analytics-service');
 const visitorId = 'cf9f99cc-bc24-4cc5-9db0-9b58e8e9470b';
 const base = { visitorId, kind: 'page' as const, referrer: 'https://www.baidu.com/a?secret=x', host: 'hot.kfxz.cn', clientIp: '' };
 
@@ -25,6 +25,15 @@ describe('访问统计真实 SQLite 边界', () => {
     expect(previousVisitRange('2026-11-01', '2026-11-10', now)).toEqual({ start: '2026-10-22', end: '2026-10-31' });
     expect(previousVisitRange('2025-11-13', '2025-11-20', now)).toBeNull();
     expect(previousVisitRange('2026-02-30', '2026-03-01', now)).toBeNull();
+  });
+  it('对比基准支持上一周期/上周同日/关闭，越界不伪造', () => {
+    const now = new Date('2026-11-12T04:00:00Z');
+    expect(isCompareMode('week')).toBe(true);
+    expect(isCompareMode('bad')).toBe(false);
+    expect(comparisonRange('2026-11-10', '2026-11-11', 'previous', now)).toEqual({ start: '2026-11-08', end: '2026-11-09' });
+    expect(comparisonRange('2026-11-10', '2026-11-11', 'week', now)).toEqual({ start: '2026-11-03', end: '2026-11-04' });
+    expect(comparisonRange('2026-11-10', '2026-11-11', 'off', now)).toBeNull();
+    expect(comparisonRange('2025-11-13', '2025-11-20', 'week', now)).toBeNull();
   });
   it('30 分钟内沿用访问，超过后新建；跨上海日期的浏览归属当天', async () => {
     await recordVisit(base, new Date('2026-11-08T15:50:00Z'));
